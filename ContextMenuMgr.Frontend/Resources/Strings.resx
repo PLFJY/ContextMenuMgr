@@ -339,6 +339,15 @@
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>Received backend notification at {0:T}.</value>
   </data>
+  <data name="PendingApprovalSystemNotificationTitle" xml:space="preserve">
+    <value>New context menu item pending review</value>
+  </data>
+  <data name="PendingApprovalSystemNotificationMessage" xml:space="preserve">
+    <value>{0} was added to the review queue. Open the app to review it.</value>
+  </data>
+  <data name="ApprovalRemoveWithoutRegistryConfirmation" xml:space="preserve">
+    <value>This review item no longer exists in the registry. It will only be removed from the review list.</value>
+  </data>
   <data name="ServiceMissingTitle" xml:space="preserve">
     <value>Backend service missing</value>
   </data>

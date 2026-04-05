@@ -18,6 +18,8 @@ public sealed class PersistedContextMenuState
 
     public string RegistryPath { get; set; } = string.Empty;
 
+    public string BackendRegistryPath { get; set; } = string.Empty;
+
     public string SourceRootPath { get; set; } = string.Empty;
 
     public string? CommandText { get; set; }
@@ -69,6 +71,7 @@ public sealed class PersistedContextMenuState
             DisplayName = DisplayName,
             EditableText = EditableText,
             RegistryPath = RegistryPath,
+            BackendRegistryPath = BackendRegistryPath,
             SourceRootPath = SourceRootPath,
             CommandText = CommandText,
             HandlerClsid = HandlerClsid,
@@ -104,6 +107,7 @@ public sealed class PersistedContextMenuState
             DisplayName = entry.DisplayName,
             EditableText = entry.EditableText,
             RegistryPath = entry.RegistryPath,
+            BackendRegistryPath = entry.BackendRegistryPath,
             SourceRootPath = entry.SourceRootPath,
             CommandText = entry.CommandText,
             HandlerClsid = entry.HandlerClsid,

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.Specialized;
+using System.Collections.ObjectModel;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -24,11 +25,14 @@ public partial class ApprovalsPageViewModel : ObservableObject
             item.PropertyChanged += OnItemPropertyChanged;
         }
 
-        ItemsView = new ListCollectionView(_workspace.Items);
+        ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ApprovalQueueItemViewModel.DisplayName), ListSortDirection.Ascending));
         RefreshLocalizedText();
+        RebuildItems();
     }
+
+    public ObservableCollection<ApprovalQueueItemViewModel> Items { get; } = [];
 
     public ICollectionView ItemsView { get; }
 
@@ -60,20 +64,48 @@ public partial class ApprovalsPageViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task AllowGroupAsync(ApprovalQueueItemViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        foreach (var sourceItem in item.SourceItems.ToArray())
+        {
+            await _workspace.ApplyDecisionAsync(sourceItem, ContextMenuDecision.Allow);
+        }
+    }
+
+    [RelayCommand]
     private Task DenyAsync(ContextMenuItemViewModel? item)
     {
         return item is null ? Task.CompletedTask : _workspace.ApplyDecisionAsync(item, ContextMenuDecision.Deny);
     }
 
     [RelayCommand]
-    private Task OpenRemoveAsync(ContextMenuItemViewModel? item)
+    private async Task DenyGroupAsync(ApprovalQueueItemViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        foreach (var sourceItem in item.SourceItems.ToArray())
+        {
+            await _workspace.ApplyDecisionAsync(sourceItem, ContextMenuDecision.Deny);
+        }
+    }
+
+    [RelayCommand]
+    private Task OpenRemoveAsync(ApprovalQueueItemViewModel? item)
     {
         if (item is null)
         {
             return Task.CompletedTask;
         }
 
-        if (!item.IsPresentInRegistry || item.IsDeleted)
+        if (!item.HasRegistryBackedItem)
         {
             return ConfirmRemoveAsync(item);
         }
@@ -83,7 +115,7 @@ public partial class ApprovalsPageViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ConfirmRemoveAsync(ContextMenuItemViewModel? item)
+    private async Task ConfirmRemoveAsync(ApprovalQueueItemViewModel? item)
     {
         if (item is null)
         {
@@ -91,7 +123,10 @@ public partial class ApprovalsPageViewModel : ObservableObject
         }
 
         item.IsApprovalRemoveFlyoutOpen = false;
-        await _workspace.ApplyDecisionAsync(item, ContextMenuDecision.Remove);
+        foreach (var sourceItem in item.SourceItems.ToArray())
+        {
+            await _workspace.ApplyDecisionAsync(sourceItem, ContextMenuDecision.Remove);
+        }
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -118,7 +153,7 @@ public partial class ApprovalsPageViewModel : ObservableObject
 
     private bool FilterItem(object obj)
     {
-        if (obj is not ContextMenuItemViewModel item || !item.IsPendingApproval)
+        if (obj is not ApprovalQueueItemViewModel item)
         {
             return false;
         }
@@ -132,7 +167,8 @@ public partial class ApprovalsPageViewModel : ObservableObject
         return Contains(item.DisplayName, search)
                || Contains(item.KeyName, search)
                || Contains(item.RegistryPath, search)
-               || Contains(item.Notes, search);
+               || Contains(item.Notes, search)
+               || item.Categories.Any(category => Contains(category, search));
     }
 
     private static bool Contains(string? value, string search)
@@ -159,6 +195,7 @@ public partial class ApprovalsPageViewModel : ObservableObject
             }
         }
 
+        RebuildItems();
         ItemsView.Refresh();
     }
 
@@ -168,9 +205,39 @@ public partial class ApprovalsPageViewModel : ObservableObject
             or nameof(ContextMenuItemViewModel.DisplayName)
             or nameof(ContextMenuItemViewModel.KeyName)
             or nameof(ContextMenuItemViewModel.RegistryPath)
-            or nameof(ContextMenuItemViewModel.Notes))
+            or nameof(ContextMenuItemViewModel.Notes)
+            or nameof(ContextMenuItemViewModel.Category))
         {
+            RebuildItems();
             ItemsView.Refresh();
         }
+    }
+
+    private void RebuildItems()
+    {
+        var grouped = _workspace.Items
+            .Where(static item => item.IsPendingApproval)
+            .GroupBy(CreateApprovalGroupKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ApprovalQueueItemViewModel(group.ToArray(), _localization))
+            .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Items.Clear();
+        foreach (var item in grouped)
+        {
+            Items.Add(item);
+        }
+    }
+
+    private static string CreateApprovalGroupKey(ContextMenuItemViewModel item)
+    {
+        return string.Join("|",
+            item.DisplayName,
+            item.KeyName,
+            item.Entry.EntryKind.ToString(),
+            item.Entry.HandlerClsid ?? string.Empty,
+            item.Entry.CommandText ?? string.Empty,
+            item.Entry.EditableText ?? string.Empty,
+            item.Entry.FilePath ?? string.Empty);
     }
 }

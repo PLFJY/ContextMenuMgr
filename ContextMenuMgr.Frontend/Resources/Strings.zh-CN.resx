@@ -339,6 +339,15 @@
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>已在 {0:T} 收到后台通知。</value>
   </data>
+  <data name="PendingApprovalSystemNotificationTitle" xml:space="preserve">
+    <value>发现新的待审核右键菜单</value>
+  </data>
+  <data name="PendingApprovalSystemNotificationMessage" xml:space="preserve">
+    <value>{0} 已加入待审核，请打开应用处理。</value>
+  </data>
+  <data name="ApprovalRemoveWithoutRegistryConfirmation" xml:space="preserve">
+    <value>这个待审核项对应的注册表项已经不存在，将只从待审核列表移除。</value>
+  </data>
   <data name="ServiceMissingTitle" xml:space="preserve">
     <value>后台服务未安装</value>
   </data>

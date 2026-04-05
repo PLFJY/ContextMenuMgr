@@ -64,6 +64,7 @@ public partial class MainWindow : FluentWindow
 
         ApplyTrayLocalization();
         _localization.LanguageChanged += OnLanguageChanged;
+        _viewModel.PendingApprovalDetected += OnPendingApprovalDetected;
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -113,6 +114,7 @@ public partial class MainWindow : FluentWindow
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _viewModel.PendingApprovalDetected -= OnPendingApprovalDetected;
         _localization.LanguageChanged -= OnLanguageChanged;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
@@ -160,6 +162,13 @@ public partial class MainWindow : FluentWindow
         _notifyIcon.BalloonTipText = _localization.Translate("TrayBackgroundInfoText");
         _notifyIcon.ShowBalloonTip(2500);
         _hasShownTrayHint = true;
+    }
+
+    private void OnPendingApprovalDetected(object? sender, ContextMenuMgr.Contracts.ContextMenuEntry entry)
+    {
+        _notifyIcon.BalloonTipTitle = _localization.Translate("PendingApprovalSystemNotificationTitle");
+        _notifyIcon.BalloonTipText = _localization.Format("PendingApprovalSystemNotificationMessage", entry.DisplayName);
+        _notifyIcon.ShowBalloonTip(4000);
     }
 
     private void ShowFromTray()

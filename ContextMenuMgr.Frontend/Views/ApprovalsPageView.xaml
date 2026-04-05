@@ -47,7 +47,7 @@
             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollBarVisibility="Auto">
             <ListBox.ItemTemplate>
-                <DataTemplate DataType="{x:Type viewModels:ContextMenuItemViewModel}">
+                <DataTemplate DataType="{x:Type viewModels:ApprovalQueueItemViewModel}">
                     <Border
                         Margin="0,0,0,10"
                         Padding="12"
@@ -84,6 +84,24 @@
                                         FontSize="15"
                                         FontWeight="SemiBold"
                                         Text="{Binding DisplayName}" />
+                                    <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding Categories}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border
+                                                    Margin="0,0,6,4"
+                                                    Padding="8,2"
+                                                    Background="{DynamicResource AccentFillColorSecondaryBrush}"
+                                                    CornerRadius="4">
+                                                    <TextBlock FontSize="11" Text="{Binding}" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                     <TextBlock
                                         Margin="0,3,0,0"
                                         FontSize="11"
@@ -108,7 +126,7 @@
                                 <ui:Button
                                     Margin="0,0,8,0"
                                     Padding="12,5"
-                                    Command="{Binding DataContext.AllowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Command="{Binding DataContext.AllowGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     CommandParameter="{Binding}"
                                     Content="{Binding DataContext.AllowText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     IsEnabled="{Binding CanReviewApproval}"
@@ -117,7 +135,7 @@
                                     Margin="8,0,0,0"
                                     Padding="12,5"
                                     Appearance="Secondary"
-                                    Command="{Binding DataContext.DenyCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Command="{Binding DataContext.DenyGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     CommandParameter="{Binding}"
                                     Content="{Binding DataContext.KeepDisabledText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     IsEnabled="{Binding CanReviewApproval}"

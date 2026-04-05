@@ -16,6 +16,8 @@ public sealed record ContextMenuEntry
 
     public string RegistryPath { get; init; } = string.Empty;
 
+    public string BackendRegistryPath { get; init; } = string.Empty;
+
     public string SourceRootPath { get; init; } = string.Empty;
 
     public string? CommandText { get; init; }

@@ -22,6 +22,7 @@ public partial class ShellViewModel : ObservableObject
         _localization = localization;
 
         _localization.LanguageChanged += OnLanguageChanged;
+        _workspace.PendingApprovalDetected += OnPendingApprovalDetected;
         _workspace.PropertyChanged += OnWorkspacePropertyChanged;
         _workspace.Items.CollectionChanged += OnWorkspaceItemsCollectionChanged;
         foreach (var item in _workspace.Items)
@@ -75,6 +76,8 @@ public partial class ShellViewModel : ObservableObject
     public string SettingsTitle => _localization.Translate("SettingsTitle");
 
     public InfoBadge ApprovalsBadge => _approvalsBadge;
+
+    public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
 
     public async Task InitializeAsync(bool suppressBootstrapPrompt = false)
     {
@@ -183,6 +186,11 @@ public partial class ShellViewModel : ObservableObject
         {
             UpdateApprovalBadge();
         }
+    }
+
+    private void OnPendingApprovalDetected(object? sender, ContextMenuEntry e)
+    {
+        PendingApprovalDetected?.Invoke(this, e);
     }
 
     private Task ResolveNotificationAsync(ToastNotificationViewModel? notification, ContextMenuDecision decision)

@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
+using System.Text.RegularExpressions;
 
 namespace ContextMenuMgr.Backend.Services;
 
@@ -214,7 +215,7 @@ public sealed class ContextMenuRegistryCatalog
             switch (item.EntryKind)
             {
                 case ContextMenuEntryKind.ShellVerb:
-                    SetShellVerbEnabled(item.RegistryPath, enable);
+                    SetShellVerbEnabled(item.BackendRegistryPath, enable);
                     break;
                 case ContextMenuEntryKind.ShellExtension:
                     SetShellExtensionEnabled(item, enable);
@@ -374,7 +375,7 @@ public sealed class ContextMenuRegistryCatalog
 
         try
         {
-            SetShellVerbAttribute(item.RegistryPath, attribute, enable);
+            SetShellVerbAttribute(item.BackendRegistryPath, attribute, enable);
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             var state = GetOrCreateState(states, item);
@@ -448,7 +449,7 @@ public sealed class ContextMenuRegistryCatalog
 
         try
         {
-            using var menuKey = Registry.ClassesRoot.OpenSubKey(item.RegistryPath, writable: true)
+            using var menuKey = OpenRegistryKey(item.BackendRegistryPath, writable: true)
                 ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath} for writing.");
             menuKey.SetValue("MUIVerb", textValue, RegistryValueKind.String);
 
@@ -699,8 +700,8 @@ public sealed class ContextMenuRegistryCatalog
 
         try
         {
-            var backupFilePath = await _backupService.ExportKeyAsync(item.RegistryPath, cancellationToken);
-            DeleteRegistryKey(item.RegistryPath);
+            var backupFilePath = await _backupService.ExportKeyAsync(item.BackendRegistryPath, cancellationToken);
+            DeleteRegistryKey(item.BackendRegistryPath);
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             var state = GetOrCreateState(states, item);
@@ -872,7 +873,7 @@ public sealed class ContextMenuRegistryCatalog
         switch (item.EntryKind)
         {
             case ContextMenuEntryKind.ShellVerb:
-                SetShellVerbEnabled(item.RegistryPath, enable: false);
+                SetShellVerbEnabled(item.BackendRegistryPath, enable: false);
                 break;
             case ContextMenuEntryKind.ShellExtension:
                 SetShellExtensionEnabled(item, enable: false);
@@ -947,78 +948,82 @@ public sealed class ContextMenuRegistryCatalog
 
     private IEnumerable<ContextMenuEntry> EnumerateRoot(RegistryRootDescriptor root)
     {
-        using var baseKey = Registry.ClassesRoot.OpenSubKey(root.RelativePath, writable: false);
-        if (baseKey is null)
+        foreach (var instance in EnumerateRootInstances())
         {
-            yield break;
-        }
-
-        foreach (var subKeyName in baseKey.GetSubKeyNames().OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
-        {
-            using var itemKey = baseKey.OpenSubKey(subKeyName, writable: false);
-            if (itemKey is null)
+            using var baseKey = instance.OpenBaseKey(root.RelativePath);
+            if (baseKey is null)
             {
                 continue;
             }
 
-            var defaultValue = itemKey.GetValue(null)?.ToString();
-            var handlerClsid = root.EntryKind == ContextMenuEntryKind.ShellExtension
-                ? ResolveShellExtensionHandlerClsid(subKeyName, defaultValue)
-                : null;
-            var displayName = ResolveDisplayName(root, itemKey, subKeyName, defaultValue, handlerClsid);
-            var editableText = root.EntryKind == ContextMenuEntryKind.ShellVerb
-                ? ResolveEditableText(itemKey, defaultValue)
-                : null;
-            var commandText = root.EntryKind == ContextMenuEntryKind.ShellVerb
-                ? itemKey.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString()
-                : null;
-
-            var (iconPath, iconIndex) = root.EntryKind switch
+            foreach (var subKeyName in baseKey.GetSubKeyNames().OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
             {
-                ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
-                ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
-                _ => (null, 0)
-            };
-            var filePath = root.EntryKind switch
-            {
-                ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
-                ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
-                _ => null
-            };
+                using var itemKey = baseKey.OpenSubKey(subKeyName, writable: false);
+                if (itemKey is null)
+                {
+                    continue;
+                }
 
-            iconPath = GuidMetadataCatalog.NormalizeCandidatePath(iconPath, filePath);
+                var defaultValue = itemKey.GetValue(null)?.ToString();
+                var handlerClsid = root.EntryKind == ContextMenuEntryKind.ShellExtension
+                    ? ResolveShellExtensionHandlerClsid(subKeyName, defaultValue)
+                    : null;
+                var displayName = ResolveDisplayName(root, itemKey, subKeyName, defaultValue, handlerClsid);
+                var editableText = root.EntryKind == ContextMenuEntryKind.ShellVerb
+                    ? ResolveEditableText(itemKey, defaultValue)
+                    : null;
+                var commandText = root.EntryKind == ContextMenuEntryKind.ShellVerb
+                    ? itemKey.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString()
+                    : null;
 
-            var isEnabled = root.EntryKind switch
-            {
-                ContextMenuEntryKind.ShellVerb => itemKey.GetValue("LegacyDisable") is null,
-                ContextMenuEntryKind.ShellExtension => !root.IsDisabledContainer && !IsShellExtensionBlocked(handlerClsid),
-                _ => true
-            };
+                var (iconPath, iconIndex) = root.EntryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
+                    _ => (null, 0)
+                };
+                var filePath = root.EntryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
+                    _ => null
+                };
 
-            yield return new ContextMenuEntry
-            {
-                Id = $"{root.StableRelativePath}|{subKeyName}",
-                Category = root.Category,
-                EntryKind = root.EntryKind,
-                KeyName = subKeyName,
-                DisplayName = displayName,
-                EditableText = editableText,
-                RegistryPath = $@"{root.RelativePath}\{subKeyName}",
-                SourceRootPath = root.StableRelativePath,
-                CommandText = commandText,
-                HandlerClsid = handlerClsid,
-                IconPath = iconPath,
-                IconIndex = iconIndex,
-                FilePath = filePath,
-                OnlyWithShift = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("Extended") is not null,
-                OnlyInExplorer = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("OnlyInBrowserWindow") is not null,
-                NoWorkingDirectory = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NoWorkingDirectory") is not null,
-                NeverDefault = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NeverDefault") is not null,
-                ShowAsDisabledIfHidden = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("ShowAsDisabledIfHidden") is not null,
-                IsEnabled = isEnabled,
-                IsPresentInRegistry = true,
-                Notes = BuildNotes(root.EntryKind, commandText, handlerClsid)
-            };
+                iconPath = GuidMetadataCatalog.NormalizeCandidatePath(iconPath, filePath);
+
+                var isEnabled = root.EntryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => itemKey.GetValue("LegacyDisable") is null,
+                    ContextMenuEntryKind.ShellExtension => !root.IsDisabledContainer && !IsShellExtensionBlocked(handlerClsid),
+                    _ => true
+                };
+
+                yield return new ContextMenuEntry
+                {
+                    Id = $"{root.StableRelativePath}|{subKeyName}",
+                    Category = root.Category,
+                    EntryKind = root.EntryKind,
+                    KeyName = subKeyName,
+                    DisplayName = displayName,
+                    EditableText = editableText,
+                    RegistryPath = $@"{root.RelativePath}\{subKeyName}",
+                    BackendRegistryPath = instance.ComposeAbsolutePath($@"{root.RelativePath}\{subKeyName}"),
+                    SourceRootPath = root.StableRelativePath,
+                    CommandText = commandText,
+                    HandlerClsid = handlerClsid,
+                    IconPath = iconPath,
+                    IconIndex = iconIndex,
+                    FilePath = filePath,
+                    OnlyWithShift = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("Extended") is not null,
+                    OnlyInExplorer = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("OnlyInBrowserWindow") is not null,
+                    NoWorkingDirectory = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NoWorkingDirectory") is not null,
+                    NeverDefault = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NeverDefault") is not null,
+                    ShowAsDisabledIfHidden = root.EntryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("ShowAsDisabledIfHidden") is not null,
+                    IsEnabled = isEnabled,
+                    IsPresentInRegistry = true,
+                    Notes = BuildNotes(root.EntryKind, commandText, handlerClsid)
+                };
+            }
         }
     }
 
@@ -1384,7 +1389,7 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void SetShellVerbEnabled(string registryPath, bool enable)
     {
-        using var menuKey = Registry.ClassesRoot.OpenSubKey(registryPath, writable: true)
+        using var menuKey = OpenRegistryKey(registryPath, writable: true)
             ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
 
         if (enable)
@@ -1399,7 +1404,7 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void SetShellVerbAttribute(string registryPath, ContextMenuShellAttribute attribute, bool enable)
     {
-        using var menuKey = Registry.ClassesRoot.OpenSubKey(registryPath, writable: true)
+        using var menuKey = OpenRegistryKey(registryPath, writable: true)
             ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
 
         var valueName = attribute switch
@@ -1444,7 +1449,7 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void DeleteRegistryKey(string registryPath)
     {
-        Registry.ClassesRoot.DeleteSubKeyTree(registryPath, throwOnMissingSubKey: false);
+        DeleteRegistryKeyTree(registryPath);
     }
 
     private static void SetEnhanceShellItemEnabled(string relativeGroupPath, XElement itemElement, bool enable)
@@ -2089,6 +2094,80 @@ public sealed class ContextMenuRegistryCatalog
         return string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
+    private static IEnumerable<RegistryRootInstance> EnumerateRootInstances()
+    {
+        yield return new RegistryRootInstance(
+            Registry.LocalMachine,
+            @"SOFTWARE\Classes",
+            @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes");
+
+        foreach (var userSid in Registry.Users.GetSubKeyNames()
+                     .Where(static sid => sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase)
+                                          && !sid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(static sid => sid, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return new RegistryRootInstance(
+                Registry.Users,
+                $@"{userSid}\Software\Classes",
+                $@"HKEY_USERS\{userSid}\Software\Classes");
+        }
+    }
+
+    private static RegistryKey? OpenRegistryKey(string absoluteRegistryPath, bool writable)
+    {
+        if (TrySplitAbsoluteRegistryPath(absoluteRegistryPath, out var rootKey, out var subPath))
+        {
+            return rootKey.OpenSubKey(subPath, writable);
+        }
+
+        return Registry.ClassesRoot.OpenSubKey(absoluteRegistryPath, writable);
+    }
+
+    private static void DeleteRegistryKeyTree(string absoluteRegistryPath)
+    {
+        if (TrySplitAbsoluteRegistryPath(absoluteRegistryPath, out var rootKey, out var subPath))
+        {
+            rootKey.DeleteSubKeyTree(subPath, throwOnMissingSubKey: false);
+            return;
+        }
+
+        Registry.ClassesRoot.DeleteSubKeyTree(absoluteRegistryPath, throwOnMissingSubKey: false);
+    }
+
+    private static bool TrySplitAbsoluteRegistryPath(string absoluteRegistryPath, out RegistryKey rootKey, out string subPath)
+    {
+        rootKey = null!;
+        subPath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(absoluteRegistryPath))
+        {
+            return false;
+        }
+
+        var normalized = absoluteRegistryPath.Trim();
+        foreach (var pair in new (string Prefix, RegistryKey Key)[]
+                 {
+                     (@"HKEY_LOCAL_MACHINE\", Registry.LocalMachine),
+                     (@"HKLM\", Registry.LocalMachine),
+                     (@"HKEY_USERS\", Registry.Users),
+                     (@"HKU\", Registry.Users),
+                     (@"HKEY_CLASSES_ROOT\", Registry.ClassesRoot),
+                     (@"HKCR\", Registry.ClassesRoot)
+                 })
+        {
+            if (!normalized.StartsWith(pair.Prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            rootKey = pair.Key;
+            subPath = normalized[pair.Prefix.Length..];
+            return true;
+        }
+
+        return false;
+    }
+
     private sealed record RegistryRootDescriptor(
         ContextMenuCategory Category,
         string RelativePath,
@@ -2097,5 +2176,15 @@ public sealed class ContextMenuRegistryCatalog
         bool IsDisabledContainer = false)
     {
         public string StableRelativePath { get; } = StableRelativePath ?? RelativePath;
+    }
+
+    private sealed record RegistryRootInstance(
+        RegistryKey Hive,
+        string ClassesBasePath,
+        string AbsoluteRootPath)
+    {
+        public RegistryKey? OpenBaseKey(string relativePath) => Hive.OpenSubKey($@"{ClassesBasePath}\{relativePath}", writable: false);
+
+        public string ComposeAbsolutePath(string relativePath) => $@"{AbsoluteRootPath}\{relativePath}";
     }
 }

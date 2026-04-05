@@ -33,7 +33,7 @@ public sealed class ContextMenuRegistryMonitor
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
     {
         var knownItems = (await _catalog.GetSnapshotAsync(cancellationToken))
-            .Where(static item => !item.IsDeleted)
+            .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
             .ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
         while (!cancellationToken.IsCancellationRequested)
@@ -43,8 +43,9 @@ public sealed class ContextMenuRegistryMonitor
                 await Task.Delay(_pollInterval, cancellationToken);
 
                 var currentSnapshot = (await _catalog.GetSnapshotAsync(cancellationToken))
-                    .Where(static item => !item.IsDeleted)
+                    .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                     .ToList();
+
                 foreach (var item in currentSnapshot.Where(item => !knownItems.ContainsKey(item.Id)))
                 {
                     knownItems[item.Id] = item;
@@ -56,6 +57,24 @@ public sealed class ContextMenuRegistryMonitor
 
                     await _logger.LogAsync($"Detected new menu item: {item.DisplayName}", cancellationToken);
                     ItemDetected?.Invoke(this, item);
+                }
+
+                foreach (var item in currentSnapshot)
+                {
+                    if (!knownItems.TryGetValue(item.Id, out var previous))
+                    {
+                        continue;
+                    }
+
+                    if (RequiresApprovalForExternalReenable(previous, item))
+                    {
+                        knownItems[item.Id] = item;
+                        await _logger.LogAsync($"Detected externally re-enabled menu item: {item.DisplayName}", cancellationToken);
+                        ItemDetected?.Invoke(this, item);
+                        continue;
+                    }
+
+                    knownItems[item.Id] = item;
                 }
 
                 foreach (var removedId in knownItems.Keys.Except(currentSnapshot.Select(item => item.Id), StringComparer.OrdinalIgnoreCase).ToList())
@@ -72,5 +91,14 @@ public sealed class ContextMenuRegistryMonitor
                 await _logger.LogAsync($"Registry monitor error: {ex.Message}", cancellationToken);
             }
         }
+    }
+
+    private static bool RequiresApprovalForExternalReenable(ContextMenuEntry previous, ContextMenuEntry current)
+    {
+        return !previous.IsPendingApproval
+               && !previous.IsEnabled
+               && current.IsEnabled
+               && current.DetectedChangeKind == ContextMenuChangeKind.Modified
+               && current.HasConsistencyIssue;
     }
 }

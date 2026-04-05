@@ -14,6 +14,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly LocalizationService _localization;
     private readonly HashSet<string> _seenPendingApprovalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenChangedItemIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool _pendingApprovalBaselineInitialized;
     private ServiceAttentionState _serviceAttentionState = ServiceAttentionState.None;
 
     public ContextMenuWorkspaceService(
@@ -31,6 +32,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _backendClient.NotificationReceived += OnBackendNotificationReceived;
         ConnectionStatus = _localization.Translate("ConnectingStatus");
     }
+
+    public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
 
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
@@ -442,9 +445,24 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             .Select(static item => item.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var itemId in currentPendingIds)
+        if (!_pendingApprovalBaselineInitialized)
         {
-            _seenPendingApprovalIds.Add(itemId);
+            foreach (var itemId in currentPendingIds)
+            {
+                _seenPendingApprovalIds.Add(itemId);
+            }
+
+            _pendingApprovalBaselineInitialized = true;
+        }
+        else
+        {
+        foreach (var item in snapshot.Where(static item => item.IsPendingApproval))
+        {
+            if (_seenPendingApprovalIds.Add(item.Id))
+            {
+                PendingApprovalDetected?.Invoke(this, item);
+            }
+        }
         }
 
         foreach (var item in snapshot.Where(static item => item.DetectedChangeKind != ContextMenuChangeKind.None))
@@ -568,6 +586,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             if (notification.Item is not null)
             {
+                if (notification.Kind == PipeNotificationKind.ItemDetected
+                    && notification.Item.IsPendingApproval
+                    && _seenPendingApprovalIds.Add(notification.Item.Id))
+                {
+                    PendingApprovalDetected?.Invoke(this, notification.Item);
+                }
+
                 UpsertItem(notification.Item);
             }
         });

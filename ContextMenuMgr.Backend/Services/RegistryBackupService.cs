@@ -14,10 +14,10 @@ public sealed class RegistryBackupService
         Directory.CreateDirectory(_backupDirectory);
     }
 
-    public async Task<string> ExportKeyAsync(string relativeRegistryPath, CancellationToken cancellationToken)
+    public async Task<string> ExportKeyAsync(string registryPath, CancellationToken cancellationToken)
     {
-        var backupPath = Path.Combine(_backupDirectory, $"{GetSafeFileName(relativeRegistryPath)}.reg");
-        await RunRegAsync($"export \"HKCR\\{relativeRegistryPath}\" \"{backupPath}\" /y", cancellationToken);
+        var backupPath = Path.Combine(_backupDirectory, $"{GetSafeFileName(registryPath)}.reg");
+        await RunRegAsync($"export \"{registryPath}\" \"{backupPath}\" /y", cancellationToken);
         return backupPath;
     }
 
