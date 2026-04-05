@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using System.Threading;
 using ContextMenuMgr.Frontend.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,6 +10,8 @@ namespace ContextMenuMgr.Frontend;
 
 public partial class App : System.Windows.Application
 {
+    private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManager.SingleInstance";
+    private const string ActivateEventName = @"Global\PLFJY.ContextMenuManager.Activate";
     private static readonly string LogFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ContextMenuMgr",
@@ -16,6 +19,11 @@ public partial class App : System.Windows.Application
         "frontend-crash.log");
 
     private ServiceProvider? _serviceProvider;
+    private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
+    private EventWaitHandle? _activateEvent;
+    private CancellationTokenSource? _singleInstanceCts;
+    private Task? _singleInstanceListenerTask;
 
     public string[] StartupArguments { get; private set; } = [];
 
@@ -31,6 +39,12 @@ public partial class App : System.Windows.Application
 
         try
         {
+            if (!InitializeSingleInstance())
+            {
+                Shutdown(0);
+                return;
+            }
+
             _serviceProvider = BuildServiceProvider();
             var settings = _serviceProvider.GetRequiredService<FrontendSettingsService>();
             FrontendDebugLog.Configure(settings.Current.LogLevel);
@@ -38,11 +52,6 @@ public partial class App : System.Windows.Application
             _serviceProvider.GetRequiredService<LocalizationService>().ApplyPersistedLanguage();
             _serviceProvider.GetRequiredService<ThemeService>().ApplyPersistedTheme();
             var window = _serviceProvider.GetRequiredService<MainWindow>();
-            if (settings.Current.LaunchMinimized)
-            {
-                window.WindowState = WindowState.Minimized;
-            }
-
             MainWindow = window;
             window.Show();
         }
@@ -61,6 +70,9 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            _singleInstanceCts?.Cancel();
+            _activateEvent?.Set();
+            _singleInstanceListenerTask?.Wait(TimeSpan.FromSeconds(1));
             _serviceProvider?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
         }
         catch (Exception ex)
@@ -69,10 +81,83 @@ public partial class App : System.Windows.Application
         }
         finally
         {
+            _singleInstanceCts?.Dispose();
+            _singleInstanceCts = null;
+            _activateEvent?.Dispose();
+            _activateEvent = null;
+            if (_ownsSingleInstanceMutex)
+            {
+                _singleInstanceMutex?.ReleaseMutex();
+            }
+            _singleInstanceMutex?.Dispose();
+            _singleInstanceMutex = null;
+            _ownsSingleInstanceMutex = false;
             _serviceProvider = null;
         }
 
         base.OnExit(e);
+    }
+
+    private bool InitializeSingleInstance()
+    {
+        var createdNew = false;
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out createdNew);
+        if (!createdNew)
+        {
+            try
+            {
+                using var activateEvent = EventWaitHandle.OpenExisting(ActivateEventName);
+                activateEvent.Set();
+            }
+            catch
+            {
+            }
+
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            return false;
+        }
+
+        _ownsSingleInstanceMutex = true;
+        _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
+        _singleInstanceCts = new CancellationTokenSource();
+        _singleInstanceListenerTask = Task.Run(() => ListenForActivationRequestsAsync(_singleInstanceCts.Token));
+        return true;
+    }
+
+    private async Task ListenForActivationRequestsAsync(CancellationToken cancellationToken)
+    {
+        if (_activateEvent is null)
+        {
+            return;
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                _activateEvent.WaitOne();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (MainWindow is MainWindow window)
+                    {
+                        window.BringToForeground();
+                    }
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+            }
+        }
     }
 
     private void RegisterGlobalExceptionHandlers()

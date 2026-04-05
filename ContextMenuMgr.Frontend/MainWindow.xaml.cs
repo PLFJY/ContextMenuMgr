@@ -17,6 +17,7 @@ public partial class MainWindow : FluentWindow
 {
     private readonly LocalizationService _localization;
     private readonly ShellViewModel _viewModel;
+    private readonly FrontendSettingsService _settingsService;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ToolStripMenuItem _openMenuItem;
     private readonly Forms.ToolStripMenuItem _exitMenuItem;
@@ -25,10 +26,15 @@ public partial class MainWindow : FluentWindow
     private bool _exitInProgress;
     private bool _hasShownTrayHint;
 
-    public MainWindow(ShellViewModel viewModel, LocalizationService localization, IServiceProvider serviceProvider)
+    public MainWindow(
+        ShellViewModel viewModel,
+        LocalizationService localization,
+        FrontendSettingsService settingsService,
+        IServiceProvider serviceProvider)
     {
         _viewModel = viewModel;
         _localization = localization;
+        _settingsService = settingsService;
 
         SystemThemeWatcher.Watch(this);
         InitializeComponent();
@@ -67,15 +73,21 @@ public partial class MainWindow : FluentWindow
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         var app = (App)System.Windows.Application.Current;
-        var suppressBootstrapPrompt =
-            WindowState == WindowState.Minimized
-            || app.StartupArguments.Any(static arg =>
-                string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
+        var isStartupLaunch = app.StartupArguments.Any(static arg =>
+            string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
+        var startInTray = isStartupLaunch && _settingsService.Current.LaunchMinimized;
+        var suppressBootstrapPrompt = isStartupLaunch;
 
         FileNavigationItem.IsActive = true;
         RootNavigation.Navigate(typeof(FileContextMenuPage));
+
+        if (startInTray)
+        {
+            HideToTray();
+        }
+
         await _viewModel.InitializeAsync(suppressBootstrapPrompt);
     }
 
@@ -140,6 +152,28 @@ public partial class MainWindow : FluentWindow
         ShowInTaskbar = true;
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    public void BringToForeground()
+    {
+        if (!IsVisible || WindowState == WindowState.Minimized)
+        {
+            ShowFromTray();
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Show();
+        ShowInTaskbar = true;
+
+        var previousTopmost = Topmost;
+        Topmost = true;
+        Activate();
+        Topmost = previousTopmost;
+        Focus();
     }
 
     private async Task ExitFromTrayAsync()

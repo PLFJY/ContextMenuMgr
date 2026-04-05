@@ -186,18 +186,28 @@ public sealed class ContextMenuItemActionsService
         return RunActionAsync(
             async () =>
             {
-                var stopExplorer = Process.Start(new ProcessStartInfo("taskkill.exe", "/f /im explorer.exe")
+                foreach (var explorerProcess in Process.GetProcessesByName("explorer"))
                 {
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-
-                if (stopExplorer is not null)
-                {
-                    await stopExplorer.WaitForExitAsync();
+                    try
+                    {
+                        explorerProcess.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                    }
+                    finally
+                    {
+                        explorerProcess.Dispose();
+                    }
                 }
 
-                Process.Start(new ProcessStartInfo("explorer.exe")
+                await Task.Delay(800);
+
+                var explorerPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "explorer.exe");
+
+                Process.Start(new ProcessStartInfo(explorerPath)
                 {
                     UseShellExecute = true
                 });
