@@ -52,6 +52,16 @@ public partial class App : System.Windows.Application
             _serviceProvider.GetRequiredService<LocalizationService>().ApplyPersistedLanguage();
             _serviceProvider.GetRequiredService<ThemeService>().ApplyPersistedTheme();
             var window = _serviceProvider.GetRequiredService<MainWindow>();
+            var isStartupLaunch = StartupArguments.Any(static arg =>
+                string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
+            var startInTray = isStartupLaunch && settings.Current.LaunchMinimized;
+            if (startInTray)
+            {
+                window.PrepareForSilentStartupToTray();
+            }
+
             MainWindow = window;
             window.Show();
         }

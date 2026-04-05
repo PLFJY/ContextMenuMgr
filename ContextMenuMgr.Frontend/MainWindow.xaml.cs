@@ -25,6 +25,7 @@ public partial class MainWindow : FluentWindow
     private bool _allowClose;
     private bool _exitInProgress;
     private bool _hasShownTrayHint;
+    private bool _silentStartupToTray;
 
     public MainWindow(
         ShellViewModel viewModel,
@@ -85,7 +86,7 @@ public partial class MainWindow : FluentWindow
 
         if (startInTray)
         {
-            HideToTray();
+            HideToTray(showNotification: false);
         }
 
         await _viewModel.InitializeAsync(suppressBootstrapPrompt);
@@ -130,12 +131,27 @@ public partial class MainWindow : FluentWindow
         _exitMenuItem.Text = _localization.Translate("TrayExit");
     }
 
-    private void HideToTray()
+    public void PrepareForSilentStartupToTray()
+    {
+        _silentStartupToTray = true;
+        ShowActivated = false;
+        ShowInTaskbar = false;
+        WindowState = WindowState.Minimized;
+        Opacity = 0;
+    }
+
+    private void HideToTray(bool showNotification = true)
     {
         Hide();
         ShowInTaskbar = false;
 
-        if (_hasShownTrayHint)
+        if (_silentStartupToTray)
+        {
+            Opacity = 1;
+            return;
+        }
+
+        if (!showNotification || _hasShownTrayHint)
         {
             return;
         }
@@ -148,6 +164,9 @@ public partial class MainWindow : FluentWindow
 
     private void ShowFromTray()
     {
+        _silentStartupToTray = false;
+        Opacity = 1;
+        ShowActivated = true;
         Show();
         ShowInTaskbar = true;
         WindowState = WindowState.Normal;
