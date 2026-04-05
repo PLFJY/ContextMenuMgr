@@ -59,6 +59,17 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    public void UpdateAutoStartOnLogin(bool autoStartOnLogin)
+    {
+        if (Current.AutoStartOnLogin == autoStartOnLogin)
+        {
+            return;
+        }
+
+        Current.AutoStartOnLogin = autoStartOnLogin;
+        Save();
+    }
+
     public void UpdateLaunchMinimized(bool launchMinimized)
     {
         if (Current.LaunchMinimized == launchMinimized)

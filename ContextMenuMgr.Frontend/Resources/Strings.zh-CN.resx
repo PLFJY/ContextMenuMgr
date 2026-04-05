@@ -477,11 +477,17 @@
   <data name="StartupBehaviorTitle" xml:space="preserve">
     <value>启动</value>
   </data>
+  <data name="AutoStartOnLoginLabel" xml:space="preserve">
+    <value>随 Windows 登录自动启动</value>
+  </data>
+  <data name="AutoStartOnLoginDescription" xml:space="preserve">
+    <value>启用后，会在当前用户登录 Windows 时自动启动前端程序，并带上启动参数。</value>
+  </data>
   <data name="LaunchMinimizedLabel" xml:space="preserve">
-    <value>开机时以最小化启动</value>
+    <value>开机自启时直接进入托盘</value>
   </data>
   <data name="LaunchMinimizedDescription" xml:space="preserve">
-    <value>当前端随 Windows 启动时，会直接最小化到系统托盘。</value>
+    <value>仅在“随 Windows 登录自动启动”场景下生效。直接双击程序时，仍会正常打开主窗口。</value>
   </data>
   <data name="LocalFilesTitle" xml:space="preserve">
     <value>本地文件</value>

@@ -477,11 +477,17 @@
   <data name="StartupBehaviorTitle" xml:space="preserve">
     <value>Startup</value>
   </data>
+  <data name="AutoStartOnLoginLabel" xml:space="preserve">
+    <value>Start automatically when I sign in to Windows</value>
+  </data>
+  <data name="AutoStartOnLoginDescription" xml:space="preserve">
+    <value>When enabled, the frontend is registered in the current user's Windows Run key and starts with a startup argument at sign-in.</value>
+  </data>
   <data name="LaunchMinimizedLabel" xml:space="preserve">
-    <value>Start minimized at sign-in</value>
+    <value>Go directly to the tray when auto-started</value>
   </data>
   <data name="LaunchMinimizedDescription" xml:space="preserve">
-    <value>When the frontend starts with Windows, it will open minimized to the system tray.</value>
+    <value>This only applies to Windows auto-start launches. Double-clicking the app still opens the main window normally.</value>
   </data>
   <data name="LocalFilesTitle" xml:space="preserve">
     <value>Local files</value>

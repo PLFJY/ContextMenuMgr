@@ -12,6 +12,7 @@ public partial class App
         var services = new ServiceCollection();
 
         services.AddSingleton<FrontendSettingsService>();
+        services.AddSingleton<FrontendStartupService>();
         services.AddSingleton<LocalizationService>();
         services.AddSingleton<ThemeService>();
         services.AddSingleton<IconPreviewService>();

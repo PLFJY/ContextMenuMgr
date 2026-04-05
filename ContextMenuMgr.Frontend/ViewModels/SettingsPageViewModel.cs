@@ -10,20 +10,24 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 public partial class SettingsPageViewModel : ObservableObject
 {
     private readonly FrontendSettingsService _settingsService;
+    private readonly FrontendStartupService _startupService;
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
     private readonly ThemeService _themeService;
     private readonly ContextMenuItemActionsService _actionsService;
     private bool _suppressProtectionSync;
+    private bool _suppressAutoStartSync;
 
     public SettingsPageViewModel(
         FrontendSettingsService settingsService,
+        FrontendStartupService startupService,
         ContextMenuWorkspaceService workspace,
         LocalizationService localization,
         ThemeService themeService,
         ContextMenuItemActionsService actionsService)
     {
         _settingsService = settingsService;
+        _startupService = startupService;
         _workspace = workspace;
         _localization = localization;
         _themeService = themeService;
@@ -53,12 +57,17 @@ public partial class SettingsPageViewModel : ObservableObject
         SelectedLanguage = AvailableLanguages.FirstOrDefault(item => item.Option == _localization.SelectedLanguage) ?? AvailableLanguages[0];
         SelectedTheme = AvailableThemes.FirstOrDefault(item => item.Option == _themeService.CurrentTheme) ?? AvailableThemes[0];
         SelectedLogLevel = AvailableLogLevels.FirstOrDefault(item => item.Option == _settingsService.Current.LogLevel) ?? AvailableLogLevels[1];
+        _suppressAutoStartSync = true;
+        AutoStartOnLogin = _startupService.IsAutoStartEnabled();
+        _suppressAutoStartSync = false;
+        _settingsService.UpdateAutoStartOnLogin(AutoStartOnLogin);
         StartMinimized = _settingsService.Current.LaunchMinimized;
         LockNewContextMenuItems = _settingsService.Current.LockNewContextMenuItems;
 
         _localization.LanguageChanged += OnLanguageChanged;
         RefreshLocalizedText();
         RefreshServiceState();
+        OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
         _ = LoadRegistryProtectionSettingAsync();
     }
 
@@ -76,6 +85,9 @@ public partial class SettingsPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial LogLevelOptionViewModel? SelectedLogLevel { get; set; }
+
+    [ObservableProperty]
+    public partial bool AutoStartOnLogin { get; set; }
 
     [ObservableProperty]
     public partial bool StartMinimized { get; set; }
@@ -100,9 +112,15 @@ public partial class SettingsPageViewModel : ObservableObject
 
     public string StartupBehaviorTitle => _localization.Translate("StartupBehaviorTitle");
 
+    public string AutoStartOnLoginLabel => _localization.Translate("AutoStartOnLoginLabel");
+
+    public string AutoStartOnLoginDescription => _localization.Translate("AutoStartOnLoginDescription");
+
     public string LaunchMinimizedLabel => _localization.Translate("LaunchMinimizedLabel");
 
     public string LaunchMinimizedDescription => _localization.Translate("LaunchMinimizedDescription");
+
+    public bool CanConfigureStartupTrayBehavior => AutoStartOnLogin;
 
     public string ProtectionTitle => _localization.Translate("ProtectionTitle");
 
@@ -164,6 +182,35 @@ public partial class SettingsPageViewModel : ObservableObject
     partial void OnStartMinimizedChanged(bool value)
     {
         _settingsService.UpdateLaunchMinimized(value);
+    }
+
+    partial void OnAutoStartOnLoginChanged(bool value)
+    {
+        if (_suppressAutoStartSync)
+        {
+            return;
+        }
+
+        try
+        {
+            _startupService.SetAutoStartEnabled(value);
+            _settingsService.UpdateAutoStartOnLogin(value);
+        }
+        catch (Exception ex)
+        {
+            var actualValue = _startupService.IsAutoStartEnabled();
+            _settingsService.UpdateAutoStartOnLogin(actualValue);
+            _suppressAutoStartSync = true;
+            AutoStartOnLogin = actualValue;
+            _suppressAutoStartSync = false;
+            _ = FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("StartupBehaviorTitle"));
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
+        }
     }
 
     partial void OnLockNewContextMenuItemsChanged(bool value)
@@ -261,8 +308,11 @@ public partial class SettingsPageViewModel : ObservableObject
         OnPropertyChanged(nameof(ThemeLabel));
         OnPropertyChanged(nameof(LogLevelLabel));
         OnPropertyChanged(nameof(StartupBehaviorTitle));
+        OnPropertyChanged(nameof(AutoStartOnLoginLabel));
+        OnPropertyChanged(nameof(AutoStartOnLoginDescription));
         OnPropertyChanged(nameof(LaunchMinimizedLabel));
         OnPropertyChanged(nameof(LaunchMinimizedDescription));
+        OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
         OnPropertyChanged(nameof(ProtectionTitle));
         OnPropertyChanged(nameof(LockNewContextMenuItemsLabel));
         OnPropertyChanged(nameof(LockNewContextMenuItemsDescription));

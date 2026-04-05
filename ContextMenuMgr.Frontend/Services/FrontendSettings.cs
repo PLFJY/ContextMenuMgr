@@ -8,6 +8,8 @@ public sealed class FrontendSettings
 
     public AppLogLevel LogLevel { get; set; } = AppLogLevel.Warning;
 
+    public bool AutoStartOnLogin { get; set; }
+
     public bool LaunchMinimized { get; set; }
 
     public bool LockNewContextMenuItems { get; set; }
