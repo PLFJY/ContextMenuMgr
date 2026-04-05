@@ -698,6 +698,11 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"Menu item '{item.DisplayName}' is already deleted.", item);
         }
 
+        if (!item.IsPresentInRegistry)
+        {
+            return await RemoveMissingItemStateAsync(item, cancellationToken);
+        }
+
         try
         {
             var backupFilePath = await _backupService.ExportKeyAsync(item.BackendRegistryPath, cancellationToken);
@@ -731,6 +736,25 @@ public sealed class ContextMenuRegistryCatalog
             await _logger.LogAsync($"Failed to delete {item.DisplayName}: {ex.Message}", cancellationToken);
             return CreateFailure(ex.Message, item);
         }
+    }
+
+    private async Task<PipeResponse> RemoveMissingItemStateAsync(ContextMenuEntry item, CancellationToken cancellationToken)
+    {
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        if (states.Remove(item.Id))
+        {
+            PruneTransientStates(states);
+            await _stateStore.SaveAsync(states, cancellationToken);
+        }
+
+        await _logger.LogAsync($"Removed missing item {item.DisplayName} from the catalog state.", cancellationToken);
+
+        return new PipeResponse
+        {
+            Success = true,
+            Message = $"Removed missing item {item.DisplayName} from the list.",
+            Item = null
+        };
     }
 
     private async Task<PipeResponse> RemovePendingApprovalItemAsync(
