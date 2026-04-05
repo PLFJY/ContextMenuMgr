@@ -238,6 +238,8 @@ public sealed class NamedPipeBackendServer
                 },
             PipeCommand.SetEnhanceMenuItemEnabled when request.ScopeValue is not null && request.DefinitionXml is not null && request.Enable is not null
                 => await _catalog.SetEnhanceMenuItemEnabledAsync(request.ScopeValue, request.DefinitionXml, request.Enable.Value, cancellationToken),
+            PipeCommand.AcknowledgeItemState when request.ItemId is not null
+                => await _catalog.AcknowledgeItemStateAsync(request.ItemId, cancellationToken),
             PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
                 => await _catalog.ApplyDesiredStateAsync(request.ItemId, request.Enable.Value, cancellationToken),
             PipeCommand.SetShellAttribute when request.ItemId is not null && request.Enable is not null && request.ShellAttribute is not null

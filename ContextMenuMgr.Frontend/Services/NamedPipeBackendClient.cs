@@ -86,6 +86,19 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(
+            new PipeRequest
+            {
+                Command = PipeCommand.AcknowledgeItemState,
+                ItemId = itemId
+            },
+            cancellationToken);
+
+        return response.Item;
+    }
+
     public async Task<ContextMenuEntry?> SetEnabledAsync(string itemId, bool enable, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(

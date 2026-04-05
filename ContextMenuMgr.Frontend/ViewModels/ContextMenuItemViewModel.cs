@@ -14,6 +14,7 @@ public partial class ContextMenuItemViewModel : ObservableObject
     private readonly Func<ContextMenuItemViewModel, bool, Task<bool>>? _setEnabledAsync;
     private readonly Func<ContextMenuItemViewModel, ContextMenuShellAttribute, bool, Task<bool>>? _setShellAttributeAsync;
     private readonly Func<ContextMenuItemViewModel, string, Task<bool>>? _setDisplayTextAsync;
+    private readonly Func<ContextMenuItemViewModel, Task<bool>>? _acknowledgeItemStateAsync;
     private bool _suppressEnabledSync;
     private bool _suppressAttributeSync;
     private string _detectedChangeSignature = string.Empty;
@@ -26,7 +27,8 @@ public partial class ContextMenuItemViewModel : ObservableObject
         ContextMenuItemActionsService actionsService,
         Func<ContextMenuItemViewModel, bool, Task<bool>>? setEnabledAsync = null,
         Func<ContextMenuItemViewModel, ContextMenuShellAttribute, bool, Task<bool>>? setShellAttributeAsync = null,
-        Func<ContextMenuItemViewModel, string, Task<bool>>? setDisplayTextAsync = null)
+        Func<ContextMenuItemViewModel, string, Task<bool>>? setDisplayTextAsync = null,
+        Func<ContextMenuItemViewModel, Task<bool>>? acknowledgeItemStateAsync = null)
     {
         _iconPreviewService = iconPreviewService;
         _localization = localization;
@@ -34,6 +36,7 @@ public partial class ContextMenuItemViewModel : ObservableObject
         _setEnabledAsync = setEnabledAsync;
         _setShellAttributeAsync = setShellAttributeAsync;
         _setDisplayTextAsync = setDisplayTextAsync;
+        _acknowledgeItemStateAsync = acknowledgeItemStateAsync;
         Entry = entry;
         ApplyEntry(entry);
         _localization.LanguageChanged += OnLanguageChanged;
@@ -663,14 +666,34 @@ public partial class ContextMenuItemViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void DismissDetectedChange()
+    private async Task DismissDetectedChangeAsync()
     {
+        if (_acknowledgeItemStateAsync is not null)
+        {
+            var success = await _acknowledgeItemStateAsync(this);
+            if (success)
+            {
+                return;
+            }
+        }
+
         IsDetectedChangeDismissed = true;
+        IsConsistencyIssueDismissed = true;
     }
 
     [RelayCommand]
-    private void DismissConsistencyIssue()
+    private async Task DismissConsistencyIssueAsync()
     {
+        if (_acknowledgeItemStateAsync is not null)
+        {
+            var success = await _acknowledgeItemStateAsync(this);
+            if (success)
+            {
+                return;
+            }
+        }
+
+        IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
     }
 }

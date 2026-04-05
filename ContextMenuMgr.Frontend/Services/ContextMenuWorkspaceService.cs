@@ -104,6 +104,31 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return false;
     }
 
+    public async Task<bool> AcknowledgeItemStateAsync(ContextMenuItemViewModel item)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var updated = await _backendClient.AcknowledgeItemStateAsync(item.Id, cts.Token);
+            if (updated is not null)
+            {
+                UpsertItem(updated);
+            }
+            else
+            {
+                RemoveItem(item.Id);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, $"AcknowledgeItemStateAsync failed for {item.Id}.");
+            ConnectionStatus = _localization.Format("ItemUpdateFailedStatus", item.DisplayName, ex.Message);
+            return false;
+        }
+    }
+
     public async Task DeleteOrUndoAsync(ContextMenuItemViewModel item)
     {
         try
@@ -398,7 +423,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             }
             else
             {
-                Items.Add(new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync));
+                Items.Add(new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync));
             }
         }
 
@@ -479,7 +504,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             return;
         }
 
-        Items.Add(new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync));
+        Items.Add(new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync));
     }
 
     private void RemoveItem(string itemId)

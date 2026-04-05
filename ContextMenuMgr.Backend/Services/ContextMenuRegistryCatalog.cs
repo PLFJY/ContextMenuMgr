@@ -276,6 +276,79 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    public async Task<PipeResponse> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
+    {
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        var actualEntry = EnumerateActualEntries()
+            .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+
+        if (actualEntry is not null)
+        {
+            states.TryGetValue(itemId, out var previousState);
+            if (previousState is not null && !string.IsNullOrWhiteSpace(previousState.BackupFilePath))
+            {
+                _backupService.DeleteBackupFile(previousState.BackupFilePath);
+            }
+
+            var state = GetOrCreateState(states, actualEntry);
+            state.IsDeleted = false;
+            state.IsPendingApproval = false;
+            state.SuppressNextDetection = false;
+            state.BackupFilePath = null;
+            state.DeletedAtUtc = null;
+            state.DesiredEnabled = actualEntry.IsEnabled;
+            state.ObservedEnabled = actualEntry.IsEnabled;
+            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            PruneTransientStates(states);
+            await _stateStore.SaveAsync(states, cancellationToken);
+
+            var refreshed = (await GetSnapshotAsync(cancellationToken))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
+                ?? actualEntry;
+
+            return new PipeResponse
+            {
+                Success = true,
+                Message = $"Synchronized {refreshed.DisplayName} with the current registry state.",
+                Item = refreshed
+            };
+        }
+
+        if (!states.TryGetValue(itemId, out var persistedState))
+        {
+            return new PipeResponse
+            {
+                Success = true,
+                Message = $"Item '{itemId}' is already synchronized."
+            };
+        }
+
+        if (!persistedState.IsDeleted)
+        {
+            states.Remove(itemId);
+            PruneTransientStates(states);
+            await _stateStore.SaveAsync(states, cancellationToken);
+
+            return new PipeResponse
+            {
+                Success = true,
+                Message = $"Removed stale state for {persistedState.DisplayName}."
+            };
+        }
+
+        persistedState.IsPendingApproval = false;
+        persistedState.SuppressNextDetection = false;
+        persistedState.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await _stateStore.SaveAsync(states, cancellationToken);
+
+        return new PipeResponse
+        {
+            Success = true,
+            Message = $"Acknowledged the current deleted state for {persistedState.DisplayName}.",
+            Item = persistedState.ToDeletedEntry()
+        };
+    }
+
     public async Task<PipeResponse> ApplyShellAttributeAsync(
         string itemId,
         ContextMenuShellAttribute attribute,

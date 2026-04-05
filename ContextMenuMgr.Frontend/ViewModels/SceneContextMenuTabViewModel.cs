@@ -277,7 +277,8 @@ public partial class SceneContextMenuTabViewModel : ObservableObject
                     _actionsService,
                     SetEnabledAsync,
                     SetShellAttributeAsync,
-                    SetDisplayTextAsync));
+                    SetDisplayTextAsync,
+                    AcknowledgeItemStateAsync));
             }
         }
 
@@ -311,6 +312,21 @@ public partial class SceneContextMenuTabViewModel : ObservableObject
                || Contains(item.KeyName, search)
                || Contains(item.RegistryPath, search)
                || Contains(item.Notes, search);
+    }
+
+    private async Task<bool> AcknowledgeItemStateAsync(ContextMenuItemViewModel item)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _backendClient.AcknowledgeItemStateAsync(item.Id, cts.Token);
+            await RefreshAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string? ResolveScopeValue()
