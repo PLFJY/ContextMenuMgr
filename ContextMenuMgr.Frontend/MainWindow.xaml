@@ -1,0 +1,198 @@
+<ui:FluentWindow
+    x:Class="ContextMenuMgr.Frontend.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:pages="clr-namespace:ContextMenuMgr.Frontend.Views.Pages"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
+    Title="{Binding WindowTitle}"
+    Width="1480"
+    Height="920"
+    MinWidth="1220"
+    MinHeight="760"
+    ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+    ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+    ExtendsContentIntoTitleBar="True"
+    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+    WindowBackdropType="Mica"
+    WindowStartupLocation="CenterScreen"
+    mc:Ignorable="d">
+    <Grid Background="{DynamicResource ApplicationBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Title="{Binding WindowTitle}" Grid.Row="0">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="/Assets/AppIcon.ico" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <Grid Grid.Row="1" Margin="12,0,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                Grid.Column="0"
+                Margin="10,0,0,0"
+                HorizontalAlignment="Left"
+                FontSize="19"
+                Text="{Binding ServiceAttentionText}"
+                Visibility="{Binding ServiceAttentionText, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
+
+            <ui:Button
+                Grid.Column="1"
+                MinWidth="108"
+                Padding="14,8"
+                HorizontalAlignment="Right"
+                Appearance="Secondary"
+                Command="{Binding RefreshCommand}"
+                Content="{Binding RefreshText}"
+                Icon="{ui:SymbolIcon Symbol=ArrowClockwise24}" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="5,0,5,5">
+            <ui:NavigationView
+                x:Name="RootNavigation"
+                IsBackButtonVisible="Collapsed"
+                IsPaneOpen="True"
+                IsPaneToggleVisible="True"
+                OpenPaneLength="224"
+                PaneDisplayMode="Left">
+                <ui:NavigationView.ItemTemplate>
+                    <ControlTemplate TargetType="{x:Type ui:NavigationViewItem}">
+                        <Border
+                            x:Name="MainBorder"
+                            Height="40"
+                            Background="Transparent"
+                            BorderThickness="{DynamicResource NavigationViewItemThickness}"
+                            CornerRadius="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <Rectangle
+                                    x:Name="SelectionIndicator"
+                                    Grid.Column="0"
+                                    Width="3"
+                                    Height="16"
+                                    VerticalAlignment="Center"
+                                    Fill="{DynamicResource NavigationViewSelectionIndicatorForeground}"
+                                    Opacity="0"
+                                    RadiusX="2"
+                                    RadiusY="2" />
+
+                                <ContentPresenter
+                                    Grid.Column="1"
+                                    Margin="10,0,6,0"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding Icon}" />
+
+                                <ContentPresenter
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding Content}"
+                                    TextElement.FontSize="13"
+                                    TextElement.Foreground="{TemplateBinding Foreground}" />
+
+                                <ContentPresenter
+                                    Grid.Column="3"
+                                    Margin="8,0,10,0"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding InfoBadge}" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsActive" Value="True">
+                                <Setter TargetName="SelectionIndicator" Property="Opacity" Value="1" />
+                                <Setter TargetName="MainBorder" Property="Background" Value="{DynamicResource NavigationViewItemBackgroundSelected}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="MainBorder" Property="Background" Value="{DynamicResource NavigationViewItemBackgroundPointerOver}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="MainBorder" Property="Background" Value="{DynamicResource NavigationViewItemBackgroundPressed}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </ui:NavigationView.ItemTemplate>
+
+                <ui:NavigationView.MenuItems>
+                    <ui:NavigationViewItem
+                        x:Name="FileNavigationItem"
+                        Content="{Binding FileCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=Document24}"
+                        TargetPageType="{x:Type pages:FileContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding AllObjectsCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=SquareMultiple24}"
+                        TargetPageType="{x:Type pages:AllObjectsContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding FolderCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=Folder24}"
+                        TargetPageType="{x:Type pages:FolderContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding DirectoryCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
+                        TargetPageType="{x:Type pages:DirectoryContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding BackgroundCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=WindowConsole20}"
+                        TargetPageType="{x:Type pages:BackgroundContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding DesktopCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=Desktop24}"
+                        TargetPageType="{x:Type pages:DesktopContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding DriveCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=AppsAddIn24}"
+                        TargetPageType="{x:Type pages:DriveContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding LibraryCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
+                        TargetPageType="{x:Type pages:LibraryContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding ComputerCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=Desktop24}"
+                        TargetPageType="{x:Type pages:ComputerContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding RecycleBinCategoryName}"
+                        Icon="{ui:SymbolIcon Symbol=Delete24}"
+                        TargetPageType="{x:Type pages:RecycleBinContextMenuPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding FileTypesPageTitle}"
+                        Icon="{ui:SymbolIcon Symbol=DocumentText24}"
+                        TargetPageType="{x:Type pages:FileTypesPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding OtherRulesPageTitle}"
+                        Icon="{ui:SymbolIcon Symbol=Settings24}"
+                        TargetPageType="{x:Type pages:OtherRulesPage}" />
+                    <ui:NavigationViewItem
+                        Content="{Binding ApprovalsTitle}"
+                        Icon="{ui:SymbolIcon Symbol=ChatWarning24}"
+                        InfoBadge="{Binding ApprovalsBadge}"
+                        TargetPageType="{x:Type pages:ApprovalsPage}" />
+                </ui:NavigationView.MenuItems>
+
+                <ui:NavigationView.FooterMenuItems>
+                    <ui:NavigationViewItem
+                        Content="{Binding SettingsTitle}"
+                        Icon="{ui:SymbolIcon Symbol=Settings24}"
+                        TargetPageType="{x:Type pages:SettingsPage}" />
+                </ui:NavigationView.FooterMenuItems>
+            </ui:NavigationView>
+
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

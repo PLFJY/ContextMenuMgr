@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ContextMenuMgr.Backend/ContextMenuMgr.Backend.csproj" />
+  <Project Path="ContextMenuMgr.Contracts/ContextMenuMgr.Contracts.csproj" />
+  <Project Path="ContextMenuMgr.Frontend/ContextMenuMgr.Frontend.csproj" />
+</Solution>

@@ -1,0 +1,95 @@
+#include "CodeDependencies.iss"
+
+#ifndef MyAppId
+  #define MyAppId "45156332-3408-47B7-B5D2-2567E5888F64"
+#endif
+
+#ifndef MyAppBuildDir
+  #define MyAppBuildDir "..\build\ContextMenuManager"
+#endif
+
+#define MyAppName "Context Menu Manager"
+#define MyAppPublisher "PLFJY"
+#define MyAppURL "https://plfjy.top/"
+#define MyAppExeName "ContextMenuManager.exe"
+#define MyAppSetupName "ContextMenuManager_Setup"
+#define AppExePath AddBackslash(MyAppBuildDir) + MyAppExeName
+#define MyAppVersion GetVersionNumbersString(AppExePath)
+#define AppProductTextVersion GetStringFileInfo(AppExePath, "ProductVersion")
+
+[Setup]
+AppId={{{#MyAppId}}}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#AppProductTextVersion}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductTextVersion={#AppProductTextVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+UninstallDisplayIcon={app}\{#MyAppExeName}
+DisableWelcomePage=no
+DisableReadyPage=yes
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+DisableProgramGroupPage=yes
+LicenseFile=..\License
+OutputDir=..\build
+OutputBaseFilename={#MyAppSetupName}
+SetupIconFile=..\ContextMenuMgr.Frontend\Assets\AppIcon.ico
+SolidCompression=yes
+WizardStyle=modern
+
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
+
+[Files]
+Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Code]
+procedure InitializeWizard();
+begin
+  WizardForm.LicenseAcceptedRadio.Checked := True;
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Dependency_AddDotNet90Desktop;
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Response: Integer;
+begin
+  case CurUninstallStep of
+    usUninstall:
+      begin
+        Response := MsgBox(
+          '是否同时删除本地数据？' + #13#10 + #13#10 +
+          '包括：配置、日志、缓存、状态库和删除备份。' + #13#10 +
+          '选择“否”将保留这些数据。',
+          mbConfirmation,
+          MB_YESNO or MB_DEFBUTTON2);
+
+        if Response = IDYES then
+        begin
+          DelTree(ExpandConstant('{localappdata}\ContextMenuMgr'), True, True, True);
+          DelTree(ExpandConstant('{commonappdata}\ContextMenuMgr'), True, True, True);
+        end;
+      end;
+  end;
+end;
+
+[Icons]
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: postinstall shellexec skipifdoesntexist

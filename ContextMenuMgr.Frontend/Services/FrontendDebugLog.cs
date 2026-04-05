@@ -1,0 +1,69 @@
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+namespace ContextMenuMgr.Frontend.Services;
+
+internal static class FrontendDebugLog
+{
+    private static readonly Lock SyncRoot = new();
+    private static AppLogLevel _currentLevel = AppLogLevel.Warning;
+
+    public static void Configure(AppLogLevel logLevel)
+    {
+        _currentLevel = logLevel;
+    }
+
+    public static string LogFilePath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ContextMenuMgr",
+        "Logs",
+        "frontend-debug.log");
+
+    public static void StartSession(string reason)
+    {
+        Write(AppLogLevel.Information, "SESSION", $"========== {reason} | PID={Environment.ProcessId} ==========");
+    }
+
+    public static void Info(string source, string message) => Write(AppLogLevel.Information, source, message);
+
+    public static void Warning(string source, string message) => Write(AppLogLevel.Warning, source, message);
+
+    public static void Error(string source, Exception exception, string? context = null)
+    {
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(context))
+        {
+            builder.Append(context).AppendLine();
+        }
+
+        builder.Append(exception);
+        Write(AppLogLevel.Error, source, builder.ToString());
+    }
+
+    private static void Write(AppLogLevel level, string source, string message)
+    {
+        if (level < _currentLevel)
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(LogFilePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [{source}] [T{Environment.CurrentManagedThreadId}] {message}{Environment.NewLine}";
+            lock (SyncRoot)
+            {
+                File.AppendAllText(LogFilePath, line, Encoding.UTF8);
+            }
+        }
+        catch
+        {
+        }
+    }
+}

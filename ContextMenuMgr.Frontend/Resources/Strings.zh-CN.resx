@@ -1,0 +1,786 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>右键菜单管理器</value>
+  </data>
+  <data name="AppTitle" xml:space="preserve">
+    <value>右键菜单管理器</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>查看文件和文件夹右键菜单项，安全地启用或禁用，并对后台服务检测到的新项目进行审核。</value>
+  </data>
+  <data name="BackendStatusTitle" xml:space="preserve">
+    <value>后端状态</value>
+  </data>
+  <data name="SystemServiceRequiredBanner" xml:space="preserve">
+    <value>系统服务未安装，请前往设置页安装。</value>
+  </data>
+  <data name="SystemServiceUnavailableBanner" xml:space="preserve">
+    <value>系统服务当前不可用，请前往设置页安装或修复。</value>
+  </data>
+  <data name="SystemServiceInstallingBanner" xml:space="preserve">
+    <value>正在安装或启动系统服务...</value>
+  </data>
+  <data name="LanguageLabel" xml:space="preserve">
+    <value>语言</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>刷新</value>
+  </data>
+  <data name="RestartExplorer" xml:space="preserve">
+    <value>重启资源管理器</value>
+  </data>
+  <data name="SearchLabel" xml:space="preserve">
+    <value>筛选</value>
+  </data>
+  <data name="LogLevelLabel" xml:space="preserve">
+    <value>日志等级</value>
+  </data>
+  <data name="LogLevelInformation" xml:space="preserve">
+    <value>信息</value>
+  </data>
+  <data name="LogLevelWarning" xml:space="preserve">
+    <value>警告</value>
+  </data>
+  <data name="LogLevelError" xml:space="preserve">
+    <value>错误</value>
+  </data>
+  <data name="MonitoredCategoriesTitle" xml:space="preserve">
+    <value>监控分类</value>
+  </data>
+  <data name="MonitoredCategoriesDescription" xml:space="preserve">
+    <value>后台会监控文件、文件系统对象、文件夹、目录、背景区域、磁盘分区和库等常见 HKCR Shell Verb 与 Shell Extension 根路径。</value>
+  </data>
+  <data name="PendingApprovalTitle" xml:space="preserve">
+    <value>待审核</value>
+  </data>
+  <data name="PendingApprovalDescription" xml:space="preserve">
+    <value>新检测到的菜单项会先以禁用状态显示在这里，等待你允许、保持禁用或移除。</value>
+  </data>
+  <data name="PendingApprovalBadge" xml:space="preserve">
+    <value>待审核</value>
+  </data>
+  <data name="ServiceNotesTitle" xml:space="preserve">
+    <value>服务说明</value>
+  </data>
+  <data name="ServiceNotesDescription" xml:space="preserve">
+    <value>后台以 Windows 服务方式运行。Shell Verb 通过 LegacyDisable 切换，Shell Extension 通过标准的 Shell Extensions\Blocked 注册表路径进行屏蔽。</value>
+  </data>
+  <data name="Allow" xml:space="preserve">
+    <value>允许</value>
+  </data>
+  <data name="Deny" xml:space="preserve">
+    <value>拒绝</value>
+  </data>
+  <data name="KeepDisabled" xml:space="preserve">
+    <value>保持禁用</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>移除</value>
+  </data>
+  <data name="ConfirmRemove" xml:space="preserve">
+    <value>确认移除</value>
+  </data>
+  <data name="ApprovalRemovePrompt" xml:space="preserve">
+    <value>移除待审核项“{0}”，并删除对应的注册表菜单项？</value>
+  </data>
+  <data name="Enabled" xml:space="preserve">
+    <value>已启用</value>
+  </data>
+  <data name="Disabled" xml:space="preserve">
+    <value>已禁用</value>
+  </data>
+  <data name="ToggleOn" xml:space="preserve">
+    <value>开</value>
+  </data>
+  <data name="ToggleOff" xml:space="preserve">
+    <value>关</value>
+  </data>
+  <data name="NoNotes" xml:space="preserve">
+    <value>此项没有捕获到命令文本或 CLSID 元数据。</value>
+  </data>
+  <data name="NoRegistryPath" xml:space="preserve">
+    <value>未提供注册表路径。</value>
+  </data>
+  <data name="FileCategoryName" xml:space="preserve">
+    <value>文件</value>
+  </data>
+  <data name="FileCategoryDescription" xml:space="preserve">
+    <value>HKCR\*\shell 和 HKCR\*\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="FolderCategoryName" xml:space="preserve">
+    <value>文件夹</value>
+  </data>
+  <data name="AllObjectsCategoryName" xml:space="preserve">
+    <value>所有对象</value>
+  </data>
+  <data name="AllObjectsCategoryDescription" xml:space="preserve">
+    <value>HKCR\AllFilesystemObjects\shell 和 HKCR\AllFilesystemObjects\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="FolderCategoryDescription" xml:space="preserve">
+    <value>HKCR\Folder\shell 和 HKCR\Folder\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DirectoryCategoryName" xml:space="preserve">
+    <value>目录</value>
+  </data>
+  <data name="DirectoryCategoryDescription" xml:space="preserve">
+    <value>HKCR\Directory\shell 和 HKCR\Directory\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="BackgroundCategoryName" xml:space="preserve">
+    <value>目录背景</value>
+  </data>
+  <data name="BackgroundCategoryDescription" xml:space="preserve">
+    <value>HKCR\Directory\Background\shell 和 HKCR\Directory\Background\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DesktopCategoryName" xml:space="preserve">
+    <value>桌面背景</value>
+  </data>
+  <data name="DesktopCategoryDescription" xml:space="preserve">
+    <value>HKCR\DesktopBackground\shell 和 HKCR\DesktopBackground\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DriveCategoryName" xml:space="preserve">
+    <value>磁盘分区</value>
+  </data>
+  <data name="DriveCategoryDescription" xml:space="preserve">
+    <value>HKCR\Drive\shell 和 HKCR\Drive\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="LibraryCategoryName" xml:space="preserve">
+    <value>库</value>
+  </data>
+  <data name="LibraryCategoryDescription" xml:space="preserve">
+    <value>HKCR\LibraryFolder、HKCR\LibraryFolder\Background 和 HKCR\UserLibraryFolder 的 Shell 根路径</value>
+  </data>
+  <data name="ComputerCategoryName" xml:space="preserve">
+    <value>此电脑</value>
+  </data>
+  <data name="ComputerCategoryDescription" xml:space="preserve">
+    <value>HKCR\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D} 的 Shell 根路径</value>
+  </data>
+  <data name="RecycleBinCategoryName" xml:space="preserve">
+    <value>回收站</value>
+  </data>
+  <data name="RecycleBinCategoryDescription" xml:space="preserve">
+    <value>HKCR\CLSID\{645FF040-5081-101B-9F08-00AA002F954E} 的 Shell 根路径</value>
+  </data>
+  <data name="ExplorerCategoryName" xml:space="preserve">
+    <value>资源管理器空白区域</value>
+  </data>
+  <data name="ExplorerCategoryDescription" xml:space="preserve">
+    <value>保留的旧标签，仅用于兼容。</value>
+  </data>
+  <data name="ChangeKindAdded" xml:space="preserve">
+    <value>外部新增</value>
+  </data>
+  <data name="ChangeKindRemoved" xml:space="preserve">
+    <value>外部缺失</value>
+  </data>
+  <data name="ChangeKindModified" xml:space="preserve">
+    <value>外部修改</value>
+  </data>
+  <data name="ChangeKindReappeared" xml:space="preserve">
+    <value>再次出现</value>
+  </data>
+  <data name="DismissDetectedChange" xml:space="preserve">
+    <value>忽略这条提醒</value>
+  </data>
+  <data name="StartupChangeSummaryFormat" xml:space="preserve">
+    <value>在“{0}”分类下检测到{1}。</value>
+  </data>
+  <data name="StartupChangeNotificationFormat" xml:space="preserve">
+    <value>{1} 在“{0}”分类下检测到外部变化。</value>
+  </data>
+  <data name="RegistryMissingText" xml:space="preserve">
+    <value>这个菜单项当前已经不在注册表中了。</value>
+  </data>
+  <data name="ItemCountFormat" xml:space="preserve">
+    <value>{0} 项</value>
+  </data>
+  <data name="ItemCountPluralSuffix" xml:space="preserve">
+    <value />
+  </data>
+  <data name="ConnectingStatus" xml:space="preserve">
+    <value>正在连接后台服务...</value>
+  </data>
+  <data name="ConnectedStatus" xml:space="preserve">
+    <value>已连接</value>
+  </data>
+  <data name="BackendUnavailableStatus" xml:space="preserve">
+    <value>后台不可用，当前显示占位数据。{0}</value>
+  </data>
+  <data name="ItemUpdatedStatus" xml:space="preserve">
+    <value>{0} 已在 {1:T} 更新。</value>
+  </data>
+  <data name="ItemUpdateFailedStatus" xml:space="preserve">
+    <value>无法更新 {0}：{1}</value>
+  </data>
+  <data name="DecisionAppliedStatus" xml:space="preserve">
+    <value>已对 {1} 应用“{0}”决策。</value>
+  </data>
+  <data name="DecisionApplyFailedStatus" xml:space="preserve">
+    <value>无法应用决策：{0}</value>
+  </data>
+  <data name="NotificationReceivedStatus" xml:space="preserve">
+    <value>已在 {0:T} 收到后台通知。</value>
+  </data>
+  <data name="ServiceMissingTitle" xml:space="preserve">
+    <value>后台服务未安装</value>
+  </data>
+  <data name="ServiceMissingPrompt" xml:space="preserve">
+    <value>检测到后台服务尚未安装。是否现在以管理员权限安装并启动它？</value>
+  </data>
+  <data name="ServiceRepairTitle" xml:space="preserve">
+    <value>后台服务不可用</value>
+  </data>
+  <data name="ServiceRepairPrompt" xml:space="preserve">
+    <value>后台服务已安装但当前无法连接。是否现在以管理员权限修复或启动它？</value>
+  </data>
+  <data name="ServiceInstallSucceeded" xml:space="preserve">
+    <value>后台服务已安装并正在运行。</value>
+  </data>
+  <data name="ServiceInstallFailed" xml:space="preserve">
+    <value>后台服务安装或启动失败：{0}</value>
+  </data>
+  <data name="ServiceInstallFailedDetailed" xml:space="preserve">
+    <value>后台服务安装或启动失败，详细信息：{0}</value>
+  </data>
+  <data name="ServiceNotRunningStatus" xml:space="preserve">
+    <value>后台服务已经安装，但当前没有运行。当前状态：{0}</value>
+  </data>
+  <data name="ServicePipeUnavailableStatus" xml:space="preserve">
+    <value>后台服务已经启动，但 IPC 管道暂时不可用。服务状态：{0}</value>
+  </data>
+  <data name="ServiceBootstrapInProgress" xml:space="preserve">
+    <value>正在安装或修复后台服务...</value>
+  </data>
+  <data name="BackendExecutableMissing" xml:space="preserve">
+    <value>未找到 ContextMenuManager.Service.exe，请先生成或发布后端程序。</value>
+  </data>
+  <data name="ServiceOperationCancelled" xml:space="preserve">
+    <value>已取消提权安装或启动操作。</value>
+  </data>
+  <data name="ServiceStatusRunning" xml:space="preserve">
+    <value>正在运行</value>
+  </data>
+  <data name="ServiceStatusStopped" xml:space="preserve">
+    <value>已停止</value>
+  </data>
+  <data name="ServiceStatusStartPending" xml:space="preserve">
+    <value>正在启动</value>
+  </data>
+  <data name="ServiceStatusStopPending" xml:space="preserve">
+    <value>正在停止</value>
+  </data>
+  <data name="ServiceStatusPaused" xml:space="preserve">
+    <value>已暂停</value>
+  </data>
+  <data name="ServiceStatusPausePending" xml:space="preserve">
+    <value>正在暂停</value>
+  </data>
+  <data name="ServiceStatusContinuePending" xml:space="preserve">
+    <value>正在继续</value>
+  </data>
+  <data name="ServiceStatusMissing" xml:space="preserve">
+    <value>未安装</value>
+  </data>
+  <data name="SystemLanguage" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="ChineseLanguage" xml:space="preserve">
+    <value>中文</value>
+  </data>
+  <data name="EnglishLanguage" xml:space="preserve">
+    <value>英语（美国）</value>
+  </data>
+  <data name="DecisionAllow" xml:space="preserve">
+    <value>允许</value>
+  </data>
+  <data name="DecisionDeny" xml:space="preserve">
+    <value>拒绝</value>
+  </data>
+  <data name="TrayOpen" xml:space="preserve">
+    <value>打开主界面</value>
+  </data>
+  <data name="TrayExit" xml:space="preserve">
+    <value>退出并停止守护</value>
+  </data>
+  <data name="TrayTooltip" xml:space="preserve">
+    <value>右键菜单管理器</value>
+  </data>
+  <data name="TrayBackgroundInfoTitle" xml:space="preserve">
+    <value>仍在后台运行</value>
+  </data>
+  <data name="TrayBackgroundInfoText" xml:space="preserve">
+    <value>程序已最小化到系统托盘，并会继续接收后台通知。</value>
+  </data>
+  <data name="DeletedState" xml:space="preserve">
+    <value>已删除</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>删除</value>
+  </data>
+  <data name="UndoDelete" xml:space="preserve">
+    <value>撤销</value>
+  </data>
+  <data name="PermanentDelete" xml:space="preserve">
+    <value>永久删除</value>
+  </data>
+  <data name="PermanentDeleteTitle" xml:space="preserve">
+    <value>永久移除备份</value>
+  </data>
+  <data name="PermanentDeletePrompt" xml:space="preserve">
+    <value>确定要永久移除 {0} 的备份吗？此操作无法撤销。</value>
+  </data>
+  <data name="DeleteFailedStatus" xml:space="preserve">
+    <value>无法删除 {0}：{1}</value>
+  </data>
+  <data name="UndoDeleteFailedStatus" xml:space="preserve">
+    <value>无法恢复 {0}：{1}</value>
+  </data>
+  <data name="PermanentDeleteFailedStatus" xml:space="preserve">
+    <value>无法永久删除 {0}：{1}</value>
+  </data>
+  <data name="DeleteOperationTimeoutDetail" xml:space="preserve">
+    <value>操作超时，可能已被安全软件拦截。</value>
+  </data>
+  <data name="DeletedAtFormat" xml:space="preserve">
+    <value>删除时间：{0:G}</value>
+  </data>
+  <data name="ThemeLabel" xml:space="preserve">
+    <value>主题</value>
+  </data>
+  <data name="ThemeSystem" xml:space="preserve">
+    <value>跟随系统</value>
+  </data>
+  <data name="ThemeLight" xml:space="preserve">
+    <value>浅色</value>
+  </data>
+  <data name="ThemeDark" xml:space="preserve">
+    <value>深色</value>
+  </data>
+  <data name="StartupBehaviorTitle" xml:space="preserve">
+    <value>启动</value>
+  </data>
+  <data name="LaunchMinimizedLabel" xml:space="preserve">
+    <value>开机时以最小化启动</value>
+  </data>
+  <data name="LaunchMinimizedDescription" xml:space="preserve">
+    <value>当前端随 Windows 启动时，会直接最小化到系统托盘。</value>
+  </data>
+  <data name="LocalFilesTitle" xml:space="preserve">
+    <value>本地文件</value>
+  </data>
+  <data name="OpenLogsFolder" xml:space="preserve">
+    <value>打开日志目录</value>
+  </data>
+  <data name="OpenStateFolder" xml:space="preserve">
+    <value>打开状态库目录</value>
+  </data>
+  <data name="OpenConfigFolder" xml:space="preserve">
+    <value>打开配置目录</value>
+  </data>
+  <data name="ProtectionTitle" xml:space="preserve">
+    <value>保护</value>
+  </data>
+  <data name="LockNewContextMenuItemsLabel" xml:space="preserve">
+    <value>从注册表权限层面禁止新增右键菜单</value>
+  </data>
+  <data name="LockNewContextMenuItemsDescription" xml:space="preserve">
+    <value>会给受监控的 Shell 根路径加上拒绝写入权限。即使后台守护程序退出，普通进程也无法继续往这些位置新增右键菜单项。</value>
+  </data>
+  <data name="NavigationToggleToolTip" xml:space="preserve">
+    <value>切换导航窗格</value>
+  </data>
+  <data name="DialogConfirm" xml:space="preserve">
+    <value>确认</value>
+  </data>
+  <data name="DialogCancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
+  <data name="DialogClose" xml:space="preserve">
+    <value>关闭</value>
+  </data>
+  <data name="SettingsTitle" xml:space="preserve">
+    <value>设置</value>
+  </data>
+  <data name="ServiceSettingsTitle" xml:space="preserve">
+    <value>服务</value>
+  </data>
+  <data name="InstallOrRepairService" xml:space="preserve">
+    <value>安装或修复服务</value>
+  </data>
+  <data name="SettingsUninstallService" xml:space="preserve">
+    <value>卸载服务</value>
+  </data>
+  <data name="UninstallServiceTitle" xml:space="preserve">
+    <value>卸载服务</value>
+  </data>
+  <data name="UninstallServicePrompt" xml:space="preserve">
+    <value>是否现在停止并卸载后台服务？</value>
+  </data>
+  <data name="ServiceStatusFormat" xml:space="preserve">
+    <value>服务状态：{0}</value>
+  </data>
+  <data name="ServicePipeUnavailableSimple" xml:space="preserve">
+    <value>服务已经启动，但后台管道暂时不可用。</value>
+  </data>
+  <data name="ApprovalNeededMessage" xml:space="preserve">
+    <value>{0} 需要审核。</value>
+  </data>
+  <data name="BackendUnavailableStatusStandalone" xml:space="preserve">
+    <value>后台不可用。</value>
+  </data>
+  <data name="ServiceStoppedStatus" xml:space="preserve">
+    <value>后台监控已停止。</value>
+  </data>
+  <data name="ServiceStopCancelled" xml:space="preserve">
+    <value>已取消提权停止监控操作。</value>
+  </data>
+  <data name="ServiceStopFailedDetailed" xml:space="preserve">
+    <value>停止后台监控失败，详细信息：{0}</value>
+  </data>
+  <data name="MoreActions" xml:space="preserve">
+    <value>更多</value>
+  </data>
+  <data name="OtherAttributesTitle" xml:space="preserve">
+    <value>其他属性</value>
+  </data>
+  <data name="DetailsTitle" xml:space="preserve">
+    <value>详细信息</value>
+  </data>
+  <data name="OnlyWithShiftLabel" xml:space="preserve">
+    <value>仅在按住 Shift 键后显示</value>
+  </data>
+  <data name="OnlyInExplorerLabel" xml:space="preserve">
+    <value>仅在 Explorer 窗口显示</value>
+  </data>
+  <data name="NoWorkingDirectoryLabel" xml:space="preserve">
+    <value>不使用右键所在目录信息</value>
+  </data>
+  <data name="NeverDefaultLabel" xml:space="preserve">
+    <value>从不作为左键默认执行命令</value>
+  </data>
+  <data name="ShowAsDisabledIfHiddenLabel" xml:space="preserve">
+    <value>被禁用时灰色显示不隐藏</value>
+  </data>
+  <data name="DetailsSearchOnline" xml:space="preserve">
+    <value>联网搜索</value>
+  </data>
+  <data name="DetailsChangeText" xml:space="preserve">
+    <value>更改文本</value>
+  </data>
+  <data name="DetailsCommandText" xml:space="preserve">
+    <value>命令文本</value>
+  </data>
+  <data name="DetailsFileProperties" xml:space="preserve">
+    <value>文件属性</value>
+  </data>
+  <data name="DetailsFileLocation" xml:space="preserve">
+    <value>打开文件位置</value>
+  </data>
+  <data name="DetailsRegistryLocation" xml:space="preserve">
+    <value>打开注册表位置</value>
+  </data>
+  <data name="DetailsExportRegistry" xml:space="preserve">
+    <value>导出注册表项</value>
+  </data>
+  <data name="DetailsClsidLocation" xml:space="preserve">
+    <value>打开 CLSID 位置</value>
+  </data>
+  <data name="CommandTextUnavailable" xml:space="preserve">
+    <value>当前菜单项没有可显示的命令文本。</value>
+  </data>
+  <data name="ItemTextLabel" xml:space="preserve">
+    <value>菜单文本</value>
+  </data>
+  <data name="TextCannotBeEmpty" xml:space="preserve">
+    <value>菜单文本不能为空。</value>
+  </data>
+  <data name="ModulePathUnavailable" xml:space="preserve">
+    <value>当前菜单项没有可用的模块文件路径。</value>
+  </data>
+  <data name="ClsidLocationUnavailable" xml:space="preserve">
+    <value>当前菜单项没有可用的 CLSID 位置。</value>
+  </data>
+  <data name="ExportRegistryFailed" xml:space="preserve">
+    <value>导出注册表项失败。</value>
+  </data>
+  <data name="DetailsActionFailed" xml:space="preserve">
+    <value>无法执行该操作：{0}</value>
+  </data>
+  <data name="FileTypesPageTitle" xml:space="preserve">
+    <value>文件类型</value>
+  </data>
+  <data name="OtherRulesPageTitle" xml:space="preserve">
+    <value>其他规则</value>
+  </data>
+  <data name="SceneLnkFileTitle" xml:space="preserve">
+    <value>快捷方式</value>
+  </data>
+  <data name="SceneLnkFileDescription" xml:space="preserve">
+    <value>查看和管理经典 .lnk 快捷方式对应的右键菜单项。</value>
+  </data>
+  <data name="SceneUwpShortcutTitle" xml:space="preserve">
+    <value>UWP 快捷方式</value>
+  </data>
+  <data name="SceneUwpShortcutDescription" xml:space="preserve">
+    <value>查看打包应用快捷方式对应的右键菜单项。</value>
+  </data>
+  <data name="SceneExeFileTitle" xml:space="preserve">
+    <value>可执行文件</value>
+  </data>
+  <data name="SceneExeFileDescription" xml:space="preserve">
+    <value>查看 exe 文件类型对应的右键菜单项。</value>
+  </data>
+  <data name="SceneCustomExtensionTitle" xml:space="preserve">
+    <value>自定义扩展名</value>
+  </data>
+  <data name="SceneCustomExtensionDescription" xml:space="preserve">
+    <value>输入 .txt、.zip 这类扩展名，查看对应文件类型专属的右键菜单项。</value>
+  </data>
+  <data name="ScenePerceivedTypeTitle" xml:space="preserve">
+    <value>感知类型</value>
+  </data>
+  <data name="ScenePerceivedTypeDescription" xml:space="preserve">
+    <value>查看 Text、Image 这类感知类型在 SystemFileAssociations 下的菜单项。</value>
+  </data>
+  <data name="SceneDirectoryTypeTitle" xml:space="preserve">
+    <value>目录类型</value>
+  </data>
+  <data name="SceneDirectoryTypeDescription" xml:space="preserve">
+    <value>查看文档、图片、视频、音频目录类型对应的右键菜单项。</value>
+  </data>
+  <data name="SceneUnknownTypeTitle" xml:space="preserve">
+    <value>未知类型</value>
+  </data>
+  <data name="SceneUnknownTypeDescription" xml:space="preserve">
+    <value>查看没有明确关联类型时使用的后备右键菜单项。</value>
+  </data>
+  <data name="SceneCustomRegistryTitle" xml:space="preserve">
+    <value>自定义注册表路径</value>
+  </data>
+  <data name="SceneCustomRegistryDescription" xml:space="preserve">
+    <value>输入 HKCR 路径，按同一套编辑界面浏览其 shell 或 ContextMenuHandlers 子项。</value>
+  </data>
+  <data name="SceneExtensionSelectorLabel" xml:space="preserve">
+    <value>扩展名</value>
+  </data>
+  <data name="ScenePerceivedTypeSelectorLabel" xml:space="preserve">
+    <value>感知类型</value>
+  </data>
+  <data name="SceneDirectoryTypeSelectorLabel" xml:space="preserve">
+    <value>目录类型</value>
+  </data>
+  <data name="SceneRegistryPathSelectorLabel" xml:space="preserve">
+    <value>注册表路径</value>
+  </data>
+  <data name="ApplySceneSelection" xml:space="preserve">
+    <value>加载</value>
+  </data>
+  <data name="SceneSelectionRequired" xml:space="preserve">
+    <value>请先选择或输入场景值。</value>
+  </data>
+  <data name="SceneNoItems" xml:space="preserve">
+    <value>当前场景下没有找到右键菜单项。</value>
+  </data>
+  <data name="PerceivedTypeText" xml:space="preserve">
+    <value>文本</value>
+  </data>
+  <data name="PerceivedTypeDocument" xml:space="preserve">
+    <value>文档</value>
+  </data>
+  <data name="PerceivedTypeImage" xml:space="preserve">
+    <value>图片</value>
+  </data>
+  <data name="PerceivedTypeVideo" xml:space="preserve">
+    <value>视频</value>
+  </data>
+  <data name="PerceivedTypeAudio" xml:space="preserve">
+    <value>音频</value>
+  </data>
+  <data name="PerceivedTypeCompressed" xml:space="preserve">
+    <value>压缩包</value>
+  </data>
+  <data name="PerceivedTypeSystem" xml:space="preserve">
+    <value>系统</value>
+  </data>
+  <data name="DirectoryTypeDocument" xml:space="preserve">
+    <value>文档</value>
+  </data>
+  <data name="DirectoryTypeImage" xml:space="preserve">
+    <value>图片</value>
+  </data>
+  <data name="DirectoryTypeVideo" xml:space="preserve">
+    <value>视频</value>
+  </data>
+  <data name="DirectoryTypeAudio" xml:space="preserve">
+    <value>音频</value>
+  </data>
+  <data name="BehaviorRulesTitle" xml:space="preserve">
+    <value>行为规则</value>
+  </data>
+  <data name="BehaviorRulesDescription" xml:space="preserve">
+    <value>把类似目标软件中的行为类开关单独放到这里，和通用设置分开。</value>
+  </data>
+  <data name="OpenMoreRegeditLabel" xml:space="preserve">
+    <value>注册表编辑器窗口多开</value>
+  </data>
+  <data name="OpenMoreExplorerLabel" xml:space="preserve">
+    <value>文件资源管理器窗口多开</value>
+  </data>
+  <data name="HideDisabledItemsLabel" xml:space="preserve">
+    <value>隐藏已禁用菜单项</value>
+  </data>
+  <data name="EnhanceMenusTitle" xml:space="preserve">
+    <value>增强菜单</value>
+  </data>
+  <data name="DetailedEditTitle" xml:space="preserve">
+    <value>详细编辑</value>
+  </data>
+  <data name="EnhanceMenusDescription" xml:space="preserve">
+    <value>按字典分组管理预定义增强项。这里直接控制增强项本身的启用状态，名称和细节请到对应编辑页调整。</value>
+  </data>
+  <data name="EnhanceMenuToggleFailed" xml:space="preserve">
+    <value>无法切换该增强菜单项。</value>
+  </data>
+  <data name="LiveSceneTitle" xml:space="preserve">
+    <value>实时菜单项</value>
+  </data>
+  <data name="DefinedItemsTitle" xml:space="preserve">
+    <value>预定义项目</value>
+  </data>
+  <data name="RawXmlTitle" xml:space="preserve">
+    <value>原始 XML</value>
+  </data>
+  <data name="NoRuleGroupSelected" xml:space="preserve">
+    <value>请选择左侧分组。</value>
+  </data>
+  <data name="Apply" xml:space="preserve">
+    <value>应用</value>
+  </data>
+  <data name="RestartExplorerHint" xml:space="preserve">
+    <value>此项修改后通常需要重启资源管理器。</value>
+  </data>
+  <data name="NumberRuleInvalid" xml:space="preserve">
+    <value>请输入有效的数字。</value>
+  </data>
+  <data name="DictionaryReadOnlyHint" xml:space="preserve">
+    <value>这一版先把目标程序中的字典内容迁到新的规则页里，后续再继续把编辑操作接上。</value>
+  </data>
+</root>

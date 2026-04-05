@@ -1,0 +1,786 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>Context Menu Manager</value>
+  </data>
+  <data name="AppTitle" xml:space="preserve">
+    <value>Context Menu Manager</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>Review file and folder context-menu entries, toggle them safely, and review new additions detected by the backend service.</value>
+  </data>
+  <data name="BackendStatusTitle" xml:space="preserve">
+    <value>Backend status</value>
+  </data>
+  <data name="SystemServiceRequiredBanner" xml:space="preserve">
+    <value>System service is not installed. Open Settings to install it.</value>
+  </data>
+  <data name="SystemServiceUnavailableBanner" xml:space="preserve">
+    <value>System service is unavailable. Open Settings to install or repair it.</value>
+  </data>
+  <data name="SystemServiceInstallingBanner" xml:space="preserve">
+    <value>Installing or starting system service...</value>
+  </data>
+  <data name="LanguageLabel" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="Refresh" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="RestartExplorer" xml:space="preserve">
+    <value>Restart Explorer</value>
+  </data>
+  <data name="SearchLabel" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="LogLevelLabel" xml:space="preserve">
+    <value>Log level</value>
+  </data>
+  <data name="LogLevelInformation" xml:space="preserve">
+    <value>Information</value>
+  </data>
+  <data name="LogLevelWarning" xml:space="preserve">
+    <value>Warning</value>
+  </data>
+  <data name="LogLevelError" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="MonitoredCategoriesTitle" xml:space="preserve">
+    <value>Monitored Categories</value>
+  </data>
+  <data name="MonitoredCategoriesDescription" xml:space="preserve">
+    <value>The backend watches common HKCR shell-verb and shell-extension roots for files, folders, directories, backgrounds, drives, libraries, and all file-system objects.</value>
+  </data>
+  <data name="PendingApprovalTitle" xml:space="preserve">
+    <value>Pending Review</value>
+  </data>
+  <data name="PendingApprovalDescription" xml:space="preserve">
+    <value>Newly detected items appear here in a disabled state so you can allow them, keep them disabled, or remove them.</value>
+  </data>
+  <data name="PendingApprovalBadge" xml:space="preserve">
+    <value>Needs review</value>
+  </data>
+  <data name="ServiceNotesTitle" xml:space="preserve">
+    <value>Service Notes</value>
+  </data>
+  <data name="ServiceNotesDescription" xml:space="preserve">
+    <value>The backend runs as a Windows Service. Shell verbs are toggled through LegacyDisable, and shell extensions are blocked through the standard Shell Extensions\Blocked registry path.</value>
+  </data>
+  <data name="Allow" xml:space="preserve">
+    <value>Allow</value>
+  </data>
+  <data name="Deny" xml:space="preserve">
+    <value>Deny</value>
+  </data>
+  <data name="KeepDisabled" xml:space="preserve">
+    <value>Keep disabled</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="ConfirmRemove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="ApprovalRemovePrompt" xml:space="preserve">
+    <value>Remove {0} from the pending-review queue and delete its registry item?</value>
+  </data>
+  <data name="Enabled" xml:space="preserve">
+    <value>Enabled</value>
+  </data>
+  <data name="Disabled" xml:space="preserve">
+    <value>Disabled</value>
+  </data>
+  <data name="ToggleOn" xml:space="preserve">
+    <value>On</value>
+  </data>
+  <data name="ToggleOff" xml:space="preserve">
+    <value>Off</value>
+  </data>
+  <data name="NoNotes" xml:space="preserve">
+    <value>No command text or CLSID metadata was captured for this entry.</value>
+  </data>
+  <data name="NoRegistryPath" xml:space="preserve">
+    <value>No registry path was provided.</value>
+  </data>
+  <data name="FileCategoryName" xml:space="preserve">
+    <value>File</value>
+  </data>
+  <data name="FileCategoryDescription" xml:space="preserve">
+    <value>HKCR\*\shell and HKCR\*\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="FolderCategoryName" xml:space="preserve">
+    <value>Folder</value>
+  </data>
+  <data name="AllObjectsCategoryName" xml:space="preserve">
+    <value>All objects</value>
+  </data>
+  <data name="AllObjectsCategoryDescription" xml:space="preserve">
+    <value>HKCR\AllFilesystemObjects\shell and HKCR\AllFilesystemObjects\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="FolderCategoryDescription" xml:space="preserve">
+    <value>HKCR\Folder\shell and HKCR\Folder\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DirectoryCategoryName" xml:space="preserve">
+    <value>Directory</value>
+  </data>
+  <data name="DirectoryCategoryDescription" xml:space="preserve">
+    <value>HKCR\Directory\shell and HKCR\Directory\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="BackgroundCategoryName" xml:space="preserve">
+    <value>Explorer background</value>
+  </data>
+  <data name="BackgroundCategoryDescription" xml:space="preserve">
+    <value>HKCR\Directory\Background\shell and HKCR\Directory\Background\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DesktopCategoryName" xml:space="preserve">
+    <value>Desktop background</value>
+  </data>
+  <data name="DesktopCategoryDescription" xml:space="preserve">
+    <value>HKCR\DesktopBackground\shell and HKCR\DesktopBackground\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="DriveCategoryName" xml:space="preserve">
+    <value>Drive</value>
+  </data>
+  <data name="DriveCategoryDescription" xml:space="preserve">
+    <value>HKCR\Drive\shell and HKCR\Drive\shellex\ContextMenuHandlers</value>
+  </data>
+  <data name="LibraryCategoryName" xml:space="preserve">
+    <value>Library</value>
+  </data>
+  <data name="LibraryCategoryDescription" xml:space="preserve">
+    <value>HKCR\LibraryFolder, HKCR\LibraryFolder\Background, and HKCR\UserLibraryFolder shell roots</value>
+  </data>
+  <data name="ComputerCategoryName" xml:space="preserve">
+    <value>This PC</value>
+  </data>
+  <data name="ComputerCategoryDescription" xml:space="preserve">
+    <value>HKCR\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D} shell roots</value>
+  </data>
+  <data name="RecycleBinCategoryName" xml:space="preserve">
+    <value>Recycle Bin</value>
+  </data>
+  <data name="RecycleBinCategoryDescription" xml:space="preserve">
+    <value>HKCR\CLSID\{645FF040-5081-101B-9F08-00AA002F954E} shell roots</value>
+  </data>
+  <data name="ExplorerCategoryName" xml:space="preserve">
+    <value>Explorer blank space</value>
+  </data>
+  <data name="ExplorerCategoryDescription" xml:space="preserve">
+    <value>Legacy label retained for compatibility.</value>
+  </data>
+  <data name="ChangeKindAdded" xml:space="preserve">
+    <value>Externally added</value>
+  </data>
+  <data name="ChangeKindRemoved" xml:space="preserve">
+    <value>Externally removed</value>
+  </data>
+  <data name="ChangeKindModified" xml:space="preserve">
+    <value>Externally modified</value>
+  </data>
+  <data name="ChangeKindReappeared" xml:space="preserve">
+    <value>Reappeared</value>
+  </data>
+  <data name="DismissDetectedChange" xml:space="preserve">
+    <value>Dismiss this notice</value>
+  </data>
+  <data name="StartupChangeSummaryFormat" xml:space="preserve">
+    <value>Detected {1} in the {0} category.</value>
+  </data>
+  <data name="StartupChangeNotificationFormat" xml:space="preserve">
+    <value>Detected an external change for {1} in the {0} category.</value>
+  </data>
+  <data name="RegistryMissingText" xml:space="preserve">
+    <value>This item is currently missing from the registry.</value>
+  </data>
+  <data name="ItemCountFormat" xml:space="preserve">
+    <value>{0} item{1}</value>
+  </data>
+  <data name="ItemCountPluralSuffix" xml:space="preserve">
+    <value>s</value>
+  </data>
+  <data name="ConnectingStatus" xml:space="preserve">
+    <value>Connecting to backend...</value>
+  </data>
+  <data name="ConnectedStatus" xml:space="preserve">
+    <value>Connected</value>
+  </data>
+  <data name="BackendUnavailableStatus" xml:space="preserve">
+    <value>Backend unavailable. Showing placeholder data. {0}</value>
+  </data>
+  <data name="ItemUpdatedStatus" xml:space="preserve">
+    <value>{0} updated at {1:T}.</value>
+  </data>
+  <data name="ItemUpdateFailedStatus" xml:space="preserve">
+    <value>Unable to update {0}: {1}</value>
+  </data>
+  <data name="DecisionAppliedStatus" xml:space="preserve">
+    <value>{0} decision applied to {1}.</value>
+  </data>
+  <data name="DecisionApplyFailedStatus" xml:space="preserve">
+    <value>Unable to apply decision: {0}</value>
+  </data>
+  <data name="NotificationReceivedStatus" xml:space="preserve">
+    <value>Received backend notification at {0:T}.</value>
+  </data>
+  <data name="ServiceMissingTitle" xml:space="preserve">
+    <value>Backend service missing</value>
+  </data>
+  <data name="ServiceMissingPrompt" xml:space="preserve">
+    <value>The backend service is not installed. Install and start it with administrator privileges now?</value>
+  </data>
+  <data name="ServiceRepairTitle" xml:space="preserve">
+    <value>Backend service unavailable</value>
+  </data>
+  <data name="ServiceRepairPrompt" xml:space="preserve">
+    <value>The backend service is installed but not reachable. Repair or start it with administrator privileges now?</value>
+  </data>
+  <data name="ServiceInstallSucceeded" xml:space="preserve">
+    <value>The backend service is installed and running.</value>
+  </data>
+  <data name="ServiceInstallFailed" xml:space="preserve">
+    <value>The backend service could not be installed or started: {0}</value>
+  </data>
+  <data name="ServiceInstallFailedDetailed" xml:space="preserve">
+    <value>The backend service could not be installed or started. Details: {0}</value>
+  </data>
+  <data name="ServiceNotRunningStatus" xml:space="preserve">
+    <value>The backend service is installed, but it is not running. Current status: {0}</value>
+  </data>
+  <data name="ServicePipeUnavailableStatus" xml:space="preserve">
+    <value>The backend service started, but the IPC pipe is still unavailable. Service status: {0}</value>
+  </data>
+  <data name="ServiceBootstrapInProgress" xml:space="preserve">
+    <value>Installing or repairing the backend service...</value>
+  </data>
+  <data name="BackendExecutableMissing" xml:space="preserve">
+    <value>Could not find ContextMenuManager.Service.exe. Build or publish the backend first.</value>
+  </data>
+  <data name="ServiceOperationCancelled" xml:space="preserve">
+    <value>The elevated install/start operation was cancelled.</value>
+  </data>
+  <data name="ServiceStatusRunning" xml:space="preserve">
+    <value>Running</value>
+  </data>
+  <data name="ServiceStatusStopped" xml:space="preserve">
+    <value>Stopped</value>
+  </data>
+  <data name="ServiceStatusStartPending" xml:space="preserve">
+    <value>Starting</value>
+  </data>
+  <data name="ServiceStatusStopPending" xml:space="preserve">
+    <value>Stopping</value>
+  </data>
+  <data name="ServiceStatusPaused" xml:space="preserve">
+    <value>Paused</value>
+  </data>
+  <data name="ServiceStatusPausePending" xml:space="preserve">
+    <value>Pausing</value>
+  </data>
+  <data name="ServiceStatusContinuePending" xml:space="preserve">
+    <value>Continuing</value>
+  </data>
+  <data name="ServiceStatusMissing" xml:space="preserve">
+    <value>Missing</value>
+  </data>
+  <data name="SystemLanguage" xml:space="preserve">
+    <value>Follow system</value>
+  </data>
+  <data name="ChineseLanguage" xml:space="preserve">
+    <value>Chinese</value>
+  </data>
+  <data name="EnglishLanguage" xml:space="preserve">
+    <value>English (United States)</value>
+  </data>
+  <data name="DecisionAllow" xml:space="preserve">
+    <value>Allow</value>
+  </data>
+  <data name="DecisionDeny" xml:space="preserve">
+    <value>Deny</value>
+  </data>
+  <data name="TrayOpen" xml:space="preserve">
+    <value>Open</value>
+  </data>
+  <data name="TrayExit" xml:space="preserve">
+    <value>Exit and stop monitoring</value>
+  </data>
+  <data name="TrayTooltip" xml:space="preserve">
+    <value>Context Menu Manager</value>
+  </data>
+  <data name="TrayBackgroundInfoTitle" xml:space="preserve">
+    <value>Still running</value>
+  </data>
+  <data name="TrayBackgroundInfoText" xml:space="preserve">
+    <value>The app is minimized to the system tray and keeps watching backend notifications.</value>
+  </data>
+  <data name="DeletedState" xml:space="preserve">
+    <value>Deleted</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="UndoDelete" xml:space="preserve">
+    <value>Undo</value>
+  </data>
+  <data name="PermanentDelete" xml:space="preserve">
+    <value>Permanent delete</value>
+  </data>
+  <data name="PermanentDeleteTitle" xml:space="preserve">
+    <value>Permanently remove backup</value>
+  </data>
+  <data name="PermanentDeletePrompt" xml:space="preserve">
+    <value>Permanently remove the backup for {0}? This action cannot be undone.</value>
+  </data>
+  <data name="DeleteFailedStatus" xml:space="preserve">
+    <value>Unable to delete {0}: {1}</value>
+  </data>
+  <data name="UndoDeleteFailedStatus" xml:space="preserve">
+    <value>Unable to restore {0}: {1}</value>
+  </data>
+  <data name="PermanentDeleteFailedStatus" xml:space="preserve">
+    <value>Unable to permanently delete {0}: {1}</value>
+  </data>
+  <data name="DeleteOperationTimeoutDetail" xml:space="preserve">
+    <value>The operation timed out and may have been blocked by security software.</value>
+  </data>
+  <data name="DeletedAtFormat" xml:space="preserve">
+    <value>Deleted at {0:G}</value>
+  </data>
+  <data name="ThemeLabel" xml:space="preserve">
+    <value>Theme</value>
+  </data>
+  <data name="ThemeSystem" xml:space="preserve">
+    <value>Follow system</value>
+  </data>
+  <data name="ThemeLight" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="ThemeDark" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <data name="StartupBehaviorTitle" xml:space="preserve">
+    <value>Startup</value>
+  </data>
+  <data name="LaunchMinimizedLabel" xml:space="preserve">
+    <value>Start minimized at sign-in</value>
+  </data>
+  <data name="LaunchMinimizedDescription" xml:space="preserve">
+    <value>When the frontend starts with Windows, it will open minimized to the system tray.</value>
+  </data>
+  <data name="LocalFilesTitle" xml:space="preserve">
+    <value>Local files</value>
+  </data>
+  <data name="OpenLogsFolder" xml:space="preserve">
+    <value>Open logs folder</value>
+  </data>
+  <data name="OpenStateFolder" xml:space="preserve">
+    <value>Open state store folder</value>
+  </data>
+  <data name="OpenConfigFolder" xml:space="preserve">
+    <value>Open config folder</value>
+  </data>
+  <data name="ProtectionTitle" xml:space="preserve">
+    <value>Protection</value>
+  </data>
+  <data name="LockNewContextMenuItemsLabel" xml:space="preserve">
+    <value>Block new context menu items at the registry permission level</value>
+  </data>
+  <data name="LockNewContextMenuItemsDescription" xml:space="preserve">
+    <value>Adds deny write rules to the monitored shell roots so ordinary processes cannot add new context menu entries even when the backend is not running.</value>
+  </data>
+  <data name="NavigationToggleToolTip" xml:space="preserve">
+    <value>Toggle navigation pane</value>
+  </data>
+  <data name="DialogConfirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="DialogCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="DialogClose" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="SettingsTitle" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="ServiceSettingsTitle" xml:space="preserve">
+    <value>Service</value>
+  </data>
+  <data name="InstallOrRepairService" xml:space="preserve">
+    <value>Install or repair service</value>
+  </data>
+  <data name="SettingsUninstallService" xml:space="preserve">
+    <value>Uninstall service</value>
+  </data>
+  <data name="UninstallServiceTitle" xml:space="preserve">
+    <value>Uninstall service</value>
+  </data>
+  <data name="UninstallServicePrompt" xml:space="preserve">
+    <value>Stop and uninstall the backend service now?</value>
+  </data>
+  <data name="ServiceStatusFormat" xml:space="preserve">
+    <value>Service status: {0}</value>
+  </data>
+  <data name="ServicePipeUnavailableSimple" xml:space="preserve">
+    <value>The service started, but the backend pipe is still unavailable.</value>
+  </data>
+  <data name="ApprovalNeededMessage" xml:space="preserve">
+    <value>{0} needs review.</value>
+  </data>
+  <data name="BackendUnavailableStatusStandalone" xml:space="preserve">
+    <value>Backend unavailable.</value>
+  </data>
+  <data name="ServiceStoppedStatus" xml:space="preserve">
+    <value>Backend monitoring has been stopped.</value>
+  </data>
+  <data name="ServiceStopCancelled" xml:space="preserve">
+    <value>The elevated stop-monitoring operation was cancelled.</value>
+  </data>
+  <data name="ServiceStopFailedDetailed" xml:space="preserve">
+    <value>Unable to stop backend monitoring. Details: {0}</value>
+  </data>
+  <data name="MoreActions" xml:space="preserve">
+    <value>More</value>
+  </data>
+  <data name="OtherAttributesTitle" xml:space="preserve">
+    <value>Other attributes</value>
+  </data>
+  <data name="DetailsTitle" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="OnlyWithShiftLabel" xml:space="preserve">
+    <value>Show only when Shift is pressed</value>
+  </data>
+  <data name="OnlyInExplorerLabel" xml:space="preserve">
+    <value>Show only in Explorer windows</value>
+  </data>
+  <data name="NoWorkingDirectoryLabel" xml:space="preserve">
+    <value>Do not use the clicked item's directory info</value>
+  </data>
+  <data name="NeverDefaultLabel" xml:space="preserve">
+    <value>Never use as the default left-click command</value>
+  </data>
+  <data name="ShowAsDisabledIfHiddenLabel" xml:space="preserve">
+    <value>Show as disabled instead of hiding</value>
+  </data>
+  <data name="DetailsSearchOnline" xml:space="preserve">
+    <value>Search online</value>
+  </data>
+  <data name="DetailsChangeText" xml:space="preserve">
+    <value>Change text</value>
+  </data>
+  <data name="DetailsCommandText" xml:space="preserve">
+    <value>Command text</value>
+  </data>
+  <data name="DetailsFileProperties" xml:space="preserve">
+    <value>File properties</value>
+  </data>
+  <data name="DetailsFileLocation" xml:space="preserve">
+    <value>Open file location</value>
+  </data>
+  <data name="DetailsRegistryLocation" xml:space="preserve">
+    <value>Open registry location</value>
+  </data>
+  <data name="DetailsExportRegistry" xml:space="preserve">
+    <value>Export registry key</value>
+  </data>
+  <data name="DetailsClsidLocation" xml:space="preserve">
+    <value>Open CLSID location</value>
+  </data>
+  <data name="CommandTextUnavailable" xml:space="preserve">
+    <value>No command text is available for this menu item.</value>
+  </data>
+  <data name="ItemTextLabel" xml:space="preserve">
+    <value>Menu text</value>
+  </data>
+  <data name="TextCannotBeEmpty" xml:space="preserve">
+    <value>Menu text cannot be empty.</value>
+  </data>
+  <data name="ModulePathUnavailable" xml:space="preserve">
+    <value>No module file path is available for this menu item.</value>
+  </data>
+  <data name="ClsidLocationUnavailable" xml:space="preserve">
+    <value>No CLSID location is available for this menu item.</value>
+  </data>
+  <data name="ExportRegistryFailed" xml:space="preserve">
+    <value>Failed to export the registry key.</value>
+  </data>
+  <data name="DetailsActionFailed" xml:space="preserve">
+    <value>Unable to complete this action: {0}</value>
+  </data>
+  <data name="FileTypesPageTitle" xml:space="preserve">
+    <value>File Types</value>
+  </data>
+  <data name="OtherRulesPageTitle" xml:space="preserve">
+    <value>Other Rules</value>
+  </data>
+  <data name="SceneLnkFileTitle" xml:space="preserve">
+    <value>Shortcut (.lnk)</value>
+  </data>
+  <data name="SceneLnkFileDescription" xml:space="preserve">
+    <value>Manage shell verbs and shell extensions registered for classic shortcut files.</value>
+  </data>
+  <data name="SceneUwpShortcutTitle" xml:space="preserve">
+    <value>UWP Shortcut</value>
+  </data>
+  <data name="SceneUwpShortcutDescription" xml:space="preserve">
+    <value>Review context-menu entries attached to packaged-application shortcut launchers.</value>
+  </data>
+  <data name="SceneExeFileTitle" xml:space="preserve">
+    <value>Executable (.exe)</value>
+  </data>
+  <data name="SceneExeFileDescription" xml:space="preserve">
+    <value>Review the executable-file shell scene, similar to the target app's file-type page.</value>
+  </data>
+  <data name="SceneCustomExtensionTitle" xml:space="preserve">
+    <value>Custom Extension</value>
+  </data>
+  <data name="SceneCustomExtensionDescription" xml:space="preserve">
+    <value>Enter an extension such as .txt or .zip to browse file-type-specific context-menu items.</value>
+  </data>
+  <data name="ScenePerceivedTypeTitle" xml:space="preserve">
+    <value>Perceived Type</value>
+  </data>
+  <data name="ScenePerceivedTypeDescription" xml:space="preserve">
+    <value>Browse SystemFileAssociations items for shared perceived file types such as text or image.</value>
+  </data>
+  <data name="SceneDirectoryTypeTitle" xml:space="preserve">
+    <value>Directory Type</value>
+  </data>
+  <data name="SceneDirectoryTypeDescription" xml:space="preserve">
+    <value>Browse directory-type shell rules for document, image, video, and audio folders.</value>
+  </data>
+  <data name="SceneUnknownTypeTitle" xml:space="preserve">
+    <value>Unknown Type</value>
+  </data>
+  <data name="SceneUnknownTypeDescription" xml:space="preserve">
+    <value>Review fallback shell rules for file types without a specific association.</value>
+  </data>
+  <data name="SceneCustomRegistryTitle" xml:space="preserve">
+    <value>Custom Registry Path</value>
+  </data>
+  <data name="SceneCustomRegistryDescription" xml:space="preserve">
+    <value>Enter an HKCR path and inspect its shell or ContextMenuHandlers children with the same editor surface.</value>
+  </data>
+  <data name="SceneExtensionSelectorLabel" xml:space="preserve">
+    <value>Extension</value>
+  </data>
+  <data name="ScenePerceivedTypeSelectorLabel" xml:space="preserve">
+    <value>Perceived type</value>
+  </data>
+  <data name="SceneDirectoryTypeSelectorLabel" xml:space="preserve">
+    <value>Directory type</value>
+  </data>
+  <data name="SceneRegistryPathSelectorLabel" xml:space="preserve">
+    <value>Registry path</value>
+  </data>
+  <data name="ApplySceneSelection" xml:space="preserve">
+    <value>Load</value>
+  </data>
+  <data name="SceneSelectionRequired" xml:space="preserve">
+    <value>Select or enter a scene value first.</value>
+  </data>
+  <data name="SceneNoItems" xml:space="preserve">
+    <value>No context-menu items were found for the selected scene.</value>
+  </data>
+  <data name="PerceivedTypeText" xml:space="preserve">
+    <value>Text</value>
+  </data>
+  <data name="PerceivedTypeDocument" xml:space="preserve">
+    <value>Document</value>
+  </data>
+  <data name="PerceivedTypeImage" xml:space="preserve">
+    <value>Image</value>
+  </data>
+  <data name="PerceivedTypeVideo" xml:space="preserve">
+    <value>Video</value>
+  </data>
+  <data name="PerceivedTypeAudio" xml:space="preserve">
+    <value>Audio</value>
+  </data>
+  <data name="PerceivedTypeCompressed" xml:space="preserve">
+    <value>Compressed</value>
+  </data>
+  <data name="PerceivedTypeSystem" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="DirectoryTypeDocument" xml:space="preserve">
+    <value>Document</value>
+  </data>
+  <data name="DirectoryTypeImage" xml:space="preserve">
+    <value>Image</value>
+  </data>
+  <data name="DirectoryTypeVideo" xml:space="preserve">
+    <value>Video</value>
+  </data>
+  <data name="DirectoryTypeAudio" xml:space="preserve">
+    <value>Audio</value>
+  </data>
+  <data name="BehaviorRulesTitle" xml:space="preserve">
+    <value>Behavior Rules</value>
+  </data>
+  <data name="BehaviorRulesDescription" xml:space="preserve">
+    <value>Move the target app's behavior-style switches here so they live in their own rules page instead of general settings.</value>
+  </data>
+  <data name="OpenMoreRegeditLabel" xml:space="preserve">
+    <value>Open Registry Editor in a separate window</value>
+  </data>
+  <data name="OpenMoreExplorerLabel" xml:space="preserve">
+    <value>Open File Explorer in a separate window</value>
+  </data>
+  <data name="HideDisabledItemsLabel" xml:space="preserve">
+    <value>Hide disabled menu items</value>
+  </data>
+  <data name="EnhanceMenusTitle" xml:space="preserve">
+    <value>Enhance Menus</value>
+  </data>
+  <data name="DetailedEditTitle" xml:space="preserve">
+    <value>Detailed Edit</value>
+  </data>
+  <data name="EnhanceMenusDescription" xml:space="preserve">
+    <value>Manage predefined enhance-menu entries by dictionary group. This page toggles the enhancement items directly; edit names and details in the corresponding editor pages.</value>
+  </data>
+  <data name="EnhanceMenuToggleFailed" xml:space="preserve">
+    <value>Unable to toggle this enhance-menu item.</value>
+  </data>
+  <data name="LiveSceneTitle" xml:space="preserve">
+    <value>Live items</value>
+  </data>
+  <data name="DefinedItemsTitle" xml:space="preserve">
+    <value>Defined items</value>
+  </data>
+  <data name="RawXmlTitle" xml:space="preserve">
+    <value>Raw XML</value>
+  </data>
+  <data name="NoRuleGroupSelected" xml:space="preserve">
+    <value>Select a group on the left.</value>
+  </data>
+  <data name="Apply" xml:space="preserve">
+    <value>Apply</value>
+  </data>
+  <data name="RestartExplorerHint" xml:space="preserve">
+    <value>This change usually requires restarting File Explorer.</value>
+  </data>
+  <data name="NumberRuleInvalid" xml:space="preserve">
+    <value>Please enter a valid number.</value>
+  </data>
+  <data name="DictionaryReadOnlyHint" xml:space="preserve">
+    <value>This first migration step brings the target app's dictionary content into the new rules page. Editing actions will be wired next.</value>
+  </data>
+</root>

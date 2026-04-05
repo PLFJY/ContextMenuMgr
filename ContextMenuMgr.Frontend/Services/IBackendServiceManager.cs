@@ -1,0 +1,16 @@
+using System.ServiceProcess;
+
+namespace ContextMenuMgr.Frontend.Services;
+
+public interface IBackendServiceManager
+{
+    bool IsServiceInstalled();
+
+    ServiceControllerStatus? GetServiceStatus();
+
+    Task<BackendServiceBootstrapResult> InstallOrRepairServiceAsync(CancellationToken cancellationToken);
+
+    Task<BackendServiceBootstrapResult> StopServiceAsync(CancellationToken cancellationToken);
+
+    Task<BackendServiceBootstrapResult> UninstallServiceAsync(CancellationToken cancellationToken);
+}

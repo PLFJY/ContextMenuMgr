@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>preview</LangVersion>
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <AssemblyName>ContextMenuManager</AssemblyName>
+    <Product>Context Menu Manager</Product>
+    <Title>Context Menu Manager</Title>
+    <Description>Windows context menu manager frontend.</Description>
+    <Company>PLFJY</Company>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <BackendTargetFramework>net10.0-windows</BackendTargetFramework>
+    <BackendOutputDir>$(MSBuildThisFileDirectory)..\artifacts\backend\$(Configuration)\$(BackendTargetFramework)\</BackendOutputDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageReference Include="WPF-UI" Version="4.2.0" />
+    <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
+    <ProjectReference Include="..\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj" ReferenceOutputAssembly="false" />
+    <Reference Include="System.ServiceProcess.ServiceController">
+      <HintPath>C:\Program Files\dotnet\sdk\10.0.201\runtimes\win\lib\net10.0\System.ServiceProcess.ServiceController.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\EnhanceMenusDic.xml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\DetailedEditDic.xml" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="Assets\AppIcon.png" />
+  </ItemGroup>
+
+  <Target Name="CopyBackendArtifacts" AfterTargets="Build">
+    <ItemGroup>
+      <BackendArtifacts Include="$(BackendOutputDir)**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(BackendArtifacts)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

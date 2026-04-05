@@ -1,0 +1,88 @@
+<UserControl
+    x:Class="ContextMenuMgr.Frontend.Views.FileTypesPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:views="clr-namespace:ContextMenuMgr.Frontend.Views">
+    <Grid>
+        <TabControl Margin="0,8,0,0">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="Document24" />
+                        <TextBlock Text="{Binding ShortcutTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding ShortcutTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="AppsAddIn24" />
+                        <TextBlock Text="{Binding UwpShortcutTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding UwpShortcutTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="WindowConsole20" />
+                        <TextBlock Text="{Binding ExecutableTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding ExecutableTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem IsSelected="True">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="DocumentText24" />
+                        <TextBlock Text="{Binding CustomExtensionTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding CustomExtensionTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="TextNumberListLtr24" />
+                        <TextBlock Text="{Binding PerceivedTypeTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding PerceivedTypeTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="Folder24" />
+                        <TextBlock Text="{Binding DirectoryTypeTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding DirectoryTypeTab}" />
+                </Grid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Margin="0,0,6,0" Symbol="Document24" />
+                        <TextBlock Text="{Binding UnknownTypeTab.Title}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12">
+                    <views:SceneBrowserView DataContext="{Binding UnknownTypeTab}" />
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

@@ -1,0 +1,1371 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--此文件为常用右键菜单字典, 可为此字典添加多语言翻译，添加一个Culture子项并设置为en-US、ja-JP等即可
+Tip属性为鼠标悬浮在开关上时的提示信息，从每个Item节点开始, 子元素Value表示该项的注册表键值，目前仅支持REG_SZ、REG_DWORD、REG_EXPAND_SZ、REG_BINARY的键值类型，
+子元素SubKey的所有子元素是该项的子项，项名即为元素名; 每一Item项和SubKey的所有子元素的属性Default为该注册表项默认值，不放在Value\REG_SZ元素里面是为了防止与可能存在的键名为Default的键产生冲突
+由于Shell项太过复杂，程序只根据注册表项名判断存在即启用，故同一场景下不允许有相同KeyName属性的Shell项目，ShellEx项只要Guid符合则为启用-->
+
+<Data>
+  <Group>
+    <Text Value='文件'/>
+    <Text Value='File'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-19</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\*</RegPath>
+    <Shell>
+      <Item KeyName='CopyContent'>
+        <Tip Value='不需打开文件直接复制文件文本内容&#x000A;非Unicode编码文件可能会乱码'/>
+        <Tip Value='You do not need to open the file directly copy the file text content, not Unicode encoding may be garbled'>
+          <Culture>en-US</Culture>
+        </Tip>
+        <Value>
+          <REG_SZ MUIVerb='复制内容到剪切板' Icon='DxpTaskSync.dll,-52'/>
+          <REG_SZ MUIVerb='Copy Content to Clipboard'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute WindowStyle='0'/>
+            <FileName>cmd.exe</FileName>
+            <Arguments>/c clip &lt; "%1"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='TakeOwnerShip'>
+        <Value>
+          <REG_SZ MUIVerb='管理员取得所有权限' HasLUAShield='' NoWorkingDirectory=''/>
+          <REG_SZ MUIVerb='Take Ownership'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>takeown.exe</FileName>
+            <Arguments>/f "%1" /a</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='GetHash'>
+        <OSVersion Compare="&gt;=">6.3</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='获取哈希值' Icon='imageres.dll,-5372'/>
+          <REG_SZ MUIVerb='Get Hash'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='open' WindowStyle='3'/>
+            <FileName>powershell.exe</FileName>
+            <Arguments>-noexit write-host '"%1"';$args = 'md5', 'sha1', 'sha256', 'sha384', 'sha512', 'mactripledes', 'ripemd160'; foreach($arg in $args){get-filehash '"%1"' -algorithm $arg | select-object algorithm, hash | format-table -wrap}</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='目录'/>
+    <Text Value='Directory'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-162</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\Directory</RegPath>
+    <Shell>
+      <Item KeyName='TakeOwnerShip'>
+        <Value>
+          <!--不包括回收站-->
+          <REG_SZ MUIVerb='管理员取得所有权限' HasLUAShield='' NoWorkingDirectory=''
+                  AppliesTo='System.ParsingName:&lt;>"::{645FF040-5081-101B-9F08-00AA002F954E}"'/>
+          <REG_SZ MUIVerb='Take Ownership'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>takeown.exe</FileName>
+            <Arguments>/f "%v" /a /r /d y</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='目录背景'/>
+    <Text Value='Background'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,0</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\Directory\Background</RegPath>
+    <Shell>
+      <Item KeyName='Windows.NewFolder'>
+        <OSVersion Compare="&gt;=">6.1</OSVersion>
+        <Value>
+          <!--新建文件夹-->
+          <REG_SZ MUIVerb='@shell32.dll,-31236' Icon='shell32.dll,-319' Position='top' CommandStateSync=''
+                  CommandStateHandler='{3756e7f5-e514-4776-a32b-eb24bc1efe7a}' CanonicalName='{E44616AD-6DF1-4B94-85A4-E465AE8A19DB}'/>
+          <REG_DWORD ImpliedSelectionModel='4' InvokeCommandOnSelection='0'/>
+        </Value>
+      </Item>
+      <Item KeyName='OpenNewWindow'>
+        <Value>
+          <!--在新窗口中打开-->
+          <REG_SZ MUIVerb='@windows.storage.dll,-8517'/>
+        </Value>
+        <SubKey>
+          <Command Default='explorer.exe "%v"'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='Windows.RecycleBin.Empty'>
+        <OSVersion Compare="&gt;=">6.1</OSVersion>
+        <Value>
+          <!--清空回收站-->
+          <REG_SZ MUIVerb='@shell32.dll,-10564' Icon='imageres.dll,-54' CommandStateHandler='{c9298eef-69dd-4cdd-b153-bdbc38486781}'/>
+        </Value>
+        <SubKey>
+          <Command>
+            <Value>
+              <REG_SZ DelegateExecute='{48527bb3-e8de-450b-8910-8c4099cb8624}'/>
+            </Value>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='SuperHidden'>
+        <Value>
+          <REG_SZ MUIVerb='超级隐藏' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='Super Hidden'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+          <REG_SZ Icon='imageres.dll,-5314'>
+            <OSVersion Compare="&gt;=">6.2</OSVersion>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <OSVersion Compare="&gt;=">6.2</OSVersion>
+                <Value>
+                  <REG_SZ MUIVerb='显示/隐藏 扩展名' CommandStateSync=''
+                          ExplorerCommandHandler='{4ac6c205-2853-4bf5-b47c-919a42a48a16}'/>
+                  <REG_SZ MUIVerb='Show or Hide File Extensions'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+              </Item0>
+              <Item1>
+                <OSVersion Compare="&gt;=">6.2</OSVersion>
+                <Value>
+                  <REG_SZ MUIVerb='显示/隐藏 隐藏文件' CommandStateSync=''
+                          ExplorerCommandHandler='{f7300245-1f4b-41ba-8948-6fd392064494}'/>
+                  <REG_SZ MUIVerb='Show or Hide Hidden Files'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+              </Item1>
+              <Item0>
+                <OSVersion Compare="&lt;">6.2</OSVersion>
+                <Value>
+                  <REG_SZ MUIVerb='显示/隐藏 扩展名'/>
+                  <REG_SZ MUIVerb='Show or Hide File Extensions'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <FileName>wscript.exe</FileName>
+                    <Arguments>
+                      <CreateFile
+                        FileName='ShowFileExtensions.vbs'
+                        Content='
+                        Dim wsh
+                        On Error Resume Next
+                        Set wsh = CreateObject("WScript.Shell")
+                        path = "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\HideFileExt"
+                        value = 1
+                        If wsh.RegRead(path) = value Then value = 0
+                        wsh.RegWrite path, value, "REG_DWORD"
+                        wsh.SendKeys "{F5}"
+                        Set wsh = Nothing'/>
+                    </Arguments>
+                  </Command>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <OSVersion Compare="&lt;">6.2</OSVersion>
+                <Value>
+                  <REG_SZ MUIVerb='显示/隐藏 隐藏文件'/>
+                  <REG_SZ MUIVerb='Show or Hide Hidden Files'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <FileName>wscript.exe</FileName>
+                    <Arguments>
+                      <CreateFile
+                        FileName='ShowHiddenFiles.vbs'
+                        Content='
+                        Dim wsh
+                        On Error Resume Next
+                        Set wsh = CreateObject("WScript.Shell")
+                        path = "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\Hidden"
+                        value = 1
+                        If wsh.RegRead(path) = value Then value = 2
+                        wsh.RegWrite path, value, "REG_DWORD"
+                        wsh.SendKeys "{F5}"
+                        Set wsh = Nothing'/>
+                    </Arguments>
+                  </Command>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='显示/隐藏 系统隐藏文件'/>
+                  <REG_SZ MUIVerb='Show or Hide Hidden System Files'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <FileName>wscript.exe</FileName>
+                    <Arguments>
+                      <CreateFile
+                        FileName='ShowSuperHidden.vbs'
+                        Content='
+                        Dim wsh
+                        On Error Resume Next
+                        Set wsh = CreateObject("WScript.Shell")
+                        path = "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\ShowSuperHidden"
+                        value = 1
+                        If wsh.RegRead(path) = value Then value = 0
+                        wsh.RegWrite path, value, "REG_DWORD"
+                        wsh.SendKeys "{F5}"
+                        Set wsh = Nothing'/>
+                    </Arguments>
+                  </Command>
+                </SubKey>
+              </Item2>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='RunasCmd'>
+        <Value>
+          <!--以管理员身份打开命令提示符-->
+          <REG_SZ MUIVerb='@shell32.dll,-37444' Icon='imageres.dll,-5324' NoWorkingDirectory=''/>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas'/>
+            <FileName>cmd.exe</FileName>
+            <Arguments>/s /k pushd "%v"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='Windows.PowershellAsAdmin'>
+        <Value>
+          <!--以管理员身份打开Powershell-->
+          <REG_SZ MUIVerb='@shell32.dll,-37448' Icon='imageres.dll,-5373' Description='@shell32.dll,-37449' CommandStateSync=''
+                  CanonicalName='{ADB73FFC-1568-4D7D-BCD5-6D11A417AF64}' ExplorerCommandHandler='{BF0AC53F-D51C-419F-92E3-2298E125F004}'/>
+          <REG_DWORD ImpliedSelectionModel='1' ResolveLinksInvokeBehavior='3' ResolveLinksQueryBehavior='0'/>
+        </Value>
+      </Item>
+      <Item KeyName='ExplorerUWP'>
+        <OSVersion Compare="&gt;=">10.0</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='资源管理器 UWP' Icon='explorer.exe,0'/>
+          <REG_SZ MUIVerb='Explorer UWP'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='explorer shell:AppsFolder\c5e2524a-ea46-4f67-841f-6a9465d9d515_cw5n1h2txyewy!App'/>
+        </SubKey>
+      </Item>
+    </Shell>
+    <ShellEx>
+      <Item>
+        <!--窗口转换程序-->
+        <Text>@shell32.dll,-12715</Text>
+        <Icon>imageres.dll,0</Icon>
+        <KeyName>Flip3D</KeyName>
+        <Guid>3080f90e-d7ad-11d9-bd98-0000947b0257</Guid>
+      </Item>
+    </ShellEx>
+  </Group>
+
+  <Group>
+    <Text Value='桌面背景'/>
+    <Text Value='Desktop Background'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-183</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\DesktopBackground</RegPath>
+    <Shell>
+      <Item KeyName='OpenThisPC'>
+        <Value>
+          <!--此电脑-->
+          <REG_SZ MUIVerb='@shell32.dll,-9216' Icon='imageres.dll,-109'/>
+        </Value>
+        <SubKey>
+          <Command Default='explorer /e,::{20D04FE0-3AEA-1069-A2D8-08002B30309D}'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='OpenControlPanel'>
+        <Value>
+          <!--控制面板-->
+          <REG_SZ MUIVerb='@shell32.dll,-4161' Icon='imageres.dll,-27'/>
+        </Value>
+        <SubKey>
+          <Command Default='control.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='RestartExplorer'>
+        <Value>
+          <REG_SZ MUIVerb='重启资源管理器' Icon='shell32.dll,238'/>
+          <REG_SZ MUIVerb='Restart Explorer'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute WindowStyle='0'/>
+            <FileName>cmd.exe</FileName>
+            <Arguments>/c taskkill /f /im explorer.exe &amp; start explorer.exe</Arguments>
+          </Command>
+          <Command>
+            <ShellExecute WindowStyle='0'/>
+            <FileName>tskill.exe</FileName>
+            <Arguments>explorer</Arguments>
+            <FileExists>%SystemRoot%\System32\tskill.exe</FileExists>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='OpenMoreRegedit'>
+        <Value>
+          <REG_SZ MUIVerb='多开注册表编辑器' Icon='regedit.exe,0'/>
+          <REG_SZ MUIVerb='Open Multiple Regedit'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='regedit -m'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='SnippingTool'>
+        <OSVersion Compare="&gt;=">6.1</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='截图工具' Icon='snippingTool.exe,0'/>
+          <REG_SZ MUIVerb='Snipping Tool'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='snippingTool.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='SnipToClipboard'>
+        <Tip Value='截屏后可直接Ctrl+V粘贴图片&#x000A;适用位置:Word、QQ、PS等&#x000A;快捷键:Win+Shift+S'/>
+        <Tip Value='After taking a screenshot, you can directly press Ctrl+V to paste the picture.&#x000A;It is suitable for Word, PS and other programs. The shortcut key is Win+Shift+S'>
+          <Culture>en-US</Culture>
+        </Tip>
+        <OSVersion Compare="&gt;=">10.0</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='截屏到剪贴板' Icon='snippingTool.exe,0'/>
+          <REG_SZ MUIVerb='Snip to Clipboard'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='explorer ms-screenclip:'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='ScreenKeyboard'>
+        <Value>
+          <REG_SZ MUIVerb='屏幕键盘' Icon='osk.exe,0'/>
+          <REG_SZ MUIVerb='Screen Keyboard'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='osk.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='ShutdownOptions'>
+        <Value>
+          <REG_SZ MUIVerb='关机选项' Icon='shell32.dll,-28' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='Shutdown Options'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='锁定'/>
+                  <REG_SZ MUIVerb='Lock'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='rundll32 user32.dll,LockWorkStation'/>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='注销'/>
+                  <REG_SZ MUIVerb='Log off'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='shutdown -l'/>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='切换账户'/>
+                  <REG_SZ MUIVerb='Switch account'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='tsdiscon'/>
+                </SubKey>
+              </Item2>
+              <Item3>
+                <Value>
+                  <REG_SZ MUIVerb='睡眠'/>
+                  <REG_SZ MUIVerb='Sleep'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='rundll32 powrprof.dll,SetSuspendState Sleep'/>
+                </SubKey>
+              </Item3>
+              <Item4>
+                <Value>
+                  <REG_SZ MUIVerb='休眠'/>
+                  <REG_SZ MUIVerb='Hibernate'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='shutdown -h'/>
+                </SubKey>
+              </Item4>
+              <Item5>
+                <Value>
+                  <REG_SZ MUIVerb='重启'/>
+                  <REG_SZ MUIVerb='Restart'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='shutdown -r -f -t 00'/>
+                </SubKey>
+              </Item5>
+              <Item6>
+                <Value>
+                  <REG_SZ MUIVerb='关机'/>
+                  <REG_SZ MUIVerb='Shutdown'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='shutdown -s -f -t 00'/>
+                </SubKey>
+              </Item6>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='SlideToShutDown'>
+        <OSVersion Compare="&gt;=">6.3</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='滑动关机' Icon='shell32.dll,-28'/>
+          <REG_SZ MUIVerb='Slide to ShutDown'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='SlideToShutDown.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='PowerPlan'>
+        <Value>
+          <REG_SZ MUIVerb='电源计划' Icon='powercpl.dll,0' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='Power Plan'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='节能'/>
+                  <REG_SZ MUIVerb='Power saver'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute WindowStyle='0'/>
+                    <FileName>powercfg.exe</FileName>
+                    <Arguments>/setactive a1841308-3541-4fab-bc81-f71556f20b4a</Arguments>
+                  </Command>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='平衡'/>
+                  <REG_SZ MUIVerb='Balanced'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute WindowStyle='0'/>
+                    <FileName>powercfg.exe</FileName>
+                    <Arguments>/setactive 381b4222-f694-41f0-9685-ff5bb260df2e</Arguments>
+                  </Command>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='高性能'/>
+                  <REG_SZ MUIVerb='High performance'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute WindowStyle='0'/>
+                    <FileName>powercfg.exe</FileName>
+                    <Arguments>/setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c</Arguments>
+                  </Command>
+                </SubKey>
+              </Item2>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='AppColorMode'>
+        <OSVersion Compare="&gt;=">10.0.17763</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='颜色模式' Icon='themecpl.dll,-1' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='App Color Mode'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='浅色应用' Icon='imageres.dll,-5411'/>
+                  <REG_SZ MUIVerb='Light Mode'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='Reg Add HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize /v AppsUseLightTheme /t REG_DWORD /d 1 /f'/>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='深色应用' Icon='imageres.dll,-5412'/>
+                  <REG_SZ MUIVerb='Dark Mode'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='Reg Add HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize /v AppsUseLightTheme /t REG_DWORD /d 0 /f'/>
+                </SubKey>
+              </Item1>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='WallPaperLocation'>
+        <Value>
+          <REG_SZ MUIVerb='壁纸位置' Icon='imageres.dll,-5346' Position='bottom'/>
+          <REG_SZ MUIVerb='WallPaper Location'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <FileName>wscript.exe</FileName>
+            <Arguments>
+              <CreateFile
+                FileName='WallPaperLocation.vbs'
+                Content='
+                Dim wsh
+                On Error Resume Next
+                Set wsh = CreateObject("WScript.Shell")
+                path = wsh.RegRead("HKCU\Control Panel\Desktop\WallPaper")
+                wsh.Run("explorer /select, " &amp; path)
+                Set wsh = Nothing'/>
+            </Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='DesktopIcon'>
+        <Value>
+          <REG_SZ MUIVerb='桌面图标设置' Icon='desk.cpl,0'/>
+          <REG_SZ MUIVerb='Desktop Icon Settings'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='control desk.cpl,,0'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='ScreenSaver'>
+        <Value>
+          <REG_SZ MUIVerb='屏幕保护设置' Icon='desk.cpl,0'/>
+          <REG_SZ MUIVerb='Screen saver Settings'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='control desk.cpl,,1'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='WebSearch'>
+        <Value>
+          <REG_SZ MUIVerb='网页搜索' Icon='Windows.Storage.Search.dll,0' SubCommands=''/>
+          <REG_SZ MUIVerb='Web Search'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='Bing'/>
+                </Value>
+                <SubKey>
+                  <Command Default='explorer "https://www.bing.com"'/>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='Baidu'/>
+                </Value>
+                <SubKey>
+                  <Command Default='explorer "https://www.baidu.com"'/>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='Google'/>
+                </Value>
+                <SubKey>
+                  <Command Default='explorer "https://www.google.com"'/>
+                </SubKey>
+              </Item2>
+              <Item3>
+                <Value>
+                  <REG_SZ MUIVerb='Yandex'/>
+                </Value>
+                <SubKey>
+                  <Command Default='explorer "https://yandex.com"'/>
+                </SubKey>
+              </Item3>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='磁盘分区'/>
+    <Text Value='Drive'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-30</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\Drive</RegPath>
+    <Shell>
+      <Item KeyName='OptimizeDrives'>
+        <Value>
+          <!--优化驱动器-->
+          <REG_SZ MUIVerb='@dfrgui.exe,-106' Icon='dfrgui.exe,0'/>
+        </Value>
+        <SubKey>
+          <Command Default='dfrgui.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='Windows.CleanUp'>
+        <Value>
+          <!--磁盘清理-->
+          <REG_SZ MUIVerb='@shell32.dll,-22026' Icon='cleanmgr.exe,-104' CommandStateSync=''
+                  ExplorerCommandHandler='{9cca66bb-9c78-4e59-a76f-a5e9990b8aa0}'/>
+          <REG_DWORD ImpliedSelectionModel='0x1'/>
+        </Value>
+      </Item>
+      <Item KeyName='ShowDriveLetters'>
+        <Value>
+          <REG_SZ MUIVerb='显示/隐藏 盘符' Position='bottom'/>
+          <REG_SZ MUIVerb='Show or hide Drive Letters'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <FileName>Wscript.exe</FileName>
+            <Arguments>
+              <CreateFile
+                FileName='ShowDriveLetters.vbs'
+                Content='
+                Dim wsh
+                On Error Resume Next
+                Set wsh = CreateObject("WScript.Shell")
+                path = "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ShowDriveLettersFirst"
+                value = 2
+                If wsh.RegRead(path) = value Then value = 0
+                wsh.RegWrite path, value, "REG_DWORD"
+                wsh.SendKeys "{F5}"
+                Set wsh = Nothing'/>
+            </Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='ShowVolumeStrips'>
+        <Value>
+          <REG_SZ MUIVerb='显示/隐藏 容量条' Position='bottom'/>
+          <REG_SZ MUIVerb='Show or hide Drive Volume'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas'/>
+            <FileName>Wscript.exe</FileName>
+            <Arguments>
+              <CreateFile
+                FileName='ShowVolumeStrips.vbs'
+                Content='
+                Dim wsh
+                On Error Resume Next
+                Set wsh = CreateObject("WScript.Shell")
+                path = "HKLM\SOFTWARE\Classes\Drive\TileInfo"
+                value = "prop:*System.PercentFull;System.Computer.DecoratedFreeSpace;System.Volume.FileSystem"
+                If wsh.RegRead(path) = value Then
+                    value = "prop:System.FreeSpace;System.Capacity"
+                End If
+                wsh.RegWrite path, value
+                wsh.SendKeys "{F5}"
+                Set wsh = Nothing'/>
+            </Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='所有对象'/>
+    <Text Value='All File system Objects'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-117</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\AllFilesystemObjects</RegPath>
+    <Shell>
+      <Item KeyName='Windows.PermanentDelete'>
+        <OSVersion Compare="&gt;=">6.2</OSVersion>
+        <Value>
+          <!--永久删除-->
+          <REG_SZ MUIVerb='@shell32.dll,-37394' Icon='shell32.dll,-240' Position='bottom' CommandStateSync=''
+                  ExplorerCommandHandler='{E9571AB2-AD92-4ec6-8924-4E5AD33790F5}'/>
+        </Value>
+      </Item>
+      <Item KeyName='CopyAsPath'>
+        <Tip Value='系统原生菜单项需按住Shift显示,&#x000A;此项可以直接显示, 路径不带双引号'/>
+        <Tip Value='The system raw lettuce item needs to hold down Shift display,&#x000A;this item can be displayed directly, path without double quotation marks'>
+          <Culture>en-US</Culture>
+        </Tip>
+        <Value>
+          <!--复制路径-->
+          <REG_SZ MUIVerb='@shell32.dll,-30329' Icon='imageres.dll,-5302'/>
+        </Value>
+        <SubKey>
+          <Command Default='mshta vbscript:clipboarddata.setdata("text","%1")(close)'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='Windows.CopyAsPath'>
+        <OSVersion Compare="&gt;=">6.2</OSVersion>
+        <Tip Value='系统原生菜单项需按住Shift显示,&#x000A;此项可以直接显示, 路径带双引号'/>
+        <Tip Value='The system raw lettuce item needs to hold down Shift display,&#x000A;this item can be displayed directly, path with double quotation marks'>
+          <Culture>en-US</Culture>
+        </Tip>
+        <Value>
+          <!--复制路径-->
+          <REG_SZ MUIVerb='@shell32.dll,-30329' Icon='imageres.dll,-5302' CommandStateHandler='{3B1599F9-E00A-4BBF-AD3E-B3F99FA87779}'
+                  CanonicalName='{707C7BC6-685A-4A4D-A275-3966A5A3EFAA}' CommandStateSync='' VerbHandler='{f3d06e7c-1e45-4a26-847e-f9fcdee59be0}'
+                  VerbName='copyaspath' Description='@shell32.dll,-30336'/>
+          <REG_DWORD InvokeCommandOnSelection='1'/>
+        </Value>
+      </Item>
+      <Item KeyName='Windows.SlideShow'>
+        <Value>
+          <!--幻灯片放映-->
+          <REG_SZ MUIVerb='@shell32.dll,-31287' Icon='imageres.dll,-5347' CommandStateHandler='{880ac964-2e34-4425-8cf2-86ada2c3a019}'
+                  CanonicalName='{73BCE053-3BBC-4AD7-9FE7-7A7C212C98E6}' CommandStateSync='' Description='@shell32.dll,-31288' VerbToInvoke='slideshow'/>
+          <REG_DWORD MediaTypeFlags='5'/>
+        </Value>
+        <SubKey>
+          <Command>
+            <Value>
+              <REG_SZ DelegateExecute='{80c68d96-366b-11dc-9eaa-00161718cf63}'/>
+            </Value>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='HideAttributes'>
+        <Value>
+          <REG_SZ MUIVerb='隐藏属性' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='File Visibility'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+          <REG_SZ Icon='imageres.dll,-5314'>
+            <OSVersion Compare="&gt;=">6.2</OSVersion>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='显示'/>
+                  <REG_SZ MUIVerb='Normal'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='attrib -s -h "%1"'/>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='隐藏'/>
+                  <REG_SZ MUIVerb='Hidden'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='attrib -s +h "%1"'/>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='系统隐藏'/>
+                  <REG_SZ MUIVerb='System Hidden'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command Default='attrib +s +h "%1"'/>
+                </SubKey>
+              </Item2>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='CreateDesktopShortcut'>
+        <Value>
+          <REG_SZ MUIVerb='创建桌面快捷方式' Icon='imageres.dll,-110' Position='bottom'/>
+          <REG_SZ MUIVerb='Create a Desktop Shortcut'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <FileName>Wscript.exe</FileName>
+            <Arguments Suffix=' "%1"'>
+              <CreateFile
+                FileName='CreateDesktopShortcut.vbs'
+                Content='
+                Dim wsh, fso, shortcut
+                Set paths = WScript.Arguments
+                Set wsh = CreateObject("WScript.Shell")
+                Set fso = CreateObject("Scripting.FileSystemObject")
+                desktop = wsh.SpecialFolders("Desktop")
+                For i = 0 To paths.Count - 1
+	              path = paths(i)
+	              index1 = InstrRev(path, "\")
+	              dir = Mid(path, 1, index1 - 1)
+	              name = Mid(path, index1 + 1)
+	              index2 = InstrRev(name, ".")
+	              If index2 > 0 Then name = Mid(name, 1, index2 - 1)
+	              lnkPath = ""
+	              j = 1
+	              Do
+	                  lnkPath = desktop &amp; "\" &amp; name
+	                  If j > 1 Then lnkPath = lnkPath &amp; " (" &amp; j &amp; ")"
+	                  lnkPath = lnkPath &amp; ".lnk"
+	                  j = j + 1
+	              Loop While fso.FileExists(lnkPath)
+	              Set shortcut = wsh.CreateShortcut(lnkPath)  
+	              shortcut.TargetPath = path 
+	              shortcut.WorkingDirectory = dir
+	              shortcut.Save
+                Next
+                Set shortcut = Nothing
+                Set wsh = Nothing
+                Set fso = Nothing'/>
+            </Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+    <ShellEx>
+      <Item>
+        <!--复制到文件夹-->
+        <Text>@shell32.dll,-30304</Text>
+        <Icon>imageres.dll,-5304</Icon>
+        <KeyName>CopyTo</KeyName>
+        <Guid>c2fbb630-2971-11d1-a18c-00c04fd75d13</Guid>
+      </Item>
+      <Item>
+        <!--移动到文件夹-->
+        <Text>@shell32.dll,-30305</Text>
+        <Icon>imageres.dll,-5303</Icon>
+        <KeyName>MoveTo</KeyName>
+        <Guid>c2fbb631-2971-11d1-a18c-00c04fd75d13</Guid>
+      </Item>
+    </ShellEx>
+  </Group>
+
+  <Group>
+    <Text Value='此电脑'/>
+    <Text Value='This PC'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-109</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}</RegPath>
+    <Shell>
+      <Item KeyName='SystemInfo'>
+        <Value>
+          <REG_SZ MUIVerb='系统信息' Icon='msinfo32.exe,0'/>
+          <REG_SZ MUIVerb='System Info'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='msinfo32.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='UserAccountControlSettings'>
+        <Value>
+          <REG_SZ MUIVerb='用户账户控制设置'/>
+          <REG_SZ MUIVerb='User Account Control Settings'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='UserAccountControlSettings.exe'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='Gpedit'>
+        <FileExists>%SystemRoot%\System32\gpedit.msc</FileExists>
+        <Value>
+          <REG_SZ MUIVerb='组策略编辑器'/>
+          <REG_SZ MUIVerb='Group Policy Editor'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='mmc.exe gpedit.msc'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='VirtualMode'>
+        <Tip Value='解决 Hyper-V 和 VirtualBox 不能共存的问题'/>
+        <Tip Value='Fixed an issue where Hyper-V and VirtualBox could not coexist'>
+          <Culture>en-US</Culture>
+        </Tip>
+        <OSVersion Compare="&gt;=">10.0</OSVersion>
+        <Value>
+          <REG_SZ MUIVerb='虚拟模式' Icon='imageres.dll,-109' SubCommands='' Position='bottom'/>
+          <REG_SZ MUIVerb='Virtual Mode'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='Hyper-V'/>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <FileName>wscript.exe</FileName>
+                    <Arguments>
+                      <CreateFile
+                        FileName='HyperVMode.vbs'
+                        Content='
+                        Dim sap, wsh
+                        Set sap = CreateObject("Shell.Application")
+                        sap.ShellExecute "bcdedit", "/set hypervisorlaunchtype auto", "" ,"runas", 0
+                        msg = "你当前切换的模式为 Hyper-V，" &amp; VbCrlf
+                        msg = msg &amp; "该模式可使用 Windows SandBox 和 Hyper-V，" &amp; VbCrlf
+                        msg = msg &amp; "不可使用 VirtualBox 和 VMware 等虚拟机程序，" &amp; VbCrlf
+                        msg = msg &amp; "是否立即重启计算机应用该模式？" &amp; VbCrlf
+                        msg = msg &amp; "你也可稍后自行重启，请保存好工作！"
+                        If Msgbox(msg, VbYesNo + VbInformation, "虚拟模式") = VbYes Then
+                            Set wsh = CreateObject("WScript.Shell")
+                            wsh.Run("shutdown -r -f -t 00")
+                            Set wsh = Nothing
+                        End If
+                        Set sap = Nothing'/>
+                      <CreateFile
+                        FileName='HyperVMode.vbs'
+                        Content='
+                        Dim sap, wsh
+                        Set sap = CreateObject("Shell.Application")
+                        sap.ShellExecute "bcdedit", "/set hypervisorlaunchtype auto", "" ,"runas", 0
+                        msg = "You are currently switching mode to Hyper-V," &amp; VbCrlf
+                        msg = msg &amp; "This mode is available using Windows SandBox and Hyper-V," &amp; VbCrlf
+                        msg = msg &amp; "But Vm programs such as VirtualBox and VMware cannot be used," &amp; VbCrlf
+                        msg = msg &amp; "Do you want to restart the computer immediately to apply the mode?" &amp; VbCrlf
+                        msg = msg &amp; "You can also restart yourself later, please save your work!"
+                        If Msgbox(msg, VbYesNo + VbInformation, "Virtual Mode") = VbYes Then
+                            Set wsh = CreateObject("WScript.Shell")
+                            wsh.Run("shutdown -r -f -t 00")
+                            Set wsh = Nothing
+                        End If
+                        Set sap = Nothing'>
+                        <Culture>en-US</Culture>
+                      </CreateFile>
+                    </Arguments>
+                  </Command>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='VirtualBox'/>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <FileName>wscript.exe</FileName>
+                    <Arguments>
+                      <CreateFile
+                        FileName='VirtualBoxMode.vbs'
+                        Content='
+                        Dim sap, wsh
+                        Set sap = CreateObject("Shell.Application")
+                        sap.ShellExecute "bcdedit", "/set hypervisorlaunchtype off", "", "runas", 0
+                        msg = "你当前切换的模式为 VirtualBox，" &amp; VbCrlf
+                        msg = msg &amp; "该模式可使用 VirtualBox 和 VMware 等虚拟机程序，" &amp; VbCrlf
+                        msg = msg &amp; "不可使用 Windows SandBox 和 Hyper-V，" &amp; VbCrlf
+                        msg = msg &amp; "是否立即重启计算机应用该模式？" &amp; VbCrlf
+                        msg = msg &amp; "你也可稍后自行重启，请保存好工作！"
+                        If Msgbox(msg, VbYesNo + VbInformation, "虚拟模式") = VbYes Then
+                            Set wsh = CreateObject("WScript.Shell")
+                            wsh.Run("shutdown -r -f -t 00")
+                            Set wsh = Nothing
+                        End If
+                        Set sap = Nothing'/>
+                      <CreateFile
+                        FileName='VirtualBoxMode.vbs'
+                        Content='
+                        Dim sap, wsh
+                        Set sap = CreateObject("Shell.Application")
+                        sap.ShellExecute "bcdedit", "/set hypervisorlaunchtype off", "", "runas", 0
+                        msg = "You are currently switching mode to VirtualBox，" &amp; VbCrlf
+                        msg = msg &amp; "This mode is available using VM programs such as VirtualBox and VMware," &amp; VbCrlf
+                        msg = msg &amp; "But Windows SandBox and Hyper-V are not available," &amp; VbCrlf
+                        msg = msg &amp; "Do you want to restart the computer immediately to apply the mode?" &amp; VbCrlf
+                        msg = msg &amp; "You can also restart yourself later, please save your work!"
+                        If Msgbox(msg, VbYesNo + VbInformation, "Virtual Mode") = VbYes Then
+                            Set wsh = CreateObject("WScript.Shell")
+                            wsh.Run("shutdown -r -f -t 00")
+                            Set wsh = Nothing
+                        End If
+                        Set sap = Nothing'>
+                        <Culture>en-US</Culture>
+                      </CreateFile>
+                    </Arguments>
+                  </Command>
+                </SubKey>
+              </Item1>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+      <Item KeyName='EditHosts'>
+        <Value>
+          <REG_SZ MUIVerb='编辑 Hosts'/>
+          <REG_SZ MUIVerb='Edit Hosts'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas'/>
+            <FileName>notepad.exe</FileName>
+            <Arguments>%systemroot%\system32\drivers\etc\hosts</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='FlushDNS'>
+        <Value>
+          <REG_SZ MUIVerb='刷新DNS缓存' Icon='shell32.dll,238'/>
+          <REG_SZ MUIVerb='Flush DNS'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command Default='ipconfig /flushdns'/>
+        </SubKey>
+      </Item>
+      <Item KeyName='BatteryReport'>
+        <Value>
+          <OSVersion Compare="&gt;=">10.0</OSVersion>
+          <REG_SZ MUIVerb='电池使用报告' Icon='powercpl.dll,0'/>
+          <REG_SZ MUIVerb='Battery Report'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute WindowStyle='0'/>
+            <FileName>cmd.exe</FileName>
+            <Arguments>/c cd %temp% &amp; del BatteryReport.html &amp; powercfg /batteryreport /output BatteryReport.html &amp; start BatteryReport.html</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='回收站'/>
+    <Text Value='RecycleBin'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-55</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}</RegPath>
+    <Shell>
+      <Item KeyName='CleanThumbCache'>
+        <Value>
+          <REG_SZ MUIVerb='清理缩略图缓存'/>
+          <REG_SZ MUIVerb='Clean Thumb Cache'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>
+              <CreateFile
+                FileName='CleanThumbCache.bat'
+                Content='
+                taskkill /f /im explorer.exe
+                del /f /s /q /a "%LocalAppData%\IconCache.db"
+                cd /d "%LocalAppData%\Microsoft\Windows\Explorer"
+                del /f /s /q /a thumbcache_*.db
+                del /f /s /q /a iconcache_*.db
+                reg delete "HKCR\Local Settings\Software\Microsoft\Windows\CurrentVersion\TrayNotify" /v IconStreams /f
+                reg delete "HKCR\Local Settings\Software\Microsoft\Windows\CurrentVersion\TrayNotify" /v PastIconsStream /f
+                start explorer'/>
+            </FileName>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='Exe文件'/>
+    <Text Value='Exe Files'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-15</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\SystemFileAssociations\.exe</RegPath>
+    <Shell>
+      <Item KeyName='FirewallRules'>
+        <Value>
+          <REG_SZ MUIVerb='防火墙规则' Icon='FirewallControlPanel.dll,0' SubCommands=''/>
+          <REG_SZ MUIVerb='Firewall Rules'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Shell>
+            <SubKey>
+              <Item0>
+                <Value>
+                  <REG_SZ MUIVerb='禁止入站' Icon='imageres.dll,-105'/>
+                  <REG_SZ MUIVerb='Not Allow In'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute Verb='runas' WindowStyle='0'/>
+                    <FileName>cmd.exe</FileName>
+                    <Arguments>/R (netsh advfirewall firewall delete rule name="_%1" dir=in program="%1" &amp; netsh advfirewall firewall add rule name="_%1" dir=in program="%1" action=block)</Arguments>
+                  </Command>
+                </SubKey>
+              </Item0>
+              <Item1>
+                <Value>
+                  <REG_SZ MUIVerb='禁止出站' Icon='imageres.dll,-105'/>
+                  <REG_SZ MUIVerb='Not Allow Out'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute Verb='runas' WindowStyle='0'/>
+                    <FileName>cmd.exe</FileName>
+                    <Arguments>/R (netsh advfirewall firewall delete rule name="_%1" dir=out program="%1" &amp; netsh advfirewall firewall add rule name="_%1" dir=out program="%1" action=block)</Arguments>
+                  </Command>
+                </SubKey>
+              </Item1>
+              <Item2>
+                <Value>
+                  <REG_SZ MUIVerb='允许入站' Icon='imageres.dll,-106'/>
+                  <REG_SZ MUIVerb='Allow In'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute Verb='runas' WindowStyle='0'/>
+                    <FileName>cmd.exe</FileName>
+                    <Arguments>/R (netsh advfirewall firewall delete rule name="_%1" dir=in program="%1" &amp; netsh advfirewall firewall add rule name="_%1" dir=in program="%1" action=allow)</Arguments>
+                  </Command>
+                </SubKey>
+              </Item2>
+              <Item3>
+                <Value>
+                  <REG_SZ MUIVerb='允许出站' Icon='imageres.dll,-106'/>
+                  <REG_SZ MUIVerb='Allow Out'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute Verb='runas' WindowStyle='0'/>
+                    <FileName>cmd.exe</FileName>
+                    <Arguments>/R (netsh advfirewall firewall delete rule name="_%1" dir=out program="%1" &amp; netsh advfirewall firewall add rule name="_%1" dir=out program="%1" action=allow)</Arguments>
+                  </Command>
+                </SubKey>
+              </Item3>
+              <Item4>
+                <Value>
+                  <REG_SZ MUIVerb='清除设置' Icon='imageres.dll,-107'/>
+                  <REG_SZ MUIVerb='Clear Settings'>
+                    <Culture>en-US</Culture>
+                  </REG_SZ>
+                </Value>
+                <SubKey>
+                  <Command>
+                    <ShellExecute Verb='runas' WindowStyle='0'/>
+                    <FileName>cmd.exe</FileName>
+                    <Arguments>/R (netsh advfirewall firewall delete rule name="_%1" program="%1")</Arguments>
+                  </Command>
+                </SubKey>
+              </Item4>
+            </SubKey>
+          </Shell>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='DLL文件'/>
+    <Text Value='DLL Files'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-67</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\SystemFileAssociations\.dll</RegPath>
+    <Shell>
+      <Item KeyName='Register'>
+        <Value>
+          <REG_SZ MUIVerb='注册 DLL'/>
+          <REG_SZ MUIVerb='Register the DLL'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>regsvr32.exe</FileName>
+            <Arguments>"%1"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='UnRegister'>
+        <Value>
+          <REG_SZ MUIVerb='注销 DLL'/>
+          <REG_SZ MUIVerb='UnRegister the DLL'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>regsvr32.exe</FileName>
+            <Arguments>/u "%1"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+
+  <Group>
+    <Text Value='OCX文件'/>
+    <Text Value='OCX Files'>
+      <Culture>en-US</Culture>
+    </Text>
+    <Icon>imageres.dll,-67</Icon>
+    <RegPath>HKEY_CLASSES_ROOT\SystemFileAssociations\.ocx</RegPath>
+    <Shell>
+      <Item KeyName='Register'>
+        <Value>
+          <REG_SZ MUIVerb='注册 OCX'/>
+          <REG_SZ MUIVerb='Register the OCX'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>regsvr32.exe</FileName>
+            <Arguments>"%1"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+      <Item KeyName='UnRegister'>
+        <Value>
+          <REG_SZ MUIVerb='注销 OCX'/>
+          <REG_SZ MUIVerb='UnRegister the OCX'>
+            <Culture>en-US</Culture>
+          </REG_SZ>
+        </Value>
+        <SubKey>
+          <Command>
+            <ShellExecute Verb='runas' WindowStyle='0'/>
+            <FileName>regsvr32.exe</FileName>
+            <Arguments>/u "%1"</Arguments>
+          </Command>
+        </SubKey>
+      </Item>
+    </Shell>
+  </Group>
+</Data>
