@@ -15,7 +15,7 @@
     <Title>Context Menu Manager</Title>
     <Description>Windows context menu manager frontend.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.0.0.0</FileVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <InformationalVersion>1.0.0</InformationalVersion>
     <BackendTargetFramework>net10.0-windows</BackendTargetFramework>
@@ -25,12 +25,10 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.5" />
     <PackageReference Include="WPF-UI" Version="4.2.0" />
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
     <ProjectReference Include="..\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj" ReferenceOutputAssembly="false" />
-    <Reference Include="System.ServiceProcess.ServiceController">
-      <HintPath>C:\Program Files\dotnet\sdk\10.0.201\runtimes\win\lib\net10.0\System.ServiceProcess.ServiceController.dll</HintPath>
-    </Reference>
   </ItemGroup>
 
   <ItemGroup>

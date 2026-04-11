@@ -41,22 +41,16 @@
                                     TextWrapping="Wrap" />
                             </StackPanel>
 
-                            <ListBox
+                            <ui:ListView
                                 Grid.Row="1"
-                                Margin="8,0,8,8"
-                                Background="Transparent"
                                 BorderThickness="0"
                                 ItemsSource="{Binding EnhanceGroups}"
                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                                 SelectedItem="{Binding SelectedEnhanceGroup}">
-                                <ListBox.ItemTemplate>
+                                <ui:ListView.ItemTemplate>
                                     <DataTemplate DataType="{x:Type viewModels:EnhanceMenuGroupViewModel}">
-                                        <Border
-                                            Margin="0,0,0,8"
-                                            Padding="10"
-                                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                                            CornerRadius="8">
+                                        <Border Padding="10">
                                             <StackPanel>
                                                 <TextBlock
                                                     FontSize="15"
@@ -71,8 +65,8 @@
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                </ui:ListView.ItemTemplate>
+                            </ui:ListView>
                         </Grid>
                     </Border>
 
@@ -240,22 +234,17 @@
                                     Text="{Binding DetailedEditTitle}" />
                             </StackPanel>
 
-                            <ListBox
+                            <ui:ListView
                                 Grid.Row="1"
-                                Margin="8,0,8,8"
                                 Background="Transparent"
                                 BorderThickness="0"
                                 ItemsSource="{Binding DetailedEditGroups}"
                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                                 SelectedItem="{Binding SelectedDetailedEditGroup}">
-                                <ListBox.ItemTemplate>
+                                <ui:ListView.ItemTemplate>
                                     <DataTemplate DataType="{x:Type viewModels:DetailedEditGroupViewModel}">
-                                        <Border
-                                            Margin="0,0,0,8"
-                                            Padding="10"
-                                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                                            CornerRadius="8">
+                                        <Border Padding="10">
                                             <StackPanel>
                                                 <TextBlock
                                                     FontSize="15"
@@ -278,8 +267,8 @@
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                </ui:ListView.ItemTemplate>
+                            </ui:ListView>
                         </Grid>
                     </Border>
 

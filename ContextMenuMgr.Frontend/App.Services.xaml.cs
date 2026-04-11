@@ -19,6 +19,7 @@ public partial class App
         services.AddSingleton<RuleDictionaryCatalogService>();
         services.AddSingleton<EnhanceMenuRuleService>();
         services.AddSingleton<DetailedEditRuleService>();
+        services.AddSingleton<Windows11ContextMenuService>();
         services.AddSingleton<ContextMenuItemActionsService>();
         services.AddSingleton<IBackendClient, NamedPipeBackendClient>();
         services.AddSingleton<IBackendServiceManager, BackendServiceManager>();
@@ -38,6 +39,7 @@ public partial class App
         services.AddSingleton<ComputerContextMenuPageViewModel>();
         services.AddSingleton<RecycleBinContextMenuPageViewModel>();
         services.AddSingleton<FileTypesPageViewModel>();
+        services.AddSingleton<Windows11ContextMenuPageViewModel>();
         services.AddSingleton<OtherRulesPageViewModel>();
         services.AddSingleton<ApprovalsPageViewModel>();
         services.AddSingleton<SettingsPageViewModel>();
@@ -53,6 +55,7 @@ public partial class App
         services.AddSingleton<ComputerContextMenuPage>();
         services.AddSingleton<RecycleBinContextMenuPage>();
         services.AddSingleton<FileTypesPage>();
+        services.AddSingleton<Windows11ContextMenuPage>();
         services.AddSingleton<OtherRulesPage>();
         services.AddSingleton<ApprovalsPage>();
         services.AddSingleton<SettingsPage>();

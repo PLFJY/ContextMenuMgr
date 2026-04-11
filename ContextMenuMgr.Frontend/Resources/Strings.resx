@@ -645,6 +645,27 @@
   <data name="FileTypesPageTitle" xml:space="preserve">
     <value>File Types</value>
   </data>
+  <data name="Windows11PageTitle" xml:space="preserve">
+    <value>Win11 New Menu</value>
+  </data>
+  <data name="Windows11PageDescription" xml:space="preserve">
+    <value>Manage packaged-app entries that appear in the Windows 11 modern context menu. This first pass supports enable and disable only.</value>
+  </data>
+  <data name="Windows11NoItems" xml:space="preserve">
+    <value>No manageable Windows 11 modern context-menu entries were found.</value>
+  </data>
+  <data name="Windows11PackageFamilyLabel" xml:space="preserve">
+    <value>Package family</value>
+  </data>
+  <data name="Windows11PublisherLabel" xml:space="preserve">
+    <value>Publisher</value>
+  </data>
+  <data name="Windows11ContextTypesLabel" xml:space="preserve">
+    <value>Applies to</value>
+  </data>
+  <data name="Windows11MachineBlockedText" xml:space="preserve">
+    <value>Blocked at machine scope</value>
+  </data>
   <data name="OtherRulesPageTitle" xml:space="preserve">
     <value>Other Rules</value>
   </data>

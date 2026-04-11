@@ -69,6 +69,8 @@ public partial class ShellViewModel : ObservableObject
 
     public string FileTypesPageTitle => _localization.Translate("FileTypesPageTitle");
 
+    public string Windows11PageTitle => _localization.Translate("Windows11PageTitle");
+
     public string OtherRulesPageTitle => _localization.Translate("OtherRulesPageTitle");
 
     public string ApprovalsTitle => _localization.Translate("PendingApprovalTitle");
@@ -132,6 +134,7 @@ public partial class ShellViewModel : ObservableObject
         OnPropertyChanged(nameof(ComputerCategoryName));
         OnPropertyChanged(nameof(RecycleBinCategoryName));
         OnPropertyChanged(nameof(FileTypesPageTitle));
+        OnPropertyChanged(nameof(Windows11PageTitle));
         OnPropertyChanged(nameof(OtherRulesPageTitle));
         OnPropertyChanged(nameof(ApprovalsTitle));
         OnPropertyChanged(nameof(SettingsTitle));

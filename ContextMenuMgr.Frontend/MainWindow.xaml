@@ -175,6 +175,10 @@
                         Icon="{ui:SymbolIcon Symbol=DocumentText24}"
                         TargetPageType="{x:Type pages:FileTypesPage}" />
                     <ui:NavigationViewItem
+                        Content="{Binding Windows11PageTitle}"
+                        Icon="{ui:SymbolIcon Symbol=AppsList24}"
+                        TargetPageType="{x:Type pages:Windows11ContextMenuPage}" />
+                    <ui:NavigationViewItem
                         Content="{Binding OtherRulesPageTitle}"
                         Icon="{ui:SymbolIcon Symbol=Settings24}"
                         TargetPageType="{x:Type pages:OtherRulesPage}" />

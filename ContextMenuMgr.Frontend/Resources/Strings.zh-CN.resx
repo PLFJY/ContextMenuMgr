@@ -645,6 +645,27 @@
   <data name="FileTypesPageTitle" xml:space="preserve">
     <value>文件类型</value>
   </data>
+  <data name="Windows11PageTitle" xml:space="preserve">
+    <value>Win11 新菜单</value>
+  </data>
+  <data name="Windows11PageDescription" xml:space="preserve">
+    <value>管理 Windows 11 新版右键菜单中的打包应用项目。当前先支持启用和禁用。</value>
+  </data>
+  <data name="Windows11NoItems" xml:space="preserve">
+    <value>没有找到可管理的 Win11 新菜单项目。</value>
+  </data>
+  <data name="Windows11PackageFamilyLabel" xml:space="preserve">
+    <value>包族名</value>
+  </data>
+  <data name="Windows11PublisherLabel" xml:space="preserve">
+    <value>发布者</value>
+  </data>
+  <data name="Windows11ContextTypesLabel" xml:space="preserve">
+    <value>适用场景</value>
+  </data>
+  <data name="Windows11MachineBlockedText" xml:space="preserve">
+    <value>已被系统范围阻止</value>
+  </data>
   <data name="OtherRulesPageTitle" xml:space="preserve">
     <value>其他规则</value>
   </data>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -11,9 +11,9 @@
     <Title>Context Menu Manager Service</Title>
     <Description>Elevated backend service for Context Menu Manager.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.0.0.0</FileVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.0.0</InformationalVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,9 +33,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="System.ServiceProcess.ServiceController">
-      <HintPath>C:\Program Files\dotnet\sdk\10.0.201\runtimes\win\lib\net10.0\System.ServiceProcess.ServiceController.dll</HintPath>
-    </Reference>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.5" />
   </ItemGroup>
 
 </Project>

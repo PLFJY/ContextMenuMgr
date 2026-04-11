@@ -93,6 +93,13 @@ public sealed class FileTypesPage : NavigationPageHost<FileTypesPageView>
     }
 }
 
+public sealed class Windows11ContextMenuPage : NavigationPageHost<Windows11ContextMenuPageView>
+{
+    public Windows11ContextMenuPage(Windows11ContextMenuPageViewModel viewModel) : base(viewModel)
+    {
+    }
+}
+
 public sealed class OtherRulesPage : NavigationPageHost<OtherRulesPageView>
 {
     public OtherRulesPage(OtherRulesPageViewModel viewModel) : base(viewModel)
