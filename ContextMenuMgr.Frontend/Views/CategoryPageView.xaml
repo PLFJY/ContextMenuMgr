@@ -129,16 +129,6 @@
                                                 Visibility="{Binding HasDetectedChange, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <TextBlock FontSize="11" Text="{Binding DetectedChangeBadgeText}" />
                                             </Border>
-                                            <ui:Button
-                                                Width="22"
-                                                Height="22"
-                                                Margin="6,0,0,0"
-                                                Padding="0"
-                                                Appearance="Transparent"
-                                                Command="{Binding DismissDetectedChangeCommand}"
-                                                Icon="{ui:SymbolIcon Symbol=Dismiss24}"
-                                                ToolTip="{Binding DismissDetectedChangeText}"
-                                                Visibility="{Binding CanDismissDetectedChange, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         </WrapPanel>
 
                                         <TextBlock
@@ -168,22 +158,23 @@
                                     Text="{Binding DetectedChangeText}"
                                     TextWrapping="Wrap"
                                     Visibility="{Binding HasDetectedChange, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <DockPanel
-                                    Margin="0,6,0,0"
-                                    Visibility="{Binding HasConsistencyIssue, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <ui:Button
-                                        Width="22"
+                                    <DockPanel
+                                        Margin="0,6,0,0"
+                                        Visibility="{Binding HasConsistencyIssue, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ui:Button
+                                            Width="22"
                                         Height="22"
-                                        Margin="0,0,6,0"
-                                        Padding="0"
-                                        Appearance="Transparent"
-                                        Command="{Binding DismissConsistencyIssueCommand}"
-                                        DockPanel.Dock="Right"
-                                        Icon="{ui:SymbolIcon Symbol=Dismiss24}"
-                                        ToolTip="{Binding DismissConsistencyIssueText}" />
-                                    <TextBlock
-                                        Foreground="#C75000"
-                                        Text="{Binding ConsistencyText}"
+                                            Margin="0,0,6,0"
+                                            Padding="0"
+                                            Appearance="Transparent"
+                                            Command="{Binding DismissDetectedChangeCommand}"
+                                            DockPanel.Dock="Right"
+                                            Icon="{ui:SymbolIcon Symbol=Dismiss24}"
+                                            ToolTip="{Binding DismissAttentionText}"
+                                            Visibility="{Binding CanDismissAttention, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <TextBlock
+                                            Foreground="#C75000"
+                                            Text="{Binding ConsistencyText}"
                                         TextWrapping="Wrap" />
                                 </DockPanel>
                                 <TextBlock

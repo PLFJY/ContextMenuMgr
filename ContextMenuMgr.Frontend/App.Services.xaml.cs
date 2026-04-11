@@ -25,7 +25,7 @@ public partial class App
         services.AddSingleton<ContextMenuWorkspaceService>();
 
         services.AddSingleton<ShellViewModel>();
-        services.AddSingleton<MainWindow>();
+        services.AddTransient<MainWindow>();
 
         services.AddSingleton<FileContextMenuPageViewModel>();
         services.AddSingleton<AllObjectsContextMenuPageViewModel>();

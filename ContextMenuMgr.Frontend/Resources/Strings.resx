@@ -487,10 +487,10 @@
     <value>Startup</value>
   </data>
   <data name="AutoStartOnLoginLabel" xml:space="preserve">
-    <value>Start automatically when I sign in to Windows</value>
+    <value>Start with Windows</value>
   </data>
   <data name="AutoStartOnLoginDescription" xml:space="preserve">
-    <value>When enabled, the frontend is registered in the current user's Windows Run key and starts with a startup argument at sign-in.</value>
+    <value>Launch automatically after sign-in and stay in the system tray.</value>
   </data>
   <data name="LaunchMinimizedLabel" xml:space="preserve">
     <value>Go directly to the tray when auto-started</value>
@@ -511,7 +511,10 @@
     <value>Open config folder</value>
   </data>
   <data name="ProtectionTitle" xml:space="preserve">
-    <value>Protection</value>
+    <value>Enhancement</value>
+  </data>
+  <data name="UtilitiesTitle" xml:space="preserve">
+    <value>Utilities</value>
   </data>
   <data name="LockNewContextMenuItemsLabel" xml:space="preserve">
     <value>Block new context menu items at the registry permission level</value>

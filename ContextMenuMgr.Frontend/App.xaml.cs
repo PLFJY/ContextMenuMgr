@@ -4,7 +4,11 @@ using System.Windows;
 using System.Windows.Threading;
 using System.Threading;
 using ContextMenuMgr.Frontend.Services;
+using ContextMenuMgr.Frontend.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
+using System.Drawing;
+using System.Diagnostics;
+using Forms = System.Windows.Forms;
 
 namespace ContextMenuMgr.Frontend;
 
@@ -24,6 +28,17 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? _activateEvent;
     private CancellationTokenSource? _singleInstanceCts;
     private Task? _singleInstanceListenerTask;
+    private Forms.NotifyIcon? _notifyIcon;
+    private Forms.ToolStripMenuItem? _openMenuItem;
+    private Forms.ToolStripMenuItem? _exitMenuItem;
+    private Icon? _trayIcon;
+    private LocalizationService? _localization;
+    private FrontendSettingsService? _settingsService;
+    private ShellViewModel? _shellViewModel;
+    private Task? _workspaceInitializationTask;
+    private bool _silentStartupToTray;
+    private bool _isExiting;
+    private bool _hasShownTrayHint;
 
     public string[] StartupArguments { get; private set; } = [];
 
@@ -46,24 +61,28 @@ public partial class App : System.Windows.Application
             }
 
             _serviceProvider = BuildServiceProvider();
-            var settings = _serviceProvider.GetRequiredService<FrontendSettingsService>();
-            FrontendDebugLog.Configure(settings.Current.LogLevel);
+            _settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
+            _localization = _serviceProvider.GetRequiredService<LocalizationService>();
+            _shellViewModel = _serviceProvider.GetRequiredService<ShellViewModel>();
+
+            FrontendDebugLog.Configure(_settingsService.Current.LogLevel);
             FrontendDebugLog.StartSession("App startup");
-            _serviceProvider.GetRequiredService<LocalizationService>().ApplyPersistedLanguage();
+            _localization.ApplyPersistedLanguage();
             _serviceProvider.GetRequiredService<ThemeService>().ApplyPersistedTheme();
-            var window = _serviceProvider.GetRequiredService<MainWindow>();
+            SetupTrayIcon();
+
             var isStartupLaunch = StartupArguments.Any(static arg =>
                 string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
-            var startInTray = isStartupLaunch && settings.Current.LaunchMinimized;
-            if (startInTray)
-            {
-                window.PrepareForSilentStartupToTray();
-            }
+            _silentStartupToTray = isStartupLaunch && _settingsService.Current.AutoStartOnLogin;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            _workspaceInitializationTask = _shellViewModel.InitializeAsync(isStartupLaunch);
 
-            MainWindow = window;
-            window.Show();
+            if (!_silentStartupToTray)
+            {
+                ShowMainWindow();
+            }
         }
         catch (Exception ex)
         {
@@ -80,6 +99,9 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            _isExiting = true;
+            _notifyIcon?.Dispose();
+            _trayIcon?.Dispose();
             _singleInstanceCts?.Cancel();
             _activateEvent?.Set();
             _singleInstanceListenerTask?.Wait(TimeSpan.FromSeconds(1));
@@ -95,6 +117,14 @@ public partial class App : System.Windows.Application
             _singleInstanceCts = null;
             _activateEvent?.Dispose();
             _activateEvent = null;
+            _notifyIcon = null;
+            _trayIcon = null;
+            _openMenuItem = null;
+            _exitMenuItem = null;
+            _localization = null;
+            _settingsService = null;
+            _shellViewModel = null;
+            _workspaceInitializationTask = null;
             if (_ownsSingleInstanceMutex)
             {
                 _singleInstanceMutex?.ReleaseMutex();
@@ -154,10 +184,7 @@ public partial class App : System.Windows.Application
 
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    if (MainWindow is MainWindow window)
-                    {
-                        window.BringToForeground();
-                    }
+                    ShowMainWindow(forceActivate: true);
                 });
             }
             catch (OperationCanceledException)
@@ -238,5 +265,202 @@ public partial class App : System.Windows.Application
         catch
         {
         }
+    }
+
+    public void MinimizeToTray(bool showNotification = true)
+    {
+        if (_isExiting)
+        {
+            return;
+        }
+
+        if (MainWindow is MainWindow window)
+        {
+            BeginDestroyWindowToTray(window, showNotification);
+            return;
+        }
+
+        ShowTrayHint(showNotification);
+    }
+
+    public void BeginDestroyWindowToTray(MainWindow window, bool showNotification = true)
+    {
+        if (_isExiting)
+        {
+            return;
+        }
+
+        // Normalize state before destroying the window so the next recreated
+        // instance does not visually resume from a minimized shell state.
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Hide();
+        window.ShowInTaskbar = false;
+        ShowTrayHint(showNotification);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isExiting)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(MainWindow, window))
+            {
+                MainWindow = null;
+            }
+
+            window.AllowCloseToTray();
+            if (window.IsLoaded)
+            {
+                window.Close();
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private void ShowTrayHint(bool showNotification)
+    {
+        if (_silentStartupToTray)
+        {
+            return;
+        }
+
+        if (!showNotification || _hasShownTrayHint || _notifyIcon is null || _localization is null)
+        {
+            return;
+        }
+
+        _notifyIcon.BalloonTipTitle = _localization.Translate("TrayBackgroundInfoTitle");
+        _notifyIcon.BalloonTipText = _localization.Translate("TrayBackgroundInfoText");
+        _notifyIcon.ShowBalloonTip(2500);
+        _hasShownTrayHint = true;
+    }
+
+    private void ShowMainWindow(bool forceActivate = false)
+    {
+        if (_serviceProvider is null || _isExiting)
+        {
+            return;
+        }
+
+        if (MainWindow is not MainWindow window)
+        {
+            window = _serviceProvider.GetRequiredService<MainWindow>();
+            MainWindow = window;
+            window.WindowState = WindowState.Normal;
+            window.ShowInTaskbar = true;
+            window.Show();
+        }
+
+        _silentStartupToTray = false;
+        window.ShowInTaskbar = true;
+        if (!window.IsVisible)
+        {
+            window.Show();
+        }
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        if (forceActivate)
+        {
+            var previousTopmost = window.Topmost;
+            window.Topmost = true;
+            window.Activate();
+            window.Topmost = previousTopmost;
+            window.Focus();
+        }
+        else
+        {
+            window.Activate();
+        }
+    }
+
+    private void SetupTrayIcon()
+    {
+        if (_localization is null || _shellViewModel is null)
+        {
+            return;
+        }
+
+        _trayIcon = LoadTrayIcon();
+        _openMenuItem = new Forms.ToolStripMenuItem();
+        _openMenuItem.Click += (_, _) => ShowMainWindow(forceActivate: true);
+
+        _exitMenuItem = new Forms.ToolStripMenuItem();
+        _exitMenuItem.Click += (_, _) => ExitFromTray();
+
+        var trayMenu = new Forms.ContextMenuStrip();
+        trayMenu.Items.AddRange([_openMenuItem, _exitMenuItem]);
+
+        _notifyIcon = new Forms.NotifyIcon
+        {
+            Icon = _trayIcon,
+            Visible = true,
+            ContextMenuStrip = trayMenu
+        };
+        _notifyIcon.DoubleClick += (_, _) => ShowMainWindow(forceActivate: true);
+
+        ApplyTrayLocalization();
+        _localization.LanguageChanged += (_, _) => ApplyTrayLocalization();
+        _shellViewModel.PendingApprovalDetected += OnPendingApprovalDetected;
+    }
+
+    private void ApplyTrayLocalization()
+    {
+        if (_notifyIcon is null || _openMenuItem is null || _exitMenuItem is null || _localization is null)
+        {
+            return;
+        }
+
+        _notifyIcon.Text = _localization.Translate("TrayTooltip");
+        _openMenuItem.Text = _localization.Translate("TrayOpen");
+        _exitMenuItem.Text = _localization.Translate("TrayExit");
+    }
+
+    private void OnPendingApprovalDetected(object? sender, ContextMenuMgr.Contracts.ContextMenuEntry entry)
+    {
+        if (_notifyIcon is null || _localization is null)
+        {
+            return;
+        }
+
+        _notifyIcon.BalloonTipTitle = _localization.Translate("PendingApprovalSystemNotificationTitle");
+        _notifyIcon.BalloonTipText = _localization.Format("PendingApprovalSystemNotificationMessage", entry.DisplayName);
+        _notifyIcon.ShowBalloonTip(4000);
+    }
+
+    private void ExitFromTray()
+    {
+        try
+        {
+            _isExiting = true;
+            if (MainWindow is MainWindow window)
+            {
+                window.PrepareForAppShutdown();
+            }
+
+            _notifyIcon?.Dispose();
+            _notifyIcon = null;
+            Shutdown();
+            Environment.Exit(0);
+        }
+        catch
+        {
+            Process.GetCurrentProcess().Kill();
+        }
+    }
+
+    private static Icon LoadTrayIcon()
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        return File.Exists(iconPath)
+            ? new Icon(iconPath)
+            : (Icon)SystemIcons.Application.Clone();
     }
 }

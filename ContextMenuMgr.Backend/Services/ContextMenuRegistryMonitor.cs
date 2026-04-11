@@ -55,6 +55,15 @@ public sealed class ContextMenuRegistryMonitor
                         continue;
                     }
 
+                    // Items stored in the persisted state can appear later than the initial
+                    // monitor baseline, especially for per-user HKCU/HKU classes that become
+                    // visible after the service has already started. Only truly brand-new
+                    // items should be auto-quarantined for review.
+                    if (item.DetectedChangeKind != ContextMenuChangeKind.Added)
+                    {
+                        continue;
+                    }
+
                     await _logger.LogAsync($"Detected new menu item: {item.DisplayName}", cancellationToken);
                     ItemDetected?.Invoke(this, item);
                 }

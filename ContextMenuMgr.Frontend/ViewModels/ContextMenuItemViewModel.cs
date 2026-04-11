@@ -243,6 +243,8 @@ public partial class ContextMenuItemViewModel : ObservableObject
 
     public bool CanDismissDetectedChange => HasDetectedChange;
 
+    public bool CanDismissAttention => HasDetectedChange || HasConsistencyIssue;
+
     public string DetectedChangeBadgeText => _localization.Translate(DetectedChangeKind switch
     {
         ContextMenuChangeKind.Added => "ChangeKindAdded",
@@ -291,6 +293,8 @@ public partial class ContextMenuItemViewModel : ObservableObject
     public string DismissDetectedChangeText => _localization.Translate("DismissDetectedChange");
 
     public string DismissConsistencyIssueText => _localization.Translate("DismissDetectedChange");
+
+    public string DismissAttentionText => _localization.Translate("DismissDetectedChange");
 
     public string OtherAttributesTitle => _localization.Translate("OtherAttributesTitle");
 
@@ -645,6 +649,7 @@ public partial class ContextMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(PermanentDeleteConfirmationText));
         OnPropertyChanged(nameof(DismissDetectedChangeText));
         OnPropertyChanged(nameof(DismissConsistencyIssueText));
+        OnPropertyChanged(nameof(DismissAttentionText));
     }
 
     partial void OnIsDetectedChangeDismissedChanged(bool value)
@@ -654,6 +659,8 @@ public partial class ContextMenuItemViewModel : ObservableObject
             DetectedChangeKind = ContextMenuChangeKind.None;
             DetectedChangeDetails = null;
         }
+
+        OnPropertyChanged(nameof(CanDismissAttention));
     }
 
     partial void OnIsConsistencyIssueDismissedChanged(bool value)
@@ -663,6 +670,8 @@ public partial class ContextMenuItemViewModel : ObservableObject
             HasConsistencyIssue = false;
             ConsistencyIssue = null;
         }
+
+        OnPropertyChanged(nameof(CanDismissAttention));
     }
 
     [RelayCommand]

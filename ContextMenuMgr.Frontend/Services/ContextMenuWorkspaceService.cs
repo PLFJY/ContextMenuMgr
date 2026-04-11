@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.ViewModels;
@@ -14,7 +15,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly LocalizationService _localization;
     private readonly HashSet<string> _seenPendingApprovalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenChangedItemIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private bool _pendingApprovalBaselineInitialized;
+    private bool _initialized;
     private ServiceAttentionState _serviceAttentionState = ServiceAttentionState.None;
 
     public ContextMenuWorkspaceService(
@@ -47,6 +50,14 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     public async Task InitializeAsync(bool suppressBootstrapPrompt = false)
     {
+        await _initializeLock.WaitAsync();
+        try
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
         FrontendDebugLog.Info(
             "ContextMenuWorkspaceService",
             $"InitializeAsync started. SuppressBootstrapPrompt={suppressBootstrapPrompt}");
@@ -55,6 +66,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             await _backendClient.ConnectAsync(CancellationToken.None);
             await RefreshAsync();
+            _initialized = true;
             return;
         }
 
@@ -63,6 +75,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 ? ServiceAttentionState.Unavailable
                 : ServiceAttentionState.Missing);
         ConnectionStatus = _localization.Translate("BackendUnavailableStatusStandalone");
+        }
+        finally
+        {
+            _initializeLock.Release();
+        }
     }
 
     public async Task RefreshAsync()

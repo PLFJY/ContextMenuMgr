@@ -1192,6 +1192,7 @@ public sealed class ContextMenuRegistryCatalog
         dirty |= UpdateIfChanged(state.DisplayName, entry.DisplayName, value => state.DisplayName = value);
         dirty |= UpdateIfChanged(state.EditableText, entry.EditableText, value => state.EditableText = value);
         dirty |= UpdateIfChanged(state.RegistryPath, entry.RegistryPath, value => state.RegistryPath = value);
+        dirty |= UpdateIfChanged(state.BackendRegistryPath, entry.BackendRegistryPath, value => state.BackendRegistryPath = value);
         dirty |= UpdateIfChanged(state.SourceRootPath, entry.SourceRootPath, value => state.SourceRootPath = value);
         dirty |= UpdateIfChanged(state.CommandText, entry.CommandText, value => state.CommandText = value);
         dirty |= UpdateIfChanged(state.HandlerClsid, entry.HandlerClsid, value => state.HandlerClsid = value);
@@ -1245,6 +1246,7 @@ public sealed class ContextMenuRegistryCatalog
             DisplayName = state.DisplayName,
             EditableText = state.EditableText,
             RegistryPath = state.RegistryPath,
+            BackendRegistryPath = state.BackendRegistryPath,
             SourceRootPath = state.SourceRootPath,
             CommandText = state.CommandText,
             HandlerClsid = state.HandlerClsid,
@@ -1287,7 +1289,30 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void PruneTransientStates(IDictionary<string, PersistedContextMenuState> states)
     {
-        _ = states;
+        foreach (var staleId in states
+                     .Where(static pair => ShouldPruneTransientState(pair.Value))
+                     .Select(static pair => pair.Key)
+                     .ToList())
+        {
+            states.Remove(staleId);
+        }
+    }
+
+    private static bool ShouldPruneTransientState(PersistedContextMenuState state)
+    {
+        // Keep the long-lived monitoring baseline for the real monitored roots,
+        // but drop neutral leftovers from scene pages or previous buggy versions
+        // so they do not pollute future startup comparisons.
+        if (MonitoredStableRootPaths.Contains(state.SourceRootPath))
+        {
+            return false;
+        }
+
+        return !state.IsDeleted
+               && !state.IsPendingApproval
+               && !state.SuppressNextDetection
+               && state.DesiredEnabled is null
+               && string.IsNullOrWhiteSpace(state.BackupFilePath);
     }
 
     private static bool HasObservedChange(ContextMenuEntry entry, PersistedContextMenuState state)

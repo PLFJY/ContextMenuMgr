@@ -61,13 +61,11 @@ public partial class SettingsPageViewModel : ObservableObject
         AutoStartOnLogin = _startupService.IsAutoStartEnabled();
         _suppressAutoStartSync = false;
         _settingsService.UpdateAutoStartOnLogin(AutoStartOnLogin);
-        StartMinimized = _settingsService.Current.LaunchMinimized;
         LockNewContextMenuItems = _settingsService.Current.LockNewContextMenuItems;
 
         _localization.LanguageChanged += OnLanguageChanged;
         RefreshLocalizedText();
         RefreshServiceState();
-        OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
         _ = LoadRegistryProtectionSettingAsync();
     }
 
@@ -88,9 +86,6 @@ public partial class SettingsPageViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool AutoStartOnLogin { get; set; }
-
-    [ObservableProperty]
-    public partial bool StartMinimized { get; set; }
 
     [ObservableProperty]
     public partial bool LockNewContextMenuItems { get; set; }
@@ -116,13 +111,9 @@ public partial class SettingsPageViewModel : ObservableObject
 
     public string AutoStartOnLoginDescription => _localization.Translate("AutoStartOnLoginDescription");
 
-    public string LaunchMinimizedLabel => _localization.Translate("LaunchMinimizedLabel");
-
-    public string LaunchMinimizedDescription => _localization.Translate("LaunchMinimizedDescription");
-
-    public bool CanConfigureStartupTrayBehavior => AutoStartOnLogin;
-
     public string ProtectionTitle => _localization.Translate("ProtectionTitle");
+
+    public string UtilitiesTitle => _localization.Translate("UtilitiesTitle");
 
     public string LockNewContextMenuItemsLabel => _localization.Translate("LockNewContextMenuItemsLabel");
 
@@ -179,11 +170,6 @@ public partial class SettingsPageViewModel : ObservableObject
         FrontendDebugLog.Configure(value.Option);
     }
 
-    partial void OnStartMinimizedChanged(bool value)
-    {
-        _settingsService.UpdateLaunchMinimized(value);
-    }
-
     partial void OnAutoStartOnLoginChanged(bool value)
     {
         if (_suppressAutoStartSync)
@@ -206,10 +192,6 @@ public partial class SettingsPageViewModel : ObservableObject
             _ = FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("StartupBehaviorTitle"));
-        }
-        finally
-        {
-            OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
         }
     }
 
@@ -310,10 +292,8 @@ public partial class SettingsPageViewModel : ObservableObject
         OnPropertyChanged(nameof(StartupBehaviorTitle));
         OnPropertyChanged(nameof(AutoStartOnLoginLabel));
         OnPropertyChanged(nameof(AutoStartOnLoginDescription));
-        OnPropertyChanged(nameof(LaunchMinimizedLabel));
-        OnPropertyChanged(nameof(LaunchMinimizedDescription));
-        OnPropertyChanged(nameof(CanConfigureStartupTrayBehavior));
         OnPropertyChanged(nameof(ProtectionTitle));
+        OnPropertyChanged(nameof(UtilitiesTitle));
         OnPropertyChanged(nameof(LockNewContextMenuItemsLabel));
         OnPropertyChanged(nameof(LockNewContextMenuItemsDescription));
         OnPropertyChanged(nameof(ServiceSettingsTitle));
