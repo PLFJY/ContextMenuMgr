@@ -1,3 +1,7 @@
+#if MyUseDotNetDependencyInstaller == "1"
+  #include "InnoDependencyInstaller\CodeDependencies.iss"
+#endif
+
 #ifndef MyAppId
   #define MyAppId "45156332-3408-47B7-B5D2-2567E5888F64"
 #endif
@@ -20,6 +24,10 @@
 
 #ifndef MyArchitecturesInstallIn64BitMode
   #define MyArchitecturesInstallIn64BitMode "x64compatible"
+#endif
+
+#ifndef MyUseDotNetDependencyInstaller
+  #define MyUseDotNetDependencyInstaller "0"
 #endif
 
 #define MyAppName "Context Menu Manager"
@@ -46,7 +54,9 @@ DefaultDirName={autopf}\{#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 DisableWelcomePage=no
 DisableReadyPage=yes
+#if MyArchitecturesAllowed != ""
 ArchitecturesAllowed={#MyArchitecturesAllowed}
+#endif
 #if MyArchitecturesInstallIn64BitMode != ""
 ArchitecturesInstallIn64BitMode={#MyArchitecturesInstallIn64BitMode}
 #endif
@@ -77,6 +87,14 @@ procedure InitializeWizard();
 begin
   WizardForm.LicenseAcceptedRadio.Checked := True;
 end;
+
+#if MyUseDotNetDependencyInstaller == "1"
+function InitializeSetup: Boolean;
+begin
+  Dependency_AddDotNet100Desktop;
+  Result := True;
+end;
+#endif
 
 function RunHidden(const FileName, Params: string): Integer;
 var

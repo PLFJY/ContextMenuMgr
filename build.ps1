@@ -2,7 +2,8 @@
 param(
     [string] $Configuration = "Release",
     [string] $AppId = "45156332-3408-47B7-B5D2-2567E5888F64",
-    [string[]] $Platforms = @("win-amd64", "win-x86", "win-arm64")
+    [string[]] $Platforms = @("win-amd64", "win-x86", "win-arm64"),
+    [string[]] $DistributionModes = @("self-contained", "framework-dependent")
 )
 
 Set-StrictMode -Version Latest
@@ -100,6 +101,31 @@ function Get-InstallerArchitectureOptions {
     }
 }
 
+function Get-DistributionModeOptions {
+    param([Parameter(Mandatory)] [string] $DistributionMode)
+
+    switch ($DistributionMode.ToLowerInvariant()) {
+        "self-contained" {
+            return @{
+                SelfContained = "true"
+                InstallerSuffix = "self-contained"
+                UseDotNetDependencyInstaller = "0"
+            }
+        }
+        "framework-dependent" {
+            return @{
+                SelfContained = "false"
+                InstallerSuffix = "framework-dependent"
+                UseDotNetDependencyInstaller = "1"
+                IsPlatformSpecific = $false
+            }
+        }
+        default {
+            throw "Unsupported distribution mode '$DistributionMode'. Supported values: self-contained, framework-dependent."
+        }
+    }
+}
+
 function Resolve-IsccPath {
     param([Parameter(Mandatory)] [string] $RepoRoot)
 
@@ -159,56 +185,104 @@ Invoke-External -FilePath "dotnet" -Arguments @(
 
 $installers = New-Object System.Collections.Generic.List[string]
 
-foreach ($platform in $Platforms) {
-    $runtimeIdentifier = Get-RuntimeIdentifier -Platform $platform
-    $publishDir = Join-Path $PublishRoot $platform
-
-    if (Test-Path -LiteralPath $publishDir) {
-        Remove-Item -LiteralPath $publishDir -Recurse -Force
+foreach ($distributionMode in $DistributionModes) {
+    $distributionOptions = Get-DistributionModeOptions -DistributionMode $distributionMode
+    $targetPlatforms = if ($distributionOptions.ContainsKey("IsPlatformSpecific") -and -not $distributionOptions.IsPlatformSpecific) {
+        @("")
+    }
+    else {
+        $Platforms
     }
 
-    New-Item -ItemType Directory -Path $publishDir | Out-Null
+    foreach ($platform in $targetPlatforms) {
+        $isPlatformSpecific = -not [string]::IsNullOrWhiteSpace($platform)
+        $publishDir = if ($isPlatformSpecific) {
+            Join-Path $PublishRoot (Join-Path $distributionMode $platform)
+        }
+        else {
+            Join-Path $PublishRoot $distributionMode
+        }
 
-    Invoke-External -FilePath "dotnet" -Arguments @(
-        "publish", $FrontendProject,
-        "-c", $Configuration,
-        "-r", $runtimeIdentifier,
-        "--self-contained", "true",
-        "-p:UseAppHost=true",
-        "-o", $publishDir
-    ) -ErrorMessage "dotnet publish failed for frontend ($platform)"
+        if (Test-Path -LiteralPath $publishDir) {
+            Remove-Item -LiteralPath $publishDir -Recurse -Force
+        }
 
-    Invoke-External -FilePath "dotnet" -Arguments @(
-        "publish", $BackendProject,
-        "-c", $Configuration,
-        "-r", $runtimeIdentifier,
-        "--self-contained", "true",
-        "-p:UseAppHost=true",
-        "-o", $publishDir
-    ) -ErrorMessage "dotnet publish failed for backend ($platform)"
+        New-Item -ItemType Directory -Path $publishDir | Out-Null
 
-    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.exe") -Description "Frontend executable"
-    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.exe") -Description "Backend service executable"
-    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.dll") -Description "Backend service DLL"
+        $frontendArguments = @(
+            "publish", $FrontendProject,
+            "-c", $Configuration,
+            "--self-contained", $distributionOptions.SelfContained,
+            "-p:UseAppHost=true",
+            "-o", $publishDir
+        )
+        $backendArguments = @(
+            "publish", $BackendProject,
+            "-c", $Configuration,
+            "--self-contained", $distributionOptions.SelfContained,
+            "-p:UseAppHost=true",
+            "-o", $publishDir
+        )
 
-    $installerOptions = Get-InstallerArchitectureOptions -Platform $platform
-    $setupBaseName = "ContextMenuManager-$Version-$platform-Setup"
+        if ($isPlatformSpecific) {
+            $runtimeIdentifier = Get-RuntimeIdentifier -Platform $platform
+            $frontendArguments = @(
+                "publish", $FrontendProject,
+                "-c", $Configuration,
+                "-r", $runtimeIdentifier,
+                "--self-contained", $distributionOptions.SelfContained,
+                "-p:UseAppHost=true",
+                "-o", $publishDir
+            )
+            $backendArguments = @(
+                "publish", $BackendProject,
+                "-c", $Configuration,
+                "-r", $runtimeIdentifier,
+                "--self-contained", $distributionOptions.SelfContained,
+                "-p:UseAppHost=true",
+                "-o", $publishDir
+            )
+        }
 
-    $isccArguments = @(
-        "/DMyArchitecturesAllowed=$($installerOptions.Allowed)",
-        "/DMyArchitecturesInstallIn64BitMode=$($installerOptions.InstallIn64BitMode)",
-        "/DMyAppId=$AppId",
-        "/DMyAppBuildDir=$publishDir",
-        "/DMyOutputDir=$DistRoot",
-        "/DMyAppSetupName=$setupBaseName",
-        $InstallerIss
-    )
+        $platformLabel = if ($isPlatformSpecific) { $platform } else { "generic" }
 
-    Invoke-External -FilePath $IsccPath -Arguments $isccArguments -ErrorMessage "Inno Setup packaging failed for $platform"
+        Invoke-External -FilePath "dotnet" -Arguments $frontendArguments -ErrorMessage "dotnet publish failed for frontend ($platformLabel, $distributionMode)"
 
-    $installerPath = Join-Path $DistRoot ($setupBaseName + ".exe")
-    Ensure-FileExists -Path $installerPath -Description "Installer package"
-    $installers.Add($installerPath) | Out-Null
+        Invoke-External -FilePath "dotnet" -Arguments $backendArguments -ErrorMessage "dotnet publish failed for backend ($platformLabel, $distributionMode)"
+
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.exe") -Description "Frontend executable"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.exe") -Description "Backend service executable"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.dll") -Description "Backend service DLL"
+
+        if ($isPlatformSpecific) {
+            $installerOptions = Get-InstallerArchitectureOptions -Platform $platform
+            $setupBaseName = "ContextMenuManager-$Version-$platform-$($distributionOptions.InstallerSuffix)-Setup"
+        }
+        else {
+            $installerOptions = @{
+                Allowed = ""
+                InstallIn64BitMode = ""
+            }
+            $setupBaseName = "ContextMenuManager-$Version-$($distributionOptions.InstallerSuffix)-Setup"
+        }
+
+        $isccArguments = @(
+            "/DMyArchitecturesAllowed=$($installerOptions.Allowed)",
+            "/DMyArchitecturesInstallIn64BitMode=$($installerOptions.InstallIn64BitMode)",
+            "/DMyUseDotNetDependencyInstaller=$($distributionOptions.UseDotNetDependencyInstaller)",
+            "/DMyAppId=$AppId",
+            "/DMyAppBuildDir=$publishDir",
+            "/DMyOutputDir=$DistRoot",
+            "/DMyAppSetupName=$setupBaseName",
+            $InstallerIss
+        )
+
+        Invoke-External -FilePath $IsccPath -Arguments $isccArguments -ErrorMessage "Inno Setup packaging failed for $platformLabel ($distributionMode)"
+
+        $installerPath = Join-Path $DistRoot ($setupBaseName + ".exe")
+        Ensure-FileExists -Path $installerPath -Description "Installer package"
+        $installers.Add($installerPath) | Out-Null
+    }
 }
 
 $manifestPath = Join-Path $DistRoot "artifacts.txt"
