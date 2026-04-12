@@ -69,16 +69,17 @@ jobs:
           git fetch --tags --force
           $previousTag = git tag --sort=-version:refname | Select-Object -First 1
 
-          $releaseBody = New-Object System.Collections.Generic.List[string]
-          $releaseBody.Add("## Changes")
-          $releaseBody.Add("")
+          $releaseBodyLines = @(
+            '## Changes'
+            ''
+          )
 
           if ([string]::IsNullOrWhiteSpace($previousTag)) {
-            $releaseBody.Add("- Initial release")
+            $releaseBodyLines += '- Initial release'
           }
           else {
-            $releaseBody.Add("Previous tag: `$previousTag`")
-            $releaseBody.Add("")
+            $releaseBodyLines += ('Previous tag: `{0}`' -f $previousTag)
+            $releaseBodyLines += ''
 
             $revisionRange = '{0}..HEAD' -f $previousTag
             $gitLogArguments = @(
@@ -88,12 +89,10 @@ jobs:
             )
             $commitLines = & git @gitLogArguments
             if (-not $commitLines) {
-              $releaseBody.Add("- No commits since the previous tag")
+              $releaseBodyLines += '- No commits since the previous tag'
             }
             else {
-              foreach ($line in $commitLines) {
-                $releaseBody.Add($line)
-              }
+              $releaseBodyLines += $commitLines
             }
           }
 
@@ -102,7 +101,7 @@ jobs:
           "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
           "release_body<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          $releaseBody | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $releaseBodyLines | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install Inno Setup
