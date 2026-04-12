@@ -2,7 +2,7 @@
 param(
     [string] $Configuration = "Release",
     [string] $AppId = "45156332-3408-47B7-B5D2-2567E5888F64",
-    [string[]] $Platforms = @("win-amd64", "win-x86", "win-arm64"),
+    [string[]] $Platforms = @("win-x64", "win-x86", "win-arm64"),
     [string[]] $DistributionModes = @("self-contained", "framework-dependent")
 )
 
@@ -55,10 +55,10 @@ function Get-RuntimeIdentifier {
     param([Parameter(Mandatory)] [string] $Platform)
 
     switch ($Platform.ToLowerInvariant()) {
-        "win-amd64" { return "win-x64" }
+        "win-x64" { return "win-x64" }
         "win-x86" { return "win-x86" }
         "win-arm64" { return "win-arm64" }
-        default { throw "Unsupported platform '$Platform'. Supported values: win-amd64, win-x86, win-arm64." }
+        default { throw "Unsupported platform '$Platform'. Supported values: win-x64, win-x86, win-arm64." }
     }
 }
 
@@ -77,7 +77,7 @@ function Get-InstallerArchitectureOptions {
     param([Parameter(Mandatory)] [string] $Platform)
 
     switch ($Platform.ToLowerInvariant()) {
-        "win-amd64" {
+        "win-x64" {
             return @{
                 Allowed = "x64compatible"
                 InstallIn64BitMode = "x64compatible"
@@ -96,7 +96,7 @@ function Get-InstallerArchitectureOptions {
             }
         }
         default {
-            throw "Unsupported platform '$Platform'. Supported values: win-amd64, win-x86, win-arm64."
+            throw "Unsupported platform '$Platform'. Supported values: win-x64, win-x86, win-arm64."
         }
     }
 }
@@ -117,7 +117,6 @@ function Get-DistributionModeOptions {
                 SelfContained = "false"
                 InstallerSuffix = "framework-dependent"
                 UseDotNetDependencyInstaller = "1"
-                IsPlatformSpecific = $false
             }
         }
         default {
