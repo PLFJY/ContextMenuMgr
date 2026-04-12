@@ -1,53 +1,78 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Security;
+using System.Security.Principal;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Win32;
+using Windows.ApplicationModel;
+using Windows.Management.Deployment;
 
 namespace ContextMenuMgr.Frontend.Services;
 
 public sealed class Windows11ContextMenuService
 {
-    private const string NamespaceCom = "http://schemas.microsoft.com/appx/manifest/com/windows10";
-    private const string NamespaceDesktop4 = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/4";
-    private const string PackageRepositoryPath = @"Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
+    public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
     public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> LoadAsync(CancellationToken cancellationToken)
     {
-        Windows11ContextMenuBlocks.LoadAll();
-        var packages = GetPackagedComPackageNames();
+        if (!IsSupported)
+        {
+            return [];
+        }
+
+        Windows11Blocks.LoadAll();
+        var comPackages = Windows11Packages.GetPackagedComPackages();
+        var packageManager = new PackageManager();
         var items = new ConcurrentDictionary<string, Windows11ContextMenuItemDefinition>(StringComparer.OrdinalIgnoreCase);
 
         await Parallel.ForEachAsync(
-            packages,
+            comPackages,
             new ParallelOptions
             {
-                CancellationToken = cancellationToken,
-                MaxDegreeOfParallelism = 4
+                MaxDegreeOfParallelism = 4,
+                CancellationToken = cancellationToken
             },
             async (fullName, ct) =>
             {
                 try
                 {
                     ct.ThrowIfCancellationRequested();
-                    var package = TryGetPackageInfo(fullName);
+                    var package = Windows11Permissions.IsElevated
+                        ? packageManager.FindPackage(fullName)
+                        : packageManager.FindPackageForUser(string.Empty, fullName);
+
                     if (package is null)
                     {
                         return;
                     }
 
-                    foreach (var definition in await AnalyzeManifestAsync(package, ct))
+                    var version = package.Id.Version;
+                    var pkg = new Windows11PackageInfo(
+                        package.Id.FamilyName,
+                        package.Id.FullName,
+                        package.DisplayName,
+                        package.PublisherDisplayName,
+                        package.Logo.LocalPath,
+                        package.InstalledLocation.Path,
+                        new Version(version.Major, version.Minor, version.Build, version.Revision));
+
+                    var definitions = await Windows11Packages.AnalyzeManifestAsync(pkg, package.IsBundle, ct);
+                    foreach (var definition in definitions)
                     {
-                        if (!items.TryGetValue(definition.Id, out var existing)
-                            || existing.Package.Version < definition.Package.Version)
+                        var materialized = definition with
                         {
-                            items[definition.Id] = definition with
-                            {
-                                IsEnabled = IsEnabled(definition.Id),
-                                IsMachineBlocked = Windows11ContextMenuBlocks.Machine.Contains(definition.Id)
-                            };
+                            IsEnabled = GetIsEnabled(definition.Id),
+                            IsMachineBlocked = Windows11Blocks.Machine.Contains(definition.Id)
+                        };
+
+                        if (!items.TryGetValue(materialized.Id, out var existing)
+                            || existing.Package.Version < materialized.Package.Version)
+                        {
+                            items[materialized.Id] = materialized;
                         }
                     }
                 }
@@ -62,34 +87,37 @@ public sealed class Windows11ContextMenuService
             .ToArray();
     }
 
-    public async Task<bool> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken)
+    public Task<bool> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!enabled && Windows11ContextMenuBlocks.Machine.Contains(id))
+
+        if (!enabled && Windows11Blocks.Machine.Contains(id))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
-        await Task.Run(() =>
+        return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (enabled)
             {
-                Windows11ContextMenuBlocks.User.Remove(id);
+                foreach (var blocks in Windows11Blocks.GetScopes())
+                {
+                    blocks.Remove(id);
+                }
             }
             else
             {
-                Windows11ContextMenuBlocks.User.Add(id);
+                Windows11Blocks.GetScope(Windows11Blocks.WriteScope).Add(id);
             }
-        }, cancellationToken);
 
-        return IsEnabled(id);
+            return GetIsEnabled(id);
+        }, cancellationToken);
     }
 
-    public bool IsEnabled(string id)
+    public bool GetIsEnabled(string id)
     {
-        return !Windows11ContextMenuBlocks.User.Contains(id)
-               && !Windows11ContextMenuBlocks.Machine.Contains(id);
+        return !Windows11Blocks.GetScopes().Any(blocks => blocks.Contains(id));
     }
 
     public ImageSource? LoadLogo(string? logoPath)
@@ -119,55 +147,40 @@ public sealed class Windows11ContextMenuService
             return null;
         }
     }
+}
 
-    private static Windows11PackageInfo? TryGetPackageInfo(string fullName)
+internal static class Windows11Permissions
+{
+    private static readonly Lazy<bool> IsElevatedLazy = new(() =>
     {
-        try
-        {
-            using var key = Registry.ClassesRoot.OpenSubKey($@"{PackageRepositoryPath}\{fullName}");
-            if (key is null)
-            {
-                return null;
-            }
+        using var identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+    });
 
-            var installPath = key.GetValue("PackageRootFolder") as string;
-            if (string.IsNullOrWhiteSpace(installPath) || !Directory.Exists(installPath))
-            {
-                return null;
-            }
+    public static bool IsElevated => IsElevatedLazy.Value;
+}
 
-            var displayName = key.GetValue("DisplayName") as string;
-            var (packageName, version, familyName) = ParsePackageIdentity(fullName);
-            var manifestMetadata = TryReadManifestMetadata(installPath);
-            var resolvedDisplayName = ResolveDisplayName(displayName, packageName);
+internal static class Windows11Packages
+{
+    private const string NamespaceCom = "http://schemas.microsoft.com/appx/manifest/com/windows10";
+    private const string NamespaceDesktop4 = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/4";
 
-            return new Windows11PackageInfo(
-                familyName,
-                fullName,
-                resolvedDisplayName,
-                manifestMetadata.PublisherDisplayName,
-                manifestMetadata.LogoPath,
-                installPath,
-                version);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string[] GetPackagedComPackageNames()
+    public static string[] GetPackagedComPackages()
     {
         using var subKey = Registry.ClassesRoot.OpenSubKey(@"PackagedCom\Package");
         return subKey?.GetSubKeyNames() ?? [];
     }
 
-    private static async Task<IEnumerable<Windows11ContextMenuItemDefinition>> AnalyzeManifestAsync(
+    public static async Task<IEnumerable<Windows11ContextMenuItemDefinition>> AnalyzeManifestAsync(
         Windows11PackageInfo package,
+        bool isBundle,
         CancellationToken cancellationToken)
     {
-        var manifestPath = ResolveManifestPath(package.InstallPath);
-        if (manifestPath is null)
+        var manifestPath = Path.Combine(
+            package.InstallPath,
+            isBundle ? @"AppxMetadata\AppxBundleManifest.xml" : "AppxManifest.xml");
+
+        if (!File.Exists(manifestPath))
         {
             return [];
         }
@@ -179,10 +192,10 @@ public sealed class Windows11ContextMenuService
             DtdProcessing = DtdProcessing.Ignore
         });
 
-        var namespaceResolver = (IXmlNamespaceResolver)reader;
+        var nsResolver = (IXmlNamespaceResolver)reader;
         if (!reader.ReadToFollowing("Package")
-            || namespaceResolver.LookupPrefix(NamespaceDesktop4) is null
-            || namespaceResolver.LookupPrefix(NamespaceCom) is null)
+            || nsResolver.LookupPrefix(NamespaceDesktop4) is null
+            || nsResolver.LookupPrefix(NamespaceCom) is null)
         {
             return [];
         }
@@ -193,6 +206,7 @@ public sealed class Windows11ContextMenuService
         while (await reader.ReadAsync())
         {
             cancellationToken.ThrowIfCancellationRequested();
+
             if (reader.NodeType != XmlNodeType.Element)
             {
                 continue;
@@ -203,27 +217,26 @@ public sealed class Windows11ContextMenuService
                 case "FileExplorerContextMenus":
                 {
                     var element = (XElement)XNode.ReadFrom(reader);
-                    var verbs =
+                    var query =
                         from itemType in element.Elements()
                         where itemType.Name.LocalName == "ItemType"
-                        let type = itemType.Attribute("Type")?.Value
                         from verb in itemType.Elements()
                         where verb.Name.LocalName == "Verb"
-                        let clsid = verb.Attribute("Clsid")?.Value
-                        let id = verb.Attribute("Id")?.Value
-                        let normalizedType = string.Equals(type, "Directory", StringComparison.OrdinalIgnoreCase)
-                            ? type
-                            : $"File: {type}"
-                        group new Windows11ContextMenuVerb(clsid, id, normalizedType) by clsid;
+                        let type = itemType.Attribute("Type")?.Value
+                        let item = new Windows11ContextMenuVerb(
+                            verb.Attribute("Clsid")?.Value,
+                            verb.Attribute("Id")?.Value,
+                            string.Equals(type, "Directory", StringComparison.OrdinalIgnoreCase)
+                                ? type
+                                : $"File: {type}")
+                        group item by item.Clsid;
 
-                    foreach (var verbGroup in verbs)
+                    foreach (var group in query)
                     {
-                        if (string.IsNullOrWhiteSpace(verbGroup.Key))
+                        if (!string.IsNullOrWhiteSpace(group.Key))
                         {
-                            continue;
+                            contextMenus[group.Key] = group.ToList();
                         }
-
-                        contextMenus[verbGroup.Key] = verbGroup.ToList();
                     }
 
                     break;
@@ -231,27 +244,25 @@ public sealed class Windows11ContextMenuService
                 case "ComServer":
                 {
                     var element = (XElement)XNode.ReadFrom(reader);
-                    var servers =
+                    var query =
                         from server in element.Elements()
                         where server.Name.LocalName is "SurrogateServer" or "ExeServer"
                         from cls in server.Elements()
                         where cls.Name.LocalName == "Class"
-                        let id = cls.Attribute("Id")?.Value
-                        let displayName = server.Attribute("DisplayName")?.Value
-                        let executablePath = cls.Attribute("Path")?.Value ?? server.Attribute("Executable")?.Value
-                        let path = string.IsNullOrWhiteSpace(executablePath)
-                            ? null
-                            : Path.Combine(package.InstallPath, executablePath)
-                        group new Windows11ComServerInfo(id, path, displayName) by id;
+                        let item = new Windows11ComServerInfo(
+                            cls.Attribute("Id")?.Value,
+                            Path.Combine(
+                                package.InstallPath,
+                                cls.Attribute("Path")?.Value ?? server.Attribute("Executable")?.Value ?? string.Empty),
+                            server.Attribute("DisplayName")?.Value)
+                        group item by item.Id;
 
-                    foreach (var serverGroup in servers)
+                    foreach (var group in query)
                     {
-                        if (string.IsNullOrWhiteSpace(serverGroup.Key))
+                        if (!string.IsNullOrWhiteSpace(group.Key))
                         {
-                            continue;
+                            comServers[group.Key] = group.First();
                         }
-
-                        comServers[serverGroup.Key] = serverGroup.First();
                     }
 
                     break;
@@ -263,13 +274,11 @@ public sealed class Windows11ContextMenuService
             .Intersect(comServers.Keys, StringComparer.OrdinalIgnoreCase)
             .Select(id =>
             {
-                var verbs = contextMenus[id];
-                var server = comServers[id];
-                var displayName = string.IsNullOrWhiteSpace(server.DisplayName)
+                var comServer = comServers[id];
+                var displayName = string.IsNullOrWhiteSpace(comServer.DisplayName)
                     ? package.DisplayName
-                    : server.DisplayName;
-
-                var contextTypes = verbs
+                    : comServer.DisplayName;
+                var contextTypes = contextMenus[id]
                     .Select(static item => item.Type)
                     .Where(static item => !string.IsNullOrWhiteSpace(item))
                     .Cast<string>()
@@ -280,185 +289,64 @@ public sealed class Windows11ContextMenuService
                     id,
                     displayName ?? package.DisplayName,
                     package,
-                    verbs,
-                    server,
+                    contextMenus[id],
+                    comServer,
                     contextTypes,
                     true,
                     false);
             });
     }
-
-    private static string ResolveDisplayName(string? displayName, string packageName)
-    {
-        if (string.IsNullOrWhiteSpace(displayName)
-            || displayName.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase))
-        {
-            return packageName;
-        }
-
-        return displayName;
-    }
-
-    private static (string PackageName, Version Version, string FamilyName) ParsePackageIdentity(string fullName)
-    {
-        var parts = fullName.Split('_');
-        var packageName = parts.Length > 0 ? parts[0] : fullName;
-        var version = parts.Length > 1 && Version.TryParse(parts[1], out var parsedVersion)
-            ? parsedVersion
-            : new Version(0, 0);
-        var publisherId = parts.Length > 0 ? parts[^1] : "unknown";
-        var familyName = $"{packageName}_{publisherId}";
-        return (packageName, version, familyName);
-    }
-
-    private static Windows11ManifestMetadata TryReadManifestMetadata(string installPath)
-    {
-        try
-        {
-            var manifestPath = ResolveManifestPath(installPath);
-            if (manifestPath is null || !File.Exists(manifestPath))
-            {
-                return Windows11ManifestMetadata.Empty;
-            }
-
-            var document = XDocument.Load(manifestPath);
-            var properties = document.Root?.Elements().FirstOrDefault(static element => element.Name.LocalName == "Properties");
-            if (properties is null)
-            {
-                return Windows11ManifestMetadata.Empty;
-            }
-
-            var publisherDisplayName = NormalizeManifestString(
-                properties.Elements().FirstOrDefault(static element => element.Name.LocalName == "PublisherDisplayName")?.Value);
-
-            var logoRelativePath =
-                FirstNonEmpty(
-                    properties.Elements().FirstOrDefault(static element => element.Name.LocalName == "Logo")?.Value,
-                    document.Descendants().FirstOrDefault(static element => element.Name.LocalName == "VisualElements")
-                        ?.Attributes().FirstOrDefault(static attribute => attribute.Name.LocalName == "Square44x44Logo")?.Value,
-                    document.Descendants().FirstOrDefault(static element => element.Name.LocalName == "VisualElements")
-                        ?.Attributes().FirstOrDefault(static attribute => attribute.Name.LocalName == "Square150x150Logo")?.Value);
-
-            var logoPath = NormalizeLogoPath(installPath, logoRelativePath);
-            return new Windows11ManifestMetadata(publisherDisplayName, logoPath);
-        }
-        catch
-        {
-            return Windows11ManifestMetadata.Empty;
-        }
-    }
-
-    private static string? ResolveManifestPath(string installPath)
-    {
-        var appxManifestPath = Path.Combine(installPath, "AppxManifest.xml");
-        if (File.Exists(appxManifestPath))
-        {
-            return appxManifestPath;
-        }
-
-        var bundleManifestPath = Path.Combine(installPath, @"AppxMetadata\AppxBundleManifest.xml");
-        return File.Exists(bundleManifestPath) ? bundleManifestPath : null;
-    }
-
-    private static string? NormalizeLogoPath(string installPath, string? logoRelativePath)
-    {
-        if (string.IsNullOrWhiteSpace(logoRelativePath))
-        {
-            return null;
-        }
-
-        if (Path.IsPathRooted(logoRelativePath))
-        {
-            return File.Exists(logoRelativePath) ? logoRelativePath : null;
-        }
-
-        var combinedPath = Path.Combine(installPath, logoRelativePath.TrimStart('\\'));
-        return File.Exists(combinedPath) ? combinedPath : null;
-    }
-
-    private static string? NormalizeManifestString(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)
-            || value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return value;
-    }
-
-    private static string? FirstNonEmpty(params string?[] values)
-    {
-        return values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
-    }
 }
 
-public sealed record Windows11ContextMenuItemDefinition(
-    string Id,
-    string DisplayName,
-    Windows11PackageInfo Package,
-    IReadOnlyList<Windows11ContextMenuVerb> ContextMenus,
-    Windows11ComServerInfo ComServer,
-    IReadOnlyList<string> ContextTypes,
-    bool IsEnabled,
-    bool IsMachineBlocked);
-
-public sealed record Windows11PackageInfo(
-    string FamilyName,
-    string FullName,
-    string DisplayName,
-    string? PublisherDisplayName,
-    string? LogoPath,
-    string InstallPath,
-    Version Version);
-
-internal sealed record Windows11ManifestMetadata(
-    string? PublisherDisplayName,
-    string? LogoPath)
+internal sealed class Windows11Blocks : IReadOnlyCollection<string>
 {
-    public static Windows11ManifestMetadata Empty { get; } = new(null, null);
-}
+    internal const string RegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
 
-public sealed record Windows11ContextMenuVerb(
-    string? Clsid,
-    string? Id,
-    string? Type);
-
-public sealed record Windows11ComServerInfo(
-    string? Id,
-    string? Path,
-    string? DisplayName);
-
-internal sealed class Windows11ContextMenuBlocks
-{
-    private const string BlockedRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     private readonly RegistryKey _baseKey;
     private HashSet<string> _items = [];
+    private readonly Lazy<bool> _isReadOnly;
 
-    private Windows11ContextMenuBlocks(RegistryHive hive)
+    private Windows11Blocks(RegistryHive hive)
     {
+        Scope = hive;
         _baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Default);
+        _isReadOnly = new Lazy<bool>(() =>
+        {
+            try
+            {
+                using var subKey = _baseKey.OpenSubKey(RegistryPath, writable: true)
+                                 ?? _baseKey.OpenSubKey(RegistryPath[..RegistryPath.LastIndexOf('\\')], writable: true);
+                return false;
+            }
+            catch (SecurityException)
+            {
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
+        });
     }
 
-    public static Windows11ContextMenuBlocks User { get; } = new(RegistryHive.CurrentUser);
+    public RegistryHive Scope { get; }
 
-    public static Windows11ContextMenuBlocks Machine { get; } = new(RegistryHive.LocalMachine);
+    public bool IsReadOnly => _isReadOnly.Value;
+
+    public int Count => _items.Count;
 
     public void Load()
     {
-        using var subKey = _baseKey.OpenSubKey(BlockedRegistryPath);
+        using var subKey = _baseKey.OpenSubKey(RegistryPath);
         _items = subKey?.GetValueNames()
-            .Select(static name => name.Trim('{', '}'))
+            .Select(static value => value.Trim('{', '}'))
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? [];
     }
 
-    public bool Contains(string id) => _items.Contains(id);
-
     public void Add(string id)
     {
-        using var subKey = _baseKey.OpenSubKey(BlockedRegistryPath, writable: true)
-                         ?? _baseKey.CreateSubKey(BlockedRegistryPath);
+        using var subKey = _baseKey.OpenSubKey(RegistryPath, writable: true) ?? _baseKey.CreateSubKey(RegistryPath);
         subKey.SetValue(ToRegistryName(id), string.Empty);
         _items.Add(id);
     }
@@ -470,16 +358,81 @@ internal sealed class Windows11ContextMenuBlocks
             return;
         }
 
-        using var subKey = _baseKey.OpenSubKey(BlockedRegistryPath, writable: true);
-        subKey?.DeleteValue(ToRegistryName(id), throwOnMissingValue: false);
+        using var subKey = _baseKey.OpenSubKey(RegistryPath, writable: true);
+        if (subKey is null)
+        {
+            _items = [];
+            return;
+        }
+
+        subKey.DeleteValue(ToRegistryName(id), throwOnMissingValue: false);
         _items.Remove(id);
+    }
+
+    public bool Contains(string id) => _items.Contains(id);
+
+    public IEnumerator<string> GetEnumerator() => _items.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public static Windows11Blocks User { get; } = new(RegistryHive.CurrentUser);
+
+    public static Windows11Blocks Machine { get; } = new(RegistryHive.LocalMachine);
+
+    public static RegistryHive WriteScope { get; set; } = RegistryHive.CurrentUser;
+
+    public static IEnumerable<Windows11Blocks> GetScopes()
+    {
+        yield return User;
+        yield return Machine;
+    }
+
+    public static Windows11Blocks GetScope(RegistryHive hive)
+    {
+        return hive switch
+        {
+            RegistryHive.CurrentUser => User,
+            RegistryHive.LocalMachine => Machine,
+            _ => throw new ArgumentOutOfRangeException(nameof(hive), hive, null)
+        };
     }
 
     public static void LoadAll()
     {
-        User.Load();
-        Machine.Load();
+        foreach (var blocks in GetScopes())
+        {
+            blocks.Load();
+        }
     }
 
-    private static string ToRegistryName(string id) => $"{{{id}}}";
+    private static string ToRegistryName(string value) => '{' + value + '}';
 }
+
+public sealed record Windows11PackageInfo(
+    string FamilyName,
+    string FullName,
+    string DisplayName,
+    string PublisherDisplayName,
+    string LogoPath,
+    string InstallPath,
+    Version Version);
+
+public sealed record Windows11ContextMenuVerb(
+    string? Clsid,
+    string? Id,
+    string? Type);
+
+public sealed record Windows11ComServerInfo(
+    string? Id,
+    string? Path,
+    string? DisplayName);
+
+public sealed record Windows11ContextMenuItemDefinition(
+    string Id,
+    string DisplayName,
+    Windows11PackageInfo Package,
+    IReadOnlyList<Windows11ContextMenuVerb> ContextMenus,
+    Windows11ComServerInfo ComServer,
+    IReadOnlyList<string> ContextTypes,
+    bool IsEnabled,
+    bool IsMachineBlocked);

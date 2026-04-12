@@ -225,14 +225,24 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             var states = await _stateStore.LoadAsync(cancellationToken);
-            var state = GetOrCreateState(states, item);
-            state.DesiredEnabled = enable;
-            state.ObservedEnabled = enable;
-            state.IsDeleted = false;
-            state.IsPendingApproval = false;
-            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-            state.DeletedAtUtc = null;
-            state.BackupFilePath = null;
+            var linkedEntries = GetStateLinkedEntries(snapshot, item);
+            foreach (var linkedEntry in linkedEntries)
+            {
+                var state = GetOrCreateState(states, linkedEntry);
+                state.DesiredEnabled = enable;
+                state.ObservedEnabled = enable;
+                state.IsDeleted = false;
+                state.IsPendingApproval = false;
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                state.DeletedAtUtc = null;
+                state.BackupFilePath = null;
+            }
+
+            if (item.EntryKind == ContextMenuEntryKind.ShellExtension)
+            {
+                UpdateLinkedShellExtensionPersistedStates(states, item.HandlerClsid, enable);
+            }
+
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
 
@@ -1285,6 +1295,45 @@ public sealed class ContextMenuRegistryCatalog
         var state = PersistedContextMenuState.FromEntry(entry);
         states[entry.Id] = state;
         return state;
+    }
+
+    private static IReadOnlyList<ContextMenuEntry> GetStateLinkedEntries(
+        IReadOnlyList<ContextMenuEntry> snapshot,
+        ContextMenuEntry item)
+    {
+        if (item.EntryKind != ContextMenuEntryKind.ShellExtension || string.IsNullOrWhiteSpace(item.HandlerClsid))
+        {
+            return [item];
+        }
+
+        return snapshot
+            .Where(entry =>
+                entry.EntryKind == ContextMenuEntryKind.ShellExtension
+                && string.Equals(entry.HandlerClsid, item.HandlerClsid, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    private static void UpdateLinkedShellExtensionPersistedStates(
+        IDictionary<string, PersistedContextMenuState> states,
+        string? handlerClsid,
+        bool enable)
+    {
+        if (string.IsNullOrWhiteSpace(handlerClsid))
+        {
+            return;
+        }
+
+        foreach (var state in states.Values.Where(state =>
+                     state.EntryKind == ContextMenuEntryKind.ShellExtension
+                     && !state.IsDeleted
+                     && string.Equals(state.HandlerClsid, handlerClsid, StringComparison.OrdinalIgnoreCase)))
+        {
+            state.DesiredEnabled = enable;
+            state.ObservedEnabled = enable;
+            state.IsPendingApproval = false;
+            state.SuppressNextDetection = false;
+            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
     }
 
     private static void PruneTransientStates(IDictionary<string, PersistedContextMenuState> states)

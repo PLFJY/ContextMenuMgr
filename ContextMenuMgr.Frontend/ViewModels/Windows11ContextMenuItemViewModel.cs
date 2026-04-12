@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
@@ -61,6 +64,8 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject
 
     public string MachineBlockedText => _localization.Translate("Windows11MachineBlockedText");
 
+    public string OpenFileLocationText => _localization.Translate("DetailsFileLocation");
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsEnabled { get; set; }
@@ -121,6 +126,32 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenFileLocationAsync()
+    {
+        if (string.IsNullOrWhiteSpace(InstallPath) || !Directory.Exists(InstallPath))
+        {
+            await FrontendMessageBox.ShowErrorAsync(
+                _localization.Translate("ModulePathUnavailable"),
+                DisplayName);
+            return;
+        }
+
+        try
+        {
+            using var _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{InstallPath}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(ex.Message, DisplayName);
         }
     }
 

@@ -14,12 +14,17 @@ public partial class ShellViewModel : ObservableObject
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
+    private readonly Windows11ContextMenuService _windows11Service;
     private readonly InfoBadge _approvalsBadge = new() { Visibility = Visibility.Collapsed };
 
-    public ShellViewModel(ContextMenuWorkspaceService workspace, LocalizationService localization)
+    public ShellViewModel(
+        ContextMenuWorkspaceService workspace,
+        LocalizationService localization,
+        Windows11ContextMenuService windows11Service)
     {
         _workspace = workspace;
         _localization = localization;
+        _windows11Service = windows11Service;
 
         _localization.LanguageChanged += OnLanguageChanged;
         _workspace.PendingApprovalDetected += OnPendingApprovalDetected;
@@ -70,6 +75,8 @@ public partial class ShellViewModel : ObservableObject
     public string FileTypesPageTitle => _localization.Translate("FileTypesPageTitle");
 
     public string Windows11PageTitle => _localization.Translate("Windows11PageTitle");
+
+    public bool IsWindows11ContextMenuSupported => _windows11Service.IsSupported;
 
     public string OtherRulesPageTitle => _localization.Translate("OtherRulesPageTitle");
 

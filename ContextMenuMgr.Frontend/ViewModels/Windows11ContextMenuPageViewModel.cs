@@ -24,7 +24,10 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(Windows11ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
 
         _localization.LanguageChanged += OnLanguageChanged;
-        _ = RefreshAsync();
+        if (_service.IsSupported)
+        {
+            _ = RefreshAsync();
+        }
     }
 
     public ObservableCollection<Windows11ContextMenuItemViewModel> Items { get; } = [];
@@ -51,9 +54,16 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject
 
     public string ContextTypesLabel => _localization.Translate("Windows11ContextTypesLabel");
 
+    public bool IsSupported => _service.IsSupported;
+
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (!_service.IsSupported)
+        {
+            return;
+        }
+
         if (IsLoading)
         {
             return;

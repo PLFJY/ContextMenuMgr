@@ -16,6 +16,7 @@ public sealed class BackendWindowsService : ServiceBase
         ServiceName = ServiceMetadata.ServiceName;
         CanStop = true;
         AutoLog = true;
+        CanHandleSessionChangeEvent = true;
     }
 
     public static bool ShouldRunAsService(string[] args) =>
@@ -26,7 +27,10 @@ public sealed class BackendWindowsService : ServiceBase
     {
         _serviceCts = new CancellationTokenSource();
         _runtime.StopRequested += OnRuntimeStopRequested;
-        _ = _runtime.StartAsync(_serviceCts.Token);
+        _ = _runtime.StartAsync(
+            _serviceCts.Token,
+            stopWhenFrontendDisconnected: true,
+            launchFrontendOnStartup: true);
     }
 
     protected override void OnStop()
@@ -50,5 +54,18 @@ public sealed class BackendWindowsService : ServiceBase
             {
             }
         });
+    }
+
+    protected override void OnSessionChange(SessionChangeDescription changeDescription)
+    {
+        base.OnSessionChange(changeDescription);
+
+        if (changeDescription.Reason is SessionChangeReason.SessionLogon
+            or SessionChangeReason.SessionUnlock
+            or SessionChangeReason.ConsoleConnect
+            or SessionChangeReason.RemoteConnect)
+        {
+            _runtime.NotifyInteractiveSessionAvailable(changeDescription.SessionId);
+        }
     }
 }

@@ -24,6 +24,7 @@ public sealed class NamedPipeBackendServer
     private CancellationTokenSource? _frontendPresenceTimeoutCts;
 
     public event EventHandler? FrontendPresenceTimedOut;
+    public event EventHandler? NotificationSubscriberConnected;
 
     public NamedPipeBackendServer(ContextMenuRegistryCatalog catalog, FileLogger logger)
     {
@@ -146,6 +147,7 @@ public sealed class NamedPipeBackendServer
                     connection.IsNotificationSubscriber = true;
                     CancelFrontendPresenceTimeout();
                     await _logger.LogAsync($"Connection {connection.Id} marked as frontend notification subscriber.", cancellationToken);
+                    NotificationSubscriberConnected?.Invoke(this, EventArgs.Empty);
                 }
 
                 PipeResponse response;

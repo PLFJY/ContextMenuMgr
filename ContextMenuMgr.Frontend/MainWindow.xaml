@@ -177,7 +177,8 @@
                     <ui:NavigationViewItem
                         Content="{Binding Windows11PageTitle}"
                         Icon="{ui:SymbolIcon Symbol=AppsList24}"
-                        TargetPageType="{x:Type pages:Windows11ContextMenuPage}" />
+                        TargetPageType="{x:Type pages:Windows11ContextMenuPage}"
+                        Visibility="{Binding IsWindows11ContextMenuSupported, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ui:NavigationViewItem
                         Content="{Binding OtherRulesPageTitle}"
                         Icon="{ui:SymbolIcon Symbol=Settings24}"

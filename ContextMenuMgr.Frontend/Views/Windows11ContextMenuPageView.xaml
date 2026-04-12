@@ -133,6 +133,15 @@
                                     IsEnabled="{Binding CanToggle}"
                                     OffContent="{Binding ToggleOffText}"
                                     OnContent="{Binding ToggleOnText}" />
+
+                                <ui:Button
+                                    Grid.Column="1"
+                                    Margin="0,44,0,0"
+                                    HorizontalAlignment="Right"
+                                    Appearance="Secondary"
+                                    Command="{Binding OpenFileLocationCommand}"
+                                    Content="{Binding OpenFileLocationText}"
+                                    Icon="{ui:SymbolIcon Symbol=FolderOpen24}" />
                             </Grid>
                         </Border>
                     </DataTemplate>
