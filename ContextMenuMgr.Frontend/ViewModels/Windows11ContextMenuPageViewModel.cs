@@ -7,7 +7,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class Windows11ContextMenuPageViewModel : ObservableObject
+public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisposable
 {
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
@@ -134,5 +134,14 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject
     {
         return !string.IsNullOrWhiteSpace(value)
                && value.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+        foreach (var item in Items)
+        {
+            item.Dispose();
+        }
     }
 }

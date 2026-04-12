@@ -3,7 +3,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class EnhanceMenuGroupViewModel : ObservableObject
+public partial class EnhanceMenuGroupViewModel : ObservableObject, IDisposable
 {
     public EnhanceMenuGroupViewModel(
         EnhanceMenuGroupDefinition definition,
@@ -33,6 +33,14 @@ public partial class EnhanceMenuGroupViewModel : ObservableObject
         foreach (var item in Items)
         {
             item.RefreshState();
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var item in Items)
+        {
+            item.Dispose();
         }
     }
 }

@@ -6,7 +6,7 @@ using System.Windows.Media;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class ContextMenuItemViewModel : ObservableObject
+public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly IconPreviewService _iconPreviewService;
     private readonly LocalizationService _localization;
@@ -19,6 +19,7 @@ public partial class ContextMenuItemViewModel : ObservableObject
     private bool _suppressAttributeSync;
     private string _detectedChangeSignature = string.Empty;
     private string _consistencyIssueSignature = string.Empty;
+    private bool _disposed;
 
     public ContextMenuItemViewModel(
         ContextMenuEntry entry,
@@ -704,5 +705,16 @@ public partial class ContextMenuItemViewModel : ObservableObject
 
         IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _localization.LanguageChanged -= OnLanguageChanged;
     }
 }

@@ -4,7 +4,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class FileTypesPageViewModel : ObservableObject
+public partial class FileTypesPageViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -189,5 +189,17 @@ public partial class FileTypesPageViewModel : ObservableObject
             new("Video", localization.Translate("DirectoryTypeVideo")),
             new("Audio", localization.Translate("DirectoryTypeAudio"))
         ];
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+        ShortcutTab.Dispose();
+        UwpShortcutTab.Dispose();
+        ExecutableTab.Dispose();
+        CustomExtensionTab.Dispose();
+        PerceivedTypeTab.Dispose();
+        DirectoryTypeTab.Dispose();
+        UnknownTypeTab.Dispose();
     }
 }

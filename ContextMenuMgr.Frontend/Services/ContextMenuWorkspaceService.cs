@@ -17,7 +17,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly HashSet<string> _seenChangedItemIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private bool _pendingApprovalBaselineInitialized;
-    private bool _initialized;
+    private bool _notificationsInitialized;
+    private bool _fullyInitialized;
+    private bool _uiStateActive;
     private ServiceAttentionState _serviceAttentionState = ServiceAttentionState.None;
 
     public ContextMenuWorkspaceService(
@@ -53,7 +55,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         await _initializeLock.WaitAsync();
         try
         {
-            if (_initialized)
+            if (_fullyInitialized)
             {
                 return;
             }
@@ -64,9 +66,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
         if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
         {
-            await _backendClient.ConnectAsync(CancellationToken.None);
+            await EnsureNotificationConnectionAsync();
+            _uiStateActive = true;
             await RefreshAsync();
-            _initialized = true;
+            _fullyInitialized = true;
             return;
         }
 
@@ -82,8 +85,42 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    public async Task InitializeNotificationsOnlyAsync(bool suppressBootstrapPrompt = true)
+    {
+        await _initializeLock.WaitAsync();
+        try
+        {
+            if (_notificationsInitialized)
+            {
+                return;
+            }
+
+            FrontendDebugLog.Info(
+                "ContextMenuWorkspaceService",
+                $"InitializeNotificationsOnlyAsync started. SuppressBootstrapPrompt={suppressBootstrapPrompt}");
+
+            if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
+            {
+                _uiStateActive = false;
+                await EnsureNotificationConnectionAsync();
+                return;
+            }
+
+            UpdateServiceAttention(
+                _backendServiceManager.IsServiceInstalled()
+                    ? ServiceAttentionState.Unavailable
+                    : ServiceAttentionState.Missing);
+            ConnectionStatus = _localization.Translate("BackendUnavailableStatusStandalone");
+        }
+        finally
+        {
+            _initializeLock.Release();
+        }
+    }
+
     public async Task RefreshAsync()
     {
+        _uiStateActive = true;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -415,6 +452,30 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    public void ReleaseUiState()
+    {
+        _uiStateActive = false;
+        _fullyInitialized = false;
+        foreach (var item in Items.ToArray())
+        {
+            item.Dispose();
+        }
+
+        Items.Clear();
+        Notifications.Clear();
+    }
+
+    private async Task EnsureNotificationConnectionAsync()
+    {
+        if (_notificationsInitialized)
+        {
+            return;
+        }
+
+        await _backendClient.ConnectAsync(CancellationToken.None);
+        _notificationsInitialized = true;
+    }
+
     private async Task<bool> WaitForBackendAsync(TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -449,6 +510,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
         foreach (var removed in existing.Values.ToList())
         {
+            removed.Dispose();
             Items.Remove(removed);
         }
 
@@ -547,6 +609,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         var existing = Items.FirstOrDefault(item => string.Equals(item.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
+            existing.Dispose();
             Items.Remove(existing);
         }
     }
@@ -610,7 +673,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                     PendingApprovalDetected?.Invoke(this, notification.Item);
                 }
 
-                UpsertItem(notification.Item);
+                if (_uiStateActive)
+                {
+                    UpsertItem(notification.Item);
+                }
             }
         });
     }

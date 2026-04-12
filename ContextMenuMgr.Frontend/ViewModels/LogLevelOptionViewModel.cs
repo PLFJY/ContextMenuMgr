@@ -3,7 +3,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class LogLevelOptionViewModel : ObservableObject
+public partial class LogLevelOptionViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -32,4 +32,9 @@ public partial class LogLevelOptionViewModel : ObservableObject
         AppLogLevel.Error => _localization.Translate("LogLevelError"),
         _ => _localization.Translate("LogLevelWarning")
     };
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+    }
 }

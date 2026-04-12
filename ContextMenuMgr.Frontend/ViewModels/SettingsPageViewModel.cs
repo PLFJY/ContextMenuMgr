@@ -7,7 +7,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class SettingsPageViewModel : ObservableObject
+public partial class SettingsPageViewModel : ObservableObject, IDisposable
 {
     private readonly FrontendSettingsService _settingsService;
     private readonly FrontendStartupService _startupService;
@@ -377,6 +377,25 @@ public partial class SettingsPageViewModel : ObservableObject
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("LocalFilesTitle"));
+        }
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+        foreach (var item in AvailableLanguages)
+        {
+            item.Dispose();
+        }
+
+        foreach (var item in AvailableThemes)
+        {
+            item.Dispose();
+        }
+
+        foreach (var item in AvailableLogLevels)
+        {
+            item.Dispose();
         }
     }
 }

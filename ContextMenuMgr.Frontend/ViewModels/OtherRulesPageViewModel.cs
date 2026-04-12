@@ -6,7 +6,7 @@ using System.ComponentModel;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class OtherRulesPageViewModel : ObservableObject
+public partial class OtherRulesPageViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
     private readonly RuleDictionaryCatalogService _ruleCatalogService;
@@ -156,5 +156,21 @@ public partial class OtherRulesPageViewModel : ObservableObject
         {
             RefreshEnhanceStates();
         }
+    }
+
+    public void Dispose()
+    {
+        _workspace.Items.CollectionChanged -= OnWorkspaceItemsCollectionChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
+        }
+
+        foreach (var group in EnhanceGroups)
+        {
+            group.Dispose();
+        }
+
+        CustomRegistryPathTab.Dispose();
     }
 }

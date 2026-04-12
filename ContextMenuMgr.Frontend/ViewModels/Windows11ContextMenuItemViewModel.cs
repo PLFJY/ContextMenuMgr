@@ -7,10 +7,11 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class Windows11ContextMenuItemViewModel : ObservableObject
+public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
+    private readonly EventHandler _languageChangedHandler;
     private bool _suppressSync;
 
     public Windows11ContextMenuItemViewModel(
@@ -25,13 +26,14 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject
         _logoSource = new Lazy<ImageSource?>(() => _service.LoadLogo(definition.Package.LogoPath));
         IsEnabled = definition.IsEnabled;
 
-        _localization.LanguageChanged += (_, _) =>
+        _languageChangedHandler = (_, _) =>
         {
             OnPropertyChanged(nameof(ToggleOnText));
             OnPropertyChanged(nameof(ToggleOffText));
             OnPropertyChanged(nameof(ContextTypesText));
             OnPropertyChanged(nameof(MachineBlockedText));
         };
+        _localization.LanguageChanged += _languageChangedHandler;
     }
 
     private readonly Lazy<ImageSource?> _logoSource;
@@ -171,5 +173,10 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject
             "DesktopBackground" => _localization.Translate("DesktopCategoryName"),
             _ => type
         };
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= _languageChangedHandler;
     }
 }

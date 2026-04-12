@@ -9,7 +9,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class SceneContextMenuTabViewModel : ObservableObject
+public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposable
 {
     private readonly IBackendClient _backendClient;
     private readonly ContextMenuWorkspaceService _workspace;
@@ -401,6 +401,17 @@ public partial class SceneContextMenuTabViewModel : ObservableObject
             or nameof(ContextMenuItemViewModel.IsEnabled))
         {
             ItemsView.Refresh();
+        }
+    }
+
+    public void Dispose()
+    {
+        _settingsService.SettingsChanged -= OnSettingsChanged;
+        _localization.LanguageChanged -= OnLanguageChanged;
+        Items.CollectionChanged -= OnItemsCollectionChanged;
+        foreach (var item in Items)
+        {
+            item.PropertyChanged -= OnItemPropertyChanged;
         }
     }
 }

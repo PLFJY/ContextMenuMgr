@@ -3,7 +3,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class LanguageOptionViewModel : ObservableObject
+public partial class LanguageOptionViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -32,4 +32,9 @@ public partial class LanguageOptionViewModel : ObservableObject
         AppLanguageOption.EnglishUnitedStates => _localization.Translate("EnglishLanguage"),
         _ => _localization.Translate("SystemLanguage")
     };
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+    }
 }

@@ -3,7 +3,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class ThemeOptionViewModel : ObservableObject
+public partial class ThemeOptionViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -32,4 +32,9 @@ public partial class ThemeOptionViewModel : ObservableObject
         AppThemeOption.Dark => _localization.Translate("ThemeDark"),
         _ => _localization.Translate("ThemeSystem")
     };
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+    }
 }

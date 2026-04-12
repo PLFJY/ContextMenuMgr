@@ -10,7 +10,7 @@ using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class ShellViewModel : ObservableObject
+public partial class ShellViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
@@ -99,9 +99,16 @@ public partial class ShellViewModel : ObservableObject
         return _workspace.StopMonitoringAsync();
     }
 
-    public ValueTask DisposeAsync()
+    public void Dispose()
     {
-        return _workspace.DisposeAsync();
+        _localization.LanguageChanged -= OnLanguageChanged;
+        _workspace.PendingApprovalDetected -= OnPendingApprovalDetected;
+        _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+        _workspace.Items.CollectionChanged -= OnWorkspaceItemsCollectionChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
+        }
     }
 
     [RelayCommand]

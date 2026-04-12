@@ -9,7 +9,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class ApprovalsPageViewModel : ObservableObject
+public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
@@ -239,5 +239,15 @@ public partial class ApprovalsPageViewModel : ObservableObject
             item.Entry.CommandText ?? string.Empty,
             item.Entry.EditableText ?? string.Empty,
             item.Entry.FilePath ?? string.Empty);
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+        _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged -= OnItemPropertyChanged;
+        }
     }
 }

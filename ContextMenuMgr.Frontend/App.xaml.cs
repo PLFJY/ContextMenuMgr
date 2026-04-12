@@ -34,8 +34,10 @@ public partial class App : System.Windows.Application
     private Icon? _trayIcon;
     private LocalizationService? _localization;
     private FrontendSettingsService? _settingsService;
+    private ContextMenuWorkspaceService? _workspace;
     private ShellViewModel? _shellViewModel;
     private Task? _workspaceInitializationTask;
+    private IServiceScope? _windowScope;
     private bool _silentStartupToTray;
     private bool _isExiting;
     private bool _hasShownTrayHint;
@@ -63,7 +65,7 @@ public partial class App : System.Windows.Application
             _serviceProvider = BuildServiceProvider();
             _settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
             _localization = _serviceProvider.GetRequiredService<LocalizationService>();
-            _shellViewModel = _serviceProvider.GetRequiredService<ShellViewModel>();
+            _workspace = _serviceProvider.GetRequiredService<ContextMenuWorkspaceService>();
 
             FrontendDebugLog.Configure(_settingsService.Current.LogLevel);
             FrontendDebugLog.StartSession("App startup");
@@ -77,9 +79,12 @@ public partial class App : System.Windows.Application
                 || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
             _silentStartupToTray = isStartupLaunch && _settingsService.Current.AutoStartOnLogin;
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            _workspaceInitializationTask = _shellViewModel.InitializeAsync(isStartupLaunch);
 
-            if (!_silentStartupToTray)
+            if (_silentStartupToTray)
+            {
+                _workspaceInitializationTask = _workspace.InitializeNotificationsOnlyAsync(suppressBootstrapPrompt: true);
+            }
+            else
             {
                 ShowMainWindow();
             }
@@ -104,6 +109,7 @@ public partial class App : System.Windows.Application
             _trayIcon?.Dispose();
             _singleInstanceCts?.Cancel();
             _activateEvent?.Set();
+            DisposeMainWindowScope();
             _singleInstanceListenerTask?.Wait(TimeSpan.FromSeconds(1));
             _serviceProvider?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
         }
@@ -123,8 +129,10 @@ public partial class App : System.Windows.Application
             _exitMenuItem = null;
             _localization = null;
             _settingsService = null;
+            _workspace = null;
             _shellViewModel = null;
             _workspaceInitializationTask = null;
+            _windowScope = null;
             if (_ownsSingleInstanceMutex)
             {
                 _singleInstanceMutex?.ReleaseMutex();
@@ -348,7 +356,12 @@ public partial class App : System.Windows.Application
 
         if (MainWindow is not MainWindow window)
         {
-            window = _serviceProvider.GetRequiredService<MainWindow>();
+            DisposeMainWindowScope();
+            _windowScope = _serviceProvider.CreateScope();
+            _shellViewModel = _windowScope.ServiceProvider.GetRequiredService<ShellViewModel>();
+            _workspaceInitializationTask = _shellViewModel.InitializeAsync(suppressBootstrapPrompt: false);
+            window = _windowScope.ServiceProvider.GetRequiredService<MainWindow>();
+            window.Closed += OnMainWindowClosed;
             MainWindow = window;
             window.WindowState = WindowState.Normal;
             window.ShowInTaskbar = true;
@@ -381,9 +394,45 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void OnMainWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is MainWindow window)
+        {
+            window.Closed -= OnMainWindowClosed;
+        }
+
+        MainWindow = null;
+        _workspace?.ReleaseUiState();
+        DisposeMainWindowScope();
+    }
+
+    private void DisposeMainWindowScope()
+    {
+        try
+        {
+            if (_windowScope is IAsyncDisposable asyncDisposable)
+            {
+                asyncDisposable.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                _windowScope?.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("App", ex, "Failed to dispose main-window scope.");
+        }
+        finally
+        {
+            _shellViewModel = null;
+            _windowScope = null;
+        }
+    }
+
     private void SetupTrayIcon()
     {
-        if (_localization is null || _shellViewModel is null)
+        if (_localization is null || _workspace is null)
         {
             return;
         }
@@ -408,7 +457,7 @@ public partial class App : System.Windows.Application
 
         ApplyTrayLocalization();
         _localization.LanguageChanged += (_, _) => ApplyTrayLocalization();
-        _shellViewModel.PendingApprovalDetected += OnPendingApprovalDetected;
+        _workspace.PendingApprovalDetected += OnPendingApprovalDetected;
     }
 
     private void ApplyTrayLocalization()

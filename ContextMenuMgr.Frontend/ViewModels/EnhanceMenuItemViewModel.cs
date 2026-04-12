@@ -4,12 +4,13 @@ using System.Windows.Media;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class EnhanceMenuItemViewModel : ObservableObject
+public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly EnhanceMenuRuleService _ruleService;
     private readonly IconPreviewService _iconPreviewService;
     private readonly LocalizationService _localization;
     private readonly Func<Task>? _refreshAsync;
+    private readonly EventHandler _languageChangedHandler;
     private bool _suppressSync;
 
     public EnhanceMenuItemViewModel(
@@ -27,11 +28,12 @@ public partial class EnhanceMenuItemViewModel : ObservableObject
         _localization = localization;
         _refreshAsync = refreshAsync;
         IsEnabled = _ruleService.IsEnabled(definition);
-        localization.LanguageChanged += (_, _) =>
+        _languageChangedHandler = (_, _) =>
         {
             OnPropertyChanged(nameof(ToggleOnText));
             OnPropertyChanged(nameof(ToggleOffText));
         };
+        localization.LanguageChanged += _languageChangedHandler;
     }
 
     public EnhanceMenuItemDefinition Definition { get; }
@@ -124,5 +126,10 @@ public partial class EnhanceMenuItemViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= _languageChangedHandler;
     }
 }

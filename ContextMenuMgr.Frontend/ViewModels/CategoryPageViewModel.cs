@@ -8,7 +8,7 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class CategoryPageViewModel : ObservableObject
+public partial class CategoryPageViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
@@ -189,6 +189,17 @@ public partial class CategoryPageViewModel : ObservableObject
             or nameof(ContextMenuItemViewModel.HasConsistencyIssue))
         {
             ItemsView.Refresh();
+        }
+    }
+
+    public void Dispose()
+    {
+        _localization.LanguageChanged -= OnLanguageChanged;
+        _settingsService.SettingsChanged -= OnSettingsChanged;
+        _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged -= OnItemPropertyChanged;
         }
     }
 }
