@@ -236,7 +236,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string ConsistencyText => string.IsNullOrWhiteSpace(ConsistencyIssue)
         ? string.Empty
-        : ConsistencyIssue;
+        : _localization.Translate("ConsistencyIssueGeneric");
 
     public bool CanDismissConsistencyIssue => HasConsistencyIssue;
 
@@ -269,9 +269,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
                 CategoryName,
                 DetectedChangeBadgeText);
 
-            return string.IsNullOrWhiteSpace(DetectedChangeDetails)
-                ? summary
-                : $"{summary} {DetectedChangeDetails}";
+            return summary;
         }
     }
 

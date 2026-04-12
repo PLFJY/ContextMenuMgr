@@ -12,6 +12,7 @@
 #define MyAppPublisher "PLFJY"
 #define MyAppURL "https://plfjy.top/"
 #define MyAppExeName "ContextMenuManager.exe"
+#define MyServiceExeName "ContextMenuManager.Service.exe"
 #define MyAppSetupName "ContextMenuManager_Setup"
 #define AppExePath AddBackslash(MyAppBuildDir) + MyAppExeName
 #define MyAppVersion GetVersionNumbersString(AppExePath)
@@ -53,6 +54,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
+const
+  ServiceName = 'ContextMenuManagerService';
+  ServiceDisplayName = 'Context Menu Manager Service';
+
 procedure InitializeWizard();
 begin
   WizardForm.LicenseAcceptedRadio.Checked := True;
@@ -64,6 +69,56 @@ begin
   Result := True;
 end;
 
+function RunHidden(const FileName, Params: string): Integer;
+var
+  ResultCode: Integer;
+begin
+  if Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
+end;
+
+procedure StopAndDeleteServiceIfPresent();
+var
+  ScPath: string;
+begin
+  ScPath := ExpandConstant('{sys}\sc.exe');
+
+  if not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\' + ServiceName) then
+    exit;
+
+  RunHidden(ScPath, 'stop ' + ServiceName);
+  Sleep(1200);
+  RunHidden(ScPath, 'delete ' + ServiceName);
+  Sleep(1200);
+end;
+
+procedure InstallAndStartService();
+var
+  ScPath: string;
+  ServiceExePath: string;
+  BinPath: string;
+begin
+  ScPath := ExpandConstant('{sys}\sc.exe');
+  ServiceExePath := ExpandConstant('{app}\{#MyServiceExeName}');
+
+  if not FileExists(ServiceExePath) then
+    exit;
+
+  BinPath := '""' + ServiceExePath + '" --service"';
+
+  RunHidden(ScPath, 'create ' + ServiceName + ' start= auto DisplayName= "' + ServiceDisplayName + '" binPath= ' + BinPath);
+  RunHidden(ScPath, 'description ' + ServiceName + ' "Context Menu Manager elevated backend service"');
+  RunHidden(ScPath, 'start ' + ServiceName);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopAndDeleteServiceIfPresent();
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Response: Integer;
@@ -71,6 +126,7 @@ begin
   case CurUninstallStep of
     usUninstall:
       begin
+        StopAndDeleteServiceIfPresent();
         Response := MsgBox(
           '是否同时删除本地数据？' + #13#10 + #13#10 +
           '包括：配置、日志、缓存、状态库和删除备份。' + #13#10 +
@@ -85,6 +141,12 @@ begin
         end;
       end;
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    InstallAndStartService();
 end;
 
 [Icons]

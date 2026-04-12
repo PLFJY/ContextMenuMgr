@@ -1031,10 +1031,11 @@ public sealed class ContextMenuRegistryCatalog
 
                 iconPath = GuidMetadataCatalog.NormalizeCandidatePath(iconPath, filePath);
 
+                var effectiveRelativePath = $@"{root.StableRelativePath}\{subKeyName}";
                 var isEnabled = root.EntryKind switch
                 {
                     ContextMenuEntryKind.ShellVerb => itemKey.GetValue("LegacyDisable") is null,
-                    ContextMenuEntryKind.ShellExtension => !root.IsDisabledContainer && !IsShellExtensionBlocked(handlerClsid),
+                    ContextMenuEntryKind.ShellExtension => !IsShellExtensionBlocked(handlerClsid),
                     _ => true
                 };
 
@@ -1046,8 +1047,8 @@ public sealed class ContextMenuRegistryCatalog
                     KeyName = subKeyName,
                     DisplayName = displayName,
                     EditableText = editableText,
-                    RegistryPath = $@"{root.RelativePath}\{subKeyName}",
-                    BackendRegistryPath = instance.ComposeAbsolutePath($@"{root.RelativePath}\{subKeyName}"),
+                    RegistryPath = effectiveRelativePath,
+                    BackendRegistryPath = instance.ComposeAbsolutePath(effectiveRelativePath),
                     SourceRootPath = root.StableRelativePath,
                     CommandText = commandText,
                     HandlerClsid = handlerClsid,

@@ -301,9 +301,12 @@
     <value>Dismiss this notice</value>
   </data>
   <data name="StartupChangeSummaryFormat" xml:space="preserve">
-    <value>Detected {1} in the {0} category.</value>
-  </data>
-  <data name="StartupChangeNotificationFormat" xml:space="preserve">
+      <value>Detected {1} in the {0} category.</value>
+    </data>
+    <data name="ConsistencyIssueGeneric" xml:space="preserve">
+      <value>The current registry state does not match the app's saved state.</value>
+    </data>
+    <data name="StartupChangeNotificationFormat" xml:space="preserve">
     <value>Detected an external change for {1} in the {0} category.</value>
   </data>
   <data name="RegistryMissingText" xml:space="preserve">

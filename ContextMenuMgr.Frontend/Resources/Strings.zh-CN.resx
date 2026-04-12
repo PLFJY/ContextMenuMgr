@@ -303,6 +303,9 @@
   <data name="StartupChangeSummaryFormat" xml:space="preserve">
     <value>在“{0}”分类下检测到{1}。</value>
   </data>
+  <data name="ConsistencyIssueGeneric" xml:space="preserve">
+    <value>当前注册表状态与软件记录不一致。</value>
+  </data>
   <data name="StartupChangeNotificationFormat" xml:space="preserve">
     <value>{1} 在“{0}”分类下检测到外部变化。</value>
   </data>
