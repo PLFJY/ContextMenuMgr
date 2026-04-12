@@ -1,5 +1,3 @@
-#include "CodeDependencies.iss"
-
 #ifndef MyAppId
   #define MyAppId "45156332-3408-47B7-B5D2-2567E5888F64"
 #endif
@@ -78,12 +76,6 @@ const
 procedure InitializeWizard();
 begin
   WizardForm.LicenseAcceptedRadio.Checked := True;
-end;
-
-function InitializeSetup: Boolean;
-begin
-  Dependency_AddDotNet90Desktop;
-  Result := True;
 end;
 
 function RunHidden(const FileName, Params: string): Integer;

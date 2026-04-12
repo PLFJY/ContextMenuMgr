@@ -173,7 +173,7 @@ foreach ($platform in $Platforms) {
         "publish", $FrontendProject,
         "-c", $Configuration,
         "-r", $runtimeIdentifier,
-        "--self-contained", "false",
+        "--self-contained", "true",
         "-p:UseAppHost=true",
         "-o", $publishDir
     ) -ErrorMessage "dotnet publish failed for frontend ($platform)"
@@ -182,7 +182,7 @@ foreach ($platform in $Platforms) {
         "publish", $BackendProject,
         "-c", $Configuration,
         "-r", $runtimeIdentifier,
-        "--self-contained", "false",
+        "--self-contained", "true",
         "-p:UseAppHost=true",
         "-o", $publishDir
     ) -ErrorMessage "dotnet publish failed for backend ($platform)"
