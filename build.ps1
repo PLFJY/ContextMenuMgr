@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 param(
     [string] $Configuration = "Release",
-    [string] $AppId = "45156332-3408-47B7-B5D2-2567E5888F64"
+    [string] $AppId = "45156332-3408-47B7-B5D2-2567E5888F64",
+    [string[]] $Platforms = @("win-amd64", "win-x86", "win-arm64")
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +30,99 @@ function Invoke-External {
     }
 }
 
+function Get-FrontendVersion {
+    param([Parameter(Mandatory)] [string] $ProjectPath)
+
+    [xml] $projectXml = Get-Content -LiteralPath $ProjectPath
+    $propertyGroups = @($projectXml.Project.PropertyGroup)
+    foreach ($group in $propertyGroups) {
+        if ($group.InformationalVersion) {
+            return [string] $group.InformationalVersion
+        }
+    }
+
+    foreach ($group in $propertyGroups) {
+        if ($group.FileVersion) {
+            return [string] $group.FileVersion
+        }
+    }
+
+    return "0.0.0"
+}
+
+function Get-RuntimeIdentifier {
+    param([Parameter(Mandatory)] [string] $Platform)
+
+    switch ($Platform.ToLowerInvariant()) {
+        "win-amd64" { return "win-x64" }
+        "win-x86" { return "win-x86" }
+        "win-arm64" { return "win-arm64" }
+        default { throw "Unsupported platform '$Platform'. Supported values: win-amd64, win-x86, win-arm64." }
+    }
+}
+
+function Ensure-FileExists {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "$Description is missing: $Path"
+    }
+}
+
+function Get-InstallerArchitectureOptions {
+    param([Parameter(Mandatory)] [string] $Platform)
+
+    switch ($Platform.ToLowerInvariant()) {
+        "win-amd64" {
+            return @{
+                Allowed = "x64compatible"
+                InstallIn64BitMode = "x64compatible"
+            }
+        }
+        "win-x86" {
+            return @{
+                Allowed = "x86compatible"
+                InstallIn64BitMode = ""
+            }
+        }
+        "win-arm64" {
+            return @{
+                Allowed = "arm64"
+                InstallIn64BitMode = "arm64"
+            }
+        }
+        default {
+            throw "Unsupported platform '$Platform'. Supported values: win-amd64, win-x86, win-arm64."
+        }
+    }
+}
+
+function Resolve-IsccPath {
+    param([Parameter(Mandatory)] [string] $RepoRoot)
+
+    $candidates = @(
+        (Join-Path $RepoRoot "Installer\Inno Setup 6\ISCC.exe"),
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+
+    throw "Unable to locate ISCC.exe. Install Inno Setup 6 or place it under Installer\\Inno Setup 6\\ISCC.exe."
+}
+
 $ScriptDir = Get-ScriptDirectory
 Set-Location -Path $ScriptDir
 
@@ -36,67 +130,95 @@ $RepoRoot = $ScriptDir
 $SolutionPath = Join-Path $RepoRoot "ContextMenuMgr.slnx"
 $FrontendProject = Join-Path $RepoRoot "ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj"
 $BackendProject = Join-Path $RepoRoot "ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj"
-$PublishRoot = Join-Path $RepoRoot "build\ContextMenuManager"
-$MainExe = Join-Path $PublishRoot "ContextMenuManager.exe"
-$ServiceExe = Join-Path $PublishRoot "ContextMenuManager.Service.exe"
-$ServiceDll = Join-Path $PublishRoot "ContextMenuManager.Service.dll"
-$IsccPath = Join-Path $RepoRoot "Installer\Inno Setup 6\ISCC.exe"
+$NuGetConfig = Join-Path $RepoRoot "NuGet.Config"
+$PublishRoot = Join-Path $RepoRoot "build\publish"
+$DistRoot = Join-Path $RepoRoot "build\dist"
+$Version = Get-FrontendVersion -ProjectPath $FrontendProject
+$IsccPath = Resolve-IsccPath -RepoRoot $RepoRoot
 $InstallerIss = Join-Path $RepoRoot "Installer\build_Installer.iss"
 
 if (Test-Path -LiteralPath $PublishRoot) {
     Remove-Item -LiteralPath $PublishRoot -Recurse -Force
 }
 
+if (Test-Path -LiteralPath $DistRoot) {
+    Remove-Item -LiteralPath $DistRoot -Recurse -Force
+}
+
 New-Item -ItemType Directory -Path $PublishRoot | Out-Null
+New-Item -ItemType Directory -Path $DistRoot | Out-Null
+
+Ensure-FileExists -Path $IsccPath -Description "Inno Setup compiler"
+Ensure-FileExists -Path $InstallerIss -Description "Inno Setup script"
 
 Invoke-External -FilePath "dotnet" -Arguments @(
     "restore",
     $SolutionPath,
-    "--configfile", (Join-Path $RepoRoot "NuGet.Config")
+    "--configfile", $NuGetConfig
 ) -ErrorMessage "dotnet restore failed"
 
-Invoke-External -FilePath "dotnet" -Arguments @(
-    "publish", $FrontendProject,
-    "-c", $Configuration,
-    "-o", $PublishRoot,
-    "--no-restore"
-) -ErrorMessage "dotnet publish failed"
+$installers = New-Object System.Collections.Generic.List[string]
 
-Invoke-External -FilePath "dotnet" -Arguments @(
-    "publish", $BackendProject,
-    "-c", $Configuration,
-    "-o", $PublishRoot,
-    "--no-restore"
-) -ErrorMessage "dotnet publish for backend failed"
+foreach ($platform in $Platforms) {
+    $runtimeIdentifier = Get-RuntimeIdentifier -Platform $platform
+    $publishDir = Join-Path $PublishRoot $platform
 
-if (-not (Test-Path -LiteralPath $MainExe)) {
-    Write-Host "Build output missing: $MainExe" -ForegroundColor Red
-    Get-ChildItem -Path $PublishRoot -Recurse | Format-Table -AutoSize
-    throw "dotnet publish finished but the frontend executable was not produced."
+    if (Test-Path -LiteralPath $publishDir) {
+        Remove-Item -LiteralPath $publishDir -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $publishDir | Out-Null
+
+    Invoke-External -FilePath "dotnet" -Arguments @(
+        "publish", $FrontendProject,
+        "-c", $Configuration,
+        "-r", $runtimeIdentifier,
+        "--self-contained", "false",
+        "-p:UseAppHost=true",
+        "-o", $publishDir
+    ) -ErrorMessage "dotnet publish failed for frontend ($platform)"
+
+    Invoke-External -FilePath "dotnet" -Arguments @(
+        "publish", $BackendProject,
+        "-c", $Configuration,
+        "-r", $runtimeIdentifier,
+        "--self-contained", "false",
+        "-p:UseAppHost=true",
+        "-o", $publishDir
+    ) -ErrorMessage "dotnet publish failed for backend ($platform)"
+
+    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.exe") -Description "Frontend executable"
+    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.exe") -Description "Backend service executable"
+    Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.dll") -Description "Backend service DLL"
+
+    $installerOptions = Get-InstallerArchitectureOptions -Platform $platform
+    $setupBaseName = "ContextMenuManager-$Version-$platform-Setup"
+
+    $isccArguments = @(
+        "/DMyArchitecturesAllowed=$($installerOptions.Allowed)",
+        "/DMyArchitecturesInstallIn64BitMode=$($installerOptions.InstallIn64BitMode)",
+        "/DMyAppId=$AppId",
+        "/DMyAppBuildDir=$publishDir",
+        "/DMyOutputDir=$DistRoot",
+        "/DMyAppSetupName=$setupBaseName",
+        $InstallerIss
+    )
+
+    Invoke-External -FilePath $IsccPath -Arguments $isccArguments -ErrorMessage "Inno Setup packaging failed for $platform"
+
+    $installerPath = Join-Path $DistRoot ($setupBaseName + ".exe")
+    Ensure-FileExists -Path $installerPath -Description "Installer package"
+    $installers.Add($installerPath) | Out-Null
 }
 
-if (-not (Test-Path -LiteralPath $ServiceExe)) {
-    Write-Host "Build output missing: $ServiceExe" -ForegroundColor Red
-    Get-ChildItem -Path $PublishRoot -Recurse | Format-Table -AutoSize
-    throw "dotnet publish finished but the backend service executable was not produced."
-}
+$manifestPath = Join-Path $DistRoot "artifacts.txt"
+$installers | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-if (-not (Test-Path -LiteralPath $ServiceDll)) {
-    Write-Host "Build output missing: $ServiceDll" -ForegroundColor Red
-    Get-ChildItem -Path $PublishRoot -Recurse | Format-Table -AutoSize
-    throw "dotnet publish finished but the backend service DLL was not produced."
+Write-Host ""
+Write-Host "Build completed successfully." -ForegroundColor Green
+Write-Host "Version: $Version"
+Write-Host "AppId: $AppId"
+Write-Host "Installers:"
+foreach ($installer in $installers) {
+    Write-Host "  $installer"
 }
-
-if (-not (Test-Path -LiteralPath $IsccPath)) {
-    throw "ISCC.exe not found at: $IsccPath"
-}
-
-if (-not (Test-Path -LiteralPath $InstallerIss)) {
-    throw ".iss script not found at: $InstallerIss"
-}
-
-Invoke-External -FilePath $IsccPath -Arguments @(
-    "/DMyAppId=$AppId",
-    "/DMyAppBuildDir=$PublishRoot",
-    $InstallerIss
-) -ErrorMessage "Inno Setup packaging failed"

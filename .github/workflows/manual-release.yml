@@ -1,0 +1,83 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag, for example v1.2.0
+        required: true
+        type: string
+      release_name:
+        description: Release title shown on GitHub
+        required: false
+        default: ""
+        type: string
+      configuration:
+        description: Build configuration
+        required: false
+        default: Release
+        type: choice
+        options:
+          - Release
+          - Debug
+      app_id:
+        description: Installer/App GUID metadata value
+        required: false
+        default: 45156332-3408-47B7-B5D2-2567E5888F64
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build multi-arch installers
+        shell: pwsh
+        run: >
+          .\build.ps1
+          -Configuration "${{ inputs.configuration }}"
+          -AppId "${{ inputs.app_id }}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ContextMenuManager-${{ inputs.release_tag }}
+          path: |
+            build/dist/*.exe
+            build/dist/artifacts.txt
+          if-no-files-found: error
+
+      - name: Determine release title
+        id: release_meta
+        shell: pwsh
+        run: |
+          $releaseName = "${{ inputs.release_name }}"
+          if ([string]::IsNullOrWhiteSpace($releaseName)) {
+            $releaseName = "${{ inputs.release_tag }}"
+          }
+          "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ steps.release_meta.outputs.release_name }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            build/dist/*.exe

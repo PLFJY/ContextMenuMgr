@@ -8,12 +8,27 @@
   #define MyAppBuildDir "..\build\ContextMenuManager"
 #endif
 
+#ifndef MyAppSetupName
+  #define MyAppSetupName "ContextMenuManager_Setup"
+#endif
+
+#ifndef MyOutputDir
+  #define MyOutputDir "..\build"
+#endif
+
+#ifndef MyArchitecturesAllowed
+  #define MyArchitecturesAllowed "x64compatible"
+#endif
+
+#ifndef MyArchitecturesInstallIn64BitMode
+  #define MyArchitecturesInstallIn64BitMode "x64compatible"
+#endif
+
 #define MyAppName "Context Menu Manager"
 #define MyAppPublisher "PLFJY"
 #define MyAppURL "https://plfjy.top/"
 #define MyAppExeName "ContextMenuManager.exe"
 #define MyServiceExeName "ContextMenuManager.Service.exe"
-#define MyAppSetupName "ContextMenuManager_Setup"
 #define AppExePath AddBackslash(MyAppBuildDir) + MyAppExeName
 #define MyAppVersion GetVersionNumbersString(AppExePath)
 #define AppProductTextVersion GetStringFileInfo(AppExePath, "ProductVersion")
@@ -33,11 +48,13 @@ DefaultDirName={autopf}\{#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 DisableWelcomePage=no
 DisableReadyPage=yes
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#MyArchitecturesAllowed}
+#if MyArchitecturesInstallIn64BitMode != ""
+ArchitecturesInstallIn64BitMode={#MyArchitecturesInstallIn64BitMode}
+#endif
 DisableProgramGroupPage=yes
 LicenseFile=..\License
-OutputDir=..\build
+OutputDir={#MyOutputDir}
 OutputBaseFilename={#MyAppSetupName}
 SetupIconFile=..\ContextMenuMgr.Frontend\Assets\AppIcon.ico
 SolidCompression=yes
