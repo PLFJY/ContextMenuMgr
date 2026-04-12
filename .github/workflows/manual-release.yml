@@ -80,7 +80,13 @@ jobs:
             $releaseBody.Add("Previous tag: `$previousTag`")
             $releaseBody.Add("")
 
-            $commitLines = & git log '--pretty=format:- %s (%h)' "$previousTag..HEAD"
+            $revisionRange = '{0}..HEAD' -f $previousTag
+            $gitLogArguments = @(
+              'log'
+              '--pretty=format:- %s (%h)'
+              $revisionRange
+            )
+            $commitLines = & git @gitLogArguments
             if (-not $commitLines) {
               $releaseBody.Add("- No commits since the previous tag")
             }
