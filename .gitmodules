@@ -1,0 +1,3 @@
+[submodule "Installer/InnoDependencyInstaller"]
+	path = Installer/InnoDependencyInstaller
+	url = https://github.com/DomGries/InnoDependencyInstaller.git
