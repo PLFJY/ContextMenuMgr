@@ -105,10 +105,6 @@ jobs:
           $releaseBodyLines | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
       - name: Build multi-arch installers
         shell: pwsh
         run: >
