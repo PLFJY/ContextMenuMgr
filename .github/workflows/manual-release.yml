@@ -3,15 +3,6 @@ name: Manual Release
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: Release tag, for example v1.2.0
-        required: true
-        type: string
-      release_name:
-        description: Release title shown on GitHub
-        required: false
-        default: ""
-        type: string
       configuration:
         description: Build configuration
         required: false
@@ -36,11 +27,77 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      - name: Resolve release metadata
+        id: release_meta
+        shell: pwsh
+        run: |
+          [xml] $projectXml = Get-Content -LiteralPath '.\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj'
+          $propertyGroups = @($projectXml.Project.PropertyGroup)
+
+          $releaseVersion = $null
+          foreach ($group in $propertyGroups) {
+            if ($group.InformationalVersion) {
+              $releaseVersion = [string] $group.InformationalVersion
+              break
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
+            foreach ($group in $propertyGroups) {
+              if ($group.FileVersion) {
+                $releaseVersion = [string] $group.FileVersion
+                break
+              }
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseVersion)) {
+            throw "Neither InformationalVersion nor FileVersion was found in ContextMenuMgr.Frontend.csproj."
+          }
+
+          $releaseTag = "v$releaseVersion"
+          $releaseName = "Release-$releaseTag"
+
+          git fetch --tags --force
+          $previousTag = git tag --sort=-version:refname | Select-Object -First 1
+
+          $releaseBody = New-Object System.Collections.Generic.List[string]
+          $releaseBody.Add("## Changes")
+          $releaseBody.Add("")
+
+          if ([string]::IsNullOrWhiteSpace($previousTag)) {
+            $releaseBody.Add("- Initial release")
+          }
+          else {
+            $releaseBody.Add("Previous tag: `$previousTag`")
+            $releaseBody.Add("")
+
+            $commitLines = git log --pretty=format:"- %s (%h)" "$previousTag..HEAD"
+            if (-not $commitLines) {
+              $releaseBody.Add("- No commits since the previous tag")
+            }
+            else {
+              foreach ($line in $commitLines) {
+                $releaseBody.Add($line)
+              }
+            }
+          }
+
+          "release_version=$releaseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_tag=$releaseTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          "release_body<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $releaseBody | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install Inno Setup
         shell: pwsh
@@ -56,28 +113,18 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ContextMenuManager-${{ inputs.release_tag }}
+          name: ContextMenuManager-${{ steps.release_meta.outputs.release_tag }}
           path: |
             build/dist/*.exe
             build/dist/artifacts.txt
           if-no-files-found: error
 
-      - name: Determine release title
-        id: release_meta
-        shell: pwsh
-        run: |
-          $releaseName = "${{ inputs.release_name }}"
-          if ([string]::IsNullOrWhiteSpace($releaseName)) {
-            $releaseName = "${{ inputs.release_tag }}"
-          }
-          "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag }}
+          tag_name: ${{ steps.release_meta.outputs.release_tag }}
           name: ${{ steps.release_meta.outputs.release_name }}
           draft: true
-          generate_release_notes: true
+          body: ${{ steps.release_meta.outputs.release_body }}
           files: |
             build/dist/*.exe
