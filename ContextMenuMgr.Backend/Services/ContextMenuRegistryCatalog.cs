@@ -128,6 +128,12 @@ public sealed class ContextMenuRegistryCatalog
         var actualEntries = new Dictionary<string, ContextMenuEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in actualEntriesSource)
         {
+            if (actualEntries.TryGetValue(item.Id, out var existing))
+            {
+                actualEntries[item.Id] = SelectPreferredActualEntry(existing, item);
+                continue;
+            }
+
             actualEntries[item.Id] = item;
         }
 
@@ -2190,6 +2196,25 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         return string.IsNullOrWhiteSpace(path) ? null : path;
+    }
+
+    private static ContextMenuEntry SelectPreferredActualEntry(ContextMenuEntry existing, ContextMenuEntry candidate)
+    {
+        var existingIsDisabledContainer = IsDisabledContainerEntry(existing);
+        var candidateIsDisabledContainer = IsDisabledContainerEntry(candidate);
+
+        if (existingIsDisabledContainer == candidateIsDisabledContainer)
+        {
+            return candidate;
+        }
+
+        return existingIsDisabledContainer ? candidate : existing;
+    }
+
+    private static bool IsDisabledContainerEntry(ContextMenuEntry entry)
+    {
+        return entry.RegistryPath.Contains(@"\-ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase)
+               || entry.BackendRegistryPath.Contains(@"\-ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<RegistryRootInstance> EnumerateRootInstances()
