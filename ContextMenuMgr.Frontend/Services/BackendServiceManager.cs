@@ -318,8 +318,41 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "    return $false\n" +
             "}\n" +
             "\n" +
+            "function Test-ServiceRegistrationHealthy($name) {\n" +
+            "    $serviceKeyPath = \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\$name\"\n" +
+            "    if (-not (Test-Path $serviceKeyPath)) {\n" +
+            "        return $false\n" +
+            "    }\n" +
+            "\n" +
+            "    $serviceKey = Get-ItemProperty -Path $serviceKeyPath -ErrorAction SilentlyContinue\n" +
+            "    if ($null -eq $serviceKey) {\n" +
+            "        return $false\n" +
+            "    }\n" +
+            "\n" +
+            "    return -not [string]::IsNullOrWhiteSpace($serviceKey.ImagePath) -and $null -ne $serviceKey.Start -and $null -ne $serviceKey.Type\n" +
+            "}\n" +
+            "\n" +
+            "function Remove-ServiceRegistration($name) {\n" +
+            "    $service = Get-Service -Name $name -ErrorAction SilentlyContinue\n" +
+            "    if ($null -ne $service -and $service.Status -ne 'Stopped') {\n" +
+            "        Stop-Service -Name $name -Force -ErrorAction SilentlyContinue\n" +
+            "        [void](Wait-ForServiceStatus $name 'Stopped' 10)\n" +
+            "    }\n" +
+            "\n" +
+            "    sc.exe delete $name | Out-Null\n" +
+            "    $deadline = (Get-Date).AddSeconds(10)\n" +
+            "    do {\n" +
+            "        Start-Sleep -Milliseconds 300\n" +
+            "    } while ((Get-Date) -lt $deadline -and (Test-Path \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\$name\"))\n" +
+            "}\n" +
+            "\n" +
             "try {\n" +
             "    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue\n" +
+            "    if ($null -ne $service -and -not (Test-ServiceRegistrationHealthy $serviceName)) {\n" +
+            "        Remove-ServiceRegistration $serviceName\n" +
+            "        $service = $null\n" +
+            "    }\n" +
+            "\n" +
             "    if ($null -eq $service) {\n" +
             "        New-Service -Name $serviceName -DisplayName $displayName -BinaryPathName $binaryPath -StartupType Automatic | Out-Null\n" +
             "    }\n" +
@@ -331,6 +364,10 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "\n" +
             "        sc.exe config $serviceName start= auto | Out-Null\n" +
             "        sc.exe config $serviceName binPath= $binaryPath | Out-Null\n" +
+            "    }\n" +
+            "\n" +
+            "    if (-not (Test-ServiceRegistrationHealthy $serviceName)) {\n" +
+            "        throw \"Service registration is incomplete after repair.\"\n" +
             "    }\n" +
             "\n" +
             "    sc.exe description $serviceName \"Context Menu Manager elevated backend service\" | Out-Null\n" +
