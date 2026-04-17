@@ -6,7 +6,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <LangVersion>preview</LangVersion>
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <AssemblyName>ContextMenuManager</AssemblyName>
