@@ -50,7 +50,7 @@ internal sealed class TrayLocalizationService
                 AllowTrailingCommas = true
             });
 
-            if (!document.RootElement.TryGetProperty("Language", out var languageElement))
+            if (!TryGetPropertyIgnoreCase(document.RootElement, "language", out var languageElement))
             {
                 return GetSystemCulture();
             }
@@ -79,6 +79,21 @@ internal sealed class TrayLocalizationService
         {
             return CultureInfo.InstalledUICulture;
         }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static class NativeMethods
