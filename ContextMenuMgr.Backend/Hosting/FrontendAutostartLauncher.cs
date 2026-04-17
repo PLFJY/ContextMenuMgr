@@ -21,8 +21,8 @@ internal sealed class FrontendAutostartLauncher
 
     public FrontendAutostartLauncher(string baseDirectory)
     {
-        _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManager.exe");
-        _trayHostExePath = Path.Combine(baseDirectory, "ContextMenuManager.TrayHost.exe");
+        _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.exe");
+        _trayHostExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.TrayHost.exe");
     }
 
     public bool TryLaunchTrayHostForActiveSession(int? sessionId = null, bool requireAutostartPolicy = true)
@@ -83,7 +83,7 @@ internal sealed class FrontendAutostartLauncher
     public void KillFrontendProcessesForActiveSession(int? sessionId)
     {
         var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
-        foreach (var process in Process.GetProcessesByName("ContextMenuManager"))
+        foreach (var process in Process.GetProcessesByName("ContextMenuManagerPlus"))
         {
             try
             {
@@ -221,7 +221,7 @@ internal sealed class FrontendAutostartLauncher
 
     private static bool IsTrayHostRunning(int sessionId)
     {
-        foreach (var process in Process.GetProcessesByName("ContextMenuManager.TrayHost"))
+        foreach (var process in Process.GetProcessesByName("ContextMenuManagerPlus.TrayHost"))
         {
             try
             {
@@ -244,7 +244,7 @@ internal sealed class FrontendAutostartLauncher
 
     private static bool IsFrontendRunning(int sessionId)
     {
-        foreach (var process in Process.GetProcessesByName("ContextMenuManager"))
+        foreach (var process in Process.GetProcessesByName("ContextMenuManagerPlus"))
         {
             try
             {

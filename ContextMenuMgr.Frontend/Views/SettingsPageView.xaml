@@ -249,7 +249,7 @@
                             <TextBlock
                                 FontSize="18"
                                 FontWeight="SemiBold"
-                                Text="Context Menu Manager" />
+                                Text="Context Menu Manager Plus" />
                             <TextBlock
                                 Margin="0,4,0,0"
                                 Opacity="0.72"

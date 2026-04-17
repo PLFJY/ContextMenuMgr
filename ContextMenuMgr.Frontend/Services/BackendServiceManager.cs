@@ -244,7 +244,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
     {
         var candidates = new[]
         {
-            Path.Combine(AppContext.BaseDirectory, "ContextMenuManager.Service.exe"),
+            Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.Service.exe"),
             Path.GetFullPath(Path.Combine(
                 AppContext.BaseDirectory,
                 "..", "..", "..", "..",
@@ -255,7 +255,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
                 "Release",
 #endif
                 "net10.0-windows",
-                "ContextMenuManager.Service.exe"))
+                "ContextMenuManagerPlus.Service.exe"))
         };
 
         foreach (var candidate in candidates)
@@ -353,6 +353,14 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "        $service = $null\n" +
             "    }\n" +
             "\n" +
+            $"    $legacyServiceName = '{ServiceMetadata.LegacyServiceName}'\n" +
+            "    if ($serviceName -ne $legacyServiceName) {\n" +
+            "        $legacyService = Get-Service -Name $legacyServiceName -ErrorAction SilentlyContinue\n" +
+            "        if ($null -ne $legacyService) {\n" +
+            "            Remove-ServiceRegistration $legacyServiceName\n" +
+            "        }\n" +
+            "    }\n" +
+            "\n" +
             "    if ($null -eq $service) {\n" +
             "        New-Service -Name $serviceName -DisplayName $displayName -BinaryPathName $binaryPath -StartupType Automatic | Out-Null\n" +
             "    }\n" +
@@ -370,7 +378,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "        throw \"Service registration is incomplete after repair.\"\n" +
             "    }\n" +
             "\n" +
-            "    sc.exe description $serviceName \"Context Menu Manager elevated backend service\" | Out-Null\n" +
+            "    sc.exe description $serviceName \"Context Menu Manager Plus elevated backend service\" | Out-Null\n" +
             "\n" +
             "    $service = Get-Service -Name $serviceName -ErrorAction Stop\n" +
             "    if ($service.Status -ne 'Running') {\n" +

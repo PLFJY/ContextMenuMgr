@@ -8,7 +8,7 @@ public sealed class FrontendStartupService
     private const string PolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
     private const string PolicyValueName = "StartWithWindows";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "ContextMenuManager.TrayHost";
+    private const string RunValueName = "ContextMenuManagerPlus.TrayHost";
 
     public bool IsAutoStartEnabled()
     {

@@ -6,10 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <BaseOutputPath>..\artifacts\trayhost\</BaseOutputPath>
-    <AssemblyName>ContextMenuManager.TrayHost</AssemblyName>
-    <Product>Context Menu Manager</Product>
-    <Title>Context Menu Manager Tray Host</Title>
-    <Description>Per-user tray host for Context Menu Manager.</Description>
+    <AssemblyName>ContextMenuManagerPlus.TrayHost</AssemblyName>
+    <Product>Context Menu Manager Plus</Product>
+    <Title>Context Menu Manager Plus Tray Host</Title>
+    <Description>Per-user tray host for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
     <FileVersion>1.3.1.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>

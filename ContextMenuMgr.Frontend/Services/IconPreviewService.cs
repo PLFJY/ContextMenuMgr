@@ -83,7 +83,7 @@ public sealed class IconPreviewService
             nint libraryHandle = nint.Zero;
             nint shellInfoIconHandle = nint.Zero;
 
-            // ContextMenuManager handles icon index -1 as a special case because
+            // Context Menu Manager Plus handles icon index -1 as a special case because
             // ExtractIconEx cannot load that resource identifier directly.
             if (iconIndex == -1)
             {

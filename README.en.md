@@ -5,10 +5,10 @@
   </picture>
 </p>
 <h1 align="center">
-  <span>Context Menu Manager</span>
+  <span>Context Menu Manager Plus</span>
 </h1>
 <p align="center">
-  <span align="center">Context Menu Manager is a powerful utility that help you manage you context menu on Windows and avoid third party to add rubish to your context menu.</span>
+  <span align="center">Context Menu Manager Plus is a powerful utility that help you manage you context menu on Windows and avoid third party to add rubish to your context menu.</span>
 </p>
 
 [中文版文档](./README.md)
@@ -19,7 +19,7 @@
 
 ## Overview
 
-`Context Menu Manager` is a Windows context menu management tool focused on an approval-first workflow rather than simple toggling.
+`Context Menu Manager Plus` is a Windows context menu management tool focused on an approval-first workflow rather than simple toggling.
 
 The project is built around:
 
@@ -53,11 +53,11 @@ That “intercept -> review -> manually allow” pipeline is the main differenti
 
 The project follows a backend-driven model:
 
-- `ContextMenuManager.Service.exe`
+- `ContextMenuManagerPlus.Service.exe`
   - the real controller and runtime core
-- `ContextMenuManager.TrayHost.exe`
+- `ContextMenuManagerPlus.TrayHost.exe`
   - a separate per-user tray surface
-- `ContextMenuManager.exe`
+- `ContextMenuManagerPlus.exe`
   - an on-demand UI process only
 
 The tray exists as a separate per-user surface, while the frontend remains a UI process.
@@ -140,7 +140,7 @@ External-change tracking focuses on:
 ### 1. Backend Service
 
 Project: `ContextMenuMgr.Backend`  
-Executable: `ContextMenuManager.Service.exe`
+Executable: `ContextMenuManagerPlus.Service.exe`
 
 Responsibilities:
 
@@ -153,7 +153,7 @@ Responsibilities:
 ### 2. Tray Host
 
 Project: `ContextMenuMgr.TrayHost`  
-Executable: `ContextMenuManager.TrayHost.exe`
+Executable: `ContextMenuManagerPlus.TrayHost.exe`
 
 The tray host is intentionally thin:
 
@@ -169,7 +169,7 @@ The tray host uses a **native Win32 tray implementation**.
 ### 3. Frontend
 
 Project: `ContextMenuMgr.Frontend`  
-Executable: `ContextMenuManager.exe`
+Executable: `ContextMenuManagerPlus.exe`
 
 Responsibilities:
 
@@ -265,9 +265,9 @@ ContextMenuMgr/
 
 Public-facing executable names are:
 
-- Frontend: `ContextMenuManager.exe`
-- Backend service: `ContextMenuManager.Service.exe`
-- Tray host: `ContextMenuManager.TrayHost.exe`
+- Frontend: `ContextMenuManagerPlus.exe`
+- Backend service: `ContextMenuManagerPlus.Service.exe`
+- Tray host: `ContextMenuManagerPlus.TrayHost.exe`
 
 ## Requirements
 
@@ -357,7 +357,7 @@ Workflow behavior:
 
 Note:
 
-- the public product name is `Context Menu Manager`
+- the public product name is `Context Menu Manager Plus`
 - the local data folder keeps the historical `ContextMenuMgr` name for compatibility
 
 ## Runtime and Recovery Flow
@@ -407,3 +407,10 @@ When opening an issue, it is very helpful to include:
 ## License
 
 This project is licensed under GPL v3.0. See [LICENSE](./LICENSE).
+
+## References And Acknowledgements
+
+This project draws heavily from the following repositories:
+
+- https://github.com/BluePointLilac/ContextMenuManager
+- https://github.com/branhill/windows-11-context-menu-manager

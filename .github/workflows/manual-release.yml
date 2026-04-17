@@ -115,7 +115,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ContextMenuManager-${{ steps.release_meta.outputs.release_tag }}
+          name: ContextMenuManagerPlus-${{ steps.release_meta.outputs.release_tag }}
           path: |
             build/dist/*.exe
             build/dist/artifacts.txt

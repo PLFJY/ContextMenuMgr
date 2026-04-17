@@ -382,7 +382,7 @@
     <value>正在安装或修复后台服务...</value>
   </data>
   <data name="BackendExecutableMissing" xml:space="preserve">
-    <value>未找到 ContextMenuManager.Service.exe，请先生成或发布后端程序。</value>
+    <value>未找到 ContextMenuManagerPlus.Service.exe，请先生成或发布后端程序。</value>
   </data>
   <data name="ServiceOperationCancelled" xml:space="preserve">
     <value>已取消提权安装或启动操作。</value>

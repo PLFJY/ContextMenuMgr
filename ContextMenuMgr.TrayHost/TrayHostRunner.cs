@@ -5,7 +5,7 @@ namespace ContextMenuMgr.TrayHost;
 
 internal sealed class TrayHostRunner : IDisposable
 {
-    private const string TrayMutexName = @"Local\PLFJY.ContextMenuManager.TrayHost";
+    private const string TrayMutexName = @"Local\PLFJY.ContextMenuManagerPlus.TrayHost";
 
     private readonly TrayBackendPipeClient _backendPipeClient;
     private readonly FrontendActivationService _frontendActivationService;

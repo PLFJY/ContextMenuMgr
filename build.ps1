@@ -321,13 +321,13 @@ $jobInitScript = {
         Invoke-External -FilePath "dotnet" -Arguments $trayHostRestoreArguments -ErrorMessage "dotnet restore failed for tray host ($platformLabel, $DistributionMode)"
         Invoke-External -FilePath "dotnet" -Arguments $trayHostPublishArguments -ErrorMessage "dotnet publish failed for tray host ($platformLabel, $DistributionMode)"
 
-        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.exe") -Description "Frontend executable"
-        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.exe") -Description "Backend service executable"
-        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.dll") -Description "Backend service DLL"
-        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.TrayHost.exe") -Description "Tray host executable"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.exe") -Description "Frontend executable"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.Service.exe") -Description "Backend service executable"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.Service.dll") -Description "Backend service DLL"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.TrayHost.exe") -Description "Tray host executable"
 
         $installerOptions = Get-InstallerArchitectureOptions -Platform $Platform
-        $setupBaseName = "ContextMenuManager-$Version-$Platform-$($distributionOptions.InstallerSuffix)-Setup"
+        $setupBaseName = "ContextMenuManagerPlus-$Version-$Platform-$($distributionOptions.InstallerSuffix)-Setup"
 
         $isccArguments = @(
             "/DMyArchitecturesAllowed=$($installerOptions.Allowed)",

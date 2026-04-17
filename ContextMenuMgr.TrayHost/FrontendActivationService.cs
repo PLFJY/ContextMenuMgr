@@ -14,7 +14,7 @@ internal sealed class FrontendActivationService
 
     public FrontendActivationService(string baseDirectory)
     {
-        _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManager.exe");
+        _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.exe");
     }
 
     public bool TryShowMainWindow()

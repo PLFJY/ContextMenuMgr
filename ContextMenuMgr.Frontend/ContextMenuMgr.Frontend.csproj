@@ -8,10 +8,10 @@
     <UseWPF>true</UseWPF>
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
-    <AssemblyName>ContextMenuManager</AssemblyName>
-    <Product>Context Menu Manager</Product>
-    <Title>Context Menu Manager</Title>
-    <Description>Windows context menu manager frontend.</Description>
+    <AssemblyName>ContextMenuManagerPlus</AssemblyName>
+    <Product>Context Menu Manager Plus</Product>
+    <Title>Context Menu Manager Plus</Title>
+    <Description>Windows context menu manager frontend for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
     <FileVersion>1.3.1.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>

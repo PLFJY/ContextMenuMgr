@@ -118,10 +118,10 @@
     <value>System.Resources.ResXResourceWriter</value>
   </resheader>
   <data name="WindowTitle" xml:space="preserve">
-    <value>Context Menu Manager</value>
+    <value>Context Menu Manager Plus</value>
   </data>
   <data name="AppTitle" xml:space="preserve">
-    <value>Context Menu Manager</value>
+    <value>Context Menu Manager Plus</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
     <value>Review file and folder context-menu entries, toggle them safely, and review new additions detected by the backend service.</value>
@@ -382,7 +382,7 @@
     <value>Installing or repairing the backend service...</value>
   </data>
   <data name="BackendExecutableMissing" xml:space="preserve">
-    <value>Could not find ContextMenuManager.Service.exe. Build or publish the backend first.</value>
+    <value>Could not find ContextMenuManagerPlus.Service.exe. Build or publish the backend first.</value>
   </data>
   <data name="ServiceOperationCancelled" xml:space="preserve">
     <value>The elevated install/start operation was cancelled.</value>
@@ -433,7 +433,7 @@
     <value>Exit and stop monitoring</value>
   </data>
   <data name="TrayTooltip" xml:space="preserve">
-    <value>Context Menu Manager</value>
+    <value>Context Menu Manager Plus</value>
   </data>
   <data name="TrayBackgroundInfoTitle" xml:space="preserve">
     <value>Still running</value>

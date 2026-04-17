@@ -12,7 +12,7 @@ namespace ContextMenuMgr.Frontend;
 
 public partial class App : System.Windows.Application
 {
-    private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManager.SingleInstance";
+    private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.SingleInstance";
     private static readonly TimeSpan CrashLogRetention = TimeSpan.FromDays(7);
     private static readonly string LogFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -363,7 +363,7 @@ public partial class App : System.Windows.Application
 
         MessageBox.Show(
             $"应用发生未处理异常，详细信息已写入：\n{LogFilePath}\n\n{exception.Message}",
-            "Context Menu Manager",
+            "Context Menu Manager Plus",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }

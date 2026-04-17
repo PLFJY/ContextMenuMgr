@@ -10,10 +10,10 @@ namespace ContextMenuMgr.Frontend.Services;
 public sealed class TrayHostProcessService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly string _trayHostExecutablePath = Path.Combine(AppContext.BaseDirectory, "ContextMenuManager.TrayHost.exe");
+    private readonly string _trayHostExecutablePath = Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.TrayHost.exe");
 
     public bool IsRunning()
-        => Process.GetProcessesByName("ContextMenuManager.TrayHost").Any();
+        => Process.GetProcessesByName("ContextMenuManagerPlus.TrayHost").Any();
 
     public bool EnsureRunning()
     {

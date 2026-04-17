@@ -3,11 +3,11 @@
 #endif
 
 #ifndef MyAppBuildDir
-  #define MyAppBuildDir "..\build\ContextMenuManager"
+  #define MyAppBuildDir "..\build\ContextMenuManagerPlus"
 #endif
 
 #ifndef MyAppSetupName
-  #define MyAppSetupName "ContextMenuManager_Setup"
+  #define MyAppSetupName "ContextMenuManagerPlus_Setup"
 #endif
 
 #ifndef MyOutputDir
@@ -30,11 +30,11 @@
   #include "InnoDependencyInstaller\CodeDependencies.iss"
 #endif
 
-#define MyAppName "Context Menu Manager"
+#define MyAppName "Context Menu Manager Plus"
 #define MyAppPublisher "PLFJY"
 #define MyAppURL "https://plfjy.top/"
-#define MyAppExeName "ContextMenuManager.exe"
-#define MyServiceExeName "ContextMenuManager.Service.exe"
+#define MyAppExeName "ContextMenuManagerPlus.exe"
+#define MyServiceExeName "ContextMenuManagerPlus.Service.exe"
 #define AppExePath AddBackslash(MyAppBuildDir) + MyAppExeName
 #define MyAppVersion GetVersionNumbersString(AppExePath)
 #define AppProductTextVersion GetStringFileInfo(AppExePath, "ProductVersion")
@@ -80,8 +80,9 @@ Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 
 [Code]
 const
-  ServiceName = 'ContextMenuManagerService';
-  ServiceDisplayName = 'Context Menu Manager Service';
+  ServiceName = 'ContextMenuManagerPlusService';
+  LegacyServiceName = 'ContextMenuManagerService';
+  ServiceDisplayName = 'Context Menu Manager Plus Service';
 
 procedure InitializeWizard();
 begin
@@ -106,19 +107,25 @@ begin
     Result := -1;
 end;
 
-procedure StopAndDeleteServiceIfPresent();
+procedure StopAndDeleteServiceIfPresentByName(const TargetName: string);
 var
   ScPath: string;
 begin
   ScPath := ExpandConstant('{sys}\sc.exe');
 
-  if not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\' + ServiceName) then
+  if not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\' + TargetName) then
     exit;
 
-  RunHidden(ScPath, 'stop ' + ServiceName);
+  RunHidden(ScPath, 'stop ' + TargetName);
   Sleep(1200);
-  RunHidden(ScPath, 'delete ' + ServiceName);
+  RunHidden(ScPath, 'delete ' + TargetName);
   Sleep(1200);
+end;
+
+procedure StopAndDeleteServiceIfPresent();
+begin
+  StopAndDeleteServiceIfPresentByName(ServiceName);
+  StopAndDeleteServiceIfPresentByName(LegacyServiceName);
 end;
 
 procedure InstallAndStartService();
@@ -136,7 +143,7 @@ begin
   BinPath := '""' + ServiceExePath + '" --service"';
 
   RunHidden(ScPath, 'create ' + ServiceName + ' start= auto DisplayName= "' + ServiceDisplayName + '" binPath= ' + BinPath);
-  RunHidden(ScPath, 'description ' + ServiceName + ' "Context Menu Manager elevated backend service"');
+  RunHidden(ScPath, 'description ' + ServiceName + ' "Context Menu Manager Plus elevated backend service"');
   RunHidden(ScPath, 'start ' + ServiceName);
 end;
 

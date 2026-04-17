@@ -5,10 +5,10 @@
   </picture>
 </p>
 <h1 align="center">
-  <span>Context Menu Manager</span>
+  <span>Context Menu Manager Plus</span>
 </h1>
 <p align="center">
-  <span align="center">Context Menu Manager 是一个强大的实用程序，它可帮助您管理 Windows 上的右键菜单，并避免第三方向你的右键菜单里塞屎。</span>
+  <span align="center">Context Menu Manager Plus 是一个强大的实用程序，它可帮助您管理 Windows 上的右键菜单，并避免第三方向你的右键菜单里塞屎。</span>
 </p>
 
 [English Version](./README.en.md)
@@ -19,7 +19,7 @@
 
 ## 项目简介
 
-`Context Menu Manager` 是一个面向 Windows 的右键菜单管理工具，重点不是“普通开关器”，而是：
+`Context Menu Manager Plus` 是一个面向 Windows 的右键菜单管理工具，重点不是“普通开关器”，而是：
 
 - 检测新增右键菜单项
 - 先拦截并默认禁用
@@ -55,13 +55,13 @@
 
 项目采用**后端主导**模型：
 
-- `ContextMenuManager.Service.exe`
+- `ContextMenuManagerPlus.Service.exe`
   - 真正的核心控制器
   - 负责监控、审核、状态库、IPC、服务生命周期
-- `ContextMenuManager.TrayHost.exe`
+- `ContextMenuManagerPlus.TrayHost.exe`
   - 独立的每用户托盘宿主
   - 负责托盘图标、托盘菜单、系统通知、拉起前端
-- `ContextMenuManager.exe`
+- `ContextMenuManagerPlus.exe`
   - 纯前端 UI
   - 按需打开
   - 关闭窗口即退出
@@ -150,7 +150,7 @@ tray 作为独立的会话侧宿主存在，前端只负责 UI。
 项目中的 backend 是真正的主控层：
 
 - 项目：`ContextMenuMgr.Backend`
-- 对外可执行文件：`ContextMenuManager.Service.exe`
+- 对外可执行文件：`ContextMenuManagerPlus.Service.exe`
 
 职责：
 
@@ -163,7 +163,7 @@ tray 作为独立的会话侧宿主存在，前端只负责 UI。
 ### 2. Tray Host
 
 项目：`ContextMenuMgr.TrayHost`  
-对外可执行文件：`ContextMenuManager.TrayHost.exe`
+对外可执行文件：`ContextMenuManagerPlus.TrayHost.exe`
 
 职责保持很薄：
 
@@ -179,7 +179,7 @@ Tray host 使用**原生 Win32 托盘实现**。
 ### 3. Frontend
 
 项目：`ContextMenuMgr.Frontend`  
-对外可执行文件：`ContextMenuManager.exe`
+对外可执行文件：`ContextMenuManagerPlus.exe`
 
 职责：
 
@@ -274,9 +274,9 @@ ContextMenuMgr/
 
 对外名称统一为：
 
-- 前端：`ContextMenuManager.exe`
-- 后端服务：`ContextMenuManager.Service.exe`
-- 托盘宿主：`ContextMenuManager.TrayHost.exe`
+- 前端：`ContextMenuManagerPlus.exe`
+- 后端服务：`ContextMenuManagerPlus.Service.exe`
+- 托盘宿主：`ContextMenuManagerPlus.TrayHost.exe`
 
 ## 开发环境要求
 
@@ -371,7 +371,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Configuration R
 
 说明：
 
-- 产品对外名称为 `Context Menu Manager`
+- 产品对外名称为 `Context Menu Manager Plus`
 - 本地数据目录保留 `ContextMenuMgr` 历史命名，以兼容旧数据
 
 ## 运行与恢复说明
@@ -421,3 +421,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Configuration R
 ## License
 
 本项目遵循 GPL V3.0 协议开源，See [LICENSE](./LICENSE).
+
+## 参考与致谢
+
+本项目代码大量参考自以下项目：
+
+- https://github.com/BluePointLilac/ContextMenuManager
+- https://github.com/branhill/windows-11-context-menu-manager
