@@ -1,10 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Windows;
 using ContextMenuMgr.Contracts;
-using H.NotifyIcon;
-using H.NotifyIcon.Core;
 
 namespace ContextMenuMgr.TrayHost;
 
@@ -16,14 +13,16 @@ internal sealed class TrayHostRunner : IDisposable
     private readonly FrontendActivationService _frontendActivationService;
     private readonly TrayHostLogger _logger;
     private readonly TrayLocalizationService _localization;
+
     private Mutex? _singleInstanceMutex;
     private bool _ownsMutex;
-    private Application? _application;
-    private TaskbarIcon? _taskbarIcon;
-    private NativeTrayMenu? _nativeTrayMenu;
+
+    private NativeTrayHost? _trayHost;
     private Icon? _trayIcon;
+
     private TrayHostControlServer? _controlServer;
     private CancellationTokenSource? _controlServerCts;
+
     private string? _pendingApprovalItemId;
     private bool _isClosing;
 
@@ -47,15 +46,18 @@ internal sealed class TrayHostRunner : IDisposable
 
         try
         {
-            _application = new Application
-            {
-                ShutdownMode = ShutdownMode.OnExplicitShutdown
-            };
-            _nativeTrayMenu = new NativeTrayMenu(
+            _trayIcon = LoadTrayIcon();
+
+            _trayHost = new NativeTrayHost(
+                _trayIcon,
+                _localization.Translate("Tray.Tooltip"),
+                _localization.Translate("Tray.ShowMainWindow"),
+                _localization.Translate("Tray.ExitFull"),
                 ShowMainWindow,
                 RequestBackendShutdown,
-                _localization.Translate("Tray.ShowMainWindow"),
-                _localization.Translate("Tray.ExitFull"));
+                OpenApprovals);
+
+            _trayHost.Initialize();
 
             _backendPipeClient.NotificationReceived += OnNotificationReceived;
             _backendPipeClient.BackendUnavailable += OnBackendUnavailable;
@@ -64,10 +66,9 @@ internal sealed class TrayHostRunner : IDisposable
             _controlServer = new TrayHostControlServer(HandleTrayControlRequestAsync);
             _controlServer.Start(_controlServerCts.Token);
 
-            CreateTrayIcon();
             _backendPipeClient.Start();
 
-            return _application.Run();
+            return _trayHost.RunMessageLoop();
         }
         finally
         {
@@ -80,28 +81,18 @@ internal sealed class TrayHostRunner : IDisposable
         _backendPipeClient.NotificationReceived -= OnNotificationReceived;
         _backendPipeClient.BackendUnavailable -= OnBackendUnavailable;
         _backendPipeClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
         _controlServerCts?.Cancel();
         _controlServer?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _controlServerCts?.Dispose();
         _controlServerCts = null;
         _controlServer = null;
 
-        if (_taskbarIcon is not null)
-        {
-            _taskbarIcon.TrayLeftMouseUp -= OnTrayLeftMouseUp;
-            _taskbarIcon.TrayLeftMouseDoubleClick -= OnTrayLeftMouseDoubleClick;
-            _taskbarIcon.TrayRightMouseUp -= OnTrayRightMouseUp;
-            _taskbarIcon.TrayBalloonTipClicked -= OnTrayBalloonTipClicked;
-            _taskbarIcon.Dispose();
-            _taskbarIcon = null;
-        }
-
-        _nativeTrayMenu?.Dispose();
-        _nativeTrayMenu = null;
+        _trayHost?.Dispose();
+        _trayHost = null;
 
         _trayIcon?.Dispose();
         _trayIcon = null;
-        _application = null;
 
         if (_ownsMutex)
         {
@@ -127,34 +118,6 @@ internal sealed class TrayHostRunner : IDisposable
         return true;
     }
 
-    private void CreateTrayIcon()
-    {
-        _trayIcon = LoadTrayIcon();
-        _taskbarIcon = new TaskbarIcon
-        {
-            Icon = _trayIcon,
-            ToolTipText = _localization.Translate("Tray.Tooltip"),
-            NoLeftClickDelay = true
-        };
-
-        _taskbarIcon.TrayLeftMouseUp += OnTrayLeftMouseUp;
-        _taskbarIcon.TrayLeftMouseDoubleClick += OnTrayLeftMouseDoubleClick;
-        _taskbarIcon.TrayRightMouseUp += OnTrayRightMouseUp;
-        _taskbarIcon.TrayBalloonTipClicked += OnTrayBalloonTipClicked;
-        _taskbarIcon.ForceCreate();
-    }
-
-    private void OnTrayLeftMouseUp(object? sender, RoutedEventArgs e) => ShowMainWindow();
-
-    private void OnTrayLeftMouseDoubleClick(object? sender, RoutedEventArgs e) => ShowMainWindow();
-
-    private void OnTrayRightMouseUp(object? sender, RoutedEventArgs e)
-    {
-        _nativeTrayMenu?.ShowAtCursor();
-    }
-
-    private void OnTrayBalloonTipClicked(object? sender, RoutedEventArgs e) => OpenApprovals();
-
     private void ShowMainWindow()
     {
         _frontendActivationService.TryShowMainWindow();
@@ -167,17 +130,26 @@ internal sealed class TrayHostRunner : IDisposable
 
     private void RequestBackendShutdown()
     {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
+
         _ = Task.Run(async () =>
         {
             try
             {
                 await _backendPipeClient.RequestBackendShutdownAsync(CancellationToken.None);
-                RequestClose();
             }
             catch (Exception ex)
             {
                 await _logger.LogAsync($"Failed to request backend shutdown from tray host: {ex.Message}");
-                RequestClose();
+            }
+            finally
+            {
+                _trayHost?.RequestClose();
             }
         });
     }
@@ -186,7 +158,7 @@ internal sealed class TrayHostRunner : IDisposable
     {
         if (notification.Kind == PipeNotificationKind.ServiceStopping)
         {
-            RequestClose();
+            _trayHost?.RequestClose();
             return;
         }
 
@@ -197,39 +169,14 @@ internal sealed class TrayHostRunner : IDisposable
 
         _pendingApprovalItemId = notification.Item.Id;
 
-        if (_application is null || _taskbarIcon is null)
-        {
-            return;
-        }
-
-        _ = _application.Dispatcher.InvokeAsync(() =>
-        {
-            _taskbarIcon?.ShowNotification(
-                _localization.Translate("Tray.PendingApprovalTitle"),
-                _localization.Format("Tray.PendingApprovalMessage", notification.Item.DisplayName),
-                NotificationIcon.Info);
-        });
+        _trayHost?.ShowNotification(
+            _localization.Translate("Tray.PendingApprovalTitle"),
+            _localization.Format("Tray.PendingApprovalMessage", notification.Item.DisplayName));
     }
 
     private void OnBackendUnavailable(object? sender, EventArgs e)
     {
         _ = _logger.LogAsync("Backend became unavailable while tray host stays alive.");
-    }
-
-    private void RequestClose()
-    {
-        if (_isClosing || _application is null)
-        {
-            return;
-        }
-
-        _isClosing = true;
-        _ = _application.Dispatcher.InvokeAsync(() =>
-        {
-            _taskbarIcon?.Dispose();
-            _taskbarIcon = null;
-            _application?.Shutdown();
-        });
     }
 
     private static Icon LoadTrayIcon()
@@ -248,7 +195,7 @@ internal sealed class TrayHostRunner : IDisposable
     {
         if (request.Command == TrayHostControlCommand.Exit)
         {
-            RequestClose();
+            _trayHost?.RequestClose();
         }
 
         return Task.FromResult(new TrayHostControlResponse

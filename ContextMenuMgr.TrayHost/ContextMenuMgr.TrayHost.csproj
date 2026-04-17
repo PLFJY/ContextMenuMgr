@@ -3,7 +3,6 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
-    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <BaseOutputPath>..\artifacts\trayhost\</BaseOutputPath>
@@ -20,10 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>

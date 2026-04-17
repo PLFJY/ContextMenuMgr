@@ -180,6 +180,14 @@ public sealed class ContextMenuRegistryCatalog
                      .OrderBy(static state => state.Category)
                      .ThenBy(static state => state.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
+            // Ignore items that are simply missing from the registry now.
+            // We only surface deleted-through-app entries for undo/purge flows;
+            // external removals should not be treated as an attention-worthy state.
+            if (!state.IsDeleted)
+            {
+                continue;
+            }
+
             var issue = state.IsDeleted
                 ? GetDeletedConsistencyIssue(state)
                 : "The menu item is missing from the registry.";

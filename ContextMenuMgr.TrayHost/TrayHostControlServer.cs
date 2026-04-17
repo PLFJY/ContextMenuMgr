@@ -74,8 +74,9 @@ internal sealed class TrayHostControlServer : IAsyncDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+        await using var ownedStream = stream;
+        using var reader = new StreamReader(ownedStream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+        using var writer = new StreamWriter(ownedStream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
         try
         {
@@ -101,10 +102,6 @@ internal sealed class TrayHostControlServer : IAsyncDisposable
         }
         catch
         {
-        }
-        finally
-        {
-            stream.Dispose();
         }
     }
 
