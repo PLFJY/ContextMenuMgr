@@ -68,11 +68,6 @@ public partial class App : System.Windows.Application
             _controlServer = new FrontendControlServer(HandleFrontendControlRequestAsync);
             _controlServer.Start(_controlServerCts.Token);
 
-            if (settingsService.Current.KeepBackgroundAfterClose || settingsService.Current.AutoStartOnLogin)
-            {
-                _trayHostProcessService.EnsureRunning();
-            }
-
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             ShowMainWindow(initialRequest, forceActivate: true);
         }

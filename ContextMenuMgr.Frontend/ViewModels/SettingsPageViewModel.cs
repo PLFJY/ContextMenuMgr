@@ -192,10 +192,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         {
             _startupService.SetAutoStartEnabled(value);
             _settingsService.UpdateAutoStartOnLogin(value);
-            if (value)
-            {
-                _trayHostProcessService.EnsureRunning();
-            }
         }
         catch (Exception ex)
         {
@@ -213,10 +209,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     partial void OnKeepBackgroundAfterCloseChanged(bool value)
     {
         _settingsService.UpdateKeepBackgroundAfterClose(value);
-        if (value)
-        {
-            _trayHostProcessService.EnsureRunning();
-        }
     }
 
     partial void OnLockNewContextMenuItemsChanged(bool value)

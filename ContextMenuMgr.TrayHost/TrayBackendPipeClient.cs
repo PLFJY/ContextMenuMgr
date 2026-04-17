@@ -93,7 +93,7 @@ internal sealed class TrayBackendPipeClient : IAsyncDisposable
             {
                 MessageType = PipeMessageType.Request,
                 CorrelationId = Guid.NewGuid(),
-                Request = new PipeRequest { Command = PipeCommand.SubscribeNotifications }
+                Request = new PipeRequest { Command = PipeCommand.SubscribeTrayHost }
             };
 
             await writer.WriteLineAsync(JsonSerializer.Serialize(subscriptionEnvelope, JsonOptions)).WaitAsync(cancellationToken);

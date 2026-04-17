@@ -10,6 +10,7 @@ public sealed class BackendRuntime : IDisposable
     private readonly ContextMenuRegistryMonitor _monitor;
     private readonly NamedPipeBackendServer _pipeServer;
     private readonly FrontendAutostartLauncher _frontendAutostartLauncher;
+    private bool _ensureTrayHostOnStartup;
     private bool _shutdownFrontendOnStop = true;
     private CancellationTokenSource? _lifetimeCts;
     private static readonly string KeepFrontendOnStopMarkerPath = Path.Combine(
@@ -75,8 +76,11 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(
+        CancellationToken cancellationToken,
+        bool ensureTrayHostOnStartup = false)
     {
+        _ensureTrayHostOnStartup = ensureTrayHostOnStartup;
         _shutdownFrontendOnStop = true;
         await _logger.LogAsync("Backend starting.", cancellationToken);
         await _monitor.Catalog.LogConsistencySummaryAsync(cancellationToken);
@@ -87,6 +91,11 @@ public sealed class BackendRuntime : IDisposable
         _pipeServer.Start(cancellationToken);
 
         await _logger.LogAsync("Backend started.", cancellationToken);
+
+        if (_ensureTrayHostOnStartup)
+        {
+            TryEnsureTrayHost(null);
+        }
     }
 
     public async Task StopAsync()
@@ -128,6 +137,16 @@ public sealed class BackendRuntime : IDisposable
         _lifetimeCts?.Dispose();
     }
 
+    public void NotifyInteractiveSessionAvailable(int sessionId)
+    {
+        if (!_ensureTrayHostOnStartup)
+        {
+            return;
+        }
+
+        TryEnsureTrayHost(sessionId);
+    }
+
     private void OnConsoleCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
     {
         e.Cancel = true;
@@ -167,6 +186,23 @@ public sealed class BackendRuntime : IDisposable
     {
         _shutdownFrontendOnStop = true;
         StopRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void TryEnsureTrayHost(int? sessionId)
+    {
+        try
+        {
+            var launched = _frontendAutostartLauncher.TryLaunchTrayHostForActiveSession(sessionId);
+            _ = _logger.LogAsync(
+                launched
+                    ? "Requested tray-host startup for the active user session."
+                    : "Skipped tray-host startup because no eligible interactive user session was available.",
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _ = _logger.LogAsync($"Failed to launch tray host from service: {ex.Message}", CancellationToken.None);
+        }
     }
 
 }

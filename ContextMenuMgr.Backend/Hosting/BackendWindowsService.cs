@@ -27,7 +27,7 @@ public sealed class BackendWindowsService : ServiceBase
     {
         _serviceCts = new CancellationTokenSource();
         _runtime.StopRequested += OnRuntimeStopRequested;
-        _ = _runtime.StartAsync(_serviceCts.Token);
+        _ = _runtime.StartAsync(_serviceCts.Token, ensureTrayHostOnStartup: true);
     }
 
     protected override void OnStop()
@@ -51,6 +51,19 @@ public sealed class BackendWindowsService : ServiceBase
             {
             }
         });
+    }
+
+    protected override void OnSessionChange(SessionChangeDescription changeDescription)
+    {
+        base.OnSessionChange(changeDescription);
+
+        if (changeDescription.Reason is SessionChangeReason.SessionLogon
+            or SessionChangeReason.SessionUnlock
+            or SessionChangeReason.ConsoleConnect
+            or SessionChangeReason.RemoteConnect)
+        {
+            _runtime.NotifyInteractiveSessionAvailable(changeDescription.SessionId);
+        }
     }
 
 }
