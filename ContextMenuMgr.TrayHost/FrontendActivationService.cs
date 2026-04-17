@@ -31,6 +31,13 @@ internal sealed class FrontendActivationService
             },
             BuildArguments("--open-approvals", focusItemId));
 
+    public bool TryShutdownFrontend()
+        => TrySendFrontendControlRequest(
+            new FrontendControlRequest
+            {
+                Command = FrontendControlCommand.Shutdown
+            });
+
     private bool TryOpenFrontend(FrontendControlRequest request, string startupArguments)
     {
         if (TrySendFrontendControlRequest(request))

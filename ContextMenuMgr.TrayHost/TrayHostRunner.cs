@@ -135,6 +135,8 @@ internal sealed class TrayHostRunner : IDisposable
         {
             try
             {
+                _frontendActivationService.TryShutdownFrontend();
+                await Task.Delay(500);
                 await _backendPipeClient.RequestBackendShutdownAsync(CancellationToken.None);
             }
             catch (Exception ex)
