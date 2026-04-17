@@ -95,7 +95,7 @@ public sealed class BackendRuntime : IDisposable
 
         if (_ensureTrayHostOnStartup)
         {
-            TryEnsureTrayHost(null, requireAutostartPolicy: false);
+            TryEnsureTrayHost(null, requireAutostartPolicy: true);
         }
     }
 
@@ -111,6 +111,7 @@ public sealed class BackendRuntime : IDisposable
             await Task.Delay(TimeSpan.FromSeconds(2));
             _frontendAutostartLauncher.KillFrontendProcessesForActiveSession(null);
         }
+
         _pipeServer.Stop();
         await _logger.LogAsync("Backend stopped.");
     }

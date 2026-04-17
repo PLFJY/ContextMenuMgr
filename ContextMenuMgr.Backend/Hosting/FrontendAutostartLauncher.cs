@@ -32,7 +32,7 @@ internal sealed class FrontendAutostartLauncher
             return false;
         }
 
-        var targetSessionId = sessionId ?? GetActiveSessionId();
+        var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
         if (targetSessionId < 0 || !TryGetUserSid(targetSessionId, out var userSid))
         {
             return false;
@@ -69,7 +69,7 @@ internal sealed class FrontendAutostartLauncher
 
     public async Task<bool> TryShutdownFrontendForActiveSessionAsync(int? sessionId, CancellationToken cancellationToken)
     {
-        var targetSessionId = sessionId ?? GetActiveSessionId();
+        var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
         if (targetSessionId < 0 || !IsFrontendRunning(targetSessionId))
         {
             return true;
@@ -82,7 +82,7 @@ internal sealed class FrontendAutostartLauncher
 
     public void KillFrontendProcessesForActiveSession(int? sessionId)
     {
-        var targetSessionId = sessionId ?? GetActiveSessionId();
+        var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
         foreach (var process in Process.GetProcessesByName("ContextMenuManager"))
         {
             try
@@ -104,7 +104,7 @@ internal sealed class FrontendAutostartLauncher
 
     private bool TryOpenFrontendForActiveSession(FrontendControlRequest request, int? sessionId, string startupArguments)
     {
-        var targetSessionId = sessionId ?? GetActiveSessionId();
+        var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
         if (targetSessionId < 0 || !File.Exists(_frontendExePath))
         {
             return false;
@@ -146,10 +146,56 @@ internal sealed class FrontendAutostartLauncher
         return false;
     }
 
-    private static int GetActiveSessionId()
+    private static int GetBestInteractiveSessionId()
     {
-        var sessionId = unchecked((int)NativeMethods.WTSGetActiveConsoleSessionId());
-        return sessionId == -1 ? -1 : sessionId;
+        var consoleSessionId = unchecked((int)NativeMethods.WTSGetActiveConsoleSessionId());
+        if (consoleSessionId != -1 && TryGetUserSid(consoleSessionId, out _))
+        {
+            return consoleSessionId;
+        }
+
+        if (!NativeMethods.WTSEnumerateSessionsW(IntPtr.Zero, 0, 1, out var sessionInfoPtr, out var count))
+        {
+            return -1;
+        }
+
+        try
+        {
+            var dataSize = Marshal.SizeOf<NativeMethods.WTS_SESSION_INFO>();
+            var connectedCandidate = -1;
+
+            for (var index = 0; index < count; index++)
+            {
+                var current = IntPtr.Add(sessionInfoPtr, index * dataSize);
+                var sessionInfo = Marshal.PtrToStructure<NativeMethods.WTS_SESSION_INFO>(current);
+
+                if (sessionInfo.SessionID == -1)
+                {
+                    continue;
+                }
+
+                if (!TryGetUserSid(sessionInfo.SessionID, out _))
+                {
+                    continue;
+                }
+
+                if (sessionInfo.State == NativeMethods.WTS_CONNECTSTATE_CLASS.WTSActive)
+                {
+                    return sessionInfo.SessionID;
+                }
+
+                if (connectedCandidate < 0 && sessionInfo.State == NativeMethods.WTS_CONNECTSTATE_CLASS.WTSConnected)
+                {
+                    connectedCandidate = sessionInfo.SessionID;
+                }
+            }
+
+            return connectedCandidate;
+        }
+        finally
+        {
+            NativeMethods.WTSFreeMemory(sessionInfoPtr);
+        }
     }
 
     private static bool TryGetUserSid(int sessionId, out string sid)
@@ -337,6 +383,18 @@ internal sealed class FrontendAutostartLauncher
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
 
+        [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool WTSEnumerateSessionsW(
+            IntPtr hServer,
+            int Reserved,
+            int Version,
+            out IntPtr ppSessionInfo,
+            out int pCount);
+
+        [DllImport("wtsapi32.dll")]
+        public static extern void WTSFreeMemory(IntPtr memory);
+
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DuplicateTokenEx(
@@ -389,6 +447,28 @@ internal sealed class FrontendAutostartLauncher
             SecurityIdentification,
             SecurityImpersonation,
             SecurityDelegation
+        }
+
+        public enum WTS_CONNECTSTATE_CLASS
+        {
+            WTSActive,
+            WTSConnected,
+            WTSConnectQuery,
+            WTSShadow,
+            WTSDisconnected,
+            WTSIdle,
+            WTSListen,
+            WTSReset,
+            WTSDown,
+            WTSInit
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct WTS_SESSION_INFO
+        {
+            public int SessionID;
+            public IntPtr pWinStationName;
+            public WTS_CONNECTSTATE_CLASS State;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
