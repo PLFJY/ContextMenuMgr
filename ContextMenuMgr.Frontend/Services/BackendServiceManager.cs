@@ -294,10 +294,17 @@ public sealed class BackendServiceManager : IBackendServiceManager
             $"$displayName = '{ServiceMetadata.DisplayName}'\n" +
             $"$binaryPath = '{quotedBackendPath.Replace("'", "''")}'\n" +
             $"$resultFile = '{resultFilePath.Replace("'", "''")}'\n" +
+            "$dataDir = Join-Path $env:ProgramData 'ContextMenuMgr\\Data'\n" +
+            $"$markerFile = Join-Path $dataDir '{ServiceMetadata.KeepFrontendOnStopMarkerFileName}'\n" +
             "\n" +
             "function Write-Result($success, $code, $detail) {\n" +
             "    $payload = @{ Success = $success; Code = $code; Detail = $detail }\n" +
             "    $payload | ConvertTo-Json -Compress | Set-Content -Path $resultFile -Encoding UTF8\n" +
+            "}\n" +
+            "\n" +
+            "function Ensure-KeepFrontendMarker() {\n" +
+            "    New-Item -Path $dataDir -ItemType Directory -Force | Out-Null\n" +
+            "    Set-Content -Path $markerFile -Value '1' -Encoding ASCII\n" +
             "}\n" +
             "\n" +
             "function Wait-ForServiceStatus($name, $desiredStatus, $timeoutSeconds) {\n" +
@@ -335,6 +342,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "function Remove-ServiceRegistration($name) {\n" +
             "    $service = Get-Service -Name $name -ErrorAction SilentlyContinue\n" +
             "    if ($null -ne $service -and $service.Status -ne 'Stopped') {\n" +
+            "        Ensure-KeepFrontendMarker\n" +
             "        Stop-Service -Name $name -Force -ErrorAction SilentlyContinue\n" +
             "        [void](Wait-ForServiceStatus $name 'Stopped' 10)\n" +
             "    }\n" +
@@ -366,6 +374,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "    }\n" +
             "    else {\n" +
             "        if ($service.Status -ne 'Stopped') {\n" +
+            "            Ensure-KeepFrontendMarker\n" +
             "            Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue\n" +
             "            [void](Wait-ForServiceStatus $serviceName 'Stopped' 10)\n" +
             "        }\n" +
