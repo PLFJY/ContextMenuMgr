@@ -11,9 +11,9 @@
     <Title>Context Menu Manager Plus Service</Title>
     <Description>Elevated backend service for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.3.1.0</FileVersion>
+    <FileVersion>1.4.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.3.1</InformationalVersion>
+    <InformationalVersion>1.4.0</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
