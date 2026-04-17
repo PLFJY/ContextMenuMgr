@@ -43,6 +43,13 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task RequestShutdownAsync(CancellationToken cancellationToken)
+    {
+        await SendRequestAsync(
+            new PipeRequest { Command = PipeCommand.RequestShutdown },
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(

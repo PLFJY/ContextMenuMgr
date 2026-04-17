@@ -4,7 +4,6 @@ namespace ContextMenuMgr.Backend;
 
 internal static class Program
 {
-    [STAThread]
     private static void Main(string[] args)
     {
         using var runtime = BackendRuntime.CreateDefault();

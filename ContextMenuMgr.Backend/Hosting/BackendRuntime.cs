@@ -1,5 +1,6 @@
 using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
+using System.IO;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
@@ -9,10 +10,13 @@ public sealed class BackendRuntime : IDisposable
     private readonly ContextMenuRegistryMonitor _monitor;
     private readonly NamedPipeBackendServer _pipeServer;
     private readonly FrontendAutostartLauncher _frontendAutostartLauncher;
-    private bool _stopWhenFrontendDisconnected = true;
-    private bool _launchFrontendOnStartup;
-    private bool _hasSeenFrontendSubscriber;
+    private bool _shutdownFrontendOnStop = true;
     private CancellationTokenSource? _lifetimeCts;
+    private static readonly string KeepFrontendOnStopMarkerPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "ContextMenuMgr",
+        "Data",
+        ServiceMetadata.KeepFrontendOnStopMarkerFileName);
 
     public event EventHandler? StopRequested;
 
@@ -71,48 +75,51 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
-    public async Task StartAsync(
-        CancellationToken cancellationToken,
-        bool stopWhenFrontendDisconnected = true,
-        bool launchFrontendOnStartup = false)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        _stopWhenFrontendDisconnected = stopWhenFrontendDisconnected;
-        _launchFrontendOnStartup = launchFrontendOnStartup;
-        _hasSeenFrontendSubscriber = false;
+        _shutdownFrontendOnStop = true;
         await _logger.LogAsync("Backend starting.", cancellationToken);
         await _monitor.Catalog.LogConsistencySummaryAsync(cancellationToken);
 
         _monitor.ItemDetected += OnItemDetected;
-        _pipeServer.FrontendPresenceTimedOut += OnFrontendPresenceTimedOut;
-        _pipeServer.NotificationSubscriberConnected += OnNotificationSubscriberConnected;
+        _pipeServer.BackendShutdownRequested += OnBackendShutdownRequested;
         _monitor.Start(cancellationToken);
         _pipeServer.Start(cancellationToken);
 
         await _logger.LogAsync("Backend started.", cancellationToken);
-
-        if (_launchFrontendOnStartup)
-        {
-            TryLaunchFrontend(null);
-        }
     }
 
     public async Task StopAsync()
     {
         _monitor.ItemDetected -= OnItemDetected;
-        _pipeServer.FrontendPresenceTimedOut -= OnFrontendPresenceTimedOut;
-        _pipeServer.NotificationSubscriberConnected -= OnNotificationSubscriberConnected;
+        _pipeServer.BackendShutdownRequested -= OnBackendShutdownRequested;
+        if (_shutdownFrontendOnStop && !ConsumeKeepFrontendOnStopMarker())
+        {
+            await _pipeServer.BroadcastServiceStoppingAsync(CancellationToken.None);
+            await _frontendAutostartLauncher.TryShutdownFrontendForActiveSessionAsync(null, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            _frontendAutostartLauncher.KillFrontendProcessesForActiveSession(null);
+        }
         _pipeServer.Stop();
         await _logger.LogAsync("Backend stopped.");
     }
 
-    public void NotifyInteractiveSessionAvailable(int sessionId)
+    private static bool ConsumeKeepFrontendOnStopMarker()
     {
-        if (!_launchFrontendOnStartup)
+        try
         {
-            return;
-        }
+            if (!File.Exists(KeepFrontendOnStopMarkerPath))
+            {
+                return false;
+            }
 
-        TryLaunchFrontend(sessionId);
+            File.Delete(KeepFrontendOnStopMarkerPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public void Dispose()
@@ -156,42 +163,10 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
-    private async void OnFrontendPresenceTimedOut(object? sender, EventArgs e)
+    private void OnBackendShutdownRequested(object? sender, EventArgs e)
     {
-        if (!_stopWhenFrontendDisconnected)
-        {
-            return;
-        }
-
-        if (_launchFrontendOnStartup && !_hasSeenFrontendSubscriber)
-        {
-            await _logger.LogAsync("Frontend timeout ignored because no frontend subscriber has connected yet.", CancellationToken.None);
-            return;
-        }
-
-        await _logger.LogAsync("Frontend process is no longer connected. Requesting backend stop.", CancellationToken.None);
+        _shutdownFrontendOnStop = true;
         StopRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnNotificationSubscriberConnected(object? sender, EventArgs e)
-    {
-        _hasSeenFrontendSubscriber = true;
-    }
-
-    private void TryLaunchFrontend(int? sessionId)
-    {
-        try
-        {
-            var launched = _frontendAutostartLauncher.TryLaunchFrontendForActiveSession(sessionId);
-            _ = _logger.LogAsync(
-                launched
-                    ? "Requested tray frontend startup for the active user session."
-                    : "Skipped tray frontend startup because no eligible interactive user session was available.",
-                CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _ = _logger.LogAsync($"Failed to launch tray frontend from service: {ex.Message}", CancellationToken.None);
-        }
-    }
 }

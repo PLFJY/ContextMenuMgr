@@ -11,6 +11,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 {
     private readonly FrontendSettingsService _settingsService;
     private readonly FrontendStartupService _startupService;
+    private readonly TrayHostProcessService _trayHostProcessService;
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
     private readonly ThemeService _themeService;
@@ -21,6 +22,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     public SettingsPageViewModel(
         FrontendSettingsService settingsService,
         FrontendStartupService startupService,
+        TrayHostProcessService trayHostProcessService,
         ContextMenuWorkspaceService workspace,
         LocalizationService localization,
         ThemeService themeService,
@@ -28,6 +30,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     {
         _settingsService = settingsService;
         _startupService = startupService;
+        _trayHostProcessService = trayHostProcessService;
         _workspace = workspace;
         _localization = localization;
         _themeService = themeService;
@@ -61,6 +64,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         AutoStartOnLogin = _startupService.IsAutoStartEnabled();
         _suppressAutoStartSync = false;
         _settingsService.UpdateAutoStartOnLogin(AutoStartOnLogin);
+        KeepBackgroundAfterClose = _settingsService.Current.KeepBackgroundAfterClose;
         LockNewContextMenuItems = _settingsService.Current.LockNewContextMenuItems;
 
         _localization.LanguageChanged += OnLanguageChanged;
@@ -88,6 +92,9 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     public partial bool AutoStartOnLogin { get; set; }
 
     [ObservableProperty]
+    public partial bool KeepBackgroundAfterClose { get; set; }
+
+    [ObservableProperty]
     public partial bool LockNewContextMenuItems { get; set; }
 
     [ObservableProperty]
@@ -107,9 +114,13 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     public string StartupBehaviorTitle => _localization.Translate("StartupBehaviorTitle");
 
-    public string AutoStartOnLoginLabel => _localization.Translate("AutoStartOnLoginLabel");
+    public string AutoStartOnLoginLabel => _localization.Translate("Settings.StartWithWindows");
 
-    public string AutoStartOnLoginDescription => _localization.Translate("AutoStartOnLoginDescription");
+    public string AutoStartOnLoginDescription => _localization.Translate("Settings.StartWithWindows.Description");
+
+    public string KeepBackgroundAfterCloseLabel => _localization.Translate("Settings.KeepBackgroundAfterClose");
+
+    public string KeepBackgroundAfterCloseDescription => _localization.Translate("Settings.KeepBackgroundAfterClose.Description");
 
     public string ProtectionTitle => _localization.Translate("ProtectionTitle");
 
@@ -181,6 +192,10 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         {
             _startupService.SetAutoStartEnabled(value);
             _settingsService.UpdateAutoStartOnLogin(value);
+            if (value)
+            {
+                _trayHostProcessService.EnsureRunning();
+            }
         }
         catch (Exception ex)
         {
@@ -192,6 +207,15 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             _ = FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("StartupBehaviorTitle"));
+        }
+    }
+
+    partial void OnKeepBackgroundAfterCloseChanged(bool value)
+    {
+        _settingsService.UpdateKeepBackgroundAfterClose(value);
+        if (value)
+        {
+            _trayHostProcessService.EnsureRunning();
         }
     }
 
@@ -292,6 +316,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(StartupBehaviorTitle));
         OnPropertyChanged(nameof(AutoStartOnLoginLabel));
         OnPropertyChanged(nameof(AutoStartOnLoginDescription));
+        OnPropertyChanged(nameof(KeepBackgroundAfterCloseLabel));
+        OnPropertyChanged(nameof(KeepBackgroundAfterCloseDescription));
         OnPropertyChanged(nameof(ProtectionTitle));
         OnPropertyChanged(nameof(UtilitiesTitle));
         OnPropertyChanged(nameof(LockNewContextMenuItemsLabel));

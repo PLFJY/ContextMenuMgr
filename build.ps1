@@ -155,6 +155,7 @@ $RepoRoot = $ScriptDir
 $SolutionPath = Join-Path $RepoRoot "ContextMenuMgr.slnx"
 $FrontendProject = Join-Path $RepoRoot "ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj"
 $BackendProject = Join-Path $RepoRoot "ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj"
+$TrayHostProject = Join-Path $RepoRoot "ContextMenuMgr.TrayHost\ContextMenuMgr.TrayHost.csproj"
 $NuGetConfig = Join-Path $RepoRoot "NuGet.Config"
 $PublishRoot = Join-Path $RepoRoot "build\publish"
 $DistRoot = Join-Path $RepoRoot "build\dist"
@@ -249,9 +250,14 @@ foreach ($distributionMode in $DistributionModes) {
 
         Invoke-External -FilePath "dotnet" -Arguments $backendArguments -ErrorMessage "dotnet publish failed for backend ($platformLabel, $distributionMode)"
 
+        $trayHostArguments = @($backendArguments)
+        $trayHostArguments[1] = $TrayHostProject
+        Invoke-External -FilePath "dotnet" -Arguments $trayHostArguments -ErrorMessage "dotnet publish failed for tray host ($platformLabel, $distributionMode)"
+
         Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.exe") -Description "Frontend executable"
         Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.exe") -Description "Backend service executable"
         Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.Service.dll") -Description "Backend service DLL"
+        Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManager.TrayHost.exe") -Description "Tray host executable"
 
         if ($isPlatformSpecific) {
             $installerOptions = Get-InstallerArchitectureOptions -Platform $platform

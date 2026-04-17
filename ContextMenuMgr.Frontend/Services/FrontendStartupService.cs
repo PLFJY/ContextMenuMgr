@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
@@ -6,8 +7,9 @@ public sealed class FrontendStartupService
 {
     private const string PolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
     private const string PolicyValueName = "StartWithWindows";
-    private const string LegacyRunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string LegacyRunValueName = "ContextMenuManager";
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "ContextMenuManager.TrayHost";
+    private readonly string _trayHostExecutablePath = Path.Combine(AppContext.BaseDirectory, "ContextMenuManager.TrayHost.exe");
 
     public bool IsAutoStartEnabled()
     {
@@ -23,9 +25,9 @@ public sealed class FrontendStartupService
             return parsed != 0;
         }
 
-        using var legacyRunKey = Registry.CurrentUser.OpenSubKey(LegacyRunKeyPath, writable: false);
-        return legacyRunKey?.GetValue(LegacyRunValueName) is string legacyCommand
-               && !string.IsNullOrWhiteSpace(legacyCommand);
+        using var runKey = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+        return runKey?.GetValue(RunValueName) is string command
+               && !string.IsNullOrWhiteSpace(command);
     }
 
     public void SetAutoStartEnabled(bool enabled)
@@ -38,10 +40,24 @@ public sealed class FrontendStartupService
 
         key.SetValue(PolicyValueName, enabled ? 1 : 0, RegistryValueKind.DWord);
 
-        // Clean up the legacy Run-based startup entry. The backend service now
-        // owns tray startup so the frontend should no longer register itself
-        // directly under the user's Run key.
-        using var legacyRunKey = Registry.CurrentUser.CreateSubKey(LegacyRunKeyPath);
-        legacyRunKey?.DeleteValue(LegacyRunValueName, throwOnMissingValue: false);
+        using var runKey = Registry.CurrentUser.CreateSubKey(RunKeyPath);
+        if (runKey is null)
+        {
+            throw new InvalidOperationException("Unable to open the Windows startup registry key.");
+        }
+
+        if (enabled)
+        {
+            if (!File.Exists(_trayHostExecutablePath))
+            {
+                throw new InvalidOperationException("ContextMenuManager.TrayHost.exe was not found.");
+            }
+
+            runKey.SetValue(RunValueName, $"\"{_trayHostExecutablePath}\"", RegistryValueKind.String);
+        }
+        else
+        {
+            runKey.DeleteValue(RunValueName, throwOnMissingValue: false);
+        }
     }
 }

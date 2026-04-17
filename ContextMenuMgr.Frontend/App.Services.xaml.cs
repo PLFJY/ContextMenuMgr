@@ -13,6 +13,8 @@ public partial class App
 
         services.AddSingleton<FrontendSettingsService>();
         services.AddSingleton<FrontendStartupService>();
+        services.AddSingleton<TrayHostProcessService>();
+        services.AddSingleton<FrontendNavigationState>();
         services.AddSingleton<LocalizationService>();
         services.AddSingleton<ThemeService>();
         services.AddSingleton<IconPreviewService>();

@@ -13,12 +13,18 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
+    private readonly FrontendNavigationState _navigationState;
 
-    public ApprovalsPageViewModel(ContextMenuWorkspaceService workspace, LocalizationService localization)
+    public ApprovalsPageViewModel(
+        ContextMenuWorkspaceService workspace,
+        LocalizationService localization,
+        FrontendNavigationState navigationState)
     {
         _workspace = workspace;
         _localization = localization;
+        _navigationState = navigationState;
         _localization.LanguageChanged += OnLanguageChanged;
+        _navigationState.ApprovalsRequested += OnApprovalsRequested;
         _workspace.Items.CollectionChanged += OnItemsCollectionChanged;
         foreach (var item in _workspace.Items)
         {
@@ -44,6 +50,9 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial ApprovalQueueItemViewModel? SelectedItem { get; set; }
 
     public string AllowText => _localization.Translate("Allow");
 
@@ -227,6 +236,8 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         {
             Items.Add(item);
         }
+
+        ApplyFocusRequest();
     }
 
     private static string CreateApprovalGroupKey(ContextMenuItemViewModel item)
@@ -244,10 +255,28 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;
+        _navigationState.ApprovalsRequested -= OnApprovalsRequested;
         _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;
         foreach (var item in _workspace.Items)
         {
             item.PropertyChanged -= OnItemPropertyChanged;
         }
+    }
+
+    private void OnApprovalsRequested(object? sender, EventArgs e)
+    {
+        ApplyFocusRequest();
+    }
+
+    private void ApplyFocusRequest()
+    {
+        if (string.IsNullOrWhiteSpace(_navigationState.FocusItemId))
+        {
+            return;
+        }
+
+        SelectedItem = Items.FirstOrDefault(
+            approval => approval.SourceItems.Any(
+                sourceItem => string.Equals(sourceItem.Id, _navigationState.FocusItemId, StringComparison.OrdinalIgnoreCase)));
     }
 }

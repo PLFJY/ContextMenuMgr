@@ -43,6 +43,7 @@
             BorderThickness="0"
             ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
             ItemsSource="{Binding ItemsView}"
+            SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
             ScrollViewer.CanContentScroll="True"
             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollBarVisibility="Auto">

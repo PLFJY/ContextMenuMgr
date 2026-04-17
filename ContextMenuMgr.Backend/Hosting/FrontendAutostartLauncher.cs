@@ -1,43 +1,39 @@
-using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Text;
+using System.Text.Json;
+using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
-// Launches the unprivileged tray frontend inside the active interactive user
-// session. The backend service uses this instead of relying on a Run key so the
-// tray app can stay silent on startup while still being controlled by the
-// service lifecycle.
 internal sealed class FrontendAutostartLauncher
 {
     private const string FrontendPolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
     private const string FrontendPolicyValueName = "StartWithWindows";
-    private const string LegacyRunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string LegacyRunValueName = "ContextMenuManager";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly string _frontendExePath;
+    private readonly string _trayHostExePath;
 
     public FrontendAutostartLauncher(string baseDirectory)
     {
         _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManager.exe");
+        _trayHostExePath = Path.Combine(baseDirectory, "ContextMenuManager.TrayHost.exe");
     }
 
-    public bool TryLaunchFrontendForActiveSession(int? sessionId = null)
+    public bool TryLaunchTrayHostForActiveSession(int? sessionId = null)
     {
-        if (!File.Exists(_frontendExePath))
+        if (!File.Exists(_trayHostExePath))
         {
             return false;
         }
 
-        var targetSessionId = sessionId ?? unchecked((int)NativeMethods.WTSGetActiveConsoleSessionId());
-        if (targetSessionId < 0)
-        {
-            return false;
-        }
-
-        if (!TryGetUserSid(targetSessionId, out var userSid))
+        var targetSessionId = sessionId ?? GetActiveSessionId();
+        if (targetSessionId < 0 || !TryGetUserSid(targetSessionId, out var userSid))
         {
             return false;
         }
@@ -47,12 +43,90 @@ internal sealed class FrontendAutostartLauncher
             return false;
         }
 
-        if (IsFrontendAlreadyRunning(targetSessionId))
+        if (IsTrayHostRunning(targetSessionId))
         {
             return true;
         }
 
-        return TryCreateFrontendProcess(targetSessionId);
+        return TryCreateUserProcess(targetSessionId, _trayHostExePath, string.Empty);
+    }
+
+    public bool TryShowMainWindowForActiveSession(int? sessionId = null)
+        => TryOpenFrontendForActiveSession(
+            new FrontendControlRequest { Command = FrontendControlCommand.ShowMainWindow },
+            sessionId,
+            "--show-main");
+
+    public bool TryOpenApprovalsForActiveSession(string? focusItemId, int? sessionId = null)
+        => TryOpenFrontendForActiveSession(
+            new FrontendControlRequest
+            {
+                Command = FrontendControlCommand.OpenApprovals,
+                FocusItemId = focusItemId
+            },
+            sessionId,
+            BuildFrontendArguments("--open-approvals", focusItemId));
+
+    public async Task<bool> TryShutdownFrontendForActiveSessionAsync(int? sessionId, CancellationToken cancellationToken)
+    {
+        var targetSessionId = sessionId ?? GetActiveSessionId();
+        if (targetSessionId < 0 || !IsFrontendRunning(targetSessionId))
+        {
+            return true;
+        }
+
+        return await TrySendFrontendControlRequestAsync(
+            new FrontendControlRequest { Command = FrontendControlCommand.Shutdown },
+            cancellationToken);
+    }
+
+    public void KillFrontendProcessesForActiveSession(int? sessionId)
+    {
+        var targetSessionId = sessionId ?? GetActiveSessionId();
+        foreach (var process in Process.GetProcessesByName("ContextMenuManager"))
+        {
+            try
+            {
+                if (targetSessionId < 0 || process.SessionId == targetSessionId)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+    }
+
+    private bool TryOpenFrontendForActiveSession(FrontendControlRequest request, int? sessionId, string startupArguments)
+    {
+        var targetSessionId = sessionId ?? GetActiveSessionId();
+        if (targetSessionId < 0 || !File.Exists(_frontendExePath))
+        {
+            return false;
+        }
+
+        if (IsFrontendRunning(targetSessionId)
+            && TrySendFrontendControlRequestAsync(request, CancellationToken.None).GetAwaiter().GetResult())
+        {
+            return true;
+        }
+
+        return TryCreateUserProcess(targetSessionId, _frontendExePath, startupArguments);
+    }
+
+    private static string BuildFrontendArguments(string command, string? focusItemId)
+    {
+        if (string.IsNullOrWhiteSpace(focusItemId))
+        {
+            return command;
+        }
+
+        return $"{command} --focus-item \"{focusItemId}\"";
     }
 
     private static bool IsAutostartEnabledForUser(string userSid)
@@ -69,11 +143,13 @@ internal sealed class FrontendAutostartLauncher
             return parsed != 0;
         }
 
-        // One-time compatibility with older builds that stored the startup
-        // choice by writing a Run key entry directly.
-        using var legacyRunKey = Registry.Users.OpenSubKey($@"{userSid}\{LegacyRunKeyPath}", writable: false);
-        return legacyRunKey?.GetValue(LegacyRunValueName) is string legacyCommand
-               && !string.IsNullOrWhiteSpace(legacyCommand);
+        return false;
+    }
+
+    private static int GetActiveSessionId()
+    {
+        var sessionId = unchecked((int)NativeMethods.WTSGetActiveConsoleSessionId());
+        return sessionId == -1 ? -1 : sessionId;
     }
 
     private static bool TryGetUserSid(int sessionId, out string sid)
@@ -97,7 +173,30 @@ internal sealed class FrontendAutostartLauncher
         }
     }
 
-    private static bool IsFrontendAlreadyRunning(int sessionId)
+    private static bool IsTrayHostRunning(int sessionId)
+    {
+        foreach (var process in Process.GetProcessesByName("ContextMenuManager.TrayHost"))
+        {
+            try
+            {
+                if (process.SessionId == sessionId)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsFrontendRunning(int sessionId)
     {
         foreach (var process in Process.GetProcessesByName("ContextMenuManager"))
         {
@@ -120,7 +219,7 @@ internal sealed class FrontendAutostartLauncher
         return false;
     }
 
-    private bool TryCreateFrontendProcess(int sessionId)
+    private bool TryCreateUserProcess(int sessionId, string executablePath, string arguments)
     {
         if (!NativeMethods.WTSQueryUserToken(sessionId, out var userTokenRaw))
         {
@@ -153,8 +252,8 @@ internal sealed class FrontendAutostartLauncher
                 lpDesktop = @"winsta0\default"
             };
 
-            var commandLine = $"\"{_frontendExePath}\" --startup";
-            var currentDirectory = Path.GetDirectoryName(_frontendExePath) ?? AppContext.BaseDirectory;
+            var currentDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory;
+            var commandLine = $"\"{executablePath}\" {arguments}".Trim();
 
             var created = NativeMethods.CreateProcessAsUser(
                 primaryToken,
@@ -184,6 +283,32 @@ internal sealed class FrontendAutostartLauncher
             {
                 NativeMethods.DestroyEnvironmentBlock(environmentBlock);
             }
+        }
+    }
+
+    private static async Task<bool> TrySendFrontendControlRequestAsync(FrontendControlRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var stream = new NamedPipeClientStream(".", PipeConstants.FrontendControlPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await stream.ConnectAsync(500, cancellationToken);
+
+            using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions)).WaitAsync(cancellationToken);
+            var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
+            if (line is null)
+            {
+                return false;
+            }
+
+            var response = JsonSerializer.Deserialize<FrontendControlResponse>(line, JsonOptions);
+            return response?.Success == true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

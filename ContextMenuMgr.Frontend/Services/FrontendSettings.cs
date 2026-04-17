@@ -10,7 +10,7 @@ public sealed class FrontendSettings
 
     public bool AutoStartOnLogin { get; set; }
 
-    public bool LaunchMinimized { get; set; }
+    public bool KeepBackgroundAfterClose { get; set; } = true;
 
     public bool LockNewContextMenuItems { get; set; }
 

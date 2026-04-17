@@ -2,20 +2,18 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
-using System.Threading;
+using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 using ContextMenuMgr.Frontend.ViewModels;
+using ContextMenuMgr.Frontend.Views.Pages;
 using Microsoft.Extensions.DependencyInjection;
-using System.Drawing;
-using System.Diagnostics;
-using Forms = System.Windows.Forms;
 
 namespace ContextMenuMgr.Frontend;
 
 public partial class App : System.Windows.Application
 {
     private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManager.SingleInstance";
-    private const string ActivateEventName = @"Global\PLFJY.ContextMenuManager.Activate";
+    private static readonly TimeSpan CrashLogRetention = TimeSpan.FromDays(7);
     private static readonly string LogFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ContextMenuMgr",
@@ -23,75 +21,64 @@ public partial class App : System.Windows.Application
         "frontend-crash.log");
 
     private ServiceProvider? _serviceProvider;
+    private FrontendControlServer? _controlServer;
+    private CancellationTokenSource? _controlServerCts;
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
-    private EventWaitHandle? _activateEvent;
-    private CancellationTokenSource? _singleInstanceCts;
-    private Task? _singleInstanceListenerTask;
-    private Forms.NotifyIcon? _notifyIcon;
-    private Forms.ToolStripMenuItem? _openMenuItem;
-    private Forms.ToolStripMenuItem? _exitMenuItem;
-    private Icon? _trayIcon;
-    private LocalizationService? _localization;
-    private FrontendSettingsService? _settingsService;
-    private ContextMenuWorkspaceService? _workspace;
+    private MainWindow? _mainWindow;
     private ShellViewModel? _shellViewModel;
-    private Task? _workspaceInitializationTask;
-    private IServiceScope? _windowScope;
-    private bool _silentStartupToTray;
-    private bool _isExiting;
-    private bool _hasShownTrayHint;
+    private LocalizationService? _localization;
+    private FrontendNavigationState? _navigationState;
+    private TrayHostProcessService? _trayHostProcessService;
+    private FrontendSettingsService? _frontendSettingsService;
+    private bool _isShuttingDown;
 
     public string[] StartupArguments { get; private set; } = [];
 
-    public T? TryGetService<T>() where T : class
-    {
-        return _serviceProvider?.GetService<T>();
-    }
+    public T? TryGetService<T>() where T : class => _serviceProvider?.GetService<T>();
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        PruneOldCrashLogs();
         RegisterGlobalExceptionHandlers();
         StartupArguments = e.Args ?? [];
 
+        var initialRequest = ParseFrontendControlRequest(StartupArguments);
         try
         {
-            if (!InitializeSingleInstance())
+            if (!InitializeSingleInstance(initialRequest))
             {
                 Shutdown(0);
                 return;
             }
 
             _serviceProvider = BuildServiceProvider();
-            _settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
+            var settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
+            _frontendSettingsService = settingsService;
             _localization = _serviceProvider.GetRequiredService<LocalizationService>();
-            _workspace = _serviceProvider.GetRequiredService<ContextMenuWorkspaceService>();
+            _navigationState = _serviceProvider.GetRequiredService<FrontendNavigationState>();
+            _trayHostProcessService = _serviceProvider.GetRequiredService<TrayHostProcessService>();
 
-            FrontendDebugLog.Configure(_settingsService.Current.LogLevel);
+            FrontendDebugLog.Configure(settingsService.Current.LogLevel);
             FrontendDebugLog.StartSession("App startup");
             _localization.ApplyPersistedLanguage();
             _serviceProvider.GetRequiredService<ThemeService>().ApplyPersistedTheme();
-            SetupTrayIcon();
 
-            var isStartupLaunch = StartupArguments.Any(static arg =>
-                string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "--silent", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "/startup", StringComparison.OrdinalIgnoreCase));
-            _silentStartupToTray = isStartupLaunch && _settingsService.Current.AutoStartOnLogin;
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            _controlServerCts = new CancellationTokenSource();
+            _controlServer = new FrontendControlServer(HandleFrontendControlRequestAsync);
+            _controlServer.Start(_controlServerCts.Token);
 
-            if (_silentStartupToTray)
+            if (settingsService.Current.KeepBackgroundAfterClose || settingsService.Current.AutoStartOnLogin)
             {
-                _workspaceInitializationTask = _workspace.InitializeNotificationsOnlyAsync(suppressBootstrapPrompt: true);
+                _trayHostProcessService.EnsureRunning();
             }
-            else
-            {
-                ShowMainWindow();
-            }
+
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            ShowMainWindow(initialRequest, forceActivate: true);
         }
         catch (Exception ex)
         {
-            FrontendDebugLog.Error("App", ex, "Fatal error while bootstrapping DI/application services.");
+            FrontendDebugLog.Error("App", ex, "Fatal error while bootstrapping frontend.");
             HandleFatalException("Startup", ex);
             Shutdown(-1);
             return;
@@ -102,106 +89,240 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _isShuttingDown = true;
         try
         {
-            _isExiting = true;
-            _notifyIcon?.Dispose();
-            _trayIcon?.Dispose();
-            _singleInstanceCts?.Cancel();
-            _activateEvent?.Set();
-            DisposeMainWindowScope();
-            _singleInstanceListenerTask?.Wait(TimeSpan.FromSeconds(1));
+            _controlServerCts?.Cancel();
+            _controlServer?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
+            _shellViewModel?.Dispose();
             _serviceProvider?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
         }
         catch (Exception ex)
         {
-            FrontendDebugLog.Error("App", ex, "Failed to dispose service provider during shutdown.");
+            FrontendDebugLog.Error("App", ex, "Failed to dispose frontend resources during shutdown.");
         }
         finally
         {
-            _singleInstanceCts?.Dispose();
-            _singleInstanceCts = null;
-            _activateEvent?.Dispose();
-            _activateEvent = null;
-            _notifyIcon = null;
-            _trayIcon = null;
-            _openMenuItem = null;
-            _exitMenuItem = null;
-            _localization = null;
-            _settingsService = null;
-            _workspace = null;
+            _controlServerCts?.Dispose();
+            _controlServerCts = null;
+            _controlServer = null;
             _shellViewModel = null;
-            _workspaceInitializationTask = null;
-            _windowScope = null;
+            _mainWindow = null;
+            _localization = null;
+            _navigationState = null;
+            _trayHostProcessService = null;
+            _frontendSettingsService = null;
+            _serviceProvider = null;
             if (_ownsSingleInstanceMutex)
             {
                 _singleInstanceMutex?.ReleaseMutex();
             }
+
             _singleInstanceMutex?.Dispose();
             _singleInstanceMutex = null;
             _ownsSingleInstanceMutex = false;
-            _serviceProvider = null;
         }
 
         base.OnExit(e);
     }
 
-    private bool InitializeSingleInstance()
+    private bool InitializeSingleInstance(FrontendControlRequest initialRequest)
     {
-        var createdNew = false;
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out createdNew);
-        if (!createdNew)
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        if (createdNew)
         {
-            try
-            {
-                using var activateEvent = EventWaitHandle.OpenExisting(ActivateEventName);
-                activateEvent.Set();
-            }
-            catch
-            {
-            }
-
-            _singleInstanceMutex.Dispose();
-            _singleInstanceMutex = null;
-            return false;
+            _ownsSingleInstanceMutex = true;
+            return true;
         }
 
-        _ownsSingleInstanceMutex = true;
-        _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
-        _singleInstanceCts = new CancellationTokenSource();
-        _singleInstanceListenerTask = Task.Run(() => ListenForActivationRequestsAsync(_singleInstanceCts.Token));
-        return true;
+        _singleInstanceMutex.Dispose();
+        _singleInstanceMutex = null;
+        FrontendControlClient.TrySendAsync(initialRequest, CancellationToken.None).GetAwaiter().GetResult();
+        return false;
     }
 
-    private async Task ListenForActivationRequestsAsync(CancellationToken cancellationToken)
+    private static FrontendControlRequest ParseFrontendControlRequest(string[] args)
     {
-        if (_activateEvent is null)
+        var focusItemId = GetArgumentValue(args, "--focus-item");
+        if (args.Any(static arg => string.Equals(arg, "--open-approvals", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new FrontendControlRequest
+            {
+                Command = FrontendControlCommand.OpenApprovals,
+                FocusItemId = focusItemId
+            };
+        }
+
+        return new FrontendControlRequest
+        {
+            Command = FrontendControlCommand.ShowMainWindow,
+            FocusItemId = focusItemId
+        };
+    }
+
+    private static string? GetArgumentValue(IReadOnlyList<string> args, string argumentName)
+    {
+        for (var i = 0; i < args.Count - 1; i++)
+        {
+            if (string.Equals(args[i], argumentName, StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<FrontendControlResponse> HandleFrontendControlRequestAsync(FrontendControlRequest request)
+    {
+        try
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                switch (request.Command)
+                {
+                    case FrontendControlCommand.ShowMainWindow:
+                        ShowMainWindow(request, forceActivate: true);
+                        break;
+                    case FrontendControlCommand.OpenApprovals:
+                        ShowMainWindow(request, forceActivate: true);
+                        break;
+                    case FrontendControlCommand.Shutdown:
+                        ShutdownFrontend();
+                        break;
+                }
+            });
+
+            return new FrontendControlResponse
+            {
+                Success = true,
+                Message = "Frontend command applied."
+            };
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("App", ex, $"Failed to handle frontend control command {request.Command}.");
+            return new FrontendControlResponse
+            {
+                Success = false,
+                Message = ex.Message
+            };
+        }
+    }
+
+    private void ShowMainWindow(FrontendControlRequest request, bool forceActivate)
+    {
+        if (_serviceProvider is null || _isShuttingDown)
         {
             return;
         }
 
-        while (!cancellationToken.IsCancellationRequested)
+        if (_mainWindow is null)
         {
-            try
+            _mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+            _mainWindow.Closed += OnMainWindowClosed;
+            _mainWindow.Closing += OnMainWindowClosing;
+            _mainWindow.Show();
+            _mainWindow.ShowInTaskbar = true;
+
+            _shellViewModel = _mainWindow.DataContext as ShellViewModel;
+            _ = _shellViewModel?.InitializeAsync(suppressBootstrapPrompt: false);
+        }
+
+        if (request.Command == FrontendControlCommand.OpenApprovals)
+        {
+            _navigationState?.RequestApprovals(request.FocusItemId);
+            _mainWindow.NavigateTo(typeof(ApprovalsPage));
+        }
+        else
+        {
+            _navigationState?.ClearFocusItem();
+            _mainWindow.NavigateTo(typeof(FileContextMenuPage));
+        }
+
+        if (_mainWindow.WindowState == WindowState.Minimized)
+        {
+            _mainWindow.WindowState = WindowState.Normal;
+        }
+
+        if (!_mainWindow.IsVisible)
+        {
+            _mainWindow.Show();
+        }
+
+        if (forceActivate)
+        {
+            _mainWindow.BringToForeground();
+        }
+        else
+        {
+            _mainWindow.Activate();
+        }
+    }
+
+    private void ShutdownFrontend()
+    {
+        _isShuttingDown = true;
+        Shutdown();
+    }
+
+    private void OnMainWindowClosed(object? sender, EventArgs e)
+    {
+        if (_mainWindow is not null)
+        {
+            _mainWindow.Closed -= OnMainWindowClosed;
+            _mainWindow.Closing -= OnMainWindowClosing;
+        }
+
+        _mainWindow = null;
+        _shellViewModel = null;
+    }
+
+    private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_isShuttingDown || _frontendSettingsService?.Current.KeepBackgroundAfterClose != false)
+        {
+            return;
+        }
+
+        TryShutdownBackgroundRuntimeOnClose();
+    }
+
+    private void TryShutdownBackgroundRuntimeOnClose()
+    {
+        try
+        {
+            var shutdownTask = Task.Run(async () =>
             {
-                _activateEvent.WaitOne();
-                if (cancellationToken.IsCancellationRequested)
+                if (_serviceProvider?.GetService<IBackendClient>() is { } backendClient)
                 {
-                    break;
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
+                        await backendClient.RequestShutdownAsync(cts.Token);
+                    }
+                    catch
+                    {
+                    }
                 }
 
-                await Dispatcher.InvokeAsync(() =>
+                if (_trayHostProcessService is not null)
                 {
-                    ShowMainWindow(forceActivate: true);
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch
-            {
-            }
+                    try
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
+                        await _trayHostProcessService.RequestExitAsync(cts.Token);
+                    }
+                    catch
+                    {
+                    }
+                }
+            });
+
+            shutdownTask.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
         }
     }
 
@@ -245,11 +366,11 @@ public partial class App : System.Windows.Application
 
         WriteLog(builder.ToString());
 
-        System.Windows.MessageBox.Show(
+        MessageBox.Show(
             $"应用发生未处理异常，详细信息已写入：\n{LogFilePath}\n\n{exception.Message}",
             "Context Menu Manager",
-            System.Windows.MessageBoxButton.OK,
-            System.Windows.MessageBoxImage.Error);
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     private static void HandleFatalMessage(string source, string message)
@@ -275,241 +396,34 @@ public partial class App : System.Windows.Application
         }
     }
 
-    public void MinimizeToTray(bool showNotification = true)
+    private static void PruneOldCrashLogs()
     {
-        if (_isExiting)
+        try
         {
-            return;
-        }
-
-        if (MainWindow is MainWindow window)
-        {
-            BeginDestroyWindowToTray(window, showNotification);
-            return;
-        }
-
-        ShowTrayHint(showNotification);
-    }
-
-    public void BeginDestroyWindowToTray(MainWindow window, bool showNotification = true)
-    {
-        if (_isExiting)
-        {
-            return;
-        }
-
-        // Normalize state before destroying the window so the next recreated
-        // instance does not visually resume from a minimized shell state.
-        if (window.WindowState == WindowState.Minimized)
-        {
-            window.WindowState = WindowState.Normal;
-        }
-
-        window.Hide();
-        window.ShowInTaskbar = false;
-        ShowTrayHint(showNotification);
-
-        Dispatcher.BeginInvoke(() =>
-        {
-            if (_isExiting)
+            var directory = Path.GetDirectoryName(LogFilePath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
             {
                 return;
             }
 
-            if (ReferenceEquals(MainWindow, window))
+            var cutoff = DateTimeOffset.Now.Subtract(CrashLogRetention);
+            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
             {
-                MainWindow = null;
+                try
+                {
+                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
+                    if (lastWriteTime < cutoff.UtcDateTime)
+                    {
+                        File.Delete(file);
+                    }
+                }
+                catch
+                {
+                }
             }
-
-            window.AllowCloseToTray();
-            if (window.IsLoaded)
-            {
-                window.Close();
-            }
-        }, DispatcherPriority.Background);
-    }
-
-    private void ShowTrayHint(bool showNotification)
-    {
-        if (_silentStartupToTray)
-        {
-            return;
-        }
-
-        if (!showNotification || _hasShownTrayHint || _notifyIcon is null || _localization is null)
-        {
-            return;
-        }
-
-        _notifyIcon.BalloonTipTitle = _localization.Translate("TrayBackgroundInfoTitle");
-        _notifyIcon.BalloonTipText = _localization.Translate("TrayBackgroundInfoText");
-        _notifyIcon.ShowBalloonTip(2500);
-        _hasShownTrayHint = true;
-    }
-
-    private void ShowMainWindow(bool forceActivate = false)
-    {
-        if (_serviceProvider is null || _isExiting)
-        {
-            return;
-        }
-
-        if (MainWindow is not MainWindow window)
-        {
-            DisposeMainWindowScope();
-            _windowScope = _serviceProvider.CreateScope();
-            _shellViewModel = _windowScope.ServiceProvider.GetRequiredService<ShellViewModel>();
-            _workspaceInitializationTask = _shellViewModel.InitializeAsync(suppressBootstrapPrompt: false);
-            window = _windowScope.ServiceProvider.GetRequiredService<MainWindow>();
-            window.Closed += OnMainWindowClosed;
-            MainWindow = window;
-            window.WindowState = WindowState.Normal;
-            window.ShowInTaskbar = true;
-            window.Show();
-        }
-
-        _silentStartupToTray = false;
-        window.ShowInTaskbar = true;
-        if (!window.IsVisible)
-        {
-            window.Show();
-        }
-
-        if (window.WindowState == WindowState.Minimized)
-        {
-            window.WindowState = WindowState.Normal;
-        }
-
-        if (forceActivate)
-        {
-            var previousTopmost = window.Topmost;
-            window.Topmost = true;
-            window.Activate();
-            window.Topmost = previousTopmost;
-            window.Focus();
-        }
-        else
-        {
-            window.Activate();
-        }
-    }
-
-    private void OnMainWindowClosed(object? sender, EventArgs e)
-    {
-        if (sender is MainWindow window)
-        {
-            window.Closed -= OnMainWindowClosed;
-        }
-
-        MainWindow = null;
-        _workspace?.ReleaseUiState();
-        DisposeMainWindowScope();
-    }
-
-    private void DisposeMainWindowScope()
-    {
-        try
-        {
-            if (_windowScope is IAsyncDisposable asyncDisposable)
-            {
-                asyncDisposable.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
-            }
-            else
-            {
-                _windowScope?.Dispose();
-            }
-        }
-        catch (Exception ex)
-        {
-            FrontendDebugLog.Error("App", ex, "Failed to dispose main-window scope.");
-        }
-        finally
-        {
-            _shellViewModel = null;
-            _windowScope = null;
-        }
-    }
-
-    private void SetupTrayIcon()
-    {
-        if (_localization is null || _workspace is null)
-        {
-            return;
-        }
-
-        _trayIcon = LoadTrayIcon();
-        _openMenuItem = new Forms.ToolStripMenuItem();
-        _openMenuItem.Click += (_, _) => ShowMainWindow(forceActivate: true);
-
-        _exitMenuItem = new Forms.ToolStripMenuItem();
-        _exitMenuItem.Click += (_, _) => ExitFromTray();
-
-        var trayMenu = new Forms.ContextMenuStrip();
-        trayMenu.Items.AddRange([_openMenuItem, _exitMenuItem]);
-
-        _notifyIcon = new Forms.NotifyIcon
-        {
-            Icon = _trayIcon,
-            Visible = true,
-            ContextMenuStrip = trayMenu
-        };
-        _notifyIcon.DoubleClick += (_, _) => ShowMainWindow(forceActivate: true);
-
-        ApplyTrayLocalization();
-        _localization.LanguageChanged += (_, _) => ApplyTrayLocalization();
-        _workspace.PendingApprovalDetected += OnPendingApprovalDetected;
-    }
-
-    private void ApplyTrayLocalization()
-    {
-        if (_notifyIcon is null || _openMenuItem is null || _exitMenuItem is null || _localization is null)
-        {
-            return;
-        }
-
-        _notifyIcon.Text = _localization.Translate("TrayTooltip");
-        _openMenuItem.Text = _localization.Translate("TrayOpen");
-        _exitMenuItem.Text = _localization.Translate("TrayExit");
-    }
-
-    private void OnPendingApprovalDetected(object? sender, ContextMenuMgr.Contracts.ContextMenuEntry entry)
-    {
-        if (_notifyIcon is null || _localization is null)
-        {
-            return;
-        }
-
-        _notifyIcon.BalloonTipTitle = _localization.Translate("PendingApprovalSystemNotificationTitle");
-        _notifyIcon.BalloonTipText = _localization.Format("PendingApprovalSystemNotificationMessage", entry.DisplayName);
-        _notifyIcon.ShowBalloonTip(4000);
-    }
-
-    private void ExitFromTray()
-    {
-        try
-        {
-            _isExiting = true;
-            if (MainWindow is MainWindow window)
-            {
-                window.PrepareForAppShutdown();
-            }
-
-            _notifyIcon?.Dispose();
-            _notifyIcon = null;
-            Shutdown();
-            Environment.Exit(0);
         }
         catch
         {
-            Process.GetCurrentProcess().Kill();
         }
-    }
-
-    private static Icon LoadTrayIcon()
-    {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-        return File.Exists(iconPath)
-            ? new Icon(iconPath)
-            : (Icon)SystemIcons.Application.Clone();
     }
 }

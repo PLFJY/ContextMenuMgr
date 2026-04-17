@@ -1,20 +1,17 @@
-using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
-using ContextMenuMgr.Frontend.ViewModels;
 using ContextMenuMgr.Frontend.Views.Pages;
 using Wpf.Ui.Appearance;
-using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend;
 
-public partial class MainWindow : FluentWindow
+public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
-    private bool _allowClose;
+    private Type? _pendingPageType;
 
     public MainWindow(
-        ShellViewModel viewModel,
+        ViewModels.ShellViewModel viewModel,
         IServiceProvider serviceProvider)
     {
         SystemThemeWatcher.Watch(this);
@@ -23,45 +20,31 @@ public partial class MainWindow : FluentWindow
         DataContext = viewModel;
 
         ApplyWindowIcon();
-
         Loaded += OnLoaded;
-        Closing += OnClosing;
-        StateChanged += OnStateChanged;
+    }
+
+    public void NavigateTo(Type pageType)
+    {
+        _pendingPageType = pageType;
+        if (IsLoaded)
+        {
+            RootNavigation.Navigate(pageType);
+        }
+    }
+
+    public void BringToForeground()
+    {
+        var previousTopmost = Topmost;
+        Topmost = true;
+        Activate();
+        Topmost = previousTopmost;
+        Focus();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        FileNavigationItem.IsActive = true;
-        RootNavigation.Navigate(typeof(FileContextMenuPage));
-    }
-
-    private void OnStateChanged(object? sender, EventArgs e)
-    {
-        if (WindowState == WindowState.Minimized)
-        {
-            ((App)System.Windows.Application.Current).MinimizeToTray();
-        }
-    }
-
-    private void OnClosing(object? sender, CancelEventArgs e)
-    {
-        if (_allowClose)
-        {
-            return;
-        }
-
-        e.Cancel = true;
-        ((App)System.Windows.Application.Current).BeginDestroyWindowToTray(this);
-    }
-
-    public void AllowCloseToTray()
-    {
-        _allowClose = true;
-    }
-
-    public void PrepareForAppShutdown()
-    {
-        _allowClose = true;
+        var targetPageType = _pendingPageType ?? typeof(FileContextMenuPage);
+        RootNavigation.Navigate(targetPageType);
     }
 
     private void ApplyWindowIcon()

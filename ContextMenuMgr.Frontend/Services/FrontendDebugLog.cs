@@ -6,12 +6,15 @@ namespace ContextMenuMgr.Frontend.Services;
 
 internal static class FrontendDebugLog
 {
+    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(14);
     private static readonly Lock SyncRoot = new();
     private static AppLogLevel _currentLevel = AppLogLevel.Warning;
+    private static bool _retentionChecked;
 
     public static void Configure(AppLogLevel logLevel)
     {
         _currentLevel = logLevel;
+        EnsureRetention();
     }
 
     public static string LogFilePath { get; } = Path.Combine(
@@ -60,6 +63,44 @@ internal static class FrontendDebugLog
             lock (SyncRoot)
             {
                 File.AppendAllText(LogFilePath, line, Encoding.UTF8);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void EnsureRetention()
+    {
+        if (_retentionChecked)
+        {
+            return;
+        }
+
+        _retentionChecked = true;
+
+        try
+        {
+            var directory = Path.GetDirectoryName(LogFilePath);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return;
+            }
+
+            var cutoff = DateTimeOffset.Now.Subtract(LogRetention);
+            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
+                    if (lastWriteTime < cutoff.UtcDateTime)
+                    {
+                        File.Delete(file);
+                    }
+                }
+                catch
+                {
+                }
             }
         }
         catch

@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
 using System.Text.RegularExpressions;
+using System.IO;
 
 namespace ContextMenuMgr.Backend.Services;
 

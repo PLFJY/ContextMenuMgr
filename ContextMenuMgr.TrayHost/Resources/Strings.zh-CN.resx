@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter</value>
+  </resheader>
+  <data name="Tray.Tooltip" xml:space="preserve">
+    <value>右键菜单管理器</value>
+  </data>
+  <data name="Tray.ShowMainWindow" xml:space="preserve">
+    <value>显示主界面</value>
+  </data>
+  <data name="Tray.ExitFull" xml:space="preserve">
+    <value>退出并停止后端服务</value>
+  </data>
+  <data name="Tray.PendingApprovalTitle" xml:space="preserve">
+    <value>发现新的待审核右键菜单</value>
+  </data>
+  <data name="Tray.PendingApprovalMessage" xml:space="preserve">
+    <value>{0} 已加入待审核队列，请打开应用处理。</value>
+  </data>
+</root>

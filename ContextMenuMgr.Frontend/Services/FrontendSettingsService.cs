@@ -61,25 +61,23 @@ public sealed class FrontendSettingsService
 
     public void UpdateAutoStartOnLogin(bool autoStartOnLogin)
     {
-        if (Current.AutoStartOnLogin == autoStartOnLogin
-            && Current.LaunchMinimized == autoStartOnLogin)
+        if (Current.AutoStartOnLogin == autoStartOnLogin)
         {
             return;
         }
 
         Current.AutoStartOnLogin = autoStartOnLogin;
-        Current.LaunchMinimized = autoStartOnLogin;
         Save();
     }
 
-    public void UpdateLaunchMinimized(bool launchMinimized)
+    public void UpdateKeepBackgroundAfterClose(bool keepBackgroundAfterClose)
     {
-        if (Current.LaunchMinimized == launchMinimized)
+        if (Current.KeepBackgroundAfterClose == keepBackgroundAfterClose)
         {
             return;
         }
 
-        Current.LaunchMinimized = launchMinimized;
+        Current.KeepBackgroundAfterClose = keepBackgroundAfterClose;
         Save();
     }
 

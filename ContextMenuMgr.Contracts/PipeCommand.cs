@@ -4,6 +4,7 @@ public enum PipeCommand
 {
     Ping,
     SubscribeNotifications,
+    SubscribeTrayHost,
     GetSnapshot,
     GetSceneSnapshot,
     SetEnhanceMenuItemEnabled,
@@ -16,5 +17,6 @@ public enum PipeCommand
     ApplyDecision,
     DeleteItem,
     UndoDelete,
-    PurgeDeletedItem
+    PurgeDeletedItem,
+    RequestShutdown
 }

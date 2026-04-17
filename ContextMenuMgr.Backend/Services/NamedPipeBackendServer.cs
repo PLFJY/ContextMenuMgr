@@ -1,9 +1,10 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.IO.Pipes;
-using System.Text;
-using System.Text.Json;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
+using System.Text.Json;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Services;
@@ -13,18 +14,13 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class NamedPipeBackendServer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly TimeSpan FrontendPresenceTimeout = TimeSpan.FromSeconds(10);
-
     private readonly ContextMenuRegistryCatalog _catalog;
     private readonly FileLogger _logger;
     private readonly ConcurrentDictionary<Guid, PipeClientConnection> _clients = new();
-    private readonly object _frontendTimeoutSync = new();
     private CancellationTokenSource? _acceptLoopCts;
     private Task? _acceptLoopTask;
-    private CancellationTokenSource? _frontendPresenceTimeoutCts;
 
-    public event EventHandler? FrontendPresenceTimedOut;
-    public event EventHandler? NotificationSubscriberConnected;
+    public event EventHandler? BackendShutdownRequested;
 
     public NamedPipeBackendServer(ContextMenuRegistryCatalog catalog, FileLogger logger)
     {
@@ -41,12 +37,6 @@ public sealed class NamedPipeBackendServer
     public void Stop()
     {
         _acceptLoopCts?.Cancel();
-        lock (_frontendTimeoutSync)
-        {
-            _frontendPresenceTimeoutCts?.Cancel();
-            _frontendPresenceTimeoutCts?.Dispose();
-            _frontendPresenceTimeoutCts = null;
-        }
     }
 
     public void BroadcastNotification(BackendNotification notification)
@@ -145,9 +135,13 @@ public sealed class NamedPipeBackendServer
                 if (envelope.Request.Command == PipeCommand.SubscribeNotifications)
                 {
                     connection.IsNotificationSubscriber = true;
-                    CancelFrontendPresenceTimeout();
                     await _logger.LogAsync($"Connection {connection.Id} marked as frontend notification subscriber.", cancellationToken);
-                    NotificationSubscriberConnected?.Invoke(this, EventArgs.Empty);
+                }
+
+                if (envelope.Request.Command == PipeCommand.SubscribeTrayHost)
+                {
+                    connection.IsNotificationSubscriber = true;
+                    await _logger.LogAsync($"Connection {connection.Id} marked as tray-host subscriber.", cancellationToken);
                 }
 
                 PipeResponse response;
@@ -201,13 +195,8 @@ public sealed class NamedPipeBackendServer
         finally
         {
             _clients.TryRemove(connection.Id, out _);
-            var wasNotificationSubscriber = connection.IsNotificationSubscriber;
             connection.Dispose();
             await _logger.LogAsync($"Pipe client disconnected: {connection.Id}", CancellationToken.None);
-            if (wasNotificationSubscriber)
-            {
-                StartFrontendPresenceTimeoutIfNeeded();
-            }
         }
     }
 
@@ -220,11 +209,17 @@ public sealed class NamedPipeBackendServer
                 Success = true,
                 Message = "Backend is reachable."
             },
+            PipeCommand.SubscribeTrayHost => new PipeResponse
+            {
+                Success = true,
+                Message = "Tray host subscription established."
+            },
             PipeCommand.SubscribeNotifications => new PipeResponse
             {
                 Success = true,
                 Message = "Notification subscription established."
             },
+            PipeCommand.RequestShutdown => HandleShutdownRequest(),
             PipeCommand.GetSnapshot => new PipeResponse
             {
                 Success = true,
@@ -293,61 +288,26 @@ public sealed class NamedPipeBackendServer
         }
     }
 
-    private void CancelFrontendPresenceTimeout()
+    public async Task BroadcastServiceStoppingAsync(CancellationToken cancellationToken)
     {
-        lock (_frontendTimeoutSync)
-        {
-            _frontendPresenceTimeoutCts?.Cancel();
-            _frontendPresenceTimeoutCts?.Dispose();
-            _frontendPresenceTimeoutCts = null;
-        }
+        await BroadcastNotificationAsync(
+            new BackendNotification
+            {
+                Kind = PipeNotificationKind.ServiceStopping,
+                Message = "Backend service is stopping.",
+                Timestamp = DateTimeOffset.UtcNow
+            },
+            cancellationToken);
     }
 
-    private void StartFrontendPresenceTimeoutIfNeeded()
+    private PipeResponse HandleShutdownRequest()
     {
-        if (_clients.Values.Any(static connection => connection.IsNotificationSubscriber))
+        BackendShutdownRequested?.Invoke(this, EventArgs.Empty);
+        return new PipeResponse
         {
-            return;
-        }
-
-        lock (_frontendTimeoutSync)
-        {
-            if (_frontendPresenceTimeoutCts is not null)
-            {
-                return;
-            }
-
-            _frontendPresenceTimeoutCts = new CancellationTokenSource();
-            var cancellationToken = _frontendPresenceTimeoutCts.Token;
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _logger.LogAsync(
-                        $"No frontend notification subscriber remains. Waiting {FrontendPresenceTimeout.TotalSeconds:0}s before stopping backend.",
-                        CancellationToken.None);
-                    await Task.Delay(FrontendPresenceTimeout, cancellationToken);
-                    if (_clients.Values.Any(static connection => connection.IsNotificationSubscriber))
-                    {
-                        return;
-                    }
-
-                    await _logger.LogAsync("Frontend presence timeout elapsed. Requesting backend shutdown.", CancellationToken.None);
-                    FrontendPresenceTimedOut?.Invoke(this, EventArgs.Empty);
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                finally
-                {
-                    lock (_frontendTimeoutSync)
-                    {
-                        _frontendPresenceTimeoutCts?.Dispose();
-                        _frontendPresenceTimeoutCts = null;
-                    }
-                }
-            }, CancellationToken.None);
-        }
+            Success = true,
+            Message = "Backend shutdown requested."
+        };
     }
 
     private sealed class PipeClientConnection : IDisposable

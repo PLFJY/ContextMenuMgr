@@ -4,5 +4,6 @@ public enum PipeNotificationKind
 {
     ItemDetected,
     ItemStateChanged,
-    ServiceMessage
+    ServiceMessage,
+    ServiceStopping
 }

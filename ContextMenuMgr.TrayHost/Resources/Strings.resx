@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter</value>
+  </resheader>
+  <data name="Tray.Tooltip" xml:space="preserve">
+    <value>Context Menu Manager</value>
+  </data>
+  <data name="Tray.ShowMainWindow" xml:space="preserve">
+    <value>Show Main Window</value>
+  </data>
+  <data name="Tray.ExitFull" xml:space="preserve">
+    <value>Exit and Stop Backend Service</value>
+  </data>
+  <data name="Tray.PendingApprovalTitle" xml:space="preserve">
+    <value>New context menu item pending review</value>
+  </data>
+  <data name="Tray.PendingApprovalMessage" xml:space="preserve">
+    <value>{0} was added to the review queue. Open the app to review it.</value>
+  </data>
+</root>

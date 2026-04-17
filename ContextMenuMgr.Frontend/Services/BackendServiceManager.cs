@@ -401,6 +401,8 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "$ErrorActionPreference = 'Stop'\n" +
             $"$serviceName = '{ServiceMetadata.ServiceName}'\n" +
             $"$resultFile = '{resultFilePath.Replace("'", "''")}'\n" +
+            $"$dataDir = Join-Path $env:ProgramData 'ContextMenuMgr\\Data'\n" +
+            $"$markerFile = Join-Path $dataDir '{ServiceMetadata.KeepFrontendOnStopMarkerFileName}'\n" +
             "\n" +
             "function Write-Result($success, $code, $detail) {\n" +
             "    $payload = @{ Success = $success; Code = $code; Detail = $detail }\n" +
@@ -415,15 +417,19 @@ public sealed class BackendServiceManager : IBackendServiceManager
             "    }\n" +
             "\n" +
             "    if ($service.Status -ne 'Stopped') {\n" +
+            "        New-Item -Path $dataDir -ItemType Directory -Force | Out-Null\n" +
+            "        Set-Content -Path $markerFile -Value '1' -Encoding ASCII\n" +
             "        Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue\n" +
             "        Start-Sleep -Seconds 1\n" +
             "    }\n" +
             "\n" +
             "sc.exe delete $serviceName | Out-Null\n" +
+            "    if (Test-Path $markerFile) { Remove-Item -Path $markerFile -Force -ErrorAction SilentlyContinue }\n" +
             "    Write-Result $true 'UNINSTALLED' 'Service removed.'\n" +
             "    exit 0\n" +
             "}\n" +
             "catch {\n" +
+            "    if (Test-Path $markerFile) { Remove-Item -Path $markerFile -Force -ErrorAction SilentlyContinue }\n" +
             "    Write-Result $false 'SERVICE_UNINSTALL_ERROR' $_.Exception.Message\n" +
             "    exit 1\n" +
             "}\n";

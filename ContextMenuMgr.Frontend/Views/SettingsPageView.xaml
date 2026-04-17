@@ -77,6 +77,15 @@
                         Opacity="0.72"
                         Text="{Binding AutoStartOnLoginDescription}"
                         TextWrapping="Wrap" />
+                    <ui:ToggleSwitch
+                        Margin="0,16,0,0"
+                        Content="{Binding KeepBackgroundAfterCloseLabel}"
+                        IsChecked="{Binding KeepBackgroundAfterClose, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock
+                        Margin="0,8,0,0"
+                        Opacity="0.72"
+                        Text="{Binding KeepBackgroundAfterCloseDescription}"
+                        TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
