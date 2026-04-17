@@ -6,10 +6,13 @@ namespace ContextMenuMgr.Backend.Hosting;
 
 public sealed class BackendRuntime : IDisposable
 {
+    private static readonly TimeSpan ApprovalNotificationDedupWindow = TimeSpan.FromMinutes(5);
     private readonly FileLogger _logger;
     private readonly ContextMenuRegistryMonitor _monitor;
     private readonly NamedPipeBackendServer _pipeServer;
     private readonly FrontendAutostartLauncher _frontendAutostartLauncher;
+    private readonly Lock _approvalNotificationSyncRoot = new();
+    private readonly Dictionary<string, DateTimeOffset> _recentApprovalNotificationKeys = new(StringComparer.OrdinalIgnoreCase);
     private bool _ensureTrayHostOnStartup;
     private bool _shutdownFrontendOnStop = true;
     private CancellationTokenSource? _lifetimeCts;
@@ -169,15 +172,20 @@ public sealed class BackendRuntime : IDisposable
             // remain active before the user reviews it.
             var quarantinedItem = await _monitor.Catalog.QuarantineNewItemAsync(item, CancellationToken.None);
 
-            // Step 2: notify the unprivileged frontend that a decision is needed.
-            _pipeServer.BroadcastNotification(
-                new BackendNotification
-                {
-                    Kind = PipeNotificationKind.ItemDetected,
-                    Item = quarantinedItem,
-                    Message = $"A new context menu item was blocked pending approval: {quarantinedItem.DisplayName}",
-                    Timestamp = DateTimeOffset.UtcNow
-                });
+            // Step 2: notify the tray/frontends once per logical item so the
+            // same menu item appearing under multiple categories does not spam
+            // duplicate approval notifications.
+            if (ShouldBroadcastApprovalNotification(quarantinedItem))
+            {
+                _pipeServer.BroadcastNotification(
+                    new BackendNotification
+                    {
+                        Kind = PipeNotificationKind.ItemDetected,
+                        Item = quarantinedItem,
+                        Message = $"A new context menu item was blocked pending approval: {quarantinedItem.DisplayName}",
+                        Timestamp = DateTimeOffset.UtcNow
+                    });
+            }
         }
         catch (Exception ex)
         {
@@ -213,6 +221,46 @@ public sealed class BackendRuntime : IDisposable
         {
             _ = _logger.LogAsync($"Failed to launch tray host from service: {ex.Message}", CancellationToken.None);
         }
+    }
+
+    private bool ShouldBroadcastApprovalNotification(ContextMenuEntry item)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var notificationKey = CreateApprovalNotificationKey(item);
+
+        lock (_approvalNotificationSyncRoot)
+        {
+            var expiredKeys = _recentApprovalNotificationKeys
+                .Where(static pair => pair.Value <= DateTimeOffset.UtcNow)
+                .Select(static pair => pair.Key)
+                .ToArray();
+
+            foreach (var expiredKey in expiredKeys)
+            {
+                _recentApprovalNotificationKeys.Remove(expiredKey);
+            }
+
+            if (_recentApprovalNotificationKeys.TryGetValue(notificationKey, out var expiresAtUtc)
+                && expiresAtUtc > now)
+            {
+                return false;
+            }
+
+            _recentApprovalNotificationKeys[notificationKey] = now.Add(ApprovalNotificationDedupWindow);
+            return true;
+        }
+    }
+
+    private static string CreateApprovalNotificationKey(ContextMenuEntry item)
+    {
+        return string.Join("|",
+            item.DisplayName,
+            item.KeyName,
+            item.EntryKind.ToString(),
+            item.HandlerClsid ?? string.Empty,
+            item.CommandText ?? string.Empty,
+            item.EditableText ?? string.Empty,
+            item.FilePath ?? string.Empty);
     }
 
 }
