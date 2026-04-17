@@ -9,7 +9,6 @@ public sealed class FrontendStartupService
     private const string PolicyValueName = "StartWithWindows";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "ContextMenuManager.TrayHost";
-    private readonly string _trayHostExecutablePath = Path.Combine(AppContext.BaseDirectory, "ContextMenuManager.TrayHost.exe");
 
     public bool IsAutoStartEnabled()
     {
@@ -41,21 +40,7 @@ public sealed class FrontendStartupService
         key.SetValue(PolicyValueName, enabled ? 1 : 0, RegistryValueKind.DWord);
 
         using var runKey = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-        if (runKey is null)
-        {
-            throw new InvalidOperationException("Unable to open the Windows startup registry key.");
-        }
-
-        if (enabled)
-        {
-            if (!File.Exists(_trayHostExecutablePath))
-            {
-                throw new InvalidOperationException("ContextMenuManager.TrayHost.exe was not found.");
-            }
-
-            runKey.SetValue(RunValueName, $"\"{_trayHostExecutablePath}\"", RegistryValueKind.String);
-        }
-        else
+        if (runKey is not null)
         {
             runKey.DeleteValue(RunValueName, throwOnMissingValue: false);
         }

@@ -20,6 +20,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private bool _notificationsInitialized;
     private bool _fullyInitialized;
     private bool _uiStateActive;
+    private bool _trayHostEnsured;
     private ServiceAttentionState _serviceAttentionState = ServiceAttentionState.None;
 
     public ContextMenuWorkspaceService(
@@ -268,7 +269,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         var result = await _backendServiceManager.InstallOrRepairServiceAsync(CancellationToken.None);
         if (result.Success)
         {
+            _trayHostEnsured = false;
             UpdateServiceAttention(ServiceAttentionState.None);
+            await EnsureTrayHostAsync();
             await RefreshAsync();
             return result;
         }
@@ -367,6 +370,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         if (await CanReachBackendAsync())
         {
             UpdateServiceAttention(ServiceAttentionState.None);
+            await EnsureTrayHostAsync();
             return true;
         }
 
@@ -435,6 +439,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         ConnectionStatus = ready
             ? _localization.Translate("ServiceInstallSucceeded")
             : _localization.Translate("ServicePipeUnavailableSimple");
+
+        if (ready)
+        {
+            _trayHostEnsured = false;
+            await EnsureTrayHostAsync();
+        }
+
         return ready;
     }
 
@@ -449,6 +460,26 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         catch
         {
             return false;
+        }
+    }
+
+    private async Task EnsureTrayHostAsync()
+    {
+        if (_trayHostEnsured)
+        {
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await _backendClient.EnsureTrayHostAsync(cts.Token);
+            _trayHostEnsured = true;
+            FrontendDebugLog.Info("ContextMenuWorkspaceService", "EnsureTrayHostAsync succeeded.");
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, "EnsureTrayHostAsync failed.");
         }
     }
 

@@ -57,7 +57,7 @@ internal sealed class TrayHostControlServer : IAsyncDisposable
             {
                 server = CreateServerStream();
                 await server.WaitForConnectionAsync(cancellationToken);
-                _ = Task.Run(() => HandleClientAsync(server, cancellationToken), CancellationToken.None);
+                _ = ObserveClientTaskAsync(server, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -69,6 +69,26 @@ internal sealed class TrayHostControlServer : IAsyncDisposable
                 server?.Dispose();
                 await Task.Delay(250, cancellationToken);
             }
+        }
+    }
+
+    private async Task ObserveClientTaskAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandleClientAsync(stream, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch
+        {
         }
     }
 

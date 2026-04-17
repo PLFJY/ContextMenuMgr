@@ -12,6 +12,8 @@ public interface IBackendClient : IAsyncDisposable
 
     Task PingAsync(CancellationToken cancellationToken);
 
+    Task EnsureTrayHostAsync(CancellationToken cancellationToken);
+
     Task RequestShutdownAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken);

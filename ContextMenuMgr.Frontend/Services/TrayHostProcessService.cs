@@ -44,6 +44,12 @@ public sealed class TrayHostProcessService
     }
 
     public async Task<bool> RequestExitAsync(CancellationToken cancellationToken)
+        => await SendCommandAsync(TrayHostControlCommand.Exit, cancellationToken);
+
+    public async Task<bool> RequestReloadLocalizationAsync(CancellationToken cancellationToken)
+        => await SendCommandAsync(TrayHostControlCommand.ReloadLocalization, cancellationToken);
+
+    private static async Task<bool> SendCommandAsync(TrayHostControlCommand command, CancellationToken cancellationToken)
     {
         try
         {
@@ -54,7 +60,7 @@ public sealed class TrayHostProcessService
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
             await writer.WriteLineAsync(JsonSerializer.Serialize(
-                new TrayHostControlRequest { Command = TrayHostControlCommand.Exit },
+                new TrayHostControlRequest { Command = command },
                 JsonOptions)).WaitAsync(cancellationToken);
 
             var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);

@@ -221,6 +221,76 @@
                     </WrapPanel>
                 </StackPanel>
             </Border>
+            <Border
+                Margin="0,0,10,10"
+                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                Style="{StaticResource CardBorderStyle}">
+                <Grid MinWidth="260">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Border
+                            Width="40"
+                            Height="40"
+                            Margin="0,0,12,0"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                            CornerRadius="10">
+                            <ui:ImageIcon
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Foreground="White"
+                                Source="/Assets/AppIcon.png" />
+                        </Border>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Text="Context Menu Manager" />
+                            <TextBlock
+                                Margin="0,4,0,0"
+                                Opacity="0.72"
+                                Text="{Binding LicenseText}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border
+                        Grid.Row="1"
+                        Margin="0,16,0,0"
+                        Padding="12"
+                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                        CornerRadius="10">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Opacity="0.72" Text="{Binding VersionLabel}" />
+                                <TextBlock
+                                    Margin="0,4,0,0"
+                                    FontFamily="Consolas"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    Text="{Binding VersionText}" />
+                            </StackPanel>
+                            <ui:SymbolIcon
+                                VerticalAlignment="Center"
+                                DockPanel.Dock="Right"
+                                FontSize="18"
+                                Opacity="0.72"
+                                Symbol="Tag24" />
+                        </DockPanel>
+                    </Border>
+
+                    <ui:HyperlinkButton
+                        Grid.Row="2"
+                        Margin="0,14,0,0"
+                        HorizontalAlignment="Left"
+                        Content="{Binding RepositoryUrl}"
+                        Icon="{ui:SymbolIcon Symbol=Open24}"
+                        NavigateUri="{Binding RepositoryUrl}" />
+                </Grid>
+            </Border>
         </WrapPanel>
     </ScrollViewer>
 </UserControl>

@@ -43,6 +43,13 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task EnsureTrayHostAsync(CancellationToken cancellationToken)
+    {
+        await SendRequestAsync(
+            new PipeRequest { Command = PipeCommand.EnsureTrayHost },
+            cancellationToken);
+    }
+
     public async Task RequestShutdownAsync(CancellationToken cancellationToken)
     {
         await SendRequestAsync(

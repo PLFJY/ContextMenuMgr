@@ -87,6 +87,7 @@ public sealed class BackendRuntime : IDisposable
 
         _monitor.ItemDetected += OnItemDetected;
         _pipeServer.BackendShutdownRequested += OnBackendShutdownRequested;
+        _pipeServer.EnsureTrayHostRequested += OnEnsureTrayHostRequested;
         _monitor.Start(cancellationToken);
         _pipeServer.Start(cancellationToken);
 
@@ -94,7 +95,7 @@ public sealed class BackendRuntime : IDisposable
 
         if (_ensureTrayHostOnStartup)
         {
-            TryEnsureTrayHost(null);
+            TryEnsureTrayHost(null, requireAutostartPolicy: false);
         }
     }
 
@@ -102,6 +103,7 @@ public sealed class BackendRuntime : IDisposable
     {
         _monitor.ItemDetected -= OnItemDetected;
         _pipeServer.BackendShutdownRequested -= OnBackendShutdownRequested;
+        _pipeServer.EnsureTrayHostRequested -= OnEnsureTrayHostRequested;
         if (_shutdownFrontendOnStop && !ConsumeKeepFrontendOnStopMarker())
         {
             await _pipeServer.BroadcastServiceStoppingAsync(CancellationToken.None);
@@ -144,7 +146,7 @@ public sealed class BackendRuntime : IDisposable
             return;
         }
 
-        TryEnsureTrayHost(sessionId);
+        TryEnsureTrayHost(sessionId, requireAutostartPolicy: true);
     }
 
     private void OnConsoleCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
@@ -188,15 +190,22 @@ public sealed class BackendRuntime : IDisposable
         StopRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void TryEnsureTrayHost(int? sessionId)
+    private void OnEnsureTrayHostRequested(object? sender, EventArgs e)
+    {
+        TryEnsureTrayHost(null, requireAutostartPolicy: false);
+    }
+
+    private void TryEnsureTrayHost(int? sessionId, bool requireAutostartPolicy)
     {
         try
         {
-            var launched = _frontendAutostartLauncher.TryLaunchTrayHostForActiveSession(sessionId);
+            var launched = _frontendAutostartLauncher.TryLaunchTrayHostForActiveSession(sessionId, requireAutostartPolicy);
             _ = _logger.LogAsync(
                 launched
                     ? "Requested tray-host startup for the active user session."
-                    : "Skipped tray-host startup because no eligible interactive user session was available.",
+                    : requireAutostartPolicy
+                        ? "Skipped tray-host startup because no eligible interactive user session was available or autostart policy is disabled."
+                        : "Skipped tray-host startup because no eligible interactive user session was available.",
                 CancellationToken.None);
         }
         catch (Exception ex)

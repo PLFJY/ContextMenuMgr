@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using ContextMenuMgr.Contracts;
 
@@ -18,7 +16,6 @@ internal sealed class TrayHostRunner : IDisposable
     private bool _ownsMutex;
 
     private NativeTrayHost? _trayHost;
-    private Icon? _trayIcon;
 
     private TrayHostControlServer? _controlServer;
     private CancellationTokenSource? _controlServerCts;
@@ -46,10 +43,10 @@ internal sealed class TrayHostRunner : IDisposable
 
         try
         {
-            _trayIcon = LoadTrayIcon();
+            var trayIconPath = ResolveTrayIconPath();
 
             _trayHost = new NativeTrayHost(
-                _trayIcon,
+                trayIconPath,
                 _localization.Translate("Tray.Tooltip"),
                 _localization.Translate("Tray.ShowMainWindow"),
                 _localization.Translate("Tray.ExitFull"),
@@ -90,9 +87,6 @@ internal sealed class TrayHostRunner : IDisposable
 
         _trayHost?.Dispose();
         _trayHost = null;
-
-        _trayIcon?.Dispose();
-        _trayIcon = null;
 
         if (_ownsMutex)
         {
@@ -179,16 +173,10 @@ internal sealed class TrayHostRunner : IDisposable
         _ = _logger.LogAsync("Backend became unavailable while tray host stays alive.");
     }
 
-    private static Icon LoadTrayIcon()
+    private static string? ResolveTrayIconPath()
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-        if (File.Exists(iconPath))
-        {
-            return new Icon(iconPath);
-        }
-
-        var extracted = Icon.ExtractAssociatedIcon(Process.GetCurrentProcess().MainModule?.FileName ?? AppContext.BaseDirectory);
-        return extracted is not null ? (Icon)extracted.Clone() : SystemIcons.Application;
+        return File.Exists(iconPath) ? iconPath : null;
     }
 
     private Task<TrayHostControlResponse> HandleTrayControlRequestAsync(TrayHostControlRequest request)
@@ -197,11 +185,24 @@ internal sealed class TrayHostRunner : IDisposable
         {
             _trayHost?.RequestClose();
         }
+        else if (request.Command == TrayHostControlCommand.ReloadLocalization)
+        {
+            ReloadLocalization();
+        }
 
         return Task.FromResult(new TrayHostControlResponse
         {
             Success = true,
             Message = "Tray host command applied."
         });
+    }
+
+    private void ReloadLocalization()
+    {
+        _localization.Reload();
+        _trayHost?.UpdateLocalization(
+            _localization.Translate("Tray.Tooltip"),
+            _localization.Translate("Tray.ShowMainWindow"),
+            _localization.Translate("Tray.ExitFull"));
     }
 }

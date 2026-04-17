@@ -25,7 +25,7 @@ internal sealed class FrontendAutostartLauncher
         _trayHostExePath = Path.Combine(baseDirectory, "ContextMenuManager.TrayHost.exe");
     }
 
-    public bool TryLaunchTrayHostForActiveSession(int? sessionId = null)
+    public bool TryLaunchTrayHostForActiveSession(int? sessionId = null, bool requireAutostartPolicy = true)
     {
         if (!File.Exists(_trayHostExePath))
         {
@@ -38,7 +38,7 @@ internal sealed class FrontendAutostartLauncher
             return false;
         }
 
-        if (!IsAutostartEnabledForUser(userSid))
+        if (requireAutostartPolicy && !IsAutostartEnabledForUser(userSid))
         {
             return false;
         }

@@ -14,12 +14,12 @@
     <FileVersion>1.3.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <InformationalVersion>1.3.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>..\ContextMenuMgr.Frontend\Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
-    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>

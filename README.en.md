@@ -3,89 +3,222 @@
 [中文说明](./README.md)
 
 > [!WARNING]
-> A significant portion of this project was generated with AI assistance and then iteratively revised and integrated by hand. It may still contain gaps, edge-case issues, or behavior that does not fully match expectations.
-> If you find bugs, unexpected behavior, missing documentation, or compatibility issues, please open an Issue and include reproduction steps, logs, and screenshots whenever possible.
+> A significant portion of this project was generated with AI assistance and then continuously revised, tested, and reshaped by hand. It may still contain gaps, edge-case regressions, or behavior that does not fully match expectations.
+> If you hit bugs, compatibility issues, missing documentation, or surprising behavior, please open an Issue. Reproduction steps, logs, screenshots, and Windows version details are especially helpful.
 
 ## Overview
 
-`Context Menu Manager` is a Windows context menu management tool
+`Context Menu Manager` is a Windows context menu management tool focused on an approval-first workflow rather than simple toggling.
+
+The project is built around:
 
 - `.NET 10`
 - `WPF`
 - `WPF-UI`
 - `Named Pipe IPC`
 - `Windows Service`
+- a native Win32 tray host
 
-The solution contains two executables:
+## Core Idea
 
-- `ContextMenuManager.exe`
-  Standard-privilege desktop frontend.
+### Intercept first, review second
+
+This project is intentionally designed to do more than just enable or disable context menu items:
+
+- when a new menu item is detected, it is intercepted first
+- it is forced into a disabled state
+- it is then placed into a review queue
+- the user explicitly decides what to do next
+
+The available review actions are:
+
+- `Allow`
+- `Keep disabled`
+- `Remove`
+
+That “intercept -> review -> manually allow” pipeline is the main differentiator of this project.
+
+### Backend-driven process model
+
+The project follows a backend-driven model:
+
 - `ContextMenuManager.Service.exe`
-  Elevated backend service responsible for registry monitoring and mutation.
+  - the real controller and runtime core
+- `ContextMenuManager.TrayHost.exe`
+  - a separate per-user tray surface
+- `ContextMenuManager.exe`
+  - an on-demand UI process only
 
-## Core Differentiator
+The tray exists as a separate per-user surface, while the frontend remains a UI process.
 
-The most important feature of this project is that it is not just a regular context-menu toggle tool:
+## Features
 
-- When a new context menu entry is detected, the backend service intercepts it immediately and disables it first
-- The intercepted item is then placed into a review queue for explicit user action
-- The user can manually choose one of the following:
-  - Allow: enable the menu item
-  - Keep disabled: keep the item present but disabled
-  - Remove: delete the item
+### Context menu management
 
-In other words, the core workflow is:
+- Browse context menu items by category
+  - File
+  - All Objects
+  - Folder
+  - Directory
+  - Directory Background
+  - Desktop Background
+  - Drive
+  - Library
+  - This PC
+  - Recycle Bin
+- Enable / disable items
+- Delete items
+- Undo delete
+- Permanently remove delete backups
+- Search and filter entries
+- Parse names, icons, command text, and CLSID metadata for many items
 
-- intercept first
-- review second
-- manually allow only when approved
+### Review queue
 
-That approval-first flow is the key differentiator of this project.
+- New items are placed into a review queue
+- Review actions:
+  - `Allow`
+  - `Keep disabled`
+  - `Remove`
+- Approval items can aggregate multiple category sources for the same logical item
+- New approval events are forwarded to the tray host, which shows a system notification
+- Clicking the notification launches the frontend and opens the approvals page
 
-## Key Features
+### External-change tracking
 
-- Browse context menu entries by category
-- Enable / disable menu entries
-- Delete, undo delete, and permanently delete items
-- Review newly detected menu items
-- Detect external changes
-- Parse item names and icons
-- Manage file-type-related menu entries
-- Manage enhance-menu and detailed-edit rules
-- Switch language and theme
-- Install, repair, or uninstall the backend service
+External-change tracking focuses on:
+
+- externally added items
+- external enabled/disabled changes that happened while the guard was offline
+
+### File-type and rules pages
+
+- File Types page
+  - Shortcuts
+  - UWP shortcuts
+  - Executables
+  - Custom extensions
+  - Perceived types
+  - Directory types
+  - Unknown types
+- Other Rules page
+  - Enhance Menu
+  - Detailed Edit
+  - Custom registry paths
+
+### Settings page
+
+- Language
+  - Follow system
+  - Simplified Chinese
+  - English (United States)
+- Theme
+  - Follow system
+  - Light
+  - Dark
+- Log level
+- Start with Windows
+- Install / repair service
+- Uninstall service
 - Restart Explorer
-- Open logs, state store, and config folders
+- Open logs / state / config folders
+- Registry protection enhancement switch
 
 ## Architecture
 
-### Frontend
+### 1. Backend Service
 
-The frontend is a WPF desktop application using `WPF-UI` for a Fluent-style interface. It is responsible for:
+Project: `ContextMenuMgr.Backend`  
+Executable: `ContextMenuManager.Service.exe`
 
-- Category navigation and item presentation
-- Review queue counters
-- Enable / disable / delete / undo operations
-- Language, theme, service, and logging settings
-- Named Pipe communication with the backend
+Responsibilities:
 
-### Backend Service
+- enumerate and monitor context-menu-related registry entries
+- store and merge persisted state
+- apply enable / disable / delete / restore / approval decisions
+- expose backend IPC
+- ensure the tray host exists when appropriate
 
-The backend is an elevated Windows Service responsible for:
+### 2. Tray Host
 
-- Enumerating and monitoring context-menu-related registry entries
-- Applying enabled / disabled states
-- Disabling newly detected items before review
-- Maintaining the state store and delete backups
-- Serving IPC requests from the frontend
+Project: `ContextMenuMgr.TrayHost`  
+Executable: `ContextMenuManager.TrayHost.exe`
 
-### IPC
+The tray host is intentionally thin:
 
-Frontend and backend communicate through JSON-over-Named-Pipe requests and responses.
+- tray icon
+- tray menu
+- system notifications
+- launching the frontend main window
+- opening the approvals UI
+- requesting backend shutdown
+
+The tray host uses a **native Win32 tray implementation**.
+
+### 3. Frontend
+
+Project: `ContextMenuMgr.Frontend`  
+Executable: `ContextMenuManager.exe`
+
+Responsibilities:
+
+- main UI
+- approvals UI
+- rules pages
+- settings UI
+- IPC with backend
+- control-pipe cooperation for frontend single-instance behavior
+
+The frontend is UI-only:
+
+- closing the window exits the frontend process
+- no tray ownership
+- no background-resident frontend process
+
+### 4. Shared Contracts
+
+Project: `ContextMenuMgr.Contracts`
+
+Responsibilities:
+
+- IPC request / response models
+- notification kinds
+- tray host and frontend control commands
+- shared protocol constants
+
+## IPC and Process Coordination
+
+### Backend pipe
+
+JSON-over-Named-Pipe is used for:
+
+- snapshot retrieval
+- item state updates
+- approval decisions
+- registry-protection settings
+- explicit tray-host startup requests
+- backend shutdown requests
+
+### Frontend control pipe
+
+Used for:
+
+- single-instance activation
+- showing the main window
+- opening the approvals page
+- focusing a specific approval item
+- shutting down the frontend cleanly
+
+### Tray host control pipe
+
+Used for:
+
+- tray host exit
+- tray localization reload
 
 ## Main Registry Scopes
 
-The project currently focuses on:
+The code primarily targets:
 
 - `HKEY_CLASSES_ROOT\*\shell`
 - `HKEY_CLASSES_ROOT\*\shellex\ContextMenuHandlers`
@@ -93,97 +226,173 @@ The project currently focuses on:
 - `HKEY_CLASSES_ROOT\Directory\shellex\ContextMenuHandlers`
 - `HKEY_CLASSES_ROOT\Directory\Background\shell`
 - `HKEY_CLASSES_ROOT\Directory\Background\shellex\ContextMenuHandlers`
-- Various `CLSID`, `PackagedCom`, file-type, and extension-related branches
+- `CLSID`
+- `PackagedCom`
+- file-type, extension, perceived-type, and directory-type branches
+- user-level `HKCU/HKEY_USERS\<SID>\Software\Classes` ranges
 
-## Repository Structure
+## Repository Layout
 
 ```text
 ContextMenuMgr/
-├─ ContextMenuMgr.Frontend/         # WPF frontend
-├─ ContextMenuMgr.Backend/          # Windows Service backend
-├─ ContextMenuMgr.Contracts/        # Shared contracts
-├─ Installer/                       # Inno Setup scripts
-├─ build.ps1                        # Build + publish + package script
-├─ build.bat                        # Batch wrapper
-├─ ContextMenuMgr.slnx              # Solution
-├─ README.md                        # Chinese primary README
-└─ README.en.md                     # English README
+├─ .github/                        # GitHub Actions
+├─ artifacts/                      # Local intermediate build output
+├─ build/                          # Publish output and installers
+├─ ContextMenuMgr.Backend/         # Windows Service / backend core
+├─ ContextMenuMgr.Contracts/       # Shared contracts
+├─ ContextMenuMgr.Frontend/        # WPF frontend
+├─ ContextMenuMgr.TrayHost/        # Per-user tray host
+├─ Installer/                      # Inno Setup scripts and related files
+├─ build.ps1                       # Main build script
+├─ build.bat                       # Batch wrapper for build.ps1
+├─ ContextMenuMgr.slnx             # Solution
+├─ README.md                       # Chinese primary README
+└─ README.en.md                    # English README
 ```
+
+## Executables
+
+Public-facing executable names are:
+
+- Frontend: `ContextMenuManager.exe`
+- Backend service: `ContextMenuManager.Service.exe`
+- Tray host: `ContextMenuManager.TrayHost.exe`
 
 ## Requirements
 
-- Windows 11 x64
+- Windows 10 / 11
 - .NET SDK 10
 - PowerShell 5.1 or later
 - Inno Setup 6
-  - Default compiler path: `Installer\Inno Setup 6\ISCC.exe`
+  - the repo prefers the bundled compiler under:
+    - `Installer\Inno Setup 6\ISCC.exe`
 
-## Build
+## Local Development Build
 
 ```powershell
 dotnet restore .\ContextMenuMgr.slnx --configfile .\NuGet.Config
 dotnet build .\ContextMenuMgr.slnx --no-restore
 ```
 
-## Publish and Package
+## Publish and Installer Build
+
+Run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Configuration Release
 ```
 
-To override the installer `AppId`:
+### What `build.ps1` does
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Configuration Release -AppId "YOUR-GUID-HERE"
-```
+The current script:
 
-The build script will:
+1. restores the full solution
+2. publishes:
+   - Frontend
+   - Backend
+   - TrayHost
+3. generates installers for multiple architecture / distribution combinations
 
-1. Run `dotnet restore`
-2. Publish the frontend project to `build\ContextMenuManager`
-3. Generate an Inno Setup installer
+The combinations are:
 
-Default outputs:
+- `win-x64`
+- `win-x86`
+- `win-arm64`
+- `self-contained`
+- `framework-dependent`
 
-- Publish folder: `build\ContextMenuManager\`
-- Installer: `build\ContextMenuManager_Setup.exe`
+Outputs:
 
-## Executable Names
+- publish output: `build\publish\`
+- installers: `build\dist\`
+- artifact manifest: `build\dist\artifacts.txt`
 
-Public-facing executable names are now:
+## GitHub Actions
 
-- Frontend: `ContextMenuManager.exe`
-- Service: `ContextMenuManager.Service.exe`
+The repository includes:
 
-## Runtime Data Paths
+- `.github/workflows/manual-release.yml`
 
-- Frontend logs:
+Workflow behavior:
+
+- supports manual dispatch
+- supports tag-based release flow
+- calls `build.ps1`
+- uploads build artifacts
+- creates a draft release
+- resolves release version/title from project version metadata
+
+## Runtime Data and Logs
+
+### Frontend
+
+- settings:
+  - `%LocalAppData%\ContextMenuMgr\frontend-settings.json`
+- logs:
   - `%LocalAppData%\ContextMenuMgr\Logs\frontend-debug.log`
   - `%LocalAppData%\ContextMenuMgr\Logs\frontend-crash.log`
-- Backend log:
+
+### Tray Host
+
+- log:
+  - `%LocalAppData%\ContextMenuMgr\Logs\trayhost.log`
+
+### Backend
+
+- log:
   - `%ProgramData%\ContextMenuMgr\Logs\backend.log`
-- Frontend settings:
-  - `%LocalAppData%\ContextMenuMgr\frontend-settings.json`
-- Backend state store:
+- state store:
   - `%ProgramData%\ContextMenuMgr\Data\context-menu-state.json`
 
 Note:
 
-- The public product name is already unified as `Context Menu Manager`
-- Local data folders still keep the historical `ContextMenuMgr` name for compatibility
+- the public product name is `Context Menu Manager`
+- the local data folder keeps the historical `ContextMenuMgr` name for compatibility
 
-## Service Notes
+## Runtime and Recovery Flow
 
-- The frontend tries to connect to the service on startup
-- If the service is missing or unavailable, install / repair / uninstall it from the Settings page
-- The backend is designed to clean itself up after the frontend exits under the current implementation
+### Normal flow
+
+- the frontend starts and tries to connect to backend
+- once backend is reachable, the frontend can explicitly ask backend to ensure the tray host exists
+- backend then launches the tray host for the active user session
+
+### Approval notification flow
+
+- backend detects a new item
+- backend broadcasts a notification event
+- tray host receives it and shows a system notification
+- the user clicks the notification
+- tray host launches the frontend and opens the approvals page
+
+### Recovery expectations
+
+- if the backend/service exits unexpectedly:
+  - tray may disappear
+  - the frontend should remain usable
+- the user can go to Settings and run:
+  - install / repair service
+  to restore backend functionality
 
 ## Notes
 
-- Some protected registry roots cannot have their ACL changed due to Windows restrictions
-- Security software may intercept delete, restore, or registry write operations
-- Icon and display-name resolution is best-effort and depends on Windows registry and resource metadata
+- Some protected registry roots cannot have their ACL changed in ordinary ways; this is a Windows limitation, not necessarily an app bug
+- Security software may block delete, restore, or registry-write operations
+- Icon and display-name resolution is best-effort and cannot guarantee perfect coverage for every third-party extension
+- User-level items, packaged system items, and shell extensions do not all behave identically; logs are often more informative than the UI when diagnosing edge cases
+
+## Reporting Issues
+
+When opening an issue, it is very helpful to include:
+
+- Windows version
+- affected menu item name or registry path
+- frontend log
+- backend log
+- trayhost log if the issue involves tray behavior
+- reproduction steps
+- screenshot or screen recording
 
 ## License
 
-See [LICENSE](./LICENSE).
+This project is licensed under GPL v3.0. See [LICENSE](./LICENSE).

@@ -11,6 +11,12 @@ public static class TrayHostControlClient
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static async Task<bool> TrySendExitAsync(CancellationToken cancellationToken)
+        => await TrySendCommandAsync(TrayHostControlCommand.Exit, cancellationToken);
+
+    public static async Task<bool> TryReloadLocalizationAsync(CancellationToken cancellationToken)
+        => await TrySendCommandAsync(TrayHostControlCommand.ReloadLocalization, cancellationToken);
+
+    private static async Task<bool> TrySendCommandAsync(TrayHostControlCommand command, CancellationToken cancellationToken)
     {
         try
         {
@@ -21,7 +27,7 @@ public static class TrayHostControlClient
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
             await writer.WriteLineAsync(JsonSerializer.Serialize(
-                new TrayHostControlRequest { Command = TrayHostControlCommand.Exit },
+                new TrayHostControlRequest { Command = command },
                 JsonOptions)).WaitAsync(cancellationToken);
 
             var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);

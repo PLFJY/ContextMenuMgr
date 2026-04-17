@@ -21,6 +21,7 @@ public sealed class NamedPipeBackendServer
     private Task? _acceptLoopTask;
 
     public event EventHandler? BackendShutdownRequested;
+    public event EventHandler? EnsureTrayHostRequested;
 
     public NamedPipeBackendServer(ContextMenuRegistryCatalog catalog, FileLogger logger)
     {
@@ -57,7 +58,7 @@ public sealed class NamedPipeBackendServer
                 await server.WaitForConnectionAsync(cancellationToken);
                 server.ReadMode = PipeTransmissionMode.Byte;
                 await _logger.LogAsync("Named pipe client handshake completed.", cancellationToken);
-                _ = Task.Run(() => HandleClientAsync(server, cancellationToken), cancellationToken);
+                _ = ObserveClientTaskAsync(server, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -70,6 +71,26 @@ public sealed class NamedPipeBackendServer
                 await _logger.LogAsync($"Named pipe accept loop failed: {ex.Message}", cancellationToken);
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             }
+        }
+    }
+
+    private async Task ObserveClientTaskAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandleClientAsync(stream, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch
+        {
         }
     }
 
@@ -209,6 +230,7 @@ public sealed class NamedPipeBackendServer
                 Success = true,
                 Message = "Backend is reachable."
             },
+            PipeCommand.EnsureTrayHost => HandleEnsureTrayHostRequest(),
             PipeCommand.SubscribeTrayHost => new PipeResponse
             {
                 Success = true,
@@ -307,6 +329,16 @@ public sealed class NamedPipeBackendServer
         {
             Success = true,
             Message = "Backend shutdown requested."
+        };
+    }
+
+    private PipeResponse HandleEnsureTrayHostRequest()
+    {
+        EnsureTrayHostRequested?.Invoke(this, EventArgs.Empty);
+        return new PipeResponse
+        {
+            Success = true,
+            Message = "Tray host startup requested."
         };
     }
 

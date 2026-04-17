@@ -74,22 +74,24 @@ public sealed class FrontendControlServer : IAsyncDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
     {
+        await using var ownedStream = stream;
+
+        using var reader = new StreamReader(
+            ownedStream,
+            new UTF8Encoding(false),
+            detectEncodingFromByteOrderMarks: false,
+            leaveOpen: true);
+
+        using var writer = new StreamWriter(
+            ownedStream,
+            new UTF8Encoding(false),
+            leaveOpen: true)
+        {
+            AutoFlush = true
+        };
+
         try
         {
-            using var reader = new StreamReader(
-                stream,
-                new UTF8Encoding(false),
-                detectEncodingFromByteOrderMarks: false,
-                leaveOpen: true);
-
-            using var writer = new StreamWriter(
-                stream,
-                new UTF8Encoding(false),
-                leaveOpen: true)
-            {
-                AutoFlush = true
-            };
-
             var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
             if (line is null)
             {
@@ -110,12 +112,14 @@ public sealed class FrontendControlServer : IAsyncDisposable
             var response = await _handler(request);
             await writer.WriteLineAsync(JsonSerializer.Serialize(response, JsonOptions)).WaitAsync(cancellationToken);
         }
-        catch
+        catch (OperationCanceledException)
         {
         }
-        finally
+        catch (IOException)
         {
-            await stream.DisposeAsync();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

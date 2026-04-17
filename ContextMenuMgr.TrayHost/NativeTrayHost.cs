@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -53,10 +52,10 @@ internal sealed class NativeTrayHost : IDisposable
     private readonly Action _showMainWindow;
     private readonly Action _exitApplication;
     private readonly Action _balloonClicked;
-    private readonly string _tooltip;
-    private readonly string _showMainWindowText;
-    private readonly string _exitText;
-    private readonly Icon _icon;
+    private string _tooltip;
+    private string _showMainWindowText;
+    private string _exitText;
+    private readonly string? _iconPath;
 
     private IntPtr _hwnd;
     private IntPtr _menu;
@@ -70,7 +69,7 @@ internal sealed class NativeTrayHost : IDisposable
     private readonly WndProcDelegate _wndProc;
 
     public NativeTrayHost(
-        Icon icon,
+        string? iconPath,
         string tooltip,
         string showMainWindowText,
         string exitText,
@@ -78,7 +77,7 @@ internal sealed class NativeTrayHost : IDisposable
         Action exitApplication,
         Action balloonClicked)
     {
-        _icon = icon;
+        _iconPath = iconPath;
         _tooltip = tooltip;
         _showMainWindowText = showMainWindowText;
         _exitText = exitText;
@@ -124,15 +123,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         TryAllowDarkModeForWindow(_hwnd, true);
 
-        _menu = CreatePopupMenu();
-        if (_menu == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("CreatePopupMenu failed.");
-        }
-
-        AppendMenu(_menu, MF_STRING, (UIntPtr)MenuCmdShowMainWindow, _showMainWindowText);
-        AppendMenu(_menu, MF_SEPARATOR, UIntPtr.Zero, null);
-        AppendMenu(_menu, MF_STRING, (UIntPtr)MenuCmdExit, _exitText);
+        RebuildMenu();
 
         CreateTrayIcon();
 
@@ -188,6 +179,25 @@ internal sealed class NativeTrayHost : IDisposable
         PostMessage(_hwnd, WM_DESTROY, IntPtr.Zero, IntPtr.Zero);
     }
 
+    public void UpdateLocalization(string tooltip, string showMainWindowText, string exitText)
+    {
+        _tooltip = tooltip;
+        _showMainWindowText = showMainWindowText;
+        _exitText = exitText;
+
+        RebuildMenu();
+
+        if (_hwnd == IntPtr.Zero || !_initialized)
+        {
+            return;
+        }
+
+        var nid = CreateBaseNotifyIconData();
+        nid.uFlags = NIF_TIP;
+        nid.szTip = _tooltip;
+        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -217,16 +227,44 @@ internal sealed class NativeTrayHost : IDisposable
         var nid = CreateBaseNotifyIconData();
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = TrayCallbackMessage;
-        nid.hIcon = _icon.Handle;
+        nid.hIcon = LoadTrayIconHandle();
         nid.szTip = _tooltip;
 
         if (!Shell_NotifyIcon(NIM_ADD, ref nid))
         {
+            if (nid.hIcon != IntPtr.Zero)
+            {
+                DestroyIcon(nid.hIcon);
+            }
             throw new InvalidOperationException("Shell_NotifyIcon(NIM_ADD) failed.");
         }
 
         nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIcon(NIM_SETVERSION, ref nid);
+
+        if (nid.hIcon != IntPtr.Zero)
+        {
+            DestroyIcon(nid.hIcon);
+        }
+    }
+
+    private void RebuildMenu()
+    {
+        if (_menu != IntPtr.Zero)
+        {
+            DestroyMenu(_menu);
+            _menu = IntPtr.Zero;
+        }
+
+        _menu = CreatePopupMenu();
+        if (_menu == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("CreatePopupMenu failed.");
+        }
+
+        AppendMenu(_menu, MF_STRING, (UIntPtr)MenuCmdShowMainWindow, _showMainWindowText);
+        AppendMenu(_menu, MF_SEPARATOR, UIntPtr.Zero, null);
+        AppendMenu(_menu, MF_STRING, (UIntPtr)MenuCmdExit, _exitText);
     }
 
     private void RemoveTrayIcon()
@@ -331,6 +369,27 @@ internal sealed class NativeTrayHost : IDisposable
         return unchecked((ushort)((nuint)value & 0xFFFF));
     }
 
+    private IntPtr LoadTrayIconHandle()
+    {
+        if (!string.IsNullOrWhiteSpace(_iconPath))
+        {
+            var loaded = LoadImage(
+                IntPtr.Zero,
+                _iconPath,
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE);
+
+            if (loaded != IntPtr.Zero)
+            {
+                return loaded;
+            }
+        }
+
+        return LoadIcon(IntPtr.Zero, IDI_APPLICATION);
+    }
+
     private static void TryEnableAppDarkMode()
     {
         Version v = Environment.OSVersion.Version;
@@ -424,6 +483,11 @@ internal sealed class NativeTrayHost : IDisposable
         Default = 0,
         AllowDark = 1
     }
+
+    private const uint IMAGE_ICON = 1;
+    private const uint LR_LOADFROMFILE = 0x00000010;
+    private const uint LR_DEFAULTSIZE = 0x00000040;
+    private static readonly IntPtr IDI_APPLICATION = new(32512);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WNDCLASSEX
@@ -564,6 +628,22 @@ internal sealed class NativeTrayHost : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadImage(
+        IntPtr hInst,
+        string? name,
+        uint type,
+        int cx,
+        int cy,
+        uint fuLoad);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool Shell_NotifyIcon(int dwMessage, ref NOTIFYICONDATA lpData);

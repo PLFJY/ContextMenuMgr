@@ -3,6 +3,7 @@ namespace ContextMenuMgr.Contracts;
 public enum PipeCommand
 {
     Ping,
+    EnsureTrayHost,
     SubscribeNotifications,
     SubscribeTrayHost,
     GetSnapshot,

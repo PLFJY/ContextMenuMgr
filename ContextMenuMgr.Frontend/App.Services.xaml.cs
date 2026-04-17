@@ -41,7 +41,6 @@ public partial class App
         services.AddTransient<ComputerContextMenuPageViewModel>();
         services.AddTransient<RecycleBinContextMenuPageViewModel>();
         services.AddTransient<FileTypesPageViewModel>();
-        services.AddTransient<Windows11ContextMenuPageViewModel>();
         services.AddTransient<OtherRulesPageViewModel>();
         services.AddTransient<ApprovalsPageViewModel>();
         services.AddTransient<SettingsPageViewModel>();
@@ -57,10 +56,15 @@ public partial class App
         services.AddTransient<ComputerContextMenuPage>();
         services.AddTransient<RecycleBinContextMenuPage>();
         services.AddTransient<FileTypesPage>();
-        services.AddTransient<Windows11ContextMenuPage>();
         services.AddTransient<OtherRulesPage>();
         services.AddTransient<ApprovalsPage>();
         services.AddTransient<SettingsPage>();
+
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            services.AddTransient<Windows11ContextMenuPageViewModel>();
+            services.AddTransient<Windows11ContextMenuPage>();
+        }
 
         return services.BuildServiceProvider();
     }

@@ -17,6 +17,7 @@
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <InformationalVersion>1.3.0</InformationalVersion>
     <BackendTargetFramework>net10.0-windows</BackendTargetFramework>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <BackendOutputDir>$(MSBuildThisFileDirectory)..\artifacts\backend\$(Configuration)\$(BackendTargetFramework)\</BackendOutputDir>
   </PropertyGroup>
 
@@ -43,8 +44,14 @@
       <TrayHostArtifacts Include="$(MSBuildThisFileDirectory)..\artifacts\trayhost\$(Configuration)\net10.0-windows10.0.17763.0\**\*.*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(BackendArtifacts)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(TrayHostArtifacts)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(BackendArtifacts)"
+      DestinationFiles="@(BackendArtifacts->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(TrayHostArtifacts)"
+      DestinationFiles="@(TrayHostArtifacts->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

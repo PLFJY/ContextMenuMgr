@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows.Markup;
 using ContextMenuMgr.Frontend.Resources;
 
@@ -78,10 +79,29 @@ public sealed class LocalizationService
     {
         return _selectedLanguage switch
         {
-            AppLanguageOption.System => CultureInfo.CurrentUICulture,
+            AppLanguageOption.System => GetSystemCulture(),
             AppLanguageOption.ChineseSimplified => CultureInfo.GetCultureInfo("zh-CN"),
             AppLanguageOption.EnglishUnitedStates => CultureInfo.GetCultureInfo("en-US"),
-            _ => CultureInfo.CurrentUICulture
+            _ => GetSystemCulture()
         };
+    }
+
+    private static CultureInfo GetSystemCulture()
+    {
+        try
+        {
+            var languageId = NativeMethods.GetUserDefaultUILanguage();
+            return CultureInfo.GetCultureInfo(languageId);
+        }
+        catch
+        {
+            return CultureInfo.InstalledUICulture;
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll")]
+        internal static extern ushort GetUserDefaultUILanguage();
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Frontend.Services;
@@ -154,11 +155,20 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     public string UninstallFlyoutText => _localization.Translate("UninstallServicePrompt");
 
+    public string RepositoryUrl => "https://github.com/PLFJY/ContextMenuMgr";
+
+    public string LicenseText => "GPL v3.0 License";
+
+    public string VersionLabel => "Version";
+
+    public string VersionText => GetApplicationVersion();
+
     partial void OnSelectedLanguageChanged(LanguageOptionViewModel? value)
     {
         if (value is not null)
         {
             _localization.SelectedLanguage = value.Option;
+            _ = NotifyTrayHostLocalizationChangedAsync();
         }
     }
 
@@ -398,6 +408,17 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task NotifyTrayHostLocalizationChangedAsync()
+    {
+        try
+        {
+            await _trayHostProcessService.RequestReloadLocalizationAsync(CancellationToken.None);
+        }
+        catch
+        {
+        }
+    }
+
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;
@@ -415,5 +436,13 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         {
             item.Dispose();
         }
+    }
+
+    private static string GetApplicationVersion()
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString()
+            ?? "Unknown";
     }
 }

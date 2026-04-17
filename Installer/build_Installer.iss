@@ -1,7 +1,3 @@
-#if MyUseDotNetDependencyInstaller == "1"
-  #include "InnoDependencyInstaller\CodeDependencies.iss"
-#endif
-
 #ifndef MyAppId
   #define MyAppId "45156332-3408-47B7-B5D2-2567E5888F64"
 #endif
@@ -28,6 +24,10 @@
 
 #ifndef MyUseDotNetDependencyInstaller
   #define MyUseDotNetDependencyInstaller "0"
+#endif
+
+#if MyUseDotNetDependencyInstaller == "1"
+  #include "InnoDependencyInstaller\CodeDependencies.iss"
 #endif
 
 #define MyAppName "Context Menu Manager"
