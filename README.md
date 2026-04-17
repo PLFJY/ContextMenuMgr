@@ -1,6 +1,17 @@
-# Context Menu Manager
+<p align="center">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="./doc/images/readme/pt-hero.light.png" />
+      <img src="./ContextMenuMgr.Frontend/Assets/AppIcon.png" style="height: 100; width: 100" />
+  </picture>
+</p>
+<h1 align="center">
+  <span>Context Menu Manager</span>
+</h1>
+<p align="center">
+  <span align="center">Context Menu Manager 是一个强大的实用程序，它可帮助您管理 Windows 上的右键菜单，并避免第三方向你的右键菜单里塞屎。</span>
+</p>
 
-[English Documentation](./README.en.md)
+[English Version](./README.en.md)
 
 > [!WARNING]
 > 本项目的相当一部分代码由 AI 辅助生成，并经过持续的人工作业、联调和重构，但它仍然可能存在遗漏、边界情况处理不足或行为与预期不完全一致的问题。

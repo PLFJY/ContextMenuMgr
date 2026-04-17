@@ -1,6 +1,17 @@
-# Context Menu Manager
+<p align="center">
+    <picture>
+      <source media="(prefers-color-scheme: light)" srcset="./doc/images/readme/pt-hero.light.png" />
+      <img src="./ContextMenuMgr.Frontend/Assets/AppIcon.png" style="height: 100; width: 100" />
+  </picture>
+</p>
+<h1 align="center">
+  <span>Context Menu Manager</span>
+</h1>
+<p align="center">
+  <span align="center">Context Menu Manager is a powerful utility that help you manage you context menu on Windows and avoid third party to add rubish to your context menu.</span>
+</p>
 
-[中文说明](./README.md)
+[中文版文档](./README.md)
 
 > [!WARNING]
 > A significant portion of this project was generated with AI assistance and then continuously revised, tested, and reshaped by hand. It may still contain gaps, edge-case regressions, or behavior that does not fully match expectations.
