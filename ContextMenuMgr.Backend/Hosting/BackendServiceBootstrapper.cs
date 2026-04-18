@@ -9,6 +9,8 @@ namespace ContextMenuMgr.Backend.Hosting;
 internal static class BackendServiceBootstrapper
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string FrontendPolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
+    private const string FrontendPolicyValueName = "StartWithWindows";
     private static readonly string DataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "ContextMenuMgr",
@@ -31,13 +33,13 @@ internal static class BackendServiceBootstrapper
             return true;
         }
 
-        var result = Execute(command);
+        var result = Execute(command, args);
         WriteResult(resultFilePath, result.Success, result.Code, result.Detail);
         Environment.ExitCode = result.Success ? 0 : 1;
         return true;
     }
 
-    private static (bool Success, string Code, string Detail) Execute(string command)
+    private static (bool Success, string Code, string Detail) Execute(string command, IReadOnlyList<string> args)
     {
         try
         {
@@ -46,6 +48,7 @@ internal static class BackendServiceBootstrapper
                 "install-or-repair" => InstallOrRepairService(),
                 "uninstall" => UninstallService(),
                 "stop" => StopService(),
+                "set-startup-mode" => SetServiceStartupMode(TryParseEnabledArgument(args)),
                 _ => (false, "UNKNOWN_BOOTSTRAP_COMMAND", command)
             };
         }
@@ -65,6 +68,7 @@ internal static class BackendServiceBootstrapper
         }
 
         var binaryPath = $"\"{serviceExePath}\" --service";
+        var startupMode = IsAutostartEnabledForCurrentUser() ? "auto" : "demand";
 
         if (ServiceExists(ServiceMetadata.ServiceName) && !TestServiceRegistrationHealthy(ServiceMetadata.ServiceName))
         {
@@ -84,7 +88,7 @@ internal static class BackendServiceBootstrapper
                 "binPath=",
                 binaryPath,
                 "start=",
-                "auto",
+                startupMode,
                 "DisplayName=",
                 ServiceMetadata.DisplayName);
         }
@@ -104,7 +108,7 @@ internal static class BackendServiceBootstrapper
                 "binPath=",
                 binaryPath,
                 "start=",
-                "auto");
+                startupMode);
         }
 
         if (!TestServiceRegistrationHealthy(ServiceMetadata.ServiceName))
@@ -163,6 +167,22 @@ internal static class BackendServiceBootstrapper
             : (false, "SERVICE_NOT_STOPPED", status);
     }
 
+    private static (bool Success, string Code, string Detail) SetServiceStartupMode(bool enabled)
+    {
+        if (!ServiceExists(ServiceMetadata.ServiceName))
+        {
+            return (true, "NOT_INSTALLED", "Service was not installed.");
+        }
+
+        RunSc(
+            "config",
+            ServiceMetadata.ServiceName,
+            "start=",
+            enabled ? "auto" : "demand");
+
+        return (true, enabled ? "STARTUP_AUTO" : "STARTUP_MANUAL", enabled ? "Automatic" : "Manual");
+    }
+
     private static void RemoveServiceRegistration(string serviceName, bool keepFrontendAlive)
     {
         if (ServiceExists(serviceName))
@@ -214,6 +234,23 @@ internal static class BackendServiceBootstrapper
         var start = key.GetValue("Start");
         var type = key.GetValue("Type");
         return !string.IsNullOrWhiteSpace(imagePath) && start is not null && type is not null;
+    }
+
+    private static bool IsAutostartEnabledForCurrentUser()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(FrontendPolicyKeyPath, writable: false);
+        var value = key?.GetValue(FrontendPolicyValueName);
+        if (value is int intValue)
+        {
+            return intValue != 0;
+        }
+
+        if (value is string stringValue && int.TryParse(stringValue, out var parsed))
+        {
+            return parsed != 0;
+        }
+
+        return false;
     }
 
     private static string GetServiceStatusText(string serviceName)
@@ -307,6 +344,13 @@ internal static class BackendServiceBootstrapper
         }
 
         return null;
+    }
+
+    private static bool TryParseEnabledArgument(IReadOnlyList<string> args)
+    {
+        var value = TryGetArgumentValue(args, "--enabled");
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record BootstrapResult(bool Success, string Code, string Detail);

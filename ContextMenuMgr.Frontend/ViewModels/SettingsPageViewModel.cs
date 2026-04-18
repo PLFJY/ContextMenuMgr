@@ -198,22 +198,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             return;
         }
 
-        try
-        {
-            _startupService.SetAutoStartEnabled(value);
-            _settingsService.UpdateAutoStartOnLogin(value);
-        }
-        catch (Exception ex)
-        {
-            var actualValue = _startupService.IsAutoStartEnabled();
-            _settingsService.UpdateAutoStartOnLogin(actualValue);
-            _suppressAutoStartSync = true;
-            AutoStartOnLogin = actualValue;
-            _suppressAutoStartSync = false;
-            _ = FrontendMessageBox.ShowErrorAsync(
-                ex.Message,
-                _localization.Translate("StartupBehaviorTitle"));
-        }
+        _ = ApplyAutoStartOnLoginAsync(value);
     }
 
     partial void OnKeepBackgroundAfterCloseChanged(bool value)
@@ -444,5 +429,34 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? assembly.GetName().Version?.ToString()
             ?? "Unknown";
+    }
+
+    private async Task ApplyAutoStartOnLoginAsync(bool value)
+    {
+        try
+        {
+            _startupService.SetAutoStartEnabled(value);
+            _settingsService.UpdateAutoStartOnLogin(value);
+
+            if (_workspace.IsServiceInstalled())
+            {
+                var result = await _workspace.SetServiceAutoStartEnabledAsync(value);
+                if (!result.Success && !result.Cancelled)
+                {
+                    throw new InvalidOperationException(result.Detail);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            var actualValue = _startupService.IsAutoStartEnabled();
+            _settingsService.UpdateAutoStartOnLogin(actualValue);
+            _suppressAutoStartSync = true;
+            AutoStartOnLogin = actualValue;
+            _suppressAutoStartSync = false;
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("StartupBehaviorTitle"));
+        }
     }
 }

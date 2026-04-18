@@ -296,6 +296,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return _backendServiceManager.UninstallServiceAsync(CancellationToken.None);
     }
 
+    public Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled)
+    {
+        return _backendServiceManager.SetServiceAutoStartEnabledAsync(enabled, CancellationToken.None);
+    }
+
     public bool IsServiceInstalled() => _backendServiceManager.IsServiceInstalled();
 
     public ContextMenuItemActionsService ItemActions => _itemActionsService;

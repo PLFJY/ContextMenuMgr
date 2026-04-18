@@ -224,6 +224,65 @@ public sealed class BackendServiceManager : IBackendServiceManager
         }
     }
 
+    public async Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        var backendExePath = ResolveBackendExecutablePath();
+        if (backendExePath is null)
+        {
+            return new BackendServiceBootstrapResult(false, false, "BACKEND_EXE_MISSING", string.Empty);
+        }
+
+        var resultFilePath = Path.Combine(
+            Path.GetTempPath(),
+            $"ContextMenuMgr-startupmode-{Guid.NewGuid():N}.json");
+
+        try
+        {
+            using var process = Process.Start(CreateElevatedBackendStartInfo(
+                backendExePath,
+                $"--service-bootstrap set-startup-mode --enabled {(enabled ? "1" : "0")} --result-file \"{resultFilePath}\""));
+            if (process is null)
+            {
+                return new BackendServiceBootstrapResult(false, false, "FAILED_TO_START_ELEVATED_PROCESS", string.Empty);
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+            var scriptResult = await TryReadScriptResultAsync(resultFilePath, cancellationToken);
+
+            if (process.ExitCode == 0 && scriptResult?.Success == true)
+            {
+                return new BackendServiceBootstrapResult(true, false, scriptResult.Code, scriptResult.Detail);
+            }
+
+            return new BackendServiceBootstrapResult(
+                false,
+                false,
+                scriptResult?.Code ?? $"EXIT_CODE_{process.ExitCode}",
+                scriptResult?.Detail ?? string.Empty);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            return new BackendServiceBootstrapResult(false, true, "ELEVATION_CANCELLED", string.Empty);
+        }
+        catch (Exception ex)
+        {
+            return new BackendServiceBootstrapResult(false, false, "BOOTSTRAP_EXCEPTION", ex.Message);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(resultFilePath))
+                {
+                    File.Delete(resultFilePath);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
     private static string? ResolveBackendExecutablePath()
     {
         var candidates = new[]
