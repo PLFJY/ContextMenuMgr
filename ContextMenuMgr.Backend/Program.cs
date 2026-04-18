@@ -6,6 +6,11 @@ internal static class Program
 {
     private static void Main(string[] args)
     {
+        if (BackendServiceBootstrapper.TryRun(args))
+        {
+            return;
+        }
+
         using var runtime = BackendRuntime.CreateDefault();
 
         if (BackendWindowsService.ShouldRunAsService(args))

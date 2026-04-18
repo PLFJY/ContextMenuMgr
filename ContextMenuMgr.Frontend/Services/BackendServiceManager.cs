@@ -53,21 +53,11 @@ public sealed class BackendServiceManager : IBackendServiceManager
         var resultFilePath = Path.Combine(
             Path.GetTempPath(),
             $"ContextMenuMgr-bootstrap-{Guid.NewGuid():N}.json");
-        var script = BuildInstallScript(backendExePath, resultFilePath);
-        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}",
-            UseShellExecute = true,
-            Verb = "runas",
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-
         try
         {
-            using var process = Process.Start(startInfo);
+            using var process = Process.Start(CreateElevatedBackendStartInfo(
+                backendExePath,
+                $"--service-bootstrap install-or-repair --result-file \"{resultFilePath}\""));
             if (process is null)
             {
                 FrontendDebugLog.Info("BackendServiceManager", "Failed to start elevated bootstrap process.");
@@ -118,24 +108,21 @@ public sealed class BackendServiceManager : IBackendServiceManager
 
     public async Task<BackendServiceBootstrapResult> UninstallServiceAsync(CancellationToken cancellationToken)
     {
+        var backendExePath = ResolveBackendExecutablePath();
+        if (backendExePath is null)
+        {
+            return new BackendServiceBootstrapResult(false, false, "BACKEND_EXE_MISSING", string.Empty);
+        }
+
         var resultFilePath = Path.Combine(
             Path.GetTempPath(),
             $"ContextMenuMgr-uninstall-{Guid.NewGuid():N}.json");
-        var script = BuildUninstallScript(resultFilePath);
-        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}",
-            UseShellExecute = true,
-            Verb = "runas",
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
 
         try
         {
-            using var process = Process.Start(startInfo);
+            using var process = Process.Start(CreateElevatedBackendStartInfo(
+                backendExePath,
+                $"--service-bootstrap uninstall --result-file \"{resultFilePath}\""));
             if (process is null)
             {
                 return new BackendServiceBootstrapResult(false, false, "FAILED_TO_START_ELEVATED_PROCESS", string.Empty);
@@ -180,24 +167,21 @@ public sealed class BackendServiceManager : IBackendServiceManager
 
     public async Task<BackendServiceBootstrapResult> StopServiceAsync(CancellationToken cancellationToken)
     {
+        var backendExePath = ResolveBackendExecutablePath();
+        if (backendExePath is null)
+        {
+            return new BackendServiceBootstrapResult(false, false, "BACKEND_EXE_MISSING", string.Empty);
+        }
+
         var resultFilePath = Path.Combine(
             Path.GetTempPath(),
             $"ContextMenuMgr-stop-{Guid.NewGuid():N}.json");
-        var script = BuildStopScript(resultFilePath);
-        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}",
-            UseShellExecute = true,
-            Verb = "runas",
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
 
         try
         {
-            using var process = Process.Start(startInfo);
+            using var process = Process.Start(CreateElevatedBackendStartInfo(
+                backendExePath,
+                $"--service-bootstrap stop --result-file \"{resultFilePath}\""));
             if (process is null)
             {
                 return new BackendServiceBootstrapResult(false, false, "FAILED_TO_START_ELEVATED_PROCESS", string.Empty);
@@ -282,6 +266,19 @@ public sealed class BackendServiceManager : IBackendServiceManager
 
         await using var stream = File.OpenRead(resultFilePath);
         return await JsonSerializer.DeserializeAsync<BootstrapScriptResult>(stream, JsonOptions, cancellationToken);
+    }
+
+    private static ProcessStartInfo CreateElevatedBackendStartInfo(string backendExePath, string arguments)
+    {
+        return new ProcessStartInfo
+        {
+            FileName = backendExePath,
+            Arguments = arguments,
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = Path.GetDirectoryName(backendExePath) ?? AppContext.BaseDirectory
+        };
     }
 
     private static string BuildInstallScript(string backendExePath, string resultFilePath)
