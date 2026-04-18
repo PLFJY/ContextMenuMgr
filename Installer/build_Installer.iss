@@ -128,31 +128,6 @@ begin
   StopAndDeleteServiceIfPresentByName(LegacyServiceName);
 end;
 
-procedure InstallAndStartService();
-var
-  ScPath: string;
-  ServiceExePath: string;
-  BinPath: string;
-begin
-  ScPath := ExpandConstant('{sys}\sc.exe');
-  ServiceExePath := ExpandConstant('{app}\{#MyServiceExeName}');
-
-  if not FileExists(ServiceExePath) then
-    exit;
-
-  BinPath := '""' + ServiceExePath + '" --service"';
-
-  RunHidden(ScPath, 'create ' + ServiceName + ' start= auto DisplayName= "' + ServiceDisplayName + '" binPath= ' + BinPath);
-  RunHidden(ScPath, 'description ' + ServiceName + ' "Context Menu Manager Plus elevated backend service"');
-  RunHidden(ScPath, 'start ' + ServiceName);
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-begin
-  StopAndDeleteServiceIfPresent();
-  Result := '';
-end;
-
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Response: Integer;
@@ -175,12 +150,6 @@ begin
         end;
       end;
   end;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-    InstallAndStartService();
 end;
 
 [Icons]

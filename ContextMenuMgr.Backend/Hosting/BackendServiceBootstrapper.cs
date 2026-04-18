@@ -78,7 +78,15 @@ internal static class BackendServiceBootstrapper
 
         if (!ServiceExists(ServiceMetadata.ServiceName))
         {
-            RunSc("create", $"\"{ServiceMetadata.ServiceName}\"", $"binPath= {binaryPath}", "start= auto", $"DisplayName= \"{ServiceMetadata.DisplayName}\"");
+            RunSc(
+                "create",
+                ServiceMetadata.ServiceName,
+                "binPath=",
+                binaryPath,
+                "start=",
+                "auto",
+                "DisplayName=",
+                ServiceMetadata.DisplayName);
         }
         else
         {
@@ -90,7 +98,13 @@ internal static class BackendServiceBootstrapper
                 service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
             }
 
-            RunSc("config", $"\"{ServiceMetadata.ServiceName}\"", $"binPath= {binaryPath}", "start= auto");
+            RunSc(
+                "config",
+                ServiceMetadata.ServiceName,
+                "binPath=",
+                binaryPath,
+                "start=",
+                "auto");
         }
 
         if (!TestServiceRegistrationHealthy(ServiceMetadata.ServiceName))
@@ -98,7 +112,7 @@ internal static class BackendServiceBootstrapper
             return (false, "SERVICE_REGISTRATION_INCOMPLETE", string.Empty);
         }
 
-        RunSc("description", $"\"{ServiceMetadata.ServiceName}\"", "\"Context Menu Manager Plus elevated backend service\"");
+        RunSc("description", ServiceMetadata.ServiceName, "Context Menu Manager Plus elevated backend service");
 
         using (var service = new ServiceController(ServiceMetadata.ServiceName))
         {
@@ -166,7 +180,7 @@ internal static class BackendServiceBootstrapper
             }
         }
 
-        RunSc("delete", $"\"{serviceName}\"");
+        RunSc("delete", serviceName);
 
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline && ServiceExists(serviceName))
@@ -237,15 +251,21 @@ internal static class BackendServiceBootstrapper
 
     private static void RunSc(params string[] arguments)
     {
-        using var process = Process.Start(new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = "sc.exe",
-            Arguments = string.Join(" ", arguments),
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
-        });
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo);
 
         if (process is null)
         {
