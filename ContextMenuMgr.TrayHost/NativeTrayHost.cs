@@ -59,9 +59,11 @@ internal sealed class NativeTrayHost : IDisposable
 
     private IntPtr _hwnd;
     private IntPtr _menu;
+    private readonly uint _taskbarCreatedMessage;
     private bool _initialized;
     private bool _disposed;
     private bool _messageLoopRunning;
+    private bool _trayIconAdded;
 
     private string? _pendingBalloonTitle;
     private string? _pendingBalloonMessage;
@@ -85,6 +87,7 @@ internal sealed class NativeTrayHost : IDisposable
         _exitApplication = exitApplication;
         _balloonClicked = balloonClicked;
         _wndProc = WndProc;
+        _taskbarCreatedMessage = RegisterWindowMessage("TaskbarCreated");
     }
 
     public void Initialize()
@@ -125,7 +128,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         RebuildMenu();
 
-        CreateTrayIcon();
+        TryCreateTrayIcon();
 
         _initialized = true;
     }
@@ -160,6 +163,11 @@ internal sealed class NativeTrayHost : IDisposable
         _pendingBalloonTitle = title;
         _pendingBalloonMessage = message;
 
+        if (!_trayIconAdded)
+        {
+            return;
+        }
+
         var nid = CreateBaseNotifyIconData();
         nid.uFlags = NIF_INFO;
         nid.dwInfoFlags = NIIF_INFO;
@@ -187,7 +195,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         RebuildMenu();
 
-        if (_hwnd == IntPtr.Zero || !_initialized)
+        if (_hwnd == IntPtr.Zero || !_initialized || !_trayIconAdded)
         {
             return;
         }
@@ -222,7 +230,7 @@ internal sealed class NativeTrayHost : IDisposable
         }
     }
 
-    private void CreateTrayIcon()
+    private void TryCreateTrayIcon()
     {
         var nid = CreateBaseNotifyIconData();
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
@@ -236,15 +244,27 @@ internal sealed class NativeTrayHost : IDisposable
             {
                 DestroyIcon(nid.hIcon);
             }
-            throw new InvalidOperationException("Shell_NotifyIcon(NIM_ADD) failed.");
+            _trayIconAdded = false;
+            return;
         }
 
+        _trayIconAdded = true;
         nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIcon(NIM_SETVERSION, ref nid);
 
         if (nid.hIcon != IntPtr.Zero)
         {
             DestroyIcon(nid.hIcon);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_pendingBalloonTitle)
+            && !string.IsNullOrWhiteSpace(_pendingBalloonMessage))
+        {
+            var title = _pendingBalloonTitle;
+            var message = _pendingBalloonMessage;
+            _pendingBalloonTitle = null;
+            _pendingBalloonMessage = null;
+            ShowNotification(title, message);
         }
     }
 
@@ -269,13 +289,14 @@ internal sealed class NativeTrayHost : IDisposable
 
     private void RemoveTrayIcon()
     {
-        if (_hwnd == IntPtr.Zero)
+        if (_hwnd == IntPtr.Zero || !_trayIconAdded)
         {
             return;
         }
 
         var nid = CreateBaseNotifyIconData();
         Shell_NotifyIcon(NIM_DELETE, ref nid);
+        _trayIconAdded = false;
     }
 
     private void ShowTrayMenu()
@@ -316,6 +337,12 @@ internal sealed class NativeTrayHost : IDisposable
 
     private IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        if (msg == _taskbarCreatedMessage)
+        {
+            TryCreateTrayIcon();
+            return IntPtr.Zero;
+        }
+
         if (msg == TrayCallbackMessage)
         {
             int code = LOWORD(lParam);
@@ -656,4 +683,7 @@ internal sealed class NativeTrayHost : IDisposable
 
     [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", SetLastError = true)]
     private static extern IntPtr GetProcAddress(IntPtr hModule, IntPtr procName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterWindowMessage(string lpString);
 }
