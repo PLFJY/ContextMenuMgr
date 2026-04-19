@@ -14,11 +14,7 @@ public partial class App : System.Windows.Application
 {
     private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.SingleInstance";
     private static readonly TimeSpan CrashLogRetention = TimeSpan.FromDays(7);
-    private static readonly string LogFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ContextMenuMgr",
-        "Logs",
-        "frontend-crash.log");
+    private static readonly string LogFilePath = RuntimePaths.FrontendCrashLogPath;
 
     private ServiceProvider? _serviceProvider;
     private FrontendControlServer? _controlServer;

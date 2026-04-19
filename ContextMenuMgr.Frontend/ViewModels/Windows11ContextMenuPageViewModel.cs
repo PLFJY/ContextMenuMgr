@@ -24,9 +24,17 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(Windows11ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
 
         _localization.LanguageChanged += OnLanguageChanged;
+        _service.ItemsChanged += OnItemsChanged;
         if (_service.IsSupported)
         {
-            _ = RefreshAsync();
+            if (_service.HasLoaded)
+            {
+                RebuildItems(_service.CurrentItems);
+            }
+            else
+            {
+                _ = EnsureLoadedAsync();
+            }
         }
     }
 
@@ -72,14 +80,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         IsLoading = true;
         try
         {
-            var items = await _service.LoadAsync(CancellationToken.None);
-            Items.Clear();
-            foreach (var item in items)
-            {
-                Items.Add(new Windows11ContextMenuItemViewModel(item, _service, _localization));
-            }
-
-            ItemsView.Refresh();
+            var items = await _service.RefreshAsync(CancellationToken.None);
+            RebuildItems(items);
         }
         catch (Exception ex)
         {
@@ -107,6 +109,47 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         OnPropertyChanged(nameof(PackageFamilyLabel));
         OnPropertyChanged(nameof(PublisherLabel));
         OnPropertyChanged(nameof(ContextTypesLabel));
+        ItemsView.Refresh();
+    }
+
+    private async Task EnsureLoadedAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            var items = await _service.EnsureLoadedAsync(CancellationToken.None);
+            RebuildItems(items);
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("Windows11PageTitle"));
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void OnItemsChanged(object? sender, EventArgs e)
+    {
+        RebuildItems(_service.CurrentItems);
+    }
+
+    private void RebuildItems(IReadOnlyList<Windows11ContextMenuItemDefinition> items)
+    {
+        foreach (var existing in Items)
+        {
+            existing.Dispose();
+        }
+
+        Items.Clear();
+        foreach (var item in items)
+        {
+            Items.Add(new Windows11ContextMenuItemViewModel(item, _service, _localization));
+        }
+
         ItemsView.Refresh();
     }
 
@@ -139,6 +182,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;
+        _service.ItemsChanged -= OnItemsChanged;
         foreach (var item in Items)
         {
             item.Dispose();

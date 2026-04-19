@@ -30,6 +30,8 @@ public sealed record ContextMenuEntry
 
     public string? FilePath { get; init; }
 
+    public bool IsWindows11ContextMenu { get; init; }
+
     public bool OnlyWithShift { get; init; }
 
     public bool OnlyInExplorer { get; init; }

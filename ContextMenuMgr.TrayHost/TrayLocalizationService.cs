@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Resources;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
@@ -35,10 +36,7 @@ internal sealed class TrayLocalizationService
     {
         try
         {
-            var settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ContextMenuMgr",
-                "frontend-settings.json");
+            var settingsPath = RuntimePaths.SettingsPath;
             if (!File.Exists(settingsPath))
             {
                 return GetSystemCulture();

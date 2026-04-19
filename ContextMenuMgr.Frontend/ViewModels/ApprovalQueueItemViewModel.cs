@@ -42,7 +42,13 @@ public partial class ApprovalQueueItemViewModel : ObservableObject
 
     public bool CanReviewApproval => SourceItems.Any(static item => item.CanReviewApproval);
 
+    public bool IsWindows11ContextMenu => SourceItems.Any(static item => item.Entry.IsWindows11ContextMenu);
+
+    public string Windows11TagText => _localization.Translate("Windows11PendingApprovalTag");
+
     public bool HasRegistryBackedItem => SourceItems.Any(static item => item.IsPresentInRegistry && !item.IsDeleted);
+
+    public bool CanRemove => !IsWindows11ContextMenu;
 
     public string ApprovalRemoveConfirmationText => HasRegistryBackedItem
         ? _localization.Translate("ApprovalRemoveConfirmation")

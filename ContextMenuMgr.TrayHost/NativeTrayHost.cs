@@ -62,7 +62,6 @@ internal sealed class NativeTrayHost : IDisposable
     private readonly uint _taskbarCreatedMessage;
     private bool _initialized;
     private bool _disposed;
-    private bool _messageLoopRunning;
     private bool _trayIconAdded;
 
     private string? _pendingBalloonTitle;
@@ -140,16 +139,12 @@ internal sealed class NativeTrayHost : IDisposable
             Initialize();
         }
 
-        _messageLoopRunning = true;
-
         MSG msg;
         while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
         {
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
         }
-
-        _messageLoopRunning = false;
         return 0;
     }
 

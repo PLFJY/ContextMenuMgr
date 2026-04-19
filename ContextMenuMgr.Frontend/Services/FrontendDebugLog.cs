@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
@@ -17,11 +18,7 @@ internal static class FrontendDebugLog
         EnsureRetention();
     }
 
-    public static string LogFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ContextMenuMgr",
-        "Logs",
-        "frontend-debug.log");
+    public static string LogFilePath { get; } = RuntimePaths.FrontendDebugLogPath;
 
     public static void StartSession(string reason)
     {

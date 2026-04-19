@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
@@ -15,16 +16,16 @@ public sealed class FrontendSettingsService
 
     public FrontendSettingsService()
     {
-        _settingsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ContextMenuMgr",
-            "frontend-settings.json");
+        _settingsPath = RuntimePaths.SettingsPath;
+        TryMigrateLegacySettings();
         Current = Load();
     }
 
     public FrontendSettings Current { get; private set; }
 
     public event EventHandler? SettingsChanged;
+
+    public string SettingsPath => _settingsPath;
 
     public void UpdateLanguage(AppLanguageOption language)
     {
@@ -158,5 +159,43 @@ public sealed class FrontendSettingsService
         }
 
         SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ResetToDefaults()
+    {
+        Current = new FrontendSettings();
+
+        lock (_syncRoot)
+        {
+            try
+            {
+                if (File.Exists(_settingsPath))
+                {
+                    File.Delete(_settingsPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void TryMigrateLegacySettings()
+    {
+        try
+        {
+            if (File.Exists(_settingsPath) || !File.Exists(RuntimePaths.LegacyFrontendSettingsPath))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+            File.Copy(RuntimePaths.LegacyFrontendSettingsPath, _settingsPath, overwrite: false);
+        }
+        catch
+        {
+        }
     }
 }

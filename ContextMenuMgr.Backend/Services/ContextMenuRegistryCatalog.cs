@@ -13,6 +13,7 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class ContextMenuRegistryCatalog
 {
     private const string BlockedShellExtensionsPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
+    internal const string Windows11MonitoredRootPath = @"PackagedCom\Windows11ContextMenu";
 
     private static readonly RegistryRootDescriptor[] MonitoredRoots =
     [
@@ -63,6 +64,7 @@ public sealed class ContextMenuRegistryCatalog
     private readonly ContextMenuStateStore _stateStore;
     private readonly RegistryBackupService _backupService;
     private readonly BackendProtectionSettingsStore _protectionSettingsStore;
+    private readonly Windows11ContextMenuCatalog _windows11Catalog;
 
     public ContextMenuRegistryCatalog(
         FileLogger logger,
@@ -74,13 +76,14 @@ public sealed class ContextMenuRegistryCatalog
         _stateStore = stateStore;
         _backupService = backupService;
         _protectionSettingsStore = protectionSettingsStore;
+        _windows11Catalog = new Windows11ContextMenuCatalog();
     }
 
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         return await BuildSnapshotAsync(
-            EnumerateActualEntries(),
-            static state => MonitoredStableRootPaths.Contains(state.SourceRootPath),
+            await EnumerateActualEntriesAsync(cancellationToken),
+            static state => MonitoredStableRootPaths.Contains(state.SourceRootPath) || state.IsWindows11ContextMenu,
             persistDiscoveredStates: true,
             cancellationToken);
     }
@@ -227,6 +230,14 @@ public sealed class ContextMenuRegistryCatalog
 
         try
         {
+            if (item.IsWindows11ContextMenu)
+            {
+                if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, null, enable))
+                {
+                    return CreateFailure($"Unable to update the Win11 context menu item '{item.DisplayName}'.");
+                }
+            }
+            else
             switch (item.EntryKind)
             {
                 case ContextMenuEntryKind.ShellVerb:
@@ -305,7 +316,7 @@ public sealed class ContextMenuRegistryCatalog
     public async Task<PipeResponse> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
-        var actualEntry = EnumerateActualEntries()
+        var actualEntry = (await EnumerateActualEntriesAsync(cancellationToken))
             .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
 
         if (actualEntry is not null)
@@ -921,8 +932,14 @@ public sealed class ContextMenuRegistryCatalog
         // service in a deny-by-default posture until the user explicitly allows it.
         switch (item.EntryKind)
         {
-            case ContextMenuEntryKind.ShellVerb:
+            case ContextMenuEntryKind.ShellVerb when !item.IsWindows11ContextMenu:
                 SetShellVerbEnabled(item.BackendRegistryPath, enable: false);
+                break;
+            case ContextMenuEntryKind.ShellExtension when item.IsWindows11ContextMenu:
+                if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, null, enable: false))
+                {
+                    throw new InvalidOperationException($"Unable to quarantine the Win11 context menu item '{item.DisplayName}'.");
+                }
                 break;
             case ContextMenuEntryKind.ShellExtension:
                 SetShellExtensionEnabled(item, enable: false);
@@ -976,12 +993,20 @@ public sealed class ContextMenuRegistryCatalog
         return true;
     }
 
-    private IEnumerable<ContextMenuEntry> EnumerateActualEntries()
+    private async Task<IReadOnlyList<ContextMenuEntry>> EnumerateActualEntriesAsync(CancellationToken cancellationToken)
     {
+        var results = new List<ContextMenuEntry>();
         foreach (var item in EnumerateEntries(MonitoredRoots))
         {
-            yield return item;
+            results.Add(item);
         }
+
+        if (_windows11Catalog.IsSupported)
+        {
+            results.AddRange(await _windows11Catalog.EnumerateEntriesAsync(cancellationToken));
+        }
+
+        return results;
     }
 
     private IEnumerable<ContextMenuEntry> EnumerateEntries(IEnumerable<RegistryRootDescriptor> roots)
@@ -1225,6 +1250,7 @@ public sealed class ContextMenuRegistryCatalog
         dirty |= UpdateIfChanged(state.IconPath, entry.IconPath, value => state.IconPath = value);
         dirty |= UpdateIfChanged(state.IconIndex, entry.IconIndex, value => state.IconIndex = value);
         dirty |= UpdateIfChanged(state.FilePath, entry.FilePath, value => state.FilePath = value);
+        dirty |= UpdateIfChanged(state.IsWindows11ContextMenu, entry.IsWindows11ContextMenu, value => state.IsWindows11ContextMenu = value);
         dirty |= UpdateIfChanged(state.OnlyWithShift, entry.OnlyWithShift, value => state.OnlyWithShift = value);
         dirty |= UpdateIfChanged(state.OnlyInExplorer, entry.OnlyInExplorer, value => state.OnlyInExplorer = value);
         dirty |= UpdateIfChanged(state.NoWorkingDirectory, entry.NoWorkingDirectory, value => state.NoWorkingDirectory = value);
@@ -1279,6 +1305,7 @@ public sealed class ContextMenuRegistryCatalog
             IconPath = state.IconPath,
             IconIndex = state.IconIndex,
             FilePath = state.FilePath,
+            IsWindows11ContextMenu = state.IsWindows11ContextMenu,
             OnlyWithShift = state.OnlyWithShift,
             OnlyInExplorer = state.OnlyInExplorer,
             NoWorkingDirectory = state.NoWorkingDirectory,
@@ -1373,6 +1400,12 @@ public sealed class ContextMenuRegistryCatalog
             return false;
         }
 
+        if (state.IsWindows11ContextMenu
+            || string.Equals(state.SourceRootPath, Windows11MonitoredRootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         return !state.IsDeleted
                && !state.IsPendingApproval
                && !state.SuppressNextDetection
@@ -1391,6 +1424,7 @@ public sealed class ContextMenuRegistryCatalog
                || !string.Equals(state.IconPath, entry.IconPath, StringComparison.OrdinalIgnoreCase)
                || state.IconIndex != entry.IconIndex
                || !string.Equals(state.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase)
+               || state.IsWindows11ContextMenu != entry.IsWindows11ContextMenu
                || state.OnlyWithShift != entry.OnlyWithShift
                || state.OnlyInExplorer != entry.OnlyInExplorer
                || state.NoWorkingDirectory != entry.NoWorkingDirectory
@@ -1750,8 +1784,7 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         var generatedDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ContextMenuMgr",
+            RuntimePaths.RootDirectory,
             "Generated");
         Directory.CreateDirectory(generatedDir);
 

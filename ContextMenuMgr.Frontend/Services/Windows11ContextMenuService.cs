@@ -15,76 +15,107 @@ namespace ContextMenuMgr.Frontend.Services;
 
 public sealed class Windows11ContextMenuService
 {
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private IReadOnlyList<Windows11ContextMenuItemDefinition> _cachedItems = [];
+
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
-    public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> LoadAsync(CancellationToken cancellationToken)
+    public bool HasLoaded { get; private set; }
+
+    public IReadOnlyList<Windows11ContextMenuItemDefinition> CurrentItems => _cachedItems;
+
+    public event EventHandler? ItemsChanged;
+
+    public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> EnsureLoadedAsync(CancellationToken cancellationToken)
+    {
+        if (HasLoaded)
+        {
+            return _cachedItems;
+        }
+
+        return await RefreshAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> RefreshAsync(CancellationToken cancellationToken)
     {
         if (!IsSupported)
         {
             return [];
         }
 
-        Windows11Blocks.LoadAll();
-        var comPackages = Windows11Packages.GetPackagedComPackages();
-        var packageManager = new PackageManager();
-        var items = new ConcurrentDictionary<string, Windows11ContextMenuItemDefinition>(StringComparer.OrdinalIgnoreCase);
+        await _refreshGate.WaitAsync(cancellationToken);
+        try
+        {
+            Windows11Blocks.LoadAll();
+            var comPackages = Windows11Packages.GetPackagedComPackages();
+            var packageManager = new PackageManager();
+            var items = new ConcurrentDictionary<string, Windows11ContextMenuItemDefinition>(StringComparer.OrdinalIgnoreCase);
 
-        await Parallel.ForEachAsync(
-            comPackages,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = 4,
-                CancellationToken = cancellationToken
-            },
-            async (fullName, ct) =>
-            {
-                try
+            await Parallel.ForEachAsync(
+                comPackages,
+                new ParallelOptions
                 {
-                    ct.ThrowIfCancellationRequested();
-                    var package = Windows11Permissions.IsElevated
-                        ? packageManager.FindPackage(fullName)
-                        : packageManager.FindPackageForUser(string.Empty, fullName);
-
-                    if (package is null)
+                    MaxDegreeOfParallelism = 4,
+                    CancellationToken = cancellationToken
+                },
+                async (fullName, ct) =>
+                {
+                    try
                     {
-                        return;
-                    }
+                        ct.ThrowIfCancellationRequested();
+                        var package = Windows11Permissions.IsElevated
+                            ? packageManager.FindPackage(fullName)
+                            : packageManager.FindPackageForUser(string.Empty, fullName);
 
-                    var version = package.Id.Version;
-                    var pkg = new Windows11PackageInfo(
-                        package.Id.FamilyName,
-                        package.Id.FullName,
-                        package.DisplayName,
-                        package.PublisherDisplayName,
-                        package.Logo.LocalPath,
-                        package.InstalledLocation.Path,
-                        new Version(version.Major, version.Minor, version.Build, version.Revision));
-
-                    var definitions = await Windows11Packages.AnalyzeManifestAsync(pkg, package.IsBundle, ct);
-                    foreach (var definition in definitions)
-                    {
-                        var materialized = definition with
+                        if (package is null)
                         {
-                            IsEnabled = GetIsEnabled(definition.Id),
-                            IsMachineBlocked = Windows11Blocks.Machine.Contains(definition.Id)
-                        };
+                            return;
+                        }
 
-                        if (!items.TryGetValue(materialized.Id, out var existing)
-                            || existing.Package.Version < materialized.Package.Version)
+                        var version = package.Id.Version;
+                        var pkg = new Windows11PackageInfo(
+                            package.Id.FamilyName,
+                            package.Id.FullName,
+                            package.DisplayName,
+                            package.PublisherDisplayName,
+                            package.Logo.LocalPath,
+                            package.InstalledLocation.Path,
+                            new Version(version.Major, version.Minor, version.Build, version.Revision));
+
+                        var definitions = await Windows11Packages.AnalyzeManifestAsync(pkg, package.IsBundle, ct);
+                        foreach (var definition in definitions)
                         {
-                            items[materialized.Id] = materialized;
+                            var materialized = definition with
+                            {
+                                IsEnabled = GetIsEnabled(definition.Id),
+                                IsMachineBlocked = Windows11Blocks.Machine.Contains(definition.Id)
+                            };
+
+                            if (!items.TryGetValue(materialized.Id, out var existing)
+                                || existing.Package.Version < materialized.Package.Version)
+                            {
+                                items[materialized.Id] = materialized;
+                            }
                         }
                     }
-                }
-                catch
-                {
-                }
-            });
+                    catch
+                    {
+                    }
+                });
 
-        return items.Values
-            .OrderBy(static item => item.Package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(static item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray();
+            _cachedItems = items.Values
+                .OrderBy(static item => item.Package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(static item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
+
+            HasLoaded = true;
+            ItemsChanged?.Invoke(this, EventArgs.Empty);
+            return _cachedItems;
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     public Task<bool> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken)

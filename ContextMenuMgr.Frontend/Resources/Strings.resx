@@ -177,6 +177,9 @@
   <data name="PendingApprovalBadge" xml:space="preserve">
     <value>Needs review</value>
   </data>
+  <data name="Windows11PendingApprovalTag" xml:space="preserve">
+    <value>Win11 new menu</value>
+  </data>
   <data name="ServiceNotesTitle" xml:space="preserve">
     <value>Service Notes</value>
   </data>
@@ -504,14 +507,35 @@
   <data name="LocalFilesTitle" xml:space="preserve">
     <value>Local files</value>
   </data>
+  <data name="DebugToolsTitle" xml:space="preserve">
+    <value>Debug</value>
+  </data>
   <data name="OpenLogsFolder" xml:space="preserve">
     <value>Open logs folder</value>
   </data>
   <data name="OpenStateFolder" xml:space="preserve">
-    <value>Open state store folder</value>
+    <value>Open data folder</value>
   </data>
   <data name="OpenConfigFolder" xml:space="preserve">
-    <value>Open config folder</value>
+    <value>Open backups folder</value>
+  </data>
+  <data name="ResetStateDatabase" xml:space="preserve">
+    <value>Reset state database</value>
+  </data>
+  <data name="ResetSettings" xml:space="preserve">
+    <value>Reset app settings</value>
+  </data>
+  <data name="ClearAllLogs" xml:space="preserve">
+    <value>Clear log files</value>
+  </data>
+  <data name="MaintenanceResetStateSucceeded" xml:space="preserve">
+    <value>The local state database and deleted backups were reset.</value>
+  </data>
+  <data name="MaintenanceResetSettingsSucceeded" xml:space="preserve">
+    <value>The application settings were restored to defaults.</value>
+  </data>
+  <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
+    <value>The frontend, backend, and tray logs were cleared.</value>
   </data>
   <data name="ProtectionTitle" xml:space="preserve">
     <value>Enhancement</value>

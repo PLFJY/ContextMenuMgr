@@ -11,10 +11,7 @@ internal static class BackendServiceBootstrapper
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string FrontendPolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
     private const string FrontendPolicyValueName = "StartWithWindows";
-    private static readonly string DataDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "ContextMenuMgr",
-        "Data");
+    private static readonly string DataDirectory = RuntimePaths.DataDirectory;
     private static readonly string KeepFrontendOnStopMarkerPath = Path.Combine(
         DataDirectory,
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);

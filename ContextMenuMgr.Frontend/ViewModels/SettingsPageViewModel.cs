@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
@@ -143,11 +144,19 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     public string LocalFilesTitle => _localization.Translate("LocalFilesTitle");
 
+    public string DebugToolsTitle => _localization.Translate("DebugToolsTitle");
+
     public string OpenLogsFolderText => _localization.Translate("OpenLogsFolder");
 
     public string OpenStateFolderText => _localization.Translate("OpenStateFolder");
 
     public string OpenConfigFolderText => _localization.Translate("OpenConfigFolder");
+
+    public string ResetStateDatabaseText => _localization.Translate("ResetStateDatabase");
+
+    public string ResetSettingsText => _localization.Translate("ResetSettings");
+
+    public string ClearAllLogsText => _localization.Translate("ClearAllLogs");
 
     public string CancelText => _localization.Translate("DialogCancel");
 
@@ -272,26 +281,118 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private Task OpenLogsFolderAsync()
-        => OpenFolderAsync(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ContextMenuMgr",
-                "Logs"));
+        => OpenFolderAsync(RuntimePaths.LogsDirectory);
 
     [RelayCommand]
     private Task OpenStateFolderAsync()
-        => OpenFolderAsync(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "ContextMenuMgr",
-                "Data"));
+        => OpenFolderAsync(RuntimePaths.DataDirectory);
 
     [RelayCommand]
     private Task OpenConfigFolderAsync()
-        => OpenFolderAsync(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ContextMenuMgr"));
+        => OpenFolderAsync(RuntimePaths.DeletedBackupsDirectory);
+
+    [RelayCommand]
+    private async Task ResetStateDatabaseAsync()
+    {
+        try
+        {
+            TryDeleteFile(RuntimePaths.StateDatabasePath);
+            TryDeleteFile(Path.Combine(RuntimePaths.DataDirectory, "backend-protection-settings.json"));
+            TryDeleteDirectory(RuntimePaths.DeletedBackupsDirectory);
+            Directory.CreateDirectory(RuntimePaths.DeletedBackupsDirectory);
+
+            await FrontendMessageBox.ShowInfoAsync(
+                _localization.Translate("MaintenanceResetStateSucceeded"),
+                _localization.Translate("DebugToolsTitle"));
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("DebugToolsTitle"));
+        }
+    }
+
+    [RelayCommand]
+    private async Task ResetSettingsAsync()
+    {
+        try
+        {
+            _settingsService.ResetToDefaults();
+
+            _suppressAutoStartSync = true;
+            AutoStartOnLogin = false;
+            _suppressAutoStartSync = false;
+            _startupService.SetAutoStartEnabled(false);
+            if (_workspace.IsServiceInstalled())
+            {
+                await _workspace.SetServiceAutoStartEnabledAsync(false);
+            }
+
+            _suppressProtectionSync = true;
+            LockNewContextMenuItems = false;
+            _suppressProtectionSync = false;
+            try
+            {
+                await _workspace.SetRegistryProtectionSettingAsync(false);
+            }
+            catch
+            {
+            }
+
+            KeepBackgroundAfterClose = false;
+
+            _localization.SelectedLanguage = AppLanguageOption.System;
+            SelectedLanguage = AvailableLanguages.FirstOrDefault(item => item.Option == AppLanguageOption.System) ?? AvailableLanguages[0];
+
+            _themeService.ApplyTheme(AppThemeOption.System);
+            SelectedTheme = AvailableThemes.FirstOrDefault(item => item.Option == AppThemeOption.System) ?? AvailableThemes[0];
+
+            FrontendDebugLog.Configure(AppLogLevel.Warning);
+            SelectedLogLevel = AvailableLogLevels.FirstOrDefault(item => item.Option == AppLogLevel.Warning) ?? AvailableLogLevels[0];
+
+            await NotifyTrayHostLocalizationChangedAsync();
+
+            await FrontendMessageBox.ShowInfoAsync(
+                _localization.Translate("MaintenanceResetSettingsSucceeded"),
+                _localization.Translate("DebugToolsTitle"));
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("DebugToolsTitle"));
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearAllLogsAsync()
+    {
+        try
+        {
+            Directory.CreateDirectory(RuntimePaths.LogsDirectory);
+            foreach (var path in new[]
+                     {
+                         RuntimePaths.FrontendDebugLogPath,
+                         RuntimePaths.FrontendCrashLogPath,
+                         RuntimePaths.BackendLogPath,
+                         RuntimePaths.TrayHostLogPath
+                     })
+            {
+                TryTruncateFile(path);
+            }
+
+            await FrontendMessageBox.ShowInfoAsync(
+                _localization.Translate("MaintenanceClearLogsSucceeded"),
+                _localization.Translate("DebugToolsTitle"));
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message,
+                _localization.Translate("DebugToolsTitle"));
+        }
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
@@ -315,9 +416,13 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(RestartExplorerText));
         OnPropertyChanged(nameof(LocalFilesTitle));
+        OnPropertyChanged(nameof(DebugToolsTitle));
         OnPropertyChanged(nameof(OpenLogsFolderText));
         OnPropertyChanged(nameof(OpenStateFolderText));
         OnPropertyChanged(nameof(OpenConfigFolderText));
+        OnPropertyChanged(nameof(ResetStateDatabaseText));
+        OnPropertyChanged(nameof(ResetSettingsText));
+        OnPropertyChanged(nameof(ClearAllLogsText));
         OnPropertyChanged(nameof(CancelText));
         OnPropertyChanged(nameof(ConfirmUninstallText));
         OnPropertyChanged(nameof(UninstallFlyoutText));
@@ -390,6 +495,45 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("LocalFilesTitle"));
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryTruncateFile(string path)
+    {
+        try
+        {
+            File.WriteAllText(path, string.Empty);
+        }
+        catch
+        {
         }
     }
 

@@ -100,6 +100,11 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             return false;
         }
 
+        if (item.IsWindows11ContextMenu)
+        {
+            return false;
+        }
+
         if (_settingsService.Current.HideDisabledItems && !item.IsEnabled && !item.IsDeleted)
         {
             return false;
@@ -183,6 +188,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             or nameof(ContextMenuItemViewModel.KeyName)
             or nameof(ContextMenuItemViewModel.RegistryPath)
             or nameof(ContextMenuItemViewModel.Notes)
+            or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu)
             or nameof(ContextMenuItemViewModel.IsDeleted)
             or nameof(ContextMenuItemViewModel.HasDetectedChange)
             or nameof(ContextMenuItemViewModel.IsPendingApproval)

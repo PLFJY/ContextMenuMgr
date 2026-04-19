@@ -1,16 +1,13 @@
 using System.IO;
 using System.Text;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
 internal sealed class TrayHostLogger
 {
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(7);
-    private readonly string _logFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ContextMenuMgr",
-        "Logs",
-        "trayhost.log");
+    private readonly string _logFilePath = RuntimePaths.TrayHostLogPath;
 
     public TrayHostLogger()
     {

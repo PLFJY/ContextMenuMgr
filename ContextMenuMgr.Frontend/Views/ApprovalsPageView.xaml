@@ -103,6 +103,14 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
+                                    <Border
+                                        Margin="0,0,0,4"
+                                        Padding="8,2"
+                                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                        CornerRadius="4"
+                                        Visibility="{Binding IsWindows11ContextMenu, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock FontSize="11" Text="{Binding Windows11TagText}" />
+                                    </Border>
                                     <TextBlock
                                         Margin="0,3,0,0"
                                         FontSize="11"
@@ -141,7 +149,9 @@
                                     Content="{Binding DataContext.KeepDisabledText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     IsEnabled="{Binding CanReviewApproval}"
                                     Icon="{ui:SymbolIcon Symbol=Dismiss24}" />
-                                <Grid Margin="10,0,0,0">
+                                <Grid
+                                    Margin="10,0,0,0"
+                                    Visibility="{Binding CanRemove, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <ui:Flyout
                                         IsOpen="{Binding IsApprovalRemoveFlyoutOpen, Mode=TwoWay}"
                                         Placement="Top">

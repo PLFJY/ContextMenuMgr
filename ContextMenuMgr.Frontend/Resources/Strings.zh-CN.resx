@@ -177,6 +177,9 @@
   <data name="PendingApprovalBadge" xml:space="preserve">
     <value>待审核</value>
   </data>
+  <data name="Windows11PendingApprovalTag" xml:space="preserve">
+    <value>Win11 新菜单</value>
+  </data>
   <data name="ServiceNotesTitle" xml:space="preserve">
     <value>服务说明</value>
   </data>
@@ -504,14 +507,35 @@
   <data name="LocalFilesTitle" xml:space="preserve">
     <value>本地文件</value>
   </data>
+  <data name="DebugToolsTitle" xml:space="preserve">
+    <value>调试</value>
+  </data>
   <data name="OpenLogsFolder" xml:space="preserve">
     <value>打开日志目录</value>
   </data>
   <data name="OpenStateFolder" xml:space="preserve">
-    <value>打开状态库目录</value>
+    <value>打开数据目录</value>
   </data>
   <data name="OpenConfigFolder" xml:space="preserve">
-    <value>打开配置目录</value>
+    <value>打开备份目录</value>
+  </data>
+  <data name="ResetStateDatabase" xml:space="preserve">
+    <value>重置状态库</value>
+  </data>
+  <data name="ResetSettings" xml:space="preserve">
+    <value>重置软件设置</value>
+  </data>
+  <data name="ClearAllLogs" xml:space="preserve">
+    <value>清空日志文件</value>
+  </data>
+  <data name="MaintenanceResetStateSucceeded" xml:space="preserve">
+    <value>本地状态库和删除备份已重置。</value>
+  </data>
+  <data name="MaintenanceResetSettingsSucceeded" xml:space="preserve">
+    <value>软件设置已恢复为默认值。</value>
+  </data>
+  <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
+    <value>前端、后端和托盘日志已清空。</value>
   </data>
   <data name="ProtectionTitle" xml:space="preserve">
     <value>增强</value>

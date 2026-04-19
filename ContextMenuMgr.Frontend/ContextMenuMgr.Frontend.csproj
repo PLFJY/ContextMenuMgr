@@ -13,9 +13,9 @@
     <Title>Context Menu Manager Plus</Title>
     <Description>Windows context menu manager frontend for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.4.3.0</FileVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.4.3</InformationalVersion>
+    <InformationalVersion>1.5.0</InformationalVersion>
     <BackendTargetFramework>net10.0-windows</BackendTargetFramework>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <BackendOutputDir>$(MSBuildThisFileDirectory)..\artifacts\backend\$(Configuration)\$(BackendTargetFramework)\</BackendOutputDir>

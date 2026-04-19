@@ -69,6 +69,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string CategoryName => ContextMenuCategoryText.GetLocalizedName(Category, _localization);
 
+    public bool IsWindows11ContextMenu => Entry.IsWindows11ContextMenu;
+
     public bool HasClsidLocation => Guid.TryParse(Entry.HandlerClsid, out _);
 
     public bool HasFileLocation => !string.IsNullOrWhiteSpace(Entry.FilePath);

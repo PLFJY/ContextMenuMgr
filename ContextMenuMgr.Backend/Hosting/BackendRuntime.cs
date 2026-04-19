@@ -17,9 +17,7 @@ public sealed class BackendRuntime : IDisposable
     private bool _shutdownFrontendOnStop = true;
     private CancellationTokenSource? _lifetimeCts;
     private static readonly string KeepFrontendOnStopMarkerPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "ContextMenuMgr",
-        "Data",
+        RuntimePaths.DataDirectory,
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);
 
     public event EventHandler? StopRequested;
@@ -38,20 +36,40 @@ public sealed class BackendRuntime : IDisposable
 
     public static BackendRuntime CreateDefault()
     {
-        var dataRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ContextMenuMgr");
-
-        var logger = new FileLogger(Path.Combine(dataRoot, "Logs", "backend.log"));
-        var stateStore = new ContextMenuStateStore(Path.Combine(dataRoot, "Data", "context-menu-state.json"));
-        var protectionSettingsStore = new BackendProtectionSettingsStore(Path.Combine(dataRoot, "Data", "backend-protection-settings.json"));
-        var backupService = new RegistryBackupService(Path.Combine(dataRoot, "DeletedBackups"));
+        TryMigrateLegacyRuntimeFiles();
+        var logger = new FileLogger(RuntimePaths.BackendLogPath);
+        var stateStore = new ContextMenuStateStore(RuntimePaths.StateDatabasePath);
+        var protectionSettingsStore = new BackendProtectionSettingsStore(Path.Combine(RuntimePaths.DataDirectory, "backend-protection-settings.json"));
+        var backupService = new RegistryBackupService(RuntimePaths.DeletedBackupsDirectory);
         var catalog = new ContextMenuRegistryCatalog(logger, stateStore, backupService, protectionSettingsStore);
         var monitor = new ContextMenuRegistryMonitor(catalog, logger);
         var pipeServer = new NamedPipeBackendServer(catalog, logger);
         var frontendAutostartLauncher = new FrontendAutostartLauncher(AppContext.BaseDirectory);
 
         return new BackendRuntime(logger, monitor, pipeServer, frontendAutostartLauncher);
+    }
+
+    private static void TryMigrateLegacyRuntimeFiles()
+    {
+        TryCopyIfMissing(RuntimePaths.LegacyStateDatabasePath, RuntimePaths.StateDatabasePath);
+        TryCopyIfMissing(RuntimePaths.LegacyBackendProtectionSettingsPath, Path.Combine(RuntimePaths.DataDirectory, "backend-protection-settings.json"));
+    }
+
+    private static void TryCopyIfMissing(string sourcePath, string destinationPath)
+    {
+        try
+        {
+            if (!File.Exists(sourcePath) || File.Exists(destinationPath))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(sourcePath, destinationPath, overwrite: false);
+        }
+        catch
+        {
+        }
     }
 
     public async Task RunConsoleAsync(string[] args)

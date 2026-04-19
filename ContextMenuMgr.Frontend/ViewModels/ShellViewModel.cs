@@ -112,9 +112,13 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private Task RefreshAsync()
+    private async Task RefreshAsync()
     {
-        return _workspace.RefreshAsync();
+        await _workspace.RefreshAsync();
+        if (_windows11Service.IsSupported)
+        {
+            await _windows11Service.RefreshAsync(CancellationToken.None);
+        }
     }
 
     [RelayCommand]

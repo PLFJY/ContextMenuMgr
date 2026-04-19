@@ -32,6 +32,8 @@ public sealed class PersistedContextMenuState
 
     public string? FilePath { get; set; }
 
+    public bool IsWindows11ContextMenu { get; set; }
+
     public bool OnlyWithShift { get; set; }
 
     public bool OnlyInExplorer { get; set; }
@@ -78,6 +80,7 @@ public sealed class PersistedContextMenuState
             IconPath = IconPath,
             IconIndex = IconIndex,
             FilePath = FilePath,
+            IsWindows11ContextMenu = IsWindows11ContextMenu,
             OnlyWithShift = OnlyWithShift,
             OnlyInExplorer = OnlyInExplorer,
             NoWorkingDirectory = NoWorkingDirectory,
@@ -114,6 +117,7 @@ public sealed class PersistedContextMenuState
             IconPath = entry.IconPath,
             IconIndex = entry.IconIndex,
             FilePath = entry.FilePath,
+            IsWindows11ContextMenu = entry.IsWindows11ContextMenu,
             OnlyWithShift = entry.OnlyWithShift,
             OnlyInExplorer = entry.OnlyInExplorer,
             NoWorkingDirectory = entry.NoWorkingDirectory,

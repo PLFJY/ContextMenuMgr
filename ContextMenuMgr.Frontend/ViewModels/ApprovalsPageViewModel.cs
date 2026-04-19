@@ -109,7 +109,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private Task OpenRemoveAsync(ApprovalQueueItemViewModel? item)
     {
-        if (item is null)
+        if (item is null || !item.CanRemove)
         {
             return Task.CompletedTask;
         }
@@ -126,7 +126,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ConfirmRemoveAsync(ApprovalQueueItemViewModel? item)
     {
-        if (item is null)
+        if (item is null || !item.CanRemove)
         {
             return;
         }
