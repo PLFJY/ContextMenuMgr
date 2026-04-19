@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Windows.Data;
@@ -9,6 +9,9 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the scene Context Menu Tab View Model.
+/// </summary>
 public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposable
 {
     private readonly IBackendClient _backendClient;
@@ -20,6 +23,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     private readonly ContextMenuSceneKind _sceneKind;
     private readonly string? _fixedScopeValue;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SceneContextMenuTabViewModel"/> class.
+    /// </summary>
     public SceneContextMenuTabViewModel(
         string iconSymbol,
         string title,
@@ -69,60 +75,120 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
+    /// <summary>
+    /// Gets the items View.
+    /// </summary>
     public ICollectionView ItemsView { get; }
 
+    /// <summary>
+    /// Gets the icon Symbol.
+    /// </summary>
     public string IconSymbol { get; }
 
+    /// <summary>
+    /// Gets or sets the title.
+    /// </summary>
     [ObservableProperty]
     public partial string Title { get; set; }
 
+    /// <summary>
+    /// Gets or sets the description.
+    /// </summary>
     [ObservableProperty]
     public partial string Description { get; set; }
 
+    /// <summary>
+    /// Gets or sets the search Text.
+    /// </summary>
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the scope Value.
+    /// </summary>
     [ObservableProperty]
     public partial string ScopeValue { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether busy.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    /// <summary>
+    /// Gets or sets the empty Text.
+    /// </summary>
     [ObservableProperty]
     public partial string EmptyText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the selector Label.
+    /// </summary>
     [ObservableProperty]
     public partial string SelectorLabel { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the selector Button Text.
+    /// </summary>
     [ObservableProperty]
     public partial string SelectorButtonText { get; set; }
 
+    /// <summary>
+    /// Gets or sets the search Label.
+    /// </summary>
     [ObservableProperty]
     public partial string SearchLabel { get; set; }
 
+    /// <summary>
+    /// Gets or sets the delete Text.
+    /// </summary>
     [ObservableProperty]
     public partial string DeleteText { get; set; }
 
+    /// <summary>
+    /// Gets or sets the permanent Delete Text.
+    /// </summary>
     [ObservableProperty]
     public partial string PermanentDeleteText { get; set; }
 
+    /// <summary>
+    /// Gets or sets the registry Missing Text.
+    /// </summary>
     [ObservableProperty]
     public partial string RegistryMissingText { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether cel Text.
+    /// </summary>
     [ObservableProperty]
     public partial string CancelText { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether text Selector.
+    /// </summary>
     [ObservableProperty]
     public partial bool HasTextSelector { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether option Selector.
+    /// </summary>
     [ObservableProperty]
     public partial bool HasOptionSelector { get; set; }
 
+    /// <summary>
+    /// Gets or sets the options.
+    /// </summary>
     [ObservableProperty]
     public partial ObservableCollection<SceneOptionViewModel> Options { get; set; } = [];
 
+    /// <summary>
+    /// Gets or sets the selected Option.
+    /// </summary>
     [ObservableProperty]
     public partial SceneOptionViewModel? SelectedOption { get; set; }
 
@@ -137,6 +203,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// Executes configure Text Selector.
+    /// </summary>
     public void ConfigureTextSelector(string label, string initialValue)
     {
         HasTextSelector = true;
@@ -145,6 +214,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         ScopeValue = initialValue;
     }
 
+    /// <summary>
+    /// Executes configure Option Selector.
+    /// </summary>
     public void ConfigureOptionSelector(string label, IEnumerable<SceneOptionViewModel> options, string? selectedValue = null)
     {
         HasOptionSelector = true;
@@ -156,6 +228,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         ScopeValue = SelectedOption?.Value ?? string.Empty;
     }
 
+    /// <summary>
+    /// Refreshes async.
+    /// </summary>
     [RelayCommand]
     public async Task RefreshAsync()
     {
@@ -309,8 +384,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
         var search = SearchText.Trim();
         return Contains(item.DisplayName, search)
-               || Contains(item.KeyName, search)
+               || Contains(item.Subtitle, search)
                || Contains(item.RegistryPath, search)
+               || Contains(item.ShellPathTail, search)
                || Contains(item.Notes, search);
     }
 
@@ -404,6 +480,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _settingsService.SettingsChanged -= OnSettingsChanged;

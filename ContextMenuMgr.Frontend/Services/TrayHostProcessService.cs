@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -7,14 +7,23 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the tray Host Process Service.
+/// </summary>
 public sealed class TrayHostProcessService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _trayHostExecutablePath = Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.TrayHost.exe");
 
+    /// <summary>
+    /// Executes is Running.
+    /// </summary>
     public bool IsRunning()
         => Process.GetProcessesByName("ContextMenuManagerPlus.TrayHost").Any();
 
+    /// <summary>
+    /// Ensures running.
+    /// </summary>
     public bool EnsureRunning()
     {
         if (IsRunning())
@@ -43,9 +52,15 @@ public sealed class TrayHostProcessService
         }
     }
 
+    /// <summary>
+    /// Executes request Exit Async.
+    /// </summary>
     public async Task<bool> RequestExitAsync(CancellationToken cancellationToken)
         => await SendCommandAsync(TrayHostControlCommand.Exit, cancellationToken);
 
+    /// <summary>
+    /// Executes request Reload Localization Async.
+    /// </summary>
     public async Task<bool> RequestReloadLocalizationAsync(CancellationToken cancellationToken)
         => await SendCommandAsync(TrayHostControlCommand.ReloadLocalization, cancellationToken);
 

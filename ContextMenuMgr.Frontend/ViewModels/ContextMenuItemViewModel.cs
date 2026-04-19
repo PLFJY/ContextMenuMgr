@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
@@ -6,6 +6,9 @@ using System.Windows.Media;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the context Menu Item View Model.
+/// </summary>
 public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly IconPreviewService _iconPreviewService;
@@ -21,6 +24,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private string _consistencyIssueSignature = string.Empty;
     private bool _disposed;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuItemViewModel"/> class.
+    /// </summary>
     public ContextMenuItemViewModel(
         ContextMenuEntry entry,
         LocalizationService localization,
@@ -43,6 +49,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         _localization.LanguageChanged += OnLanguageChanged;
     }
 
+    /// <summary>
+    /// Gets or sets the entry.
+    /// </summary>
     public ContextMenuEntry Entry { get; private set; }
 
     public string Id => Entry.Id;
@@ -52,6 +61,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     public string DisplayName => Entry.DisplayName;
 
     public string KeyName => Entry.KeyName;
+
+    public string Subtitle => KeyName;
+
+    public string ShellPathTail => GetShellPathTail(RegistryPath);
 
     public string EditableText => Entry.EditableText ?? DisplayName;
 
@@ -95,6 +108,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanSearchOnline => !string.IsNullOrWhiteSpace(DisplayName) || !string.IsNullOrWhiteSpace(KeyName);
 
+    /// <summary>
+    /// Gets or sets a value indicating whether enabled.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StateLabel))]
     [NotifyPropertyChangedFor(nameof(ToggleLabel))]
@@ -104,6 +120,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     public partial bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether deleted.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StateLabel))]
     [NotifyPropertyChangedFor(nameof(PrimaryActionLabel))]
@@ -118,22 +137,34 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(HasActionFlyout))]
     public partial bool IsDeleted { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether pending Approval.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NeedsAttention))]
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     [NotifyPropertyChangedFor(nameof(CanReviewApproval))]
     public partial bool IsPendingApproval { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether backup.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
     public partial bool HasBackup { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether consistency Issue.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NeedsAttention))]
     [NotifyPropertyChangedFor(nameof(ConsistencyText))]
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     public partial bool HasConsistencyIssue { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether consistency Issue Dismissed.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasConsistencyIssue))]
     [NotifyPropertyChangedFor(nameof(ConsistencyText))]
@@ -142,14 +173,23 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     public partial bool IsConsistencyIssueDismissed { get; set; }
 
+    /// <summary>
+    /// Gets or sets the consistency Issue.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConsistencyText))]
     public partial string? ConsistencyIssue { get; private set; }
 
+    /// <summary>
+    /// Gets or sets the deleted At Utc.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DeletedAtText))]
     public partial DateTimeOffset? DeletedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether present In Registry.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     [NotifyPropertyChangedFor(nameof(ToggleLabel))]
@@ -161,14 +201,23 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanReviewApproval))]
     public partial bool IsPresentInRegistry { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether toggle Busy.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsToggleBusy { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether attributes Busy.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool IsAttributesBusy { get; private set; }
 
+    /// <summary>
+    /// Gets or sets the detected Change Kind.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDetectedChange))]
     [NotifyPropertyChangedFor(nameof(DetectedChangeBadgeText))]
@@ -177,6 +226,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     public partial ContextMenuChangeKind DetectedChangeKind { get; private set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether detected Change Dismissed.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDetectedChange))]
     [NotifyPropertyChangedFor(nameof(CanDismissDetectedChange))]
@@ -184,32 +236,56 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(SortAttentionWeight))]
     public partial bool IsDetectedChangeDismissed { get; set; }
 
+    /// <summary>
+    /// Gets or sets the only With Shift.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool OnlyWithShift { get; set; }
 
+    /// <summary>
+    /// Gets or sets the only In Explorer.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool OnlyInExplorer { get; set; }
 
+    /// <summary>
+    /// Gets or sets the no Working Directory.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool NoWorkingDirectory { get; set; }
 
+    /// <summary>
+    /// Gets or sets the never Default.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool NeverDefault { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether as Disabled If Hidden.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
     public partial bool ShowAsDisabledIfHidden { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether approval Remove Flyout Open.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsApprovalRemoveFlyoutOpen { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether permanent Delete Flyout Open.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsPermanentDeleteFlyoutOpen { get; set; }
 
+    /// <summary>
+    /// Gets or sets the detected Change Details.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DetectedChangeText))]
     public partial string? DetectedChangeDetails { get; private set; }
@@ -363,6 +439,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     partial void OnShowAsDisabledIfHiddenChanged(bool oldValue, bool newValue) =>
         SyncShellAttribute(oldValue, newValue, ContextMenuShellAttribute.ShowAsDisabledIfHidden);
 
+    /// <summary>
+    /// Executes update.
+    /// </summary>
     public void Update(ContextMenuEntry entry)
     {
         Entry = entry;
@@ -707,6 +786,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         IsConsistencyIssueDismissed = true;
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)
@@ -716,5 +798,19 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         _localization.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private static string GetShellPathTail(string? registryPath)
+    {
+        if (string.IsNullOrWhiteSpace(registryPath))
+        {
+            return string.Empty;
+        }
+
+        var normalized = registryPath.Replace('/', '\\').TrimEnd('\\');
+        var lastSeparatorIndex = normalized.LastIndexOf('\\');
+        return lastSeparatorIndex >= 0
+            ? normalized[(lastSeparatorIndex + 1)..]
+            : normalized;
     }
 }

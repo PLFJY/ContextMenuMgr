@@ -1,5 +1,8 @@
-namespace ContextMenuMgr.Contracts;
+﻿namespace ContextMenuMgr.Contracts;
 
+/// <summary>
+/// Defines the available pipe Command values.
+/// </summary>
 public enum PipeCommand
 {
     Ping,

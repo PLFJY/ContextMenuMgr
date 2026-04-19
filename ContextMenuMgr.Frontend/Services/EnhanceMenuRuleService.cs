@@ -1,17 +1,26 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the enhance Menu Rule Service.
+/// </summary>
 public sealed class EnhanceMenuRuleService
 {
     private readonly IBackendClient _backendClient;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="EnhanceMenuRuleService"/> class.
+    /// </summary>
     public EnhanceMenuRuleService(IBackendClient backendClient)
     {
         _backendClient = backendClient;
     }
 
+    /// <summary>
+    /// Executes is Enabled.
+    /// </summary>
     public bool IsEnabled(EnhanceMenuItemDefinition definition)
     {
         var relativeGroupPath = NormalizeClassesRootRelativePath(definition.GroupRegistryPath);
@@ -25,6 +34,9 @@ public sealed class EnhanceMenuRuleService
             : IsShellEnabled(relativeGroupPath, definition);
     }
 
+    /// <summary>
+    /// Sets enabled Async.
+    /// </summary>
     public Task SetEnabledAsync(
         EnhanceMenuItemDefinition definition,
         bool enable,

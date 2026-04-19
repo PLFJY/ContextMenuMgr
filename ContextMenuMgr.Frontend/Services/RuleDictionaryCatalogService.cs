@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Xml.Linq;
@@ -6,15 +6,24 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the rule Dictionary Catalog Service.
+/// </summary>
 public sealed class RuleDictionaryCatalogService
 {
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RuleDictionaryCatalogService"/> class.
+    /// </summary>
     public RuleDictionaryCatalogService(LocalizationService localization)
     {
         _localization = localization;
     }
 
+    /// <summary>
+    /// Loads enhance Menu Groups.
+    /// </summary>
     public IReadOnlyList<EnhanceMenuGroupDefinition> LoadEnhanceMenuGroups()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Resources", "EnhanceMenusDic.xml");
@@ -88,6 +97,9 @@ public sealed class RuleDictionaryCatalogService
         return result;
     }
 
+    /// <summary>
+    /// Loads detailed Edit Groups.
+    /// </summary>
     public IReadOnlyList<DetailedEditGroupDefinition> LoadDetailedEditGroups()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Resources", "DetailedEditDic.xml");

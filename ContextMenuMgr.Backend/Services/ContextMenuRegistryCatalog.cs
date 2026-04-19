@@ -1,4 +1,4 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -10,6 +10,9 @@ using System.IO;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the context Menu Registry Catalog.
+/// </summary>
 public sealed class ContextMenuRegistryCatalog
 {
     private const string BlockedShellExtensionsPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
@@ -66,6 +69,9 @@ public sealed class ContextMenuRegistryCatalog
     private readonly BackendProtectionSettingsStore _protectionSettingsStore;
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuRegistryCatalog"/> class.
+    /// </summary>
     public ContextMenuRegistryCatalog(
         FileLogger logger,
         ContextMenuStateStore stateStore,
@@ -79,6 +85,9 @@ public sealed class ContextMenuRegistryCatalog
         _windows11Catalog = new Windows11ContextMenuCatalog();
     }
 
+    /// <summary>
+    /// Gets snapshot Async.
+    /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         return await BuildSnapshotAsync(
@@ -88,6 +97,9 @@ public sealed class ContextMenuRegistryCatalog
             cancellationToken);
     }
 
+    /// <summary>
+    /// Gets scene Snapshot Async.
+    /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSceneSnapshotAsync(
         ContextMenuSceneKind sceneKind,
         string? scopeValue,
@@ -134,6 +146,8 @@ public sealed class ContextMenuRegistryCatalog
         {
             if (actualEntries.TryGetValue(item.Id, out var existing))
             {
+                // Some roots can describe the same logical menu entry more than once
+                // (for example stable vs. mirrored shell extension locations).
                 actualEntries[item.Id] = SelectPreferredActualEntry(existing, item);
                 continue;
             }
@@ -143,6 +157,7 @@ public sealed class ContextMenuRegistryCatalog
 
         var results = new List<ContextMenuEntry>();
         var dirty = false;
+        var missingStateIdsToRemove = new List<string>();
 
         foreach (var entry in actualEntries.Values.OrderBy(static item => item.Category).ThenBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
@@ -168,6 +183,8 @@ public sealed class ContextMenuRegistryCatalog
             {
                 if (persistDiscoveredStates)
                 {
+                    // The first persisted snapshot becomes the baseline that later
+                    // runs compare against for change detection and approvals.
                     states[entry.Id] = PersistedContextMenuState.FromEntry(merged);
                     dirty = true;
                 }
@@ -183,11 +200,13 @@ public sealed class ContextMenuRegistryCatalog
                      .OrderBy(static state => state.Category)
                      .ThenBy(static state => state.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            // Ignore items that are simply missing from the registry now.
-            // We only surface deleted-through-app entries for undo/purge flows;
-            // external removals should not be treated as an attention-worthy state.
+            // External removals are intentionally silent in the UI, but they still
+            // need to be removed from the persisted baseline. Otherwise a later
+            // reinstall looks like an old known item instead of a genuinely new one.
             if (!state.IsDeleted)
             {
+                missingStateIdsToRemove.Add(state.Id);
+                dirty = true;
                 continue;
             }
 
@@ -204,6 +223,11 @@ public sealed class ContextMenuRegistryCatalog
             results.Add(CreateVirtualEntry(state, issue, changeKind, changeDetails));
         }
 
+        foreach (var stateId in missingStateIdsToRemove)
+        {
+            states.Remove(stateId);
+        }
+
         PruneTransientStates(states);
 
         if (dirty)
@@ -214,6 +238,9 @@ public sealed class ContextMenuRegistryCatalog
         return results;
     }
 
+    /// <summary>
+    /// Applies desired State Async.
+    /// </summary>
     public async Task<PipeResponse> ApplyDesiredStateAsync(string itemId, bool enable, CancellationToken cancellationToken)
     {
         var snapshot = await GetSnapshotAsync(cancellationToken);
@@ -232,6 +259,8 @@ public sealed class ContextMenuRegistryCatalog
         {
             if (item.IsWindows11ContextMenu)
             {
+                // Win11 packaged verbs do not use the classic shell verb/handler
+                // write paths, so they are toggled through the blocked-extension list.
                 if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, null, enable))
                 {
                     return CreateFailure($"Unable to update the Win11 context menu item '{item.DisplayName}'.");
@@ -254,6 +283,8 @@ public sealed class ContextMenuRegistryCatalog
             var linkedEntries = GetStateLinkedEntries(snapshot, item);
             foreach (var linkedEntry in linkedEntries)
             {
+                // One user gesture may affect several projected entries, so we keep
+                // their persisted desired/observed state in sync here.
                 var state = GetOrCreateState(states, linkedEntry);
                 state.DesiredEnabled = enable;
                 state.ObservedEnabled = enable;
@@ -292,6 +323,9 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
+    /// <summary>
+    /// Applies decision Async.
+    /// </summary>
     public async Task<PipeResponse> ApplyDecisionAsync(
         string itemId,
         ContextMenuDecision decision,
@@ -313,6 +347,9 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    /// <summary>
+    /// Executes acknowledge Item State Async.
+    /// </summary>
     public async Task<PipeResponse> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
@@ -386,6 +423,9 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    /// <summary>
+    /// Applies shell Attribute Async.
+    /// </summary>
     public async Task<PipeResponse> ApplyShellAttributeAsync(
         string itemId,
         ContextMenuShellAttribute attribute,
@@ -443,6 +483,9 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
+    /// <summary>
+    /// Applies display Text Async.
+    /// </summary>
     public async Task<PipeResponse> ApplyDisplayTextAsync(string itemId, string textValue, CancellationToken cancellationToken)
     {
         var snapshot = await GetSnapshotAsync(cancellationToken);
@@ -513,6 +556,9 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
+    /// <summary>
+    /// Sets enhance Menu Item Enabled Async.
+    /// </summary>
     public async Task<PipeResponse> SetEnhanceMenuItemEnabledAsync(
         string groupRegistryPath,
         string definitionXml,
@@ -685,6 +731,9 @@ public sealed class ContextMenuRegistryCatalog
                && expectedGuid == stateGuid;
     }
 
+    /// <summary>
+    /// Gets registry Protection Setting Async.
+    /// </summary>
     public async Task<PipeResponse> GetRegistryProtectionSettingAsync(CancellationToken cancellationToken)
     {
         var settings = await _protectionSettingsStore.LoadAsync(cancellationToken);
@@ -696,6 +745,9 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    /// <summary>
+    /// Sets registry Protection Setting Async.
+    /// </summary>
     public async Task<PipeResponse> SetRegistryProtectionSettingAsync(bool enable, CancellationToken cancellationToken)
     {
         var errors = ApplyRegistryWriteProtection(enable);
@@ -720,6 +772,9 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    /// <summary>
+    /// Deletes item Async.
+    /// </summary>
     public async Task<PipeResponse> DeleteItemAsync(string itemId, CancellationToken cancellationToken)
     {
         var snapshot = await GetSnapshotAsync(cancellationToken);
@@ -845,6 +900,9 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
+    /// <summary>
+    /// Executes undo Delete Async.
+    /// </summary>
     public async Task<PipeResponse> UndoDeleteAsync(string itemId, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
@@ -889,6 +947,9 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
+    /// <summary>
+    /// Executes purge Deleted Item Async.
+    /// </summary>
     public async Task<PipeResponse> PurgeDeletedItemAsync(string itemId, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
@@ -917,6 +978,9 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
+    /// <summary>
+    /// Executes mark Item Pending Approval Async.
+    /// </summary>
     public async Task MarkItemPendingApprovalAsync(ContextMenuEntry item, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
@@ -926,6 +990,9 @@ public sealed class ContextMenuRegistryCatalog
         await _stateStore.SaveAsync(states, cancellationToken);
     }
 
+    /// <summary>
+    /// Executes quarantine New Item Async.
+    /// </summary>
     public async Task<ContextMenuEntry> QuarantineNewItemAsync(ContextMenuEntry item, CancellationToken cancellationToken)
     {
         // Step 1: disable the newly detected item immediately. This keeps the
@@ -972,6 +1039,9 @@ public sealed class ContextMenuRegistryCatalog
             };
     }
 
+    /// <summary>
+    /// Executes log Consistency Summary Async.
+    /// </summary>
     public async Task<int> LogConsistencySummaryAsync(CancellationToken cancellationToken)
     {
         var inconsistencies = (await GetSnapshotAsync(cancellationToken)).Count(static entry => entry.HasConsistencyIssue);
@@ -979,6 +1049,9 @@ public sealed class ContextMenuRegistryCatalog
         return inconsistencies;
     }
 
+    /// <summary>
+    /// Attempts to consume Suppressed Detection Async.
+    /// </summary>
     public async Task<bool> TryConsumeSuppressedDetectionAsync(string itemId, CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
@@ -2341,6 +2414,9 @@ public sealed class ContextMenuRegistryCatalog
         string? StableRelativePath = null,
         bool IsDisabledContainer = false)
     {
+        /// <summary>
+        /// Gets the stable Relative Path.
+        /// </summary>
         public string StableRelativePath { get; } = StableRelativePath ?? RelativePath;
     }
 
@@ -2349,8 +2425,14 @@ public sealed class ContextMenuRegistryCatalog
         string ClassesBasePath,
         string AbsoluteRootPath)
     {
+        /// <summary>
+        /// Opens base Key.
+        /// </summary>
         public RegistryKey? OpenBaseKey(string relativePath) => Hive.OpenSubKey($@"{ClassesBasePath}\{relativePath}", writable: false);
 
+        /// <summary>
+        /// Executes compose Absolute Path.
+        /// </summary>
         public string ComposeAbsolutePath(string relativePath) => $@"{AbsoluteRootPath}\{relativePath}";
     }
 }

@@ -1,15 +1,21 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows.Markup;
 using ContextMenuMgr.Frontend.Resources;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the localization Service.
+/// </summary>
 public sealed class LocalizationService
 {
     private readonly FrontendSettingsService _settingsService;
     private AppLanguageOption _selectedLanguage = AppLanguageOption.System;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LocalizationService"/> class.
+    /// </summary>
     public LocalizationService(FrontendSettingsService settingsService)
     {
         _settingsService = settingsService;
@@ -36,21 +42,33 @@ public sealed class LocalizationService
         }
     }
 
+    /// <summary>
+    /// Applies persisted Language.
+    /// </summary>
     public void ApplyPersistedLanguage()
     {
         ApplyCulture();
     }
 
+    /// <summary>
+    /// Executes translate.
+    /// </summary>
     public string Translate(string key)
     {
         return Strings.ResourceManager.GetString(key, GetSelectedCulture()) ?? key;
     }
 
+    /// <summary>
+    /// Executes format.
+    /// </summary>
     public string Format(string key, params object[] args)
     {
         return string.Format(GetFormattingCulture(), Translate(key), args);
     }
 
+    /// <summary>
+    /// Executes uses Chinese.
+    /// </summary>
     public bool UsesChinese()
     {
         return GetSelectedCulture().Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase);

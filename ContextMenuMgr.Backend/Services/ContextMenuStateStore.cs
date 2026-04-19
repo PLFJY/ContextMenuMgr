@@ -1,8 +1,11 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the context Menu State Store.
+/// </summary>
 public sealed class ContextMenuStateStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -13,6 +16,9 @@ public sealed class ContextMenuStateStore
     private readonly string _storagePath;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuStateStore"/> class.
+    /// </summary>
     public ContextMenuStateStore(string storagePath)
     {
         _storagePath = storagePath;
@@ -23,6 +29,9 @@ public sealed class ContextMenuStateStore
         }
     }
 
+    /// <summary>
+    /// Loads async.
+    /// </summary>
     public async Task<Dictionary<string, PersistedContextMenuState>> LoadAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
@@ -36,6 +45,9 @@ public sealed class ContextMenuStateStore
         }
     }
 
+    /// <summary>
+    /// Executes save Async.
+    /// </summary>
     public async Task SaveAsync(Dictionary<string, PersistedContextMenuState> states, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);

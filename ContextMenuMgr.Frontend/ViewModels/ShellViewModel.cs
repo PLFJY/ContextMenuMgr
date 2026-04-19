@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Windows;
@@ -10,6 +10,9 @@ using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the shell View Model.
+/// </summary>
 public partial class ShellViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
@@ -17,6 +20,9 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     private readonly Windows11ContextMenuService _windows11Service;
     private readonly InfoBadge _approvalsBadge = new() { Visibility = Visibility.Collapsed };
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ShellViewModel"/> class.
+    /// </summary>
     public ShellViewModel(
         ContextMenuWorkspaceService workspace,
         LocalizationService localization,
@@ -88,17 +94,26 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
 
+    /// <summary>
+    /// Initializes async.
+    /// </summary>
     public async Task InitializeAsync(bool suppressBootstrapPrompt = false)
     {
         await _workspace.InitializeAsync(suppressBootstrapPrompt);
         UpdateApprovalBadge();
     }
 
+    /// <summary>
+    /// Stops monitoring Async.
+    /// </summary>
     public Task<BackendServiceBootstrapResult> StopMonitoringAsync()
     {
         return _workspace.StopMonitoringAsync();
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

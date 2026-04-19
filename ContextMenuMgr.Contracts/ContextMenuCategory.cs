@@ -1,5 +1,8 @@
-namespace ContextMenuMgr.Contracts;
+﻿namespace ContextMenuMgr.Contracts;
 
+/// <summary>
+/// Defines the available context Menu Category values.
+/// </summary>
 public enum ContextMenuCategory
 {
     File = 0,

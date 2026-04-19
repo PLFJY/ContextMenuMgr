@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Resources;
@@ -8,12 +8,18 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the tray Localization Service.
+/// </summary>
 internal sealed class TrayLocalizationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly ResourceManager ResourceManager = new("ContextMenuMgr.TrayHost.Resources.Strings", Assembly.GetExecutingAssembly());
     private CultureInfo _culture;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TrayLocalizationService"/> class.
+    /// </summary>
     public TrayLocalizationService()
     {
         _culture = LoadSelectedCulture();
@@ -21,12 +27,21 @@ internal sealed class TrayLocalizationService
 
     public CultureInfo CurrentCulture => _culture;
 
+    /// <summary>
+    /// Executes translate.
+    /// </summary>
     public string Translate(string key)
         => ResourceManager.GetString(key, _culture) ?? key;
 
+    /// <summary>
+    /// Executes format.
+    /// </summary>
     public string Format(string key, params object[] args)
         => string.Format(_culture, Translate(key), args);
 
+    /// <summary>
+    /// Executes reload.
+    /// </summary>
     public void Reload()
     {
         _culture = LoadSelectedCulture();

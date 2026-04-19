@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -8,6 +8,9 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Control Server.
+/// </summary>
 public sealed class FrontendControlServer : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -15,11 +18,17 @@ public sealed class FrontendControlServer : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FrontendControlServer"/> class.
+    /// </summary>
     public FrontendControlServer(Func<FrontendControlRequest, Task<FrontendControlResponse>> handler)
     {
         _handler = handler;
     }
 
+    /// <summary>
+    /// Executes start.
+    /// </summary>
     public void Start(CancellationToken cancellationToken)
     {
         if (_loopTask is not null && !_loopTask.IsCompleted)
@@ -31,6 +40,9 @@ public sealed class FrontendControlServer : IAsyncDisposable
         _loopTask = Task.Run(() => AcceptLoopAsync(_cts.Token), CancellationToken.None);
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _cts?.Cancel();

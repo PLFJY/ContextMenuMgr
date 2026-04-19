@@ -1,15 +1,21 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using System.Windows;
 using Wpf.Ui.Appearance;
 using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the theme Service.
+/// </summary>
 public sealed class ThemeService : IDisposable
 {
     private readonly FrontendSettingsService _settingsService;
     private bool _disposed;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ThemeService"/> class.
+    /// </summary>
     public ThemeService(FrontendSettingsService settingsService)
     {
         _settingsService = settingsService;
@@ -18,11 +24,17 @@ public sealed class ThemeService : IDisposable
 
     public AppThemeOption CurrentTheme => _settingsService.Current.Theme;
 
+    /// <summary>
+    /// Applies persisted Theme.
+    /// </summary>
     public void ApplyPersistedTheme()
     {
         ApplyTheme(_settingsService.Current.Theme, persist: false);
     }
 
+    /// <summary>
+    /// Applies theme.
+    /// </summary>
     public void ApplyTheme(AppThemeOption option, bool persist = true)
     {
         switch (option)
@@ -51,7 +63,7 @@ public sealed class ThemeService : IDisposable
             return;
         }
 
-        // 系统主题变化通常会落在这几个类别里，保守一点一起处理
+        // 绯荤粺涓婚鍙樺寲閫氬父浼氳惤鍦ㄨ繖鍑犱釜绫诲埆閲岋紝淇濆畧涓€鐐逛竴璧峰鐞?
         if (e.Category is not UserPreferenceCategory.General
             and not UserPreferenceCategory.Color
             and not UserPreferenceCategory.VisualStyle
@@ -74,6 +86,9 @@ public sealed class ThemeService : IDisposable
         });
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

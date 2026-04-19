@@ -1,9 +1,12 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Frontend.Services;
 using System.Windows.Media;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the enhance Menu Item View Model.
+/// </summary>
 public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly EnhanceMenuRuleService _ruleService;
@@ -13,6 +16,9 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
     private readonly EventHandler _languageChangedHandler;
     private bool _suppressSync;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="EnhanceMenuItemViewModel"/> class.
+    /// </summary>
     public EnhanceMenuItemViewModel(
         EnhanceMenuItemDefinition definition,
         string? groupIconPath,
@@ -36,8 +42,14 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
         localization.LanguageChanged += _languageChangedHandler;
     }
 
+    /// <summary>
+    /// Gets the definition.
+    /// </summary>
     public EnhanceMenuItemDefinition Definition { get; }
 
+    /// <summary>
+    /// Gets the group Icon Path.
+    /// </summary>
     public string? GroupIconPath { get; }
 
     public string DisplayName => Definition.DisplayName;
@@ -58,16 +70,25 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
 
     public string ToggleOffText => _localization.Translate("ToggleOff");
 
+    /// <summary>
+    /// Gets or sets a value indicating whether enabled.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether busy.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsBusy { get; set; }
 
     public bool CanToggle => !IsBusy;
 
+    /// <summary>
+    /// Refreshes state.
+    /// </summary>
     public void RefreshState()
     {
         var current = _ruleService.IsEnabled(Definition);
@@ -128,6 +149,9 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= _languageChangedHandler;

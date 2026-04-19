@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using ContextMenuMgr.Frontend.Views.Pages;
@@ -6,10 +6,16 @@ using Wpf.Ui.Appearance;
 
 namespace ContextMenuMgr.Frontend;
 
+/// <summary>
+/// Represents the main Window.
+/// </summary>
 public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
     private Type? _pendingPageType;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MainWindow"/> class.
+    /// </summary>
     public MainWindow(
         ViewModels.ShellViewModel viewModel,
         IServiceProvider serviceProvider)
@@ -23,6 +29,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Loaded += OnLoaded;
     }
 
+    /// <summary>
+    /// Navigates to to.
+    /// </summary>
     public void NavigateTo(Type pageType)
     {
         _pendingPageType = pageType;
@@ -32,6 +41,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
+    /// <summary>
+    /// Executes bring To Foreground.
+    /// </summary>
     public void BringToForeground()
     {
         var previousTopmost = Topmost;

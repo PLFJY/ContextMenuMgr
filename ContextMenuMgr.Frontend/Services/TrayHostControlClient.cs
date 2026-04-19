@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -6,13 +6,22 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the tray Host Control Client.
+/// </summary>
 public static class TrayHostControlClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Attempts to send Exit Async.
+    /// </summary>
     public static async Task<bool> TrySendExitAsync(CancellationToken cancellationToken)
         => await TrySendCommandAsync(TrayHostControlCommand.Exit, cancellationToken);
 
+    /// <summary>
+    /// Attempts to reload Localization Async.
+    /// </summary>
     public static async Task<bool> TryReloadLocalizationAsync(CancellationToken cancellationToken)
         => await TrySendCommandAsync(TrayHostControlCommand.ReloadLocalization, cancellationToken);
 

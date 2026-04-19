@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -7,21 +7,33 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the frontend Activation Service.
+/// </summary>
 internal sealed class FrontendActivationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _frontendExePath;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FrontendActivationService"/> class.
+    /// </summary>
     public FrontendActivationService(string baseDirectory)
     {
         _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.exe");
     }
 
+    /// <summary>
+    /// Attempts to show Main Window.
+    /// </summary>
     public bool TryShowMainWindow()
         => TryOpenFrontend(
             new FrontendControlRequest { Command = FrontendControlCommand.ShowMainWindow },
             "--show-main");
 
+    /// <summary>
+    /// Attempts to open Approvals.
+    /// </summary>
     public bool TryOpenApprovals(string? focusItemId)
         => TryOpenFrontend(
             new FrontendControlRequest
@@ -31,6 +43,9 @@ internal sealed class FrontendActivationService
             },
             BuildArguments("--open-approvals", focusItemId));
 
+    /// <summary>
+    /// Attempts to shutdown Frontend.
+    /// </summary>
     public bool TryShutdownFrontend()
         => TrySendFrontendControlRequest(
             new FrontendControlRequest

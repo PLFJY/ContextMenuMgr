@@ -1,8 +1,11 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the native Tray Host.
+/// </summary>
 internal sealed class NativeTrayHost : IDisposable
 {
     private const string WindowClassName = "ContextMenuMgr.TrayHost.NativeWindow";
@@ -29,6 +32,8 @@ internal sealed class NativeTrayHost : IDisposable
     private const int NIIF_INFO = 0x00000001;
 
     private const int NIN_BALLOONUSERCLICK = WM_USER + 5;
+    private const int NIN_SELECT = WM_USER + 0;
+    private const int NIN_KEYSELECT = WM_USER + 1;
 
     private const uint TPM_LEFTALIGN = 0x0000;
     private const uint TPM_BOTTOMALIGN = 0x0020;
@@ -63,12 +68,16 @@ internal sealed class NativeTrayHost : IDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _trayIconAdded;
+    private DateTimeOffset? _pendingNotificationClickExpiryUtc;
 
     private string? _pendingBalloonTitle;
     private string? _pendingBalloonMessage;
 
     private readonly WndProcDelegate _wndProc;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NativeTrayHost"/> class.
+    /// </summary>
     public NativeTrayHost(
         string? iconPath,
         string tooltip,
@@ -89,6 +98,9 @@ internal sealed class NativeTrayHost : IDisposable
         _taskbarCreatedMessage = RegisterWindowMessage("TaskbarCreated");
     }
 
+    /// <summary>
+    /// Executes initialize.
+    /// </summary>
     public void Initialize()
     {
         if (_initialized)
@@ -132,6 +144,9 @@ internal sealed class NativeTrayHost : IDisposable
         _initialized = true;
     }
 
+    /// <summary>
+    /// Executes run Message Loop.
+    /// </summary>
     public int RunMessageLoop()
     {
         if (!_initialized)
@@ -148,6 +163,9 @@ internal sealed class NativeTrayHost : IDisposable
         return 0;
     }
 
+    /// <summary>
+    /// Shows notification.
+    /// </summary>
     public void ShowNotification(string title, string message)
     {
         if (_hwnd == IntPtr.Zero)
@@ -157,6 +175,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         _pendingBalloonTitle = title;
         _pendingBalloonMessage = message;
+        _pendingNotificationClickExpiryUtc = DateTimeOffset.UtcNow.AddMinutes(2);
 
         if (!_trayIconAdded)
         {
@@ -172,6 +191,9 @@ internal sealed class NativeTrayHost : IDisposable
         Shell_NotifyIcon(NIM_MODIFY, ref nid);
     }
 
+    /// <summary>
+    /// Executes request Close.
+    /// </summary>
     public void RequestClose()
     {
         if (_hwnd == IntPtr.Zero)
@@ -182,6 +204,9 @@ internal sealed class NativeTrayHost : IDisposable
         PostMessage(_hwnd, WM_DESTROY, IntPtr.Zero, IntPtr.Zero);
     }
 
+    /// <summary>
+    /// Updates localization.
+    /// </summary>
     public void UpdateLocalization(string tooltip, string showMainWindowText, string exitText)
     {
         _tooltip = tooltip;
@@ -201,6 +226,9 @@ internal sealed class NativeTrayHost : IDisposable
         Shell_NotifyIcon(NIM_MODIFY, ref nid);
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)
@@ -348,15 +376,24 @@ internal sealed class NativeTrayHost : IDisposable
                 return IntPtr.Zero;
             }
 
-            if (code == WM_LBUTTONUP)
+            if (code == NIN_BALLOONUSERCLICK
+                || code == NIN_SELECT
+                || code == NIN_KEYSELECT)
             {
-                _showMainWindow();
-                return IntPtr.Zero;
+                if (TryHandlePendingNotificationClick())
+                {
+                    return IntPtr.Zero;
+                }
             }
 
-            if (code == NIN_BALLOONUSERCLICK)
+            if (code == WM_LBUTTONUP)
             {
-                _balloonClicked();
+                if (TryHandlePendingNotificationClick())
+                {
+                    return IntPtr.Zero;
+                }
+
+                _showMainWindow();
                 return IntPtr.Zero;
             }
         }
@@ -384,6 +421,20 @@ internal sealed class NativeTrayHost : IDisposable
         }
 
         return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+
+    private bool TryHandlePendingNotificationClick()
+    {
+        if (_pendingNotificationClickExpiryUtc is not { } expiresAtUtc
+            || expiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            _pendingNotificationClickExpiryUtc = null;
+            return false;
+        }
+
+        _pendingNotificationClickExpiryUtc = null;
+        _balloonClicked();
+        return true;
     }
 
     private static int LOWORD(IntPtr value)

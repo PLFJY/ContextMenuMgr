@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Security;
@@ -13,6 +13,9 @@ using Windows.Management.Deployment;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the windows11 Context Menu Service.
+/// </summary>
 public sealed class Windows11ContextMenuService
 {
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -20,12 +23,18 @@ public sealed class Windows11ContextMenuService
 
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
+    /// <summary>
+    /// Gets or sets a value indicating whether loaded.
+    /// </summary>
     public bool HasLoaded { get; private set; }
 
     public IReadOnlyList<Windows11ContextMenuItemDefinition> CurrentItems => _cachedItems;
 
     public event EventHandler? ItemsChanged;
 
+    /// <summary>
+    /// Ensures loaded Async.
+    /// </summary>
     public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> EnsureLoadedAsync(CancellationToken cancellationToken)
     {
         if (HasLoaded)
@@ -36,6 +45,9 @@ public sealed class Windows11ContextMenuService
         return await RefreshAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Refreshes async.
+    /// </summary>
     public async Task<IReadOnlyList<Windows11ContextMenuItemDefinition>> RefreshAsync(CancellationToken cancellationToken)
     {
         if (!IsSupported)
@@ -118,6 +130,9 @@ public sealed class Windows11ContextMenuService
         }
     }
 
+    /// <summary>
+    /// Sets enabled Async.
+    /// </summary>
     public Task<bool> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -146,11 +161,17 @@ public sealed class Windows11ContextMenuService
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Gets is Enabled.
+    /// </summary>
     public bool GetIsEnabled(string id)
     {
         return !Windows11Blocks.GetScopes().Any(blocks => blocks.Contains(id));
     }
 
+    /// <summary>
+    /// Loads logo.
+    /// </summary>
     public ImageSource? LoadLogo(string? logoPath)
     {
         if (string.IsNullOrWhiteSpace(logoPath))
@@ -180,6 +201,9 @@ public sealed class Windows11ContextMenuService
     }
 }
 
+/// <summary>
+/// Represents the windows11 Permissions.
+/// </summary>
 internal static class Windows11Permissions
 {
     private static readonly Lazy<bool> IsElevatedLazy = new(() =>
@@ -191,17 +215,26 @@ internal static class Windows11Permissions
     public static bool IsElevated => IsElevatedLazy.Value;
 }
 
+/// <summary>
+/// Represents the windows11 Packages.
+/// </summary>
 internal static class Windows11Packages
 {
     private const string NamespaceCom = "http://schemas.microsoft.com/appx/manifest/com/windows10";
     private const string NamespaceDesktop4 = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/4";
 
+    /// <summary>
+    /// Gets packaged Com Packages.
+    /// </summary>
     public static string[] GetPackagedComPackages()
     {
         using var subKey = Registry.ClassesRoot.OpenSubKey(@"PackagedCom\Package");
         return subKey?.GetSubKeyNames() ?? [];
     }
 
+    /// <summary>
+    /// Executes analyze Manifest Async.
+    /// </summary>
     public static async Task<IEnumerable<Windows11ContextMenuItemDefinition>> AnalyzeManifestAsync(
         Windows11PackageInfo package,
         bool isBundle,
@@ -329,6 +362,9 @@ internal static class Windows11Packages
     }
 }
 
+/// <summary>
+/// Represents the windows11 Blocks.
+/// </summary>
 internal sealed class Windows11Blocks : IReadOnlyCollection<string>
 {
     internal const string RegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
@@ -360,12 +396,18 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
         });
     }
 
+    /// <summary>
+    /// Gets the scope.
+    /// </summary>
     public RegistryHive Scope { get; }
 
     public bool IsReadOnly => _isReadOnly.Value;
 
     public int Count => _items.Count;
 
+    /// <summary>
+    /// Executes load.
+    /// </summary>
     public void Load()
     {
         using var subKey = _baseKey.OpenSubKey(RegistryPath);
@@ -375,6 +417,9 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
             ?? [];
     }
 
+    /// <summary>
+    /// Executes add.
+    /// </summary>
     public void Add(string id)
     {
         using var subKey = _baseKey.OpenSubKey(RegistryPath, writable: true) ?? _baseKey.CreateSubKey(RegistryPath);
@@ -382,6 +427,9 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
         _items.Add(id);
     }
 
+    /// <summary>
+    /// Executes remove.
+    /// </summary>
     public void Remove(string id)
     {
         if (!_items.Contains(id))
@@ -400,24 +448,45 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
         _items.Remove(id);
     }
 
+    /// <summary>
+    /// Executes contains.
+    /// </summary>
     public bool Contains(string id) => _items.Contains(id);
 
+    /// <summary>
+    /// Gets enumerator.
+    /// </summary>
     public IEnumerator<string> GetEnumerator() => _items.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
+    /// <summary>
+    /// Gets a value indicating whether r.
+    /// </summary>
     public static Windows11Blocks User { get; } = new(RegistryHive.CurrentUser);
 
+    /// <summary>
+    /// Gets the machine.
+    /// </summary>
     public static Windows11Blocks Machine { get; } = new(RegistryHive.LocalMachine);
 
+    /// <summary>
+    /// Gets or sets the write Scope.
+    /// </summary>
     public static RegistryHive WriteScope { get; set; } = RegistryHive.CurrentUser;
 
+    /// <summary>
+    /// Gets scopes.
+    /// </summary>
     public static IEnumerable<Windows11Blocks> GetScopes()
     {
         yield return User;
         yield return Machine;
     }
 
+    /// <summary>
+    /// Gets scope.
+    /// </summary>
     public static Windows11Blocks GetScope(RegistryHive hive)
     {
         return hive switch
@@ -428,6 +497,9 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
         };
     }
 
+    /// <summary>
+    /// Loads all.
+    /// </summary>
     public static void LoadAll()
     {
         foreach (var blocks in GetScopes())
@@ -439,6 +511,9 @@ internal sealed class Windows11Blocks : IReadOnlyCollection<string>
     private static string ToRegistryName(string value) => '{' + value + '}';
 }
 
+/// <summary>
+/// Represents the windows11 Package Info.
+/// </summary>
 public sealed record Windows11PackageInfo(
     string FamilyName,
     string FullName,
@@ -448,16 +523,25 @@ public sealed record Windows11PackageInfo(
     string InstallPath,
     Version Version);
 
+/// <summary>
+/// Represents the windows11 Context Menu Verb.
+/// </summary>
 public sealed record Windows11ContextMenuVerb(
     string? Clsid,
     string? Id,
     string? Type);
 
+/// <summary>
+/// Represents the windows11 Com Server Info.
+/// </summary>
 public sealed record Windows11ComServerInfo(
     string? Id,
     string? Path,
     string? DisplayName);
 
+/// <summary>
+/// Represents the windows11 Context Menu Item Definition.
+/// </summary>
 public sealed record Windows11ContextMenuItemDefinition(
     string Id,
     string DisplayName,

@@ -1,10 +1,16 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the enhance Menu Group View Model.
+/// </summary>
 public partial class EnhanceMenuGroupViewModel : ObservableObject, IDisposable
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="EnhanceMenuGroupViewModel"/> class.
+    /// </summary>
     public EnhanceMenuGroupViewModel(
         EnhanceMenuGroupDefinition definition,
         LocalizationService localization,
@@ -20,14 +26,29 @@ public partial class EnhanceMenuGroupViewModel : ObservableObject, IDisposable
             .ToArray();
     }
 
+    /// <summary>
+    /// Gets the title.
+    /// </summary>
     public string Title { get; }
 
+    /// <summary>
+    /// Gets the registry Path.
+    /// </summary>
     public string RegistryPath { get; }
 
+    /// <summary>
+    /// Gets the icon Path.
+    /// </summary>
     public string? IconPath { get; }
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public IReadOnlyList<EnhanceMenuItemViewModel> Items { get; }
 
+    /// <summary>
+    /// Refreshes states.
+    /// </summary>
     public void RefreshStates()
     {
         foreach (var item in Items)
@@ -36,6 +57,9 @@ public partial class EnhanceMenuGroupViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         foreach (var item in Items)

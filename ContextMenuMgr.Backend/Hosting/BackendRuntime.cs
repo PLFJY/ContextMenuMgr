@@ -1,9 +1,12 @@
-using ContextMenuMgr.Backend.Services;
+﻿using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
 using System.IO;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
+/// <summary>
+/// Represents the backend Runtime.
+/// </summary>
 public sealed class BackendRuntime : IDisposable
 {
     private static readonly TimeSpan ApprovalNotificationDedupWindow = TimeSpan.FromMinutes(5);
@@ -34,6 +37,9 @@ public sealed class BackendRuntime : IDisposable
         _frontendAutostartLauncher = frontendAutostartLauncher;
     }
 
+    /// <summary>
+    /// Creates default.
+    /// </summary>
     public static BackendRuntime CreateDefault()
     {
         TryMigrateLegacyRuntimeFiles();
@@ -72,6 +78,9 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes run Console Async.
+    /// </summary>
     public async Task RunConsoleAsync(string[] args)
     {
         using var cts = new CancellationTokenSource();
@@ -97,6 +106,9 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Starts async.
+    /// </summary>
     public async Task StartAsync(
         CancellationToken cancellationToken,
         bool ensureTrayHostOnStartup = false)
@@ -116,10 +128,15 @@ public sealed class BackendRuntime : IDisposable
 
         if (_ensureTrayHostOnStartup)
         {
+            // Service startup performs one best-effort tray launch. Follow-up
+            // attempts are then driven by session events and explicit pipe requests.
             TryEnsureTrayHost(null, requireAutostartPolicy: true);
         }
     }
 
+    /// <summary>
+    /// Stops async.
+    /// </summary>
     public async Task StopAsync()
     {
         _monitor.ItemDetected -= OnItemDetected;
@@ -127,6 +144,8 @@ public sealed class BackendRuntime : IDisposable
         _pipeServer.EnsureTrayHostRequested -= OnEnsureTrayHostRequested;
         if (_shutdownFrontendOnStop && !ConsumeKeepFrontendOnStopMarker())
         {
+            // A normal backend shutdown should first ask the UI to exit cleanly
+            // before the backend falls back to forcefully terminating it.
             await _pipeServer.BroadcastServiceStoppingAsync(CancellationToken.None);
             await _frontendAutostartLauncher.TryShutdownFrontendForActiveSessionAsync(null, CancellationToken.None);
             await Task.Delay(TimeSpan.FromSeconds(2));
@@ -155,12 +174,18 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _lifetimeCts?.Cancel();
         _lifetimeCts?.Dispose();
     }
 
+    /// <summary>
+    /// Executes notify Interactive Session Available.
+    /// </summary>
     public void NotifyInteractiveSessionAvailable(int sessionId)
     {
         if (!_ensureTrayHostOnStartup)
@@ -248,6 +273,8 @@ public sealed class BackendRuntime : IDisposable
 
         lock (_approvalNotificationSyncRoot)
         {
+            // The dedup cache intentionally expires entries so the same logical item
+            // can notify again later without growing this dictionary forever.
             var expiredKeys = _recentApprovalNotificationKeys
                 .Where(static pair => pair.Value <= DateTimeOffset.UtcNow)
                 .Select(static pair => pair.Key)
@@ -271,14 +298,7 @@ public sealed class BackendRuntime : IDisposable
 
     private static string CreateApprovalNotificationKey(ContextMenuEntry item)
     {
-        return string.Join("|",
-            item.DisplayName,
-            item.KeyName,
-            item.EntryKind.ToString(),
-            item.HandlerClsid ?? string.Empty,
-            item.CommandText ?? string.Empty,
-            item.EditableText ?? string.Empty,
-            item.FilePath ?? string.Empty);
+        return ContextMenuApprovalIdentity.CreateLogicalItemKey(item);
     }
 
 }

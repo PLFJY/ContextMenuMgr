@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.ServiceProcess;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
@@ -6,6 +6,9 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
+/// <summary>
+/// Represents the backend Service Bootstrapper.
+/// </summary>
 internal static class BackendServiceBootstrapper
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -16,6 +19,9 @@ internal static class BackendServiceBootstrapper
         DataDirectory,
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);
 
+    /// <summary>
+    /// Attempts to run.
+    /// </summary>
     public static bool TryRun(string[] args)
     {
         if (args.Length == 0 || !string.Equals(args[0], "--service-bootstrap", StringComparison.OrdinalIgnoreCase))

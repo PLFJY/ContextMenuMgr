@@ -1,11 +1,17 @@
-using Wpf.Ui.Controls;
+﻿using Wpf.Ui.Controls;
 using MessageBox = Wpf.Ui.Controls.MessageBox;
 using MessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Message Box.
+/// </summary>
 public static class FrontendMessageBox
 {
+    /// <summary>
+    /// Shows info Async.
+    /// </summary>
     public static async Task ShowInfoAsync(
         string message,
         string title,
@@ -24,6 +30,9 @@ public static class FrontendMessageBox
         await messageBox.ShowDialogAsync();
     }
 
+    /// <summary>
+    /// Shows error Async.
+    /// </summary>
     public static async Task ShowErrorAsync(
         string message,
         string title,
@@ -42,6 +51,9 @@ public static class FrontendMessageBox
         await messageBox.ShowDialogAsync();
     }
 
+    /// <summary>
+    /// Shows confirm Async.
+    /// </summary>
     public static async Task<bool> ShowConfirmAsync(
         string message,
         string title,

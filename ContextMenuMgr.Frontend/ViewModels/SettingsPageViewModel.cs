@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -9,6 +9,9 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the settings Page View Model.
+/// </summary>
 public partial class SettingsPageViewModel : ObservableObject, IDisposable
 {
     private readonly FrontendSettingsService _settingsService;
@@ -21,6 +24,9 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     private bool _suppressProtectionSync;
     private bool _suppressAutoStartSync;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SettingsPageViewModel"/> class.
+    /// </summary>
     public SettingsPageViewModel(
         FrontendSettingsService settingsService,
         FrontendStartupService startupService,
@@ -75,36 +81,72 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         _ = LoadRegistryProtectionSettingAsync();
     }
 
+    /// <summary>
+    /// Gets the available Languages.
+    /// </summary>
     public ObservableCollection<LanguageOptionViewModel> AvailableLanguages { get; }
 
+    /// <summary>
+    /// Gets the available Themes.
+    /// </summary>
     public ObservableCollection<ThemeOptionViewModel> AvailableThemes { get; }
 
+    /// <summary>
+    /// Gets the available Log Levels.
+    /// </summary>
     public ObservableCollection<LogLevelOptionViewModel> AvailableLogLevels { get; }
 
+    /// <summary>
+    /// Gets or sets the selected Language.
+    /// </summary>
     [ObservableProperty]
     public partial LanguageOptionViewModel? SelectedLanguage { get; set; }
 
+    /// <summary>
+    /// Gets or sets the selected Theme.
+    /// </summary>
     [ObservableProperty]
     public partial ThemeOptionViewModel? SelectedTheme { get; set; }
 
+    /// <summary>
+    /// Gets or sets the selected Log Level.
+    /// </summary>
     [ObservableProperty]
     public partial LogLevelOptionViewModel? SelectedLogLevel { get; set; }
 
+    /// <summary>
+    /// Gets or sets the auto Start On Login.
+    /// </summary>
     [ObservableProperty]
     public partial bool AutoStartOnLogin { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether background After Close.
+    /// </summary>
     [ObservableProperty]
     public partial bool KeepBackgroundAfterClose { get; set; }
 
+    /// <summary>
+    /// Gets or sets the lock New Context Menu Items.
+    /// </summary>
     [ObservableProperty]
     public partial bool LockNewContextMenuItems { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether uninstall Flyout Open.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsUninstallFlyoutOpen { get; set; }
 
+    /// <summary>
+    /// Gets or sets the title.
+    /// </summary>
     [ObservableProperty]
     public partial string Title { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the service State Text.
+    /// </summary>
     [ObservableProperty]
     public partial string ServiceStateText { get; private set; } = string.Empty;
 
@@ -548,6 +590,9 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

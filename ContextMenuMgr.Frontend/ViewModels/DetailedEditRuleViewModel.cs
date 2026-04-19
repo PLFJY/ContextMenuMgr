@@ -1,9 +1,12 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the detailed Edit Rule View Model.
+/// </summary>
 public partial class DetailedEditRuleViewModel : ObservableObject
 {
     private readonly DetailedEditRuleDefinition _definition;
@@ -11,6 +14,9 @@ public partial class DetailedEditRuleViewModel : ObservableObject
     private readonly LocalizationService _localization;
     private bool _suppressAutoApply;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DetailedEditRuleViewModel"/> class.
+    /// </summary>
     public DetailedEditRuleViewModel(
         DetailedEditRuleDefinition definition,
         DetailedEditRuleService ruleService,
@@ -28,12 +34,24 @@ public partial class DetailedEditRuleViewModel : ObservableObject
         Refresh();
     }
 
+    /// <summary>
+    /// Gets the display Name.
+    /// </summary>
     public string DisplayName { get; }
 
+    /// <summary>
+    /// Gets the tip.
+    /// </summary>
     public string? Tip { get; }
 
+    /// <summary>
+    /// Gets the requires Explorer Restart.
+    /// </summary>
     public bool RequiresExplorerRestart { get; }
 
+    /// <summary>
+    /// Gets the editor Kind.
+    /// </summary>
     public RuleValueEditorKind EditorKind { get; }
 
     public bool IsBooleanRule => EditorKind == RuleValueEditorKind.Boolean;
@@ -46,12 +64,21 @@ public partial class DetailedEditRuleViewModel : ObservableObject
 
     public string ApplyText => _localization.Translate("Apply");
 
+    /// <summary>
+    /// Gets or sets the bool Value.
+    /// </summary>
     [ObservableProperty]
     public partial bool BoolValue { get; set; }
 
+    /// <summary>
+    /// Gets or sets the number Text.
+    /// </summary>
     [ObservableProperty]
     public partial string NumberText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the string Value.
+    /// </summary>
     [ObservableProperty]
     public partial string StringValue { get; set; } = string.Empty;
 
@@ -99,6 +126,9 @@ public partial class DetailedEditRuleViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Executes refresh.
+    /// </summary>
     public void Refresh()
     {
         _suppressAutoApply = true;

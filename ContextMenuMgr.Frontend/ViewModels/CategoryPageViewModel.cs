@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -8,12 +8,18 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the category Page View Model.
+/// </summary>
 public partial class CategoryPageViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CategoryPageViewModel"/> class.
+    /// </summary>
     public CategoryPageViewModel(
         ContextMenuCategory category,
         ContextMenuWorkspaceService workspace,
@@ -41,16 +47,31 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         RefreshLocalizedText();
     }
 
+    /// <summary>
+    /// Gets the category.
+    /// </summary>
     public ContextMenuCategory Category { get; }
 
+    /// <summary>
+    /// Gets the items View.
+    /// </summary>
     public ICollectionView ItemsView { get; }
 
+    /// <summary>
+    /// Gets or sets the title.
+    /// </summary>
     [ObservableProperty]
     public partial string Title { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the description.
+    /// </summary>
     [ObservableProperty]
     public partial string Description { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the search Text.
+    /// </summary>
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
 
@@ -150,8 +171,9 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
         var search = SearchText.Trim();
         return Contains(item.DisplayName, search)
-               || Contains(item.KeyName, search)
+               || Contains(item.Subtitle, search)
                || Contains(item.RegistryPath, search)
+               || Contains(item.ShellPathTail, search)
                || Contains(item.Notes, search);
     }
 
@@ -198,6 +220,9 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

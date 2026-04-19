@@ -1,14 +1,20 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the category View Model.
+/// </summary>
 public partial class CategoryViewModel : ObservableObject
 {
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CategoryViewModel"/> class.
+    /// </summary>
     public CategoryViewModel(ContextMenuCategory category, LocalizationService localization)
     {
         Category = category;
@@ -18,14 +24,26 @@ public partial class CategoryViewModel : ObservableObject
         RefreshLocalizedText();
     }
 
+    /// <summary>
+    /// Gets the category.
+    /// </summary>
     public ContextMenuCategory Category { get; }
 
+    /// <summary>
+    /// Gets or sets the name.
+    /// </summary>
     [ObservableProperty]
     public partial string Name { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the description.
+    /// </summary>
     [ObservableProperty]
     public partial string Description { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
     public string ItemCountLabel

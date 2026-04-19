@@ -1,19 +1,28 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the tray Host Logger.
+/// </summary>
 internal sealed class TrayHostLogger
 {
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(7);
     private readonly string _logFilePath = RuntimePaths.TrayHostLogPath;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TrayHostLogger"/> class.
+    /// </summary>
     public TrayHostLogger()
     {
         PruneOldLogs();
     }
 
+    /// <summary>
+    /// Executes log Async.
+    /// </summary>
     public async Task LogAsync(string message)
     {
         try

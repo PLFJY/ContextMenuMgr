@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +6,9 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the named Pipe Backend Client.
+/// </summary>
 public sealed class NamedPipeBackendClient : IBackendClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -20,6 +23,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
 
     public bool IsConnected => _isConnected;
 
+    /// <summary>
+    /// Executes connect Async.
+    /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         lock (_notificationSync)
@@ -36,6 +42,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         await PingAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Executes ping Async.
+    /// </summary>
     public async Task PingAsync(CancellationToken cancellationToken)
     {
         await SendRequestAsync(
@@ -43,6 +52,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Ensures tray Host Async.
+    /// </summary>
     public async Task EnsureTrayHostAsync(CancellationToken cancellationToken)
     {
         await SendRequestAsync(
@@ -50,6 +62,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Executes request Shutdown Async.
+    /// </summary>
     public async Task RequestShutdownAsync(CancellationToken cancellationToken)
     {
         await SendRequestAsync(
@@ -57,6 +72,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Gets snapshot Async.
+    /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -66,6 +84,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Items;
     }
 
+    /// <summary>
+    /// Gets scene Snapshot Async.
+    /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> GetSceneSnapshotAsync(
         ContextMenuSceneKind sceneKind,
         string? scopeValue,
@@ -83,6 +104,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Items;
     }
 
+    /// <summary>
+    /// Sets enhance Menu Item Enabled Async.
+    /// </summary>
     public async Task SetEnhanceMenuItemEnabledAsync(
         string groupRegistryPath,
         string itemXml,
@@ -100,6 +124,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Executes acknowledge Item State Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -113,6 +140,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Sets enabled Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> SetEnabledAsync(string itemId, bool enable, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -127,6 +157,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Sets shell Attribute Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> SetShellAttributeAsync(
         string itemId,
         ContextMenuShellAttribute attribute,
@@ -146,6 +179,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Sets display Text Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> SetDisplayTextAsync(
         string itemId,
         string textValue,
@@ -163,6 +199,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Gets registry Protection Setting Async.
+    /// </summary>
     public async Task<bool> GetRegistryProtectionSettingAsync(CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -175,6 +214,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.RegistryProtectionEnabled ?? false;
     }
 
+    /// <summary>
+    /// Sets registry Protection Setting Async.
+    /// </summary>
     public async Task<bool> SetRegistryProtectionSettingAsync(bool enable, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -188,6 +230,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.RegistryProtectionEnabled ?? enable;
     }
 
+    /// <summary>
+    /// Applies decision Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> ApplyDecisionAsync(string itemId, ContextMenuDecision decision, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -202,6 +247,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Deletes item Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> DeleteItemAsync(string itemId, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -215,6 +263,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Executes undo Delete Async.
+    /// </summary>
     public async Task<ContextMenuEntry?> UndoDeleteAsync(string itemId, CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
@@ -228,6 +279,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    /// <summary>
+    /// Executes purge Deleted Item Async.
+    /// </summary>
     public async Task PurgeDeletedItemAsync(string itemId, CancellationToken cancellationToken)
     {
         await SendRequestAsync(
@@ -239,6 +293,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         CancellationTokenSource? notificationLoopCts;

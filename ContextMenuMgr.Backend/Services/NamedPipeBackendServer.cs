@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
@@ -11,6 +11,9 @@ namespace ContextMenuMgr.Backend.Services;
 
 // Named pipes keep the frontend unprivileged while still allowing duplex messaging
 // for snapshot queries, toggle requests, and service-pushed notifications.
+/// <summary>
+/// Represents the named Pipe Backend Server.
+/// </summary>
 public sealed class NamedPipeBackendServer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -23,23 +26,35 @@ public sealed class NamedPipeBackendServer
     public event EventHandler? BackendShutdownRequested;
     public event EventHandler? EnsureTrayHostRequested;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NamedPipeBackendServer"/> class.
+    /// </summary>
     public NamedPipeBackendServer(ContextMenuRegistryCatalog catalog, FileLogger logger)
     {
         _catalog = catalog;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Executes start.
+    /// </summary>
     public void Start(CancellationToken cancellationToken)
     {
         _acceptLoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _acceptLoopTask = Task.Run(() => AcceptLoopAsync(_acceptLoopCts.Token), _acceptLoopCts.Token);
     }
 
+    /// <summary>
+    /// Executes stop.
+    /// </summary>
     public void Stop()
     {
         _acceptLoopCts?.Cancel();
     }
 
+    /// <summary>
+    /// Executes broadcast Notification.
+    /// </summary>
     public void BroadcastNotification(BackendNotification notification)
     {
         _ = BroadcastNotificationAsync(notification, CancellationToken.None);
@@ -168,6 +183,8 @@ public sealed class NamedPipeBackendServer
                 PipeResponse response;
                 try
                 {
+                    // Request handlers are allowed to fail independently; the pipe
+                    // stays alive and the caller receives a structured error response.
                     response = await HandleRequestAsync(envelope.Request, cancellationToken);
                 }
                 catch (Exception ex)
@@ -194,6 +211,8 @@ public sealed class NamedPipeBackendServer
 
                 if (response.Success && response.Item is not null)
                 {
+                    // Successful state-changing requests are rebroadcast so other
+                    // connected surfaces can update without polling.
                     await BroadcastNotificationAsync(
                         new BackendNotification
                         {
@@ -310,6 +329,9 @@ public sealed class NamedPipeBackendServer
         }
     }
 
+    /// <summary>
+    /// Executes broadcast Service Stopping Async.
+    /// </summary>
     public async Task BroadcastServiceStoppingAsync(CancellationToken cancellationToken)
     {
         await BroadcastNotificationAsync(
@@ -347,6 +369,9 @@ public sealed class NamedPipeBackendServer
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly NamedPipeServerStream _stream;
 
+        /// <summary>
+        /// Executes pipe Client Connection.
+        /// </summary>
         public PipeClientConnection(NamedPipeServerStream stream)
         {
             Id = Guid.NewGuid();
@@ -358,14 +383,29 @@ public sealed class NamedPipeBackendServer
             };
         }
 
+        /// <summary>
+        /// Gets the id.
+        /// </summary>
         public Guid Id { get; }
 
+        /// <summary>
+        /// Gets the reader.
+        /// </summary>
         public StreamReader Reader { get; }
 
+        /// <summary>
+        /// Gets the writer.
+        /// </summary>
         public StreamWriter Writer { get; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether notification Subscriber.
+        /// </summary>
         public bool IsNotificationSubscriber { get; set; }
 
+        /// <summary>
+        /// Executes send Async.
+        /// </summary>
         public async Task SendAsync(PipeEnvelope envelope, CancellationToken cancellationToken)
         {
             var payload = JsonSerializer.Serialize(envelope, JsonOptions);
@@ -381,6 +421,9 @@ public sealed class NamedPipeBackendServer
             }
         }
 
+        /// <summary>
+        /// Executes dispose.
+        /// </summary>
         public void Dispose()
         {
             Reader.Dispose();

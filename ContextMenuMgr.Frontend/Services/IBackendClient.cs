@@ -1,7 +1,10 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Defines the contract for i Backend Client.
+/// </summary>
 public interface IBackendClient : IAsyncDisposable
 {
     event EventHandler<BackendNotification>? NotificationReceived;

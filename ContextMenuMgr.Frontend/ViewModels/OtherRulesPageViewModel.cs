@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 using System.Collections.Specialized;
@@ -6,12 +6,18 @@ using System.ComponentModel;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the other Rules Page View Model.
+/// </summary>
 public partial class OtherRulesPageViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
     private readonly RuleDictionaryCatalogService _ruleCatalogService;
     private readonly ContextMenuWorkspaceService _workspace;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OtherRulesPageViewModel"/> class.
+    /// </summary>
     public OtherRulesPageViewModel(
         IBackendClient backendClient,
         ContextMenuWorkspaceService workspace,
@@ -63,17 +69,32 @@ public partial class OtherRulesPageViewModel : ObservableObject, IDisposable
         };
     }
 
+    /// <summary>
+    /// Gets the custom Registry Path Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel CustomRegistryPathTab { get; }
 
+    /// <summary>
+    /// Gets or sets the enhance Groups.
+    /// </summary>
     [ObservableProperty]
     public partial IReadOnlyList<EnhanceMenuGroupViewModel> EnhanceGroups { get; private set; } = [];
 
+    /// <summary>
+    /// Gets or sets the selected Enhance Group.
+    /// </summary>
     [ObservableProperty]
     public partial EnhanceMenuGroupViewModel? SelectedEnhanceGroup { get; set; }
 
+    /// <summary>
+    /// Gets or sets the detailed Edit Groups.
+    /// </summary>
     [ObservableProperty]
     public partial IReadOnlyList<DetailedEditGroupViewModel> DetailedEditGroups { get; private set; } = [];
 
+    /// <summary>
+    /// Gets or sets the selected Detailed Edit Group.
+    /// </summary>
     [ObservableProperty]
     public partial DetailedEditGroupViewModel? SelectedDetailedEditGroup { get; set; }
 
@@ -158,6 +179,9 @@ public partial class OtherRulesPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _workspace.Items.CollectionChanged -= OnWorkspaceItemsCollectionChanged;

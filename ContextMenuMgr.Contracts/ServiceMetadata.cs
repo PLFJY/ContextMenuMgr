@@ -1,5 +1,8 @@
-namespace ContextMenuMgr.Contracts;
+﻿namespace ContextMenuMgr.Contracts;
 
+/// <summary>
+/// Represents the service Metadata.
+/// </summary>
 public static class ServiceMetadata
 {
     public const string ServiceName = "ContextMenuManagerPlusService";

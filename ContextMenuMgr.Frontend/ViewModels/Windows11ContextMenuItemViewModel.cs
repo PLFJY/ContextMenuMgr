@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -7,24 +7,32 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the windows11 Context Menu Item View Model.
+/// </summary>
 public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisposable
 {
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
     private readonly EventHandler _languageChangedHandler;
     private bool _suppressSync;
+    private readonly Windows11ContextMenuItemDefinition _primaryDefinition;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Windows11ContextMenuItemViewModel"/> class.
+    /// </summary>
     public Windows11ContextMenuItemViewModel(
-        Windows11ContextMenuItemDefinition definition,
+        IReadOnlyList<Windows11ContextMenuItemDefinition> definitions,
         Windows11ContextMenuService service,
         LocalizationService localization)
     {
-        Definition = definition;
+        Definitions = definitions;
+        _primaryDefinition = definitions[0];
         _service = service;
         _localization = localization;
 
-        _logoSource = new Lazy<ImageSource?>(() => _service.LoadLogo(definition.Package.LogoPath));
-        IsEnabled = definition.IsEnabled;
+        _logoSource = new Lazy<ImageSource?>(() => _service.LoadLogo(_primaryDefinition.Package.LogoPath));
+        IsEnabled = definitions.All(static definition => definition.IsEnabled);
 
         _languageChangedHandler = (_, _) =>
         {
@@ -38,23 +46,32 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
 
     private readonly Lazy<ImageSource?> _logoSource;
 
-    public Windows11ContextMenuItemDefinition Definition { get; }
+    /// <summary>
+    /// Gets the grouped source definitions.
+    /// </summary>
+    public IReadOnlyList<Windows11ContextMenuItemDefinition> Definitions { get; }
 
-    public string DisplayName => Definition.DisplayName;
+    public string DisplayName => _primaryDefinition.DisplayName;
 
-    public string PublisherName => Definition.Package.PublisherDisplayName ?? string.Empty;
+    public string PublisherName => _primaryDefinition.Package.PublisherDisplayName ?? string.Empty;
 
-    public string PackageFamilyName => Definition.Package.FamilyName;
+    public string PackageFamilyName => _primaryDefinition.Package.FamilyName;
 
-    public string InstallPath => Definition.Package.InstallPath;
+    public string InstallPath => _primaryDefinition.Package.InstallPath;
 
-    public string ComServerPath => Definition.ComServer.Path ?? string.Empty;
+    public string ComServerPath => _primaryDefinition.ComServer.Path ?? string.Empty;
 
-    public string ContextTypesText => string.Join("  ·  ", Definition.ContextTypes.Select(LocalizeContextType));
+    public string ContextTypesText => string.Join(
+        "  ·  ",
+        Definitions
+            .SelectMany(static definition => definition.ContextTypes)
+            .Where(static type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(LocalizeContextType));
 
-    public bool HasComServerPath => !string.IsNullOrWhiteSpace(Definition.ComServer.Path);
+    public bool HasComServerPath => !string.IsNullOrWhiteSpace(_primaryDefinition.ComServer.Path);
 
-    public bool HasPublisherName => !string.IsNullOrWhiteSpace(Definition.Package.PublisherDisplayName);
+    public bool HasPublisherName => !string.IsNullOrWhiteSpace(_primaryDefinition.Package.PublisherDisplayName);
 
     public ImageSource? LogoSource => _logoSource.Value;
 
@@ -68,18 +85,27 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
 
     public string OpenFileLocationText => _localization.Translate("DetailsFileLocation");
 
+    /// <summary>
+    /// Gets or sets a value indicating whether enabled.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether busy.
+    /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsBusy { get; set; }
 
-    public bool IsMachineBlocked => Definition.IsMachineBlocked;
+    public bool IsMachineBlocked => Definitions.Any(static definition => definition.IsMachineBlocked);
 
     public bool CanToggle => !IsBusy && !IsMachineBlocked;
 
+    /// <summary>
+    /// Refreshes state.
+    /// </summary>
     public void RefreshState(bool isEnabled)
     {
         _suppressSync = true;
@@ -108,8 +134,13 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     {
         try
         {
-            var actual = await _service.SetEnabledAsync(Definition.Id, newValue, CancellationToken.None);
-            RefreshState(actual);
+            var actualStates = new List<bool>(Definitions.Count);
+            foreach (var definition in Definitions)
+            {
+                actualStates.Add(await _service.SetEnabledAsync(definition.Id, newValue, CancellationToken.None));
+            }
+
+            RefreshState(actualStates.All(static state => state));
         }
         catch (Exception ex)
         {
@@ -175,6 +206,9 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         };
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= _languageChangedHandler;

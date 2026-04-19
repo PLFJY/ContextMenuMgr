@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +6,9 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the tray Backend Pipe Client.
+/// </summary>
 internal sealed class TrayBackendPipeClient : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -17,6 +20,9 @@ internal sealed class TrayBackendPipeClient : IAsyncDisposable
 
     public event EventHandler? BackendUnavailable;
 
+    /// <summary>
+    /// Executes start.
+    /// </summary>
     public void Start()
     {
         lock (_sync)
@@ -31,6 +37,9 @@ internal sealed class TrayBackendPipeClient : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Executes request Backend Shutdown Async.
+    /// </summary>
     public async Task RequestBackendShutdownAsync(CancellationToken cancellationToken)
     {
         using var stream = new NamedPipeClientStream(".", PipeConstants.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -51,6 +60,9 @@ internal sealed class TrayBackendPipeClient : IAsyncDisposable
         _ = await reader.ReadLineAsync().WaitAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         CancellationTokenSource? cts;

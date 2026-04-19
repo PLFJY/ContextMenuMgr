@@ -1,15 +1,21 @@
-using System.ServiceProcess;
+﻿using System.ServiceProcess;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
 // The backend executable can run interactively for development, or as a
 // Windows Service when installed by the frontend bootstrapper.
+/// <summary>
+/// Represents the backend Windows Service.
+/// </summary>
 public sealed class BackendWindowsService : ServiceBase
 {
     private readonly BackendRuntime _runtime;
     private CancellationTokenSource? _serviceCts;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BackendWindowsService"/> class.
+    /// </summary>
     public BackendWindowsService(BackendRuntime runtime)
     {
         _runtime = runtime;
@@ -19,6 +25,9 @@ public sealed class BackendWindowsService : ServiceBase
         CanHandleSessionChangeEvent = true;
     }
 
+    /// <summary>
+    /// Executes should Run As Service.
+    /// </summary>
     public static bool ShouldRunAsService(string[] args) =>
         args.Any(static arg => string.Equals(arg, "--service", StringComparison.OrdinalIgnoreCase)) ||
         !Environment.UserInteractive;

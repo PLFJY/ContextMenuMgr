@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using ContextMenuMgr.Contracts;
@@ -7,17 +7,26 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the context Menu Item Actions Service.
+/// </summary>
 public sealed class ContextMenuItemActionsService
 {
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuItemActionsService"/> class.
+    /// </summary>
     public ContextMenuItemActionsService(LocalizationService localization, FrontendSettingsService settingsService)
     {
         _localization = localization;
         _settingsService = settingsService;
     }
 
+    /// <summary>
+    /// Opens web Search Async.
+    /// </summary>
     public Task OpenWebSearchAsync(ContextMenuItemViewModel item)
     {
         return RunActionAsync(
@@ -33,6 +42,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsSearchOnline");
     }
 
+    /// <summary>
+    /// Shows command Text Async.
+    /// </summary>
     public async Task ShowCommandTextAsync(ContextMenuItemViewModel item)
     {
         await RunActionAsync(
@@ -53,6 +65,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsCommandText");
     }
 
+    /// <summary>
+    /// Opens file Properties Async.
+    /// </summary>
     public Task OpenFilePropertiesAsync(ContextMenuItemViewModel item)
     {
         return RunActionAsync(
@@ -74,6 +89,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsFileProperties");
     }
 
+    /// <summary>
+    /// Opens file Location Async.
+    /// </summary>
     public Task OpenFileLocationAsync(ContextMenuItemViewModel item)
     {
         return RunActionAsync(
@@ -106,6 +124,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsFileLocation");
     }
 
+    /// <summary>
+    /// Opens registry Location Async.
+    /// </summary>
     public Task OpenRegistryLocationAsync(ContextMenuItemViewModel item)
     {
         return RunActionAsync(
@@ -122,6 +143,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsRegistryLocation");
     }
 
+    /// <summary>
+    /// Opens clsid Location Async.
+    /// </summary>
     public Task OpenClsidLocationAsync(ContextMenuItemViewModel item)
     {
         return RunActionAsync(
@@ -138,6 +162,9 @@ public sealed class ContextMenuItemActionsService
             "DetailsClsidLocation");
     }
 
+    /// <summary>
+    /// Executes export Registry Async.
+    /// </summary>
     public async Task ExportRegistryAsync(ContextMenuItemViewModel item)
     {
         await RunActionAsync(async () =>
@@ -181,6 +208,9 @@ public sealed class ContextMenuItemActionsService
         }, "DetailsExportRegistry");
     }
 
+    /// <summary>
+    /// Executes restart Explorer Async.
+    /// </summary>
     public Task RestartExplorerAsync()
     {
         return RunActionAsync(

@@ -1,10 +1,13 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the shell Metadata Resolver.
+/// </summary>
 internal static class ShellMetadataResolver
 {
     private static readonly Dictionary<string, int> DefaultVerbNameIndexes = new(StringComparer.OrdinalIgnoreCase)
@@ -25,6 +28,9 @@ internal static class ShellMetadataResolver
         @"WOW6432Node\CLSID"
     ];
 
+    /// <summary>
+    /// Executes resolve Verb Display Name.
+    /// </summary>
     public static string ResolveVerbDisplayName(RegistryKey itemKey, string fallbackKeyName)
     {
         foreach (var valueName in new[] { "MUIVerb", string.Empty })
@@ -48,6 +54,9 @@ internal static class ShellMetadataResolver
         return fallbackKeyName;
     }
 
+    /// <summary>
+    /// Executes resolve Shell Extension Display Name.
+    /// </summary>
     public static string ResolveShellExtensionDisplayName(string keyName, string? handlerClsid)
     {
         if (Guid.TryParse(handlerClsid, out var handlerGuid))
@@ -80,11 +89,17 @@ internal static class ShellMetadataResolver
         return keyName;
     }
 
+    /// <summary>
+    /// Executes resolve Resource String.
+    /// </summary>
     public static string ResolveResourceString(string? value)
     {
         return ResolveIndirectString(value) ?? value?.Trim() ?? string.Empty;
     }
 
+    /// <summary>
+    /// Executes static.
+    /// </summary>
     public static (string? IconPath, int IconIndex) ResolveVerbIcon(RegistryKey itemKey, string? commandText)
     {
         var iconValue = itemKey.GetValue("Icon")?.ToString();
@@ -131,6 +146,9 @@ internal static class ShellMetadataResolver
         return ("imageres.dll", -2);
     }
 
+    /// <summary>
+    /// Executes resolve Verb File Path.
+    /// </summary>
     public static string? ResolveVerbFilePath(RegistryKey itemKey, string? commandText)
     {
         var handlerGuid = ExtractVerbHandlerGuid(itemKey);
@@ -152,6 +170,9 @@ internal static class ShellMetadataResolver
         return ExtractResourceModulePath(itemKey.GetValue("MUIVerb")?.ToString());
     }
 
+    /// <summary>
+    /// Executes static.
+    /// </summary>
     public static (string? IconPath, int IconIndex) ResolveShellExtensionIcon(string? handlerClsid)
     {
         if (Guid.TryParse(handlerClsid, out var handlerGuid))
@@ -203,6 +224,9 @@ internal static class ShellMetadataResolver
         return ("imageres.dll", -2);
     }
 
+    /// <summary>
+    /// Executes resolve Shell Extension File Path.
+    /// </summary>
     public static string? ResolveShellExtensionFilePath(string? handlerClsid)
     {
         if (Guid.TryParse(handlerClsid, out var handlerGuid))

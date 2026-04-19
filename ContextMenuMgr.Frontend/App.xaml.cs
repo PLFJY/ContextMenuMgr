@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
@@ -10,6 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ContextMenuMgr.Frontend;
 
+/// <summary>
+/// Represents the app.
+/// </summary>
 public partial class App : System.Windows.Application
 {
     private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.SingleInstance";
@@ -29,6 +32,9 @@ public partial class App : System.Windows.Application
     private FrontendSettingsService? _frontendSettingsService;
     private bool _isShuttingDown;
 
+    /// <summary>
+    /// Gets or sets the startup Arguments.
+    /// </summary>
     public string[] StartupArguments { get; private set; } = [];
 
     public T? TryGetService<T>() where T : class => _serviceProvider?.GetService<T>();
@@ -358,7 +364,7 @@ public partial class App : System.Windows.Application
         WriteLog(builder.ToString());
 
         MessageBox.Show(
-            $"应用发生未处理异常，详细信息已写入：\n{LogFilePath}\n\n{exception.Message}",
+            $"搴旂敤鍙戠敓鏈鐞嗗紓甯革紝璇︾粏淇℃伅宸插啓鍏ワ細\n{LogFilePath}\n\n{exception.Message}",
             "Context Menu Manager Plus",
             MessageBoxButton.OK,
             MessageBoxImage.Error);

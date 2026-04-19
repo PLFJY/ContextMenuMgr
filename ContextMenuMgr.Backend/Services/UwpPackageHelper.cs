@@ -1,13 +1,19 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using System.IO;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the uwp Package Helper.
+/// </summary>
 internal static class UwpPackageHelper
 {
     private const string PackageRegPath = @"PackagedCom\Package";
     private const string PackagesRegPath = @"Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Packages";
 
+    /// <summary>
+    /// Gets package Name.
+    /// </summary>
     public static string? GetPackageName(string? uwpName)
     {
         if (string.IsNullOrWhiteSpace(uwpName))
@@ -32,6 +38,9 @@ internal static class UwpPackageHelper
         return null;
     }
 
+    /// <summary>
+    /// Gets file Path.
+    /// </summary>
     public static string? GetFilePath(string? uwpName, Guid guid)
     {
         var packageName = GetPackageName(uwpName);

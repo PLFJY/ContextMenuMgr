@@ -1,7 +1,10 @@
-using System.ServiceProcess;
+﻿using System.ServiceProcess;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Defines the contract for i Backend Service Manager.
+/// </summary>
 public interface IBackendServiceManager
 {
     bool IsServiceInstalled();

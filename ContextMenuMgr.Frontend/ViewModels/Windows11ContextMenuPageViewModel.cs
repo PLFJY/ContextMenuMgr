@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -7,11 +7,17 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the windows11 Context Menu Page View Model.
+/// </summary>
 public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisposable
 {
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Windows11ContextMenuPageViewModel"/> class.
+    /// </summary>
     public Windows11ContextMenuPageViewModel(
         Windows11ContextMenuService service,
         LocalizationService localization)
@@ -38,13 +44,25 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         }
     }
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public ObservableCollection<Windows11ContextMenuItemViewModel> Items { get; } = [];
 
+    /// <summary>
+    /// Gets the items View.
+    /// </summary>
     public ICollectionView ItemsView { get; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether loading.
+    /// </summary>
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
+    /// <summary>
+    /// Gets or sets the search Text.
+    /// </summary>
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
 
@@ -64,6 +82,9 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public bool IsSupported => _service.IsSupported;
 
+    /// <summary>
+    /// Refreshes async.
+    /// </summary>
     [RelayCommand]
     public async Task RefreshAsync()
     {
@@ -145,12 +166,23 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         }
 
         Items.Clear();
-        foreach (var item in items)
+        foreach (var group in items
+                     .GroupBy(CreateLogicalGroupKey, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(static group => group.First().Package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                     .ThenBy(static group => group.First().DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            Items.Add(new Windows11ContextMenuItemViewModel(item, _service, _localization));
+            Items.Add(new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization));
         }
 
         ItemsView.Refresh();
+    }
+
+    private static string CreateLogicalGroupKey(Windows11ContextMenuItemDefinition item)
+    {
+        return string.Join("|",
+            item.Package.FamilyName,
+            item.DisplayName,
+            item.ComServer.Path ?? string.Empty);
     }
 
     private bool FilterItem(object obj)
@@ -179,6 +211,9 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
                && value.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

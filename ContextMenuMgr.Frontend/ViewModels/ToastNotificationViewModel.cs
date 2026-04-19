@@ -1,18 +1,27 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the toast Notification View Model.
+/// </summary>
 public sealed class ToastNotificationViewModel
 {
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ToastNotificationViewModel"/> class.
+    /// </summary>
     public ToastNotificationViewModel(BackendNotification notification, LocalizationService localization)
     {
         Notification = notification;
         _localization = localization;
     }
 
+    /// <summary>
+    /// Gets the notification.
+    /// </summary>
     public BackendNotification Notification { get; }
 
     public string ItemId => Notification.Item?.Id ?? string.Empty;

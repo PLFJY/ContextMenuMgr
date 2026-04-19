@@ -1,10 +1,13 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Text;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Debug Log.
+/// </summary>
 internal static class FrontendDebugLog
 {
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(14);
@@ -12,23 +15,41 @@ internal static class FrontendDebugLog
     private static AppLogLevel _currentLevel = AppLogLevel.Warning;
     private static bool _retentionChecked;
 
+    /// <summary>
+    /// Executes configure.
+    /// </summary>
     public static void Configure(AppLogLevel logLevel)
     {
         _currentLevel = logLevel;
         EnsureRetention();
     }
 
+    /// <summary>
+    /// Gets the log File Path.
+    /// </summary>
     public static string LogFilePath { get; } = RuntimePaths.FrontendDebugLogPath;
 
+    /// <summary>
+    /// Starts session.
+    /// </summary>
     public static void StartSession(string reason)
     {
         Write(AppLogLevel.Information, "SESSION", $"========== {reason} | PID={Environment.ProcessId} ==========");
     }
 
+    /// <summary>
+    /// Executes info.
+    /// </summary>
     public static void Info(string source, string message) => Write(AppLogLevel.Information, source, message);
 
+    /// <summary>
+    /// Executes warning.
+    /// </summary>
     public static void Warning(string source, string message) => Write(AppLogLevel.Warning, source, message);
 
+    /// <summary>
+    /// Executes error.
+    /// </summary>
     public static void Error(string source, Exception exception, string? context = null)
     {
         var builder = new StringBuilder();

@@ -1,8 +1,11 @@
-using System.IO;
+﻿using System.IO;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Startup Service.
+/// </summary>
 public sealed class FrontendStartupService
 {
     private const string PolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
@@ -10,6 +13,9 @@ public sealed class FrontendStartupService
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "ContextMenuManagerPlus.TrayHost";
 
+    /// <summary>
+    /// Executes is Auto Start Enabled.
+    /// </summary>
     public bool IsAutoStartEnabled()
     {
         using var key = Registry.CurrentUser.OpenSubKey(PolicyKeyPath, writable: false);
@@ -29,6 +35,9 @@ public sealed class FrontendStartupService
                && !string.IsNullOrWhiteSpace(command);
     }
 
+    /// <summary>
+    /// Sets auto Start Enabled.
+    /// </summary>
     public void SetAutoStartEnabled(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(PolicyKeyPath);

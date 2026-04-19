@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -10,6 +10,9 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
+/// <summary>
+/// Represents the frontend Autostart Launcher.
+/// </summary>
 internal sealed class FrontendAutostartLauncher
 {
     private const string FrontendPolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
@@ -19,12 +22,18 @@ internal sealed class FrontendAutostartLauncher
     private readonly string _frontendExePath;
     private readonly string _trayHostExePath;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FrontendAutostartLauncher"/> class.
+    /// </summary>
     public FrontendAutostartLauncher(string baseDirectory)
     {
         _frontendExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.exe");
         _trayHostExePath = Path.Combine(baseDirectory, "ContextMenuManagerPlus.TrayHost.exe");
     }
 
+    /// <summary>
+    /// Attempts to launch Tray Host For Active Session.
+    /// </summary>
     public bool TryLaunchTrayHostForActiveSession(int? sessionId = null, bool requireAutostartPolicy = true)
     {
         if (!File.Exists(_trayHostExePath))
@@ -48,15 +57,23 @@ internal sealed class FrontendAutostartLauncher
             return true;
         }
 
+        // The tray host lives in the user's session, so service-side code must
+        // cross the session boundary with a user token before starting it.
         return TryCreateUserProcess(targetSessionId, _trayHostExePath, string.Empty);
     }
 
+    /// <summary>
+    /// Attempts to show Main Window For Active Session.
+    /// </summary>
     public bool TryShowMainWindowForActiveSession(int? sessionId = null)
         => TryOpenFrontendForActiveSession(
             new FrontendControlRequest { Command = FrontendControlCommand.ShowMainWindow },
             sessionId,
             "--show-main");
 
+    /// <summary>
+    /// Attempts to open Approvals For Active Session.
+    /// </summary>
     public bool TryOpenApprovalsForActiveSession(string? focusItemId, int? sessionId = null)
         => TryOpenFrontendForActiveSession(
             new FrontendControlRequest
@@ -67,6 +84,9 @@ internal sealed class FrontendAutostartLauncher
             sessionId,
             BuildFrontendArguments("--open-approvals", focusItemId));
 
+    /// <summary>
+    /// Attempts to shutdown Frontend For Active Session Async.
+    /// </summary>
     public async Task<bool> TryShutdownFrontendForActiveSessionAsync(int? sessionId, CancellationToken cancellationToken)
     {
         var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
@@ -80,6 +100,9 @@ internal sealed class FrontendAutostartLauncher
             cancellationToken);
     }
 
+    /// <summary>
+    /// Executes kill Frontend Processes For Active Session.
+    /// </summary>
     public void KillFrontendProcessesForActiveSession(int? sessionId)
     {
         var targetSessionId = sessionId ?? GetBestInteractiveSessionId();
@@ -181,6 +204,8 @@ internal sealed class FrontendAutostartLauncher
 
                 if (sessionInfo.State == NativeMethods.WTS_CONNECTSTATE_CLASS.WTSActive)
                 {
+                    // Prefer an actively logged-on desktop session so foreground
+                    // UI processes land in the place the user can actually see.
                     return sessionInfo.SessionID;
                 }
 
@@ -360,6 +385,9 @@ internal sealed class FrontendAutostartLauncher
 
     private sealed class SafeAccessTokenHandle : SafeHandle
     {
+        /// <summary>
+        /// Executes safe Access Token Handle.
+        /// </summary>
         public SafeAccessTokenHandle(IntPtr handle)
             : base(IntPtr.Zero, ownsHandle: true)
         {
@@ -376,13 +404,22 @@ internal sealed class FrontendAutostartLauncher
         public const uint TOKEN_ALL_ACCESS = 0xF01FF;
         public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
 
+        /// <summary>
+        /// Executes wTS Get Active Console Session Id.
+        /// </summary>
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint WTSGetActiveConsoleSessionId();
 
+        /// <summary>
+        /// Executes wTS Query User Token.
+        /// </summary>
         [DllImport("wtsapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
 
+        /// <summary>
+        /// Executes wTS Enumerate Sessions W.
+        /// </summary>
         [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSEnumerateSessionsW(
@@ -392,9 +429,15 @@ internal sealed class FrontendAutostartLauncher
             out IntPtr ppSessionInfo,
             out int pCount);
 
+        /// <summary>
+        /// Executes wTS Free Memory.
+        /// </summary>
         [DllImport("wtsapi32.dll")]
         public static extern void WTSFreeMemory(IntPtr memory);
 
+        /// <summary>
+        /// Executes duplicate Token Ex.
+        /// </summary>
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DuplicateTokenEx(
@@ -405,6 +448,9 @@ internal sealed class FrontendAutostartLauncher
             TOKEN_TYPE tokenType,
             out IntPtr duplicateTokenHandle);
 
+        /// <summary>
+        /// Creates environment Block.
+        /// </summary>
         [DllImport("userenv.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool CreateEnvironmentBlock(
@@ -412,10 +458,16 @@ internal sealed class FrontendAutostartLauncher
             SafeHandle token,
             [MarshalAs(UnmanagedType.Bool)] bool inherit);
 
+        /// <summary>
+        /// Executes destroy Environment Block.
+        /// </summary>
         [DllImport("userenv.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DestroyEnvironmentBlock(IntPtr environment);
 
+        /// <summary>
+        /// Creates process As User.
+        /// </summary>
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool CreateProcessAsUser(
@@ -431,16 +483,25 @@ internal sealed class FrontendAutostartLauncher
             ref STARTUPINFO startupInfo,
             out PROCESS_INFORMATION processInformation);
 
+        /// <summary>
+        /// Executes close Handle.
+        /// </summary>
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool CloseHandle(IntPtr handle);
 
+        /// <summary>
+        /// Defines the available tOKEN_TYPE values.
+        /// </summary>
         public enum TOKEN_TYPE
         {
             TokenPrimary = 1,
             TokenImpersonation = 2
         }
 
+        /// <summary>
+        /// Defines the available sECURITY_IMPERSONATION_LEVEL values.
+        /// </summary>
         public enum SECURITY_IMPERSONATION_LEVEL
         {
             SecurityAnonymous,
@@ -449,6 +510,9 @@ internal sealed class FrontendAutostartLauncher
             SecurityDelegation
         }
 
+        /// <summary>
+        /// Defines the available wTS_CONNECTSTATE_CLASS values.
+        /// </summary>
         public enum WTS_CONNECTSTATE_CLASS
         {
             WTSActive,
@@ -463,6 +527,9 @@ internal sealed class FrontendAutostartLauncher
             WTSInit
         }
 
+        /// <summary>
+        /// Represents the wTS_SESSION_INFO.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct WTS_SESSION_INFO
         {
@@ -471,6 +538,9 @@ internal sealed class FrontendAutostartLauncher
             public WTS_CONNECTSTATE_CLASS State;
         }
 
+        /// <summary>
+        /// Represents the sTARTUPINFO.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct STARTUPINFO
         {
@@ -494,6 +564,9 @@ internal sealed class FrontendAutostartLauncher
             public IntPtr hStdError;
         }
 
+        /// <summary>
+        /// Represents the pROCESS_INFORMATION.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         public struct PROCESS_INFORMATION
         {

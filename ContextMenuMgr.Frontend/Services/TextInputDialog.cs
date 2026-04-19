@@ -1,9 +1,15 @@
-using Wpf.Ui.Controls;
+﻿using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the text Input Dialog.
+/// </summary>
 public static class TextInputDialog
 {
+    /// <summary>
+    /// Shows async.
+    /// </summary>
     public static Task<string?> ShowAsync(string title, string label, string initialText)
     {
         var window = new TextInputFluentWindow(title, label, initialText)
@@ -17,6 +23,9 @@ public static class TextInputDialog
     {
         private readonly System.Windows.Controls.TextBox _textBox;
 
+        /// <summary>
+        /// Executes text Input Fluent Window.
+        /// </summary>
         public TextInputFluentWindow(string title, string label, string initialText)
         {
             Title = title;

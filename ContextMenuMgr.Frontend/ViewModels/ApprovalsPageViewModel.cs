@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using System.Windows.Data;
@@ -9,12 +9,18 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the approvals Page View Model.
+/// </summary>
 public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 {
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
     private readonly FrontendNavigationState _navigationState;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ApprovalsPageViewModel"/> class.
+    /// </summary>
     public ApprovalsPageViewModel(
         ContextMenuWorkspaceService workspace,
         LocalizationService localization,
@@ -38,19 +44,37 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         RebuildItems();
     }
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public ObservableCollection<ApprovalQueueItemViewModel> Items { get; } = [];
 
+    /// <summary>
+    /// Gets the items View.
+    /// </summary>
     public ICollectionView ItemsView { get; }
 
+    /// <summary>
+    /// Gets or sets the title.
+    /// </summary>
     [ObservableProperty]
     public partial string Title { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the description.
+    /// </summary>
     [ObservableProperty]
     public partial string Description { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the search Text.
+    /// </summary>
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the selected Item.
+    /// </summary>
     [ObservableProperty]
     public partial ApprovalQueueItemViewModel? SelectedItem { get; set; }
 
@@ -147,6 +171,8 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ConfirmRemoveText));
         OnPropertyChanged(nameof(CancelText));
         OnPropertyChanged(nameof(SearchLabel));
+        RebuildItems();
+        ItemsView.Refresh();
     }
 
     partial void OnSearchTextChanged(string value)
@@ -174,10 +200,11 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
         var search = SearchText.Trim();
         return Contains(item.DisplayName, search)
-               || Contains(item.KeyName, search)
+               || Contains(item.Subtitle, search)
                || Contains(item.RegistryPath, search)
+               || Contains(item.ShellPathTail, search)
                || Contains(item.Notes, search)
-               || item.Categories.Any(category => Contains(category, search));
+               || item.CategoryTags.Any(tag => Contains(tag.Text, search));
     }
 
     private static bool Contains(string? value, string search)
@@ -242,16 +269,12 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
     private static string CreateApprovalGroupKey(ContextMenuItemViewModel item)
     {
-        return string.Join("|",
-            item.DisplayName,
-            item.KeyName,
-            item.Entry.EntryKind.ToString(),
-            item.Entry.HandlerClsid ?? string.Empty,
-            item.Entry.CommandText ?? string.Empty,
-            item.Entry.EditableText ?? string.Empty,
-            item.Entry.FilePath ?? string.Empty);
+        return ContextMenuApprovalIdentity.CreateLogicalItemKey(item.Entry);
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

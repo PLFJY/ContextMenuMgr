@@ -1,9 +1,12 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Services;
 
 // Timed polling keeps the scaffold simple while still showing how the service can
 // push real-time-ish notifications into the frontend over IPC.
+/// <summary>
+/// Represents the context Menu Registry Monitor.
+/// </summary>
 public sealed class ContextMenuRegistryMonitor
 {
     private readonly ContextMenuRegistryCatalog _catalog;
@@ -11,6 +14,9 @@ public sealed class ContextMenuRegistryMonitor
     private readonly TimeSpan _pollInterval;
     private Task? _monitorTask;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuRegistryMonitor"/> class.
+    /// </summary>
     public ContextMenuRegistryMonitor(
         ContextMenuRegistryCatalog catalog,
         FileLogger logger,
@@ -25,6 +31,9 @@ public sealed class ContextMenuRegistryMonitor
 
     public event EventHandler<ContextMenuEntry>? ItemDetected;
 
+    /// <summary>
+    /// Executes start.
+    /// </summary>
     public void Start(CancellationToken cancellationToken)
     {
         _monitorTask ??= Task.Run(() => MonitorLoopAsync(cancellationToken), cancellationToken);

@@ -1,8 +1,11 @@
-using System.IO;
+﻿using System.IO;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the tray Host Runner.
+/// </summary>
 internal sealed class TrayHostRunner : IDisposable
 {
     private const string TrayMutexName = @"Local\PLFJY.ContextMenuManagerPlus.TrayHost";
@@ -23,6 +26,9 @@ internal sealed class TrayHostRunner : IDisposable
     private string? _pendingApprovalItemId;
     private bool _isClosing;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TrayHostRunner"/> class.
+    /// </summary>
     public TrayHostRunner(
         TrayBackendPipeClient backendPipeClient,
         FrontendActivationService frontendActivationService,
@@ -34,6 +40,9 @@ internal sealed class TrayHostRunner : IDisposable
         _localization = new TrayLocalizationService();
     }
 
+    /// <summary>
+    /// Executes run.
+    /// </summary>
     public int Run()
     {
         if (!AcquireSingleInstance())
@@ -45,6 +54,8 @@ internal sealed class TrayHostRunner : IDisposable
         {
             var trayIconPath = ResolveTrayIconPath();
 
+            // The tray host only surfaces lightweight session-side UI. All real
+            // state changes still flow through backend notifications and commands.
             _trayHost = new NativeTrayHost(
                 trayIconPath,
                 _localization.Translate("Tray.Tooltip"),
@@ -73,6 +84,9 @@ internal sealed class TrayHostRunner : IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _backendPipeClient.NotificationReceived -= OnNotificationReceived;
@@ -119,6 +133,7 @@ internal sealed class TrayHostRunner : IDisposable
 
     private void OpenApprovals()
     {
+        _ = _logger.LogAsync($"Opening approvals from tray notification. PendingItemId={_pendingApprovalItemId ?? "<none>"}");
         _frontendActivationService.TryOpenApprovals(_pendingApprovalItemId);
     }
 
@@ -135,6 +150,8 @@ internal sealed class TrayHostRunner : IDisposable
         {
             try
             {
+                // Exiting from the tray should feel like exiting the whole app, so
+                // the UI is asked to close before the backend shutdown request runs.
                 _frontendActivationService.TryShutdownFrontend();
                 await Task.Delay(500);
                 await _backendPipeClient.RequestBackendShutdownAsync(CancellationToken.None);
@@ -164,6 +181,7 @@ internal sealed class TrayHostRunner : IDisposable
         }
 
         _pendingApprovalItemId = notification.Item.Id;
+        _ = _logger.LogAsync($"Approval notification received for item {notification.Item.Id} ({notification.Item.DisplayName}).");
 
         _trayHost?.ShowNotification(
             _localization.Translate("Tray.PendingApprovalTitle"),

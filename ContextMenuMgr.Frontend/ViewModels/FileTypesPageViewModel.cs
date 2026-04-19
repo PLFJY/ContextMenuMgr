@@ -1,13 +1,19 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the file Types Page View Model.
+/// </summary>
 public partial class FileTypesPageViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileTypesPageViewModel"/> class.
+    /// </summary>
     public FileTypesPageViewModel(
         IBackendClient backendClient,
         ContextMenuWorkspaceService workspace,
@@ -121,18 +127,39 @@ public partial class FileTypesPageViewModel : ObservableObject, IDisposable
         _localization.LanguageChanged += OnLanguageChanged;
     }
 
+    /// <summary>
+    /// Gets the shortcut Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel ShortcutTab { get; }
 
+    /// <summary>
+    /// Gets the uwp Shortcut Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel UwpShortcutTab { get; }
 
+    /// <summary>
+    /// Gets the executable Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel ExecutableTab { get; }
 
+    /// <summary>
+    /// Gets the custom Extension Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel CustomExtensionTab { get; }
 
+    /// <summary>
+    /// Gets the perceived Type Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel PerceivedTypeTab { get; }
 
+    /// <summary>
+    /// Gets the directory Type Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel DirectoryTypeTab { get; }
 
+    /// <summary>
+    /// Gets the unknown Type Tab.
+    /// </summary>
     public SceneContextMenuTabViewModel UnknownTypeTab { get; }
 
     public string Title => _localization.Translate("FileTypesPageTitle");
@@ -191,6 +218,9 @@ public partial class FileTypesPageViewModel : ObservableObject, IDisposable
         ];
     }
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

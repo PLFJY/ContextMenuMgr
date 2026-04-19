@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -6,10 +6,16 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Control Client.
+/// </summary>
 public static class FrontendControlClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Attempts to send Async.
+    /// </summary>
     public static async Task<bool> TrySendAsync(FrontendControlRequest request, CancellationToken cancellationToken)
     {
         try

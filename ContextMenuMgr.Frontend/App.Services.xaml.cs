@@ -1,10 +1,13 @@
-using ContextMenuMgr.Frontend.Services;
+﻿using ContextMenuMgr.Frontend.Services;
 using ContextMenuMgr.Frontend.ViewModels;
 using ContextMenuMgr.Frontend.Views.Pages;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ContextMenuMgr.Frontend;
 
+/// <summary>
+/// Represents the app.
+/// </summary>
 public partial class App
 {
     private static ServiceProvider BuildServiceProvider()

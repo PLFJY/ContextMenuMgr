@@ -1,12 +1,18 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the detailed Edit Rule Service.
+/// </summary>
 public sealed class DetailedEditRuleService
 {
+    /// <summary>
+    /// Executes read Boolean.
+    /// </summary>
     public bool ReadBoolean(DetailedEditRuleDefinition definition)
     {
         foreach (var clause in definition.Clauses)
@@ -31,6 +37,9 @@ public sealed class DetailedEditRuleService
         return true;
     }
 
+    /// <summary>
+    /// Executes write Boolean.
+    /// </summary>
     public void WriteBoolean(DetailedEditRuleDefinition definition, bool enabled)
     {
         foreach (var clause in definition.Clauses)
@@ -40,6 +49,9 @@ public sealed class DetailedEditRuleService
         }
     }
 
+    /// <summary>
+    /// Executes read Number.
+    /// </summary>
     public int ReadNumber(DetailedEditRuleDefinition definition)
     {
         var clause = definition.Clauses[0];
@@ -57,6 +69,9 @@ public sealed class DetailedEditRuleService
         return Math.Clamp(number, definition.MinNumber, definition.MaxNumber);
     }
 
+    /// <summary>
+    /// Executes write Number.
+    /// </summary>
     public void WriteNumber(DetailedEditRuleDefinition definition, int value)
     {
         var clamped = Math.Clamp(value, definition.MinNumber, definition.MaxNumber);
@@ -64,12 +79,18 @@ public sealed class DetailedEditRuleService
         WriteValue(clause, clamped.ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// Executes read String.
+    /// </summary>
     public string ReadString(DetailedEditRuleDefinition definition)
     {
         var clause = definition.Clauses[0];
         return ReadValue(clause) ?? string.Empty;
     }
 
+    /// <summary>
+    /// Executes write String.
+    /// </summary>
     public void WriteString(DetailedEditRuleDefinition definition, string value)
     {
         var clause = definition.Clauses[0];

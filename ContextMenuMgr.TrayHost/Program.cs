@@ -1,5 +1,8 @@
-using ContextMenuMgr.TrayHost;
+﻿using ContextMenuMgr.TrayHost;
 
+/// <summary>
+/// Represents the program.
+/// </summary>
 internal static class Program
 {
     [STAThread]

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.ServiceProcess;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -8,6 +8,9 @@ using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the main View Model.
+/// </summary>
 public partial class MainViewModel : ObservableObject
 {
     private readonly IBackendClient _backendClient;
@@ -16,6 +19,9 @@ public partial class MainViewModel : ObservableObject
     private readonly IconPreviewService _iconPreviewService;
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MainViewModel"/> class.
+    /// </summary>
     public MainViewModel(
         IBackendClient backendClient,
         IBackendServiceManager backendServiceManager,
@@ -52,15 +58,30 @@ public partial class MainViewModel : ObservableObject
         SelectedLanguage = AvailableLanguages[0];
     }
 
+    /// <summary>
+    /// Gets the categories.
+    /// </summary>
     public ObservableCollection<CategoryViewModel> Categories { get; }
 
+    /// <summary>
+    /// Gets the notifications.
+    /// </summary>
     public ObservableCollection<ToastNotificationViewModel> Notifications { get; } = [];
 
+    /// <summary>
+    /// Gets the available Languages.
+    /// </summary>
     public ObservableCollection<LanguageOptionViewModel> AvailableLanguages { get; }
 
+    /// <summary>
+    /// Gets or sets the selected Language.
+    /// </summary>
     [ObservableProperty]
     public partial LanguageOptionViewModel? SelectedLanguage { get; set; }
 
+    /// <summary>
+    /// Gets or sets the connection Status.
+    /// </summary>
     [ObservableProperty]
     public partial string ConnectionStatus { get; set; }
 
@@ -100,6 +121,9 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Initializes async.
+    /// </summary>
     public async Task InitializeAsync()
     {
         var stopwatch = Stopwatch.StartNew();
@@ -116,6 +140,9 @@ public partial class MainViewModel : ObservableObject
         SeedDesignTimeData();
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public async Task DisposeAsync()
     {
         _backendClient.NotificationReceived -= OnNotificationReceived;

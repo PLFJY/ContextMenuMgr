@@ -1,9 +1,15 @@
-using System.IO;
+﻿using System.IO;
 
 namespace ContextMenuMgr.Contracts;
 
+/// <summary>
+/// Represents the runtime Paths.
+/// </summary>
 public static class RuntimePaths
 {
+    /// <summary>
+    /// Gets the root Directory.
+    /// </summary>
     public static string RootDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "ContextMenuMgr");
@@ -26,21 +32,33 @@ public static class RuntimePaths
 
     public static string DataDirectory => RootDirectory;
 
+    /// <summary>
+    /// Gets the legacy Frontend Settings Path.
+    /// </summary>
     public static string LegacyFrontendSettingsPath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ContextMenuMgr",
         "frontend-settings.json");
 
+    /// <summary>
+    /// Gets the legacy Frontend Logs Directory.
+    /// </summary>
     public static string LegacyFrontendLogsDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ContextMenuMgr",
         "Logs");
 
+    /// <summary>
+    /// Gets the legacy State Database Path.
+    /// </summary>
     public static string LegacyStateDatabasePath { get; } = Path.Combine(
         RootDirectory,
         "Data",
         "context-menu-state.json");
 
+    /// <summary>
+    /// Gets the legacy Backend Protection Settings Path.
+    /// </summary>
     public static string LegacyBackendProtectionSettingsPath { get; } = Path.Combine(
         RootDirectory,
         "Data",

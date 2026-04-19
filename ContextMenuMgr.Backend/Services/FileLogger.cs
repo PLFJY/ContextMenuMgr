@@ -1,8 +1,11 @@
-using System.IO;
+﻿using System.IO;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the file Logger.
+/// </summary>
 public sealed class FileLogger
 {
     private static readonly TimeSpan LogRetention = TimeSpan.FromDays(7);
@@ -10,6 +13,9 @@ public sealed class FileLogger
     private readonly string _fallbackLogPath;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileLogger"/> class.
+    /// </summary>
     public FileLogger(string logPath)
     {
         _logPath = logPath;
@@ -21,6 +27,9 @@ public sealed class FileLogger
         PruneOldLogs(_fallbackLogPath);
     }
 
+    /// <summary>
+    /// Executes log Async.
+    /// </summary>
     public async Task LogAsync(string message, CancellationToken cancellationToken = default)
     {
         var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}";
@@ -43,6 +52,9 @@ public sealed class FileLogger
         }
     }
 
+    /// <summary>
+    /// Executes log Fire And Forget.
+    /// </summary>
     public void LogFireAndForget(string message) => _ = LogAsync(message);
 
     private static void EnsureDirectoryExists(string path)

@@ -1,13 +1,19 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Defines the available rule Storage Kind values.
+/// </summary>
 public enum RuleStorageKind
 {
     Registry,
     Ini
 }
 
+/// <summary>
+/// Defines the available rule Value Editor Kind values.
+/// </summary>
 public enum RuleValueEditorKind
 {
     Boolean,
@@ -15,6 +21,9 @@ public enum RuleValueEditorKind
     String
 }
 
+/// <summary>
+/// Represents the enhance Menu Item Definition.
+/// </summary>
 public sealed record EnhanceMenuItemDefinition(
     string GroupRegistryPath,
     string DisplayName,
@@ -25,12 +34,18 @@ public sealed record EnhanceMenuItemDefinition(
     string? IconPath,
     string RawXml);
 
+/// <summary>
+/// Represents the enhance Menu Group Definition.
+/// </summary>
 public sealed record EnhanceMenuGroupDefinition(
     string Title,
     string RegistryPath,
     string? IconPath,
     IReadOnlyList<EnhanceMenuItemDefinition> Items);
 
+/// <summary>
+/// Represents the detailed Edit Rule Clause Definition.
+/// </summary>
 public sealed record DetailedEditRuleClauseDefinition(
     RuleStorageKind StorageKind,
     string Path,
@@ -40,6 +55,9 @@ public sealed record DetailedEditRuleClauseDefinition(
     string? TurnOnValue,
     string? TurnOffValue);
 
+/// <summary>
+/// Represents the detailed Edit Rule Definition.
+/// </summary>
 public sealed record DetailedEditRuleDefinition(
     string DisplayName,
     string? Tip,
@@ -50,6 +68,9 @@ public sealed record DetailedEditRuleDefinition(
     int MaxNumber,
     IReadOnlyList<DetailedEditRuleClauseDefinition> Clauses);
 
+/// <summary>
+/// Represents the detailed Edit Group Definition.
+/// </summary>
 public sealed record DetailedEditGroupDefinition(
     string Title,
     string? RegistryPath,

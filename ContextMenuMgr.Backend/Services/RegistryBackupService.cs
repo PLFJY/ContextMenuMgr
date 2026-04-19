@@ -1,20 +1,29 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the registry Backup Service.
+/// </summary>
 public sealed class RegistryBackupService
 {
     private readonly string _backupDirectory;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RegistryBackupService"/> class.
+    /// </summary>
     public RegistryBackupService(string backupDirectory)
     {
         _backupDirectory = backupDirectory;
         Directory.CreateDirectory(_backupDirectory);
     }
 
+    /// <summary>
+    /// Executes export Key Async.
+    /// </summary>
     public async Task<string> ExportKeyAsync(string registryPath, CancellationToken cancellationToken)
     {
         var backupPath = Path.Combine(_backupDirectory, $"{GetSafeFileName(registryPath)}.reg");
@@ -22,11 +31,17 @@ public sealed class RegistryBackupService
         return backupPath;
     }
 
+    /// <summary>
+    /// Executes restore Backup Async.
+    /// </summary>
     public async Task RestoreBackupAsync(string backupFilePath, CancellationToken cancellationToken)
     {
         await RunRegAsync($"import \"{backupFilePath}\"", cancellationToken);
     }
 
+    /// <summary>
+    /// Deletes backup File.
+    /// </summary>
     public void DeleteBackupFile(string? backupFilePath)
     {
         if (!string.IsNullOrWhiteSpace(backupFilePath) && File.Exists(backupFilePath))

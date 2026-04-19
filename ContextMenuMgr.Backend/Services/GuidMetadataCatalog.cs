@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -8,6 +8,9 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the guid Metadata Catalog.
+/// </summary>
 internal static class GuidMetadataCatalog
 {
     private static readonly Lazy<Dictionary<Guid, Dictionary<string, string>>> Entries = new(LoadEntries);
@@ -34,6 +37,9 @@ internal static class GuidMetadataCatalog
         @"Software\Classes\WOW6432Node\CLSID"
     ];
 
+    /// <summary>
+    /// Gets display Name.
+    /// </summary>
     public static string? GetDisplayName(Guid guid)
     {
         return DisplayNameCache.GetOrAdd(guid, static id =>
@@ -99,6 +105,9 @@ internal static class GuidMetadataCatalog
         });
     }
 
+    /// <summary>
+    /// Executes static.
+    /// </summary>
     public static (string? IconPath, int IconIndex) GetIconLocation(Guid guid)
     {
         return IconCache.GetOrAdd(guid, static id =>
@@ -120,6 +129,9 @@ internal static class GuidMetadataCatalog
         });
     }
 
+    /// <summary>
+    /// Gets file Path.
+    /// </summary>
     public static string? GetFilePath(Guid guid)
     {
         return FilePathCache.GetOrAdd(guid, static id =>
@@ -167,6 +179,9 @@ internal static class GuidMetadataCatalog
         });
     }
 
+    /// <summary>
+    /// Gets uwp Name.
+    /// </summary>
     public static string? GetUwpName(Guid guid)
     {
         return UwpNameCache.GetOrAdd(guid, static id =>
@@ -306,6 +321,9 @@ internal static class GuidMetadataCatalog
         return isName ? "@" + result : result;
     }
 
+    /// <summary>
+    /// Executes normalize Candidate Path.
+    /// </summary>
     public static string NormalizeCandidatePath(string? candidate, string? baseFilePath)
     {
         if (string.IsNullOrWhiteSpace(candidate))

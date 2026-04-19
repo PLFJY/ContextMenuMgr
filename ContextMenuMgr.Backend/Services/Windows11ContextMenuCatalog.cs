@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Xml;
@@ -8,6 +8,9 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Services;
 
+/// <summary>
+/// Represents the windows11 Context Menu Catalog.
+/// </summary>
 internal sealed class Windows11ContextMenuCatalog
 {
     private const string PackagedComPath = @"PackagedCom\Package";
@@ -19,6 +22,9 @@ internal sealed class Windows11ContextMenuCatalog
 
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
+    /// <summary>
+    /// Executes enumerate Entries Async.
+    /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> EnumerateEntriesAsync(CancellationToken cancellationToken, string? userSid = null)
     {
         userSid ??= TryGetBestInteractiveUserSid();
@@ -78,6 +84,9 @@ internal sealed class Windows11ContextMenuCatalog
             .ToArray();
     }
 
+    /// <summary>
+    /// Sets enabled.
+    /// </summary>
     public bool SetEnabled(string handlerClsid, string displayName, string? userSid, bool enable)
     {
         userSid ??= TryGetBestInteractiveUserSid();
@@ -104,6 +113,9 @@ internal sealed class Windows11ContextMenuCatalog
         return true;
     }
 
+    /// <summary>
+    /// Gets is Enabled.
+    /// </summary>
     public bool GetIsEnabled(string handlerClsid, string? userSid)
     {
         if (string.IsNullOrWhiteSpace(handlerClsid))
@@ -469,6 +481,9 @@ internal sealed class Windows11ContextMenuCatalog
 
     private sealed class SafeAccessTokenHandle : SafeHandle
     {
+        /// <summary>
+        /// Executes safe Access Token Handle.
+        /// </summary>
         public SafeAccessTokenHandle(IntPtr handle)
             : base(IntPtr.Zero, ownsHandle: true)
         {
@@ -482,13 +497,22 @@ internal sealed class Windows11ContextMenuCatalog
 
     private static class NativeMethods
     {
+        /// <summary>
+        /// Executes wTS Get Active Console Session Id.
+        /// </summary>
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint WTSGetActiveConsoleSessionId();
 
+        /// <summary>
+        /// Executes wTS Query User Token.
+        /// </summary>
         [DllImport("wtsapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
 
+        /// <summary>
+        /// Executes wTS Enumerate Sessions W.
+        /// </summary>
         [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSEnumerateSessionsW(
@@ -498,13 +522,22 @@ internal sealed class Windows11ContextMenuCatalog
             out IntPtr ppSessionInfo,
             out int pCount);
 
+        /// <summary>
+        /// Executes wTS Free Memory.
+        /// </summary>
         [DllImport("wtsapi32.dll")]
         public static extern void WTSFreeMemory(IntPtr memory);
 
+        /// <summary>
+        /// Executes close Handle.
+        /// </summary>
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool CloseHandle(IntPtr handle);
 
+        /// <summary>
+        /// Defines the available wTS_CONNECTSTATE_CLASS values.
+        /// </summary>
         public enum WTS_CONNECTSTATE_CLASS
         {
             WTSActive,
@@ -519,6 +552,9 @@ internal sealed class Windows11ContextMenuCatalog
             WTSInit
         }
 
+        /// <summary>
+        /// Represents the wTS_SESSION_INFO.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct WTS_SESSION_INFO
         {

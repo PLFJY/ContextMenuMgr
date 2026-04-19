@@ -1,9 +1,12 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the frontend Settings Service.
+/// </summary>
 public sealed class FrontendSettingsService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -14,6 +17,9 @@ public sealed class FrontendSettingsService
     private readonly string _settingsPath;
     private readonly Lock _syncRoot = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FrontendSettingsService"/> class.
+    /// </summary>
     public FrontendSettingsService()
     {
         _settingsPath = RuntimePaths.SettingsPath;
@@ -21,12 +27,18 @@ public sealed class FrontendSettingsService
         Current = Load();
     }
 
+    /// <summary>
+    /// Gets or sets the current.
+    /// </summary>
     public FrontendSettings Current { get; private set; }
 
     public event EventHandler? SettingsChanged;
 
     public string SettingsPath => _settingsPath;
 
+    /// <summary>
+    /// Updates language.
+    /// </summary>
     public void UpdateLanguage(AppLanguageOption language)
     {
         if (Current.Language == language)
@@ -38,6 +50,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates theme.
+    /// </summary>
     public void UpdateTheme(AppThemeOption theme)
     {
         if (Current.Theme == theme)
@@ -49,6 +64,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates log Level.
+    /// </summary>
     public void UpdateLogLevel(AppLogLevel logLevel)
     {
         if (Current.LogLevel == logLevel)
@@ -60,6 +78,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates auto Start On Login.
+    /// </summary>
     public void UpdateAutoStartOnLogin(bool autoStartOnLogin)
     {
         if (Current.AutoStartOnLogin == autoStartOnLogin)
@@ -71,6 +92,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates keep Background After Close.
+    /// </summary>
     public void UpdateKeepBackgroundAfterClose(bool keepBackgroundAfterClose)
     {
         if (Current.KeepBackgroundAfterClose == keepBackgroundAfterClose)
@@ -82,6 +106,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates lock New Context Menu Items.
+    /// </summary>
     public void UpdateLockNewContextMenuItems(bool lockNewContextMenuItems)
     {
         if (Current.LockNewContextMenuItems == lockNewContextMenuItems)
@@ -93,6 +120,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates hide Disabled Items.
+    /// </summary>
     public void UpdateHideDisabledItems(bool hideDisabledItems)
     {
         if (Current.HideDisabledItems == hideDisabledItems)
@@ -104,6 +134,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates open More Regedit.
+    /// </summary>
     public void UpdateOpenMoreRegedit(bool openMoreRegedit)
     {
         if (Current.OpenMoreRegedit == openMoreRegedit)
@@ -115,6 +148,9 @@ public sealed class FrontendSettingsService
         Save();
     }
 
+    /// <summary>
+    /// Updates open More Explorer.
+    /// </summary>
     public void UpdateOpenMoreExplorer(bool openMoreExplorer)
     {
         if (Current.OpenMoreExplorer == openMoreExplorer)
@@ -161,6 +197,9 @@ public sealed class FrontendSettingsService
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Executes reset To Defaults.
+    /// </summary>
     public void ResetToDefaults()
     {
         Current = new FrontendSettings();

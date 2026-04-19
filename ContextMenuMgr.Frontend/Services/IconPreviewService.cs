@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -9,6 +9,9 @@ using System.Windows.Media.Imaging;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the icon Preview Service.
+/// </summary>
 public sealed class IconPreviewService
 {
     private const string DefaultIconPath = "imageres.dll";
@@ -17,6 +20,9 @@ public sealed class IconPreviewService
 
     private readonly ConcurrentDictionary<string, ImageSource?> _cache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Gets icon.
+    /// </summary>
     public ImageSource? GetIcon(string? iconPath, int iconIndex, string? fallbackFilePath = null)
     {
         if (iconIndex == 0 && TryParseIconLocation(iconPath, out var parsedIconPath, out var parsedIconIndex))

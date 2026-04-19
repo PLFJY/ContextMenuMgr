@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Contracts;
@@ -6,6 +6,9 @@ using ContextMenuMgr.Frontend.ViewModels;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the context Menu Workspace Service.
+/// </summary>
 public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDisposable
 {
     private readonly IBackendClient _backendClient;
@@ -23,6 +26,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private bool _trayHostEnsured;
     private ServiceAttentionState _serviceAttentionState = ServiceAttentionState.None;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ContextMenuWorkspaceService"/> class.
+    /// </summary>
     public ContextMenuWorkspaceService(
         IBackendClient backendClient,
         IBackendServiceManager backendServiceManager,
@@ -41,16 +47,31 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
 
+    /// <summary>
+    /// Gets the items.
+    /// </summary>
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
+    /// <summary>
+    /// Gets the notifications.
+    /// </summary>
     public ObservableCollection<ToastNotificationViewModel> Notifications { get; } = [];
 
+    /// <summary>
+    /// Gets or sets the connection Status.
+    /// </summary>
     [ObservableProperty]
     public partial string ConnectionStatus { get; set; }
 
+    /// <summary>
+    /// Gets or sets the service Attention Text.
+    /// </summary>
     [ObservableProperty]
     public partial string ServiceAttentionText { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Initializes async.
+    /// </summary>
     public async Task InitializeAsync(bool suppressBootstrapPrompt = false)
     {
         await _initializeLock.WaitAsync();
@@ -61,24 +82,24 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 return;
             }
 
-        FrontendDebugLog.Info(
-            "ContextMenuWorkspaceService",
-            $"InitializeAsync started. SuppressBootstrapPrompt={suppressBootstrapPrompt}");
+            FrontendDebugLog.Info(
+                "ContextMenuWorkspaceService",
+                $"InitializeAsync started. SuppressBootstrapPrompt={suppressBootstrapPrompt}");
 
-        if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
-        {
-            await EnsureNotificationConnectionAsync();
-            _uiStateActive = true;
-            await RefreshAsync();
-            _fullyInitialized = true;
-            return;
-        }
+            if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
+            {
+                await EnsureNotificationConnectionAsync();
+                _uiStateActive = true;
+                await RefreshAsync();
+                _fullyInitialized = true;
+                return;
+            }
 
-        UpdateServiceAttention(
-            _backendServiceManager.IsServiceInstalled()
-                ? ServiceAttentionState.Unavailable
-                : ServiceAttentionState.Missing);
-        ConnectionStatus = _localization.Translate("BackendUnavailableStatusStandalone");
+            UpdateServiceAttention(
+                _backendServiceManager.IsServiceInstalled()
+                    ? ServiceAttentionState.Unavailable
+                    : ServiceAttentionState.Missing);
+            ConnectionStatus = _localization.Translate("BackendUnavailableStatusStandalone");
         }
         finally
         {
@@ -86,6 +107,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Initializes notifications Only Async.
+    /// </summary>
     public async Task InitializeNotificationsOnlyAsync(bool suppressBootstrapPrompt = true)
     {
         await _initializeLock.WaitAsync();
@@ -119,6 +143,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Refreshes async.
+    /// </summary>
     public async Task RefreshAsync()
     {
         _uiStateActive = true;
@@ -126,6 +153,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var snapshot = await _backendClient.GetSnapshotAsync(cts.Token);
+            // The frontend works from a backend-authored snapshot so every page
+            // stays consistent after a single refresh pass.
             ApplySnapshot(snapshot);
             UpdateServiceAttention(ServiceAttentionState.None);
             ConnectionStatus = _localization.Translate("ConnectedStatus");
@@ -140,6 +169,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Sets enabled Async.
+    /// </summary>
     public async Task<bool> SetEnabledAsync(ContextMenuItemViewModel item, bool enable)
     {
         try
@@ -162,6 +194,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return false;
     }
 
+    /// <summary>
+    /// Executes acknowledge Item State Async.
+    /// </summary>
     public async Task<bool> AcknowledgeItemStateAsync(ContextMenuItemViewModel item)
     {
         try
@@ -187,6 +222,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Deletes or Undo Async.
+    /// </summary>
     public async Task DeleteOrUndoAsync(ContextMenuItemViewModel item)
     {
         try
@@ -215,6 +253,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Executes permanently Delete Async.
+    /// </summary>
     public async Task PermanentlyDeleteAsync(ContextMenuItemViewModel item)
     {
         try
@@ -229,9 +270,15 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Applies decision Async.
+    /// </summary>
     public async Task ApplyDecisionAsync(ContextMenuItemViewModel item, ContextMenuDecision decision)
         => await ApplyDecisionAsync(item.Id, decision);
 
+    /// <summary>
+    /// Applies decision Async.
+    /// </summary>
     public async Task ApplyDecisionAsync(string itemId, ContextMenuDecision decision)
     {
         try
@@ -264,6 +311,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Executes install Or Repair Service Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> InstallOrRepairServiceAsync()
     {
         var result = await _backendServiceManager.InstallOrRepairServiceAsync(CancellationToken.None);
@@ -279,6 +329,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return result;
     }
 
+    /// <summary>
+    /// Stops monitoring Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> StopMonitoringAsync()
     {
         var result = await _backendServiceManager.StopServiceAsync(CancellationToken.None);
@@ -291,20 +344,32 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return result;
     }
 
+    /// <summary>
+    /// Executes uninstall Service Async.
+    /// </summary>
     public Task<BackendServiceBootstrapResult> UninstallServiceAsync()
     {
         return _backendServiceManager.UninstallServiceAsync(CancellationToken.None);
     }
 
+    /// <summary>
+    /// Sets service Auto Start Enabled Async.
+    /// </summary>
     public Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled)
     {
         return _backendServiceManager.SetServiceAutoStartEnabledAsync(enabled, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Executes is Service Installed.
+    /// </summary>
     public bool IsServiceInstalled() => _backendServiceManager.IsServiceInstalled();
 
     public ContextMenuItemActionsService ItemActions => _itemActionsService;
 
+    /// <summary>
+    /// Sets shell Attribute Async.
+    /// </summary>
     public async Task<bool> SetShellAttributeAsync(ContextMenuItemViewModel item, ContextMenuShellAttribute attribute, bool enable)
     {
         try
@@ -326,6 +391,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return false;
     }
 
+    /// <summary>
+    /// Sets display Text Async.
+    /// </summary>
     public async Task<bool> SetDisplayTextAsync(ContextMenuItemViewModel item, string textValue)
     {
         try
@@ -347,23 +415,35 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return false;
     }
 
+    /// <summary>
+    /// Gets registry Protection Setting Async.
+    /// </summary>
     public async Task<bool> GetRegistryProtectionSettingAsync()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         return await _backendClient.GetRegistryProtectionSettingAsync(cts.Token);
     }
 
+    /// <summary>
+    /// Sets registry Protection Setting Async.
+    /// </summary>
     public async Task<bool> SetRegistryProtectionSettingAsync(bool enable)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         return await _backendClient.SetRegistryProtectionSettingAsync(enable, cts.Token);
     }
 
+    /// <summary>
+    /// Gets service Status Text.
+    /// </summary>
     public string GetServiceStatusText()
     {
         return (_backendServiceManager.GetServiceStatus()?.ToString() ?? "Missing");
     }
 
+    /// <summary>
+    /// Releases resources used by the current instance.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _backendClient.NotificationReceived -= OnBackendNotificationReceived;
@@ -488,6 +568,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Executes release Ui State.
+    /// </summary>
     public void ReleaseUiState()
     {
         _uiStateActive = false;
@@ -676,6 +759,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    /// <summary>
+    /// Refreshes service Attention Text.
+    /// </summary>
     public void RefreshServiceAttentionText()
     {
         ServiceAttentionText = GetServiceAttentionText(_serviceAttentionState);

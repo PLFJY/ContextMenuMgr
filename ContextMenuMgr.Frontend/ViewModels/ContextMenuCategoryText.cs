@@ -1,10 +1,16 @@
-using ContextMenuMgr.Contracts;
+﻿using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the context Menu Category Text.
+/// </summary>
 internal static class ContextMenuCategoryText
 {
+    /// <summary>
+    /// Executes static.
+    /// </summary>
     public static (string NameKey, string DescriptionKey) GetResourceKeys(ContextMenuCategory category) => category switch
     {
         ContextMenuCategory.File => ("FileCategoryName", "FileCategoryDescription"),
@@ -20,6 +26,9 @@ internal static class ContextMenuCategoryText
         _ => ("FileCategoryName", "FileCategoryDescription")
     };
 
+    /// <summary>
+    /// Gets localized Name.
+    /// </summary>
     public static string GetLocalizedName(ContextMenuCategory category, LocalizationService localization)
     {
         var (nameKey, _) = GetResourceKeys(category);

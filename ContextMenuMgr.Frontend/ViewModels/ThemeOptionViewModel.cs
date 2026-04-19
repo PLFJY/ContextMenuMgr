@@ -1,12 +1,18 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+/// <summary>
+/// Represents the theme Option View Model.
+/// </summary>
 public partial class ThemeOptionViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ThemeOptionViewModel"/> class.
+    /// </summary>
     public ThemeOptionViewModel(AppThemeOption option, LocalizationService localization)
     {
         Option = option;
@@ -15,8 +21,14 @@ public partial class ThemeOptionViewModel : ObservableObject, IDisposable
         DisplayName = GetDisplayName();
     }
 
+    /// <summary>
+    /// Gets the option.
+    /// </summary>
     public AppThemeOption Option { get; }
 
+    /// <summary>
+    /// Gets or sets the display Name.
+    /// </summary>
     [ObservableProperty]
     public partial string DisplayName { get; private set; }
 
@@ -33,6 +45,9 @@ public partial class ThemeOptionViewModel : ObservableObject, IDisposable
         _ => _localization.Translate("ThemeSystem")
     };
 
+    /// <summary>
+    /// Executes dispose.
+    /// </summary>
     public void Dispose()
     {
         _localization.LanguageChanged -= OnLanguageChanged;

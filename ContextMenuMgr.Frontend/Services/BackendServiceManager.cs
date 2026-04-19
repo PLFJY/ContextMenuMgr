@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.ServiceProcess;
@@ -9,10 +9,16 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
+/// <summary>
+/// Represents the backend Service Manager.
+/// </summary>
 public sealed class BackendServiceManager : IBackendServiceManager
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Executes is Service Installed.
+    /// </summary>
     public bool IsServiceInstalled()
     {
         using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{ServiceMetadata.ServiceName}");
@@ -21,6 +27,9 @@ public sealed class BackendServiceManager : IBackendServiceManager
         return installed;
     }
 
+    /// <summary>
+    /// Gets service Status.
+    /// </summary>
     public ServiceControllerStatus? GetServiceStatus()
     {
         try
@@ -38,6 +47,9 @@ public sealed class BackendServiceManager : IBackendServiceManager
         }
     }
 
+    /// <summary>
+    /// Executes install Or Repair Service Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> InstallOrRepairServiceAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -106,6 +118,9 @@ public sealed class BackendServiceManager : IBackendServiceManager
         }
     }
 
+    /// <summary>
+    /// Executes uninstall Service Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> UninstallServiceAsync(CancellationToken cancellationToken)
     {
         var backendExePath = ResolveBackendExecutablePath();
@@ -165,6 +180,9 @@ public sealed class BackendServiceManager : IBackendServiceManager
         }
     }
 
+    /// <summary>
+    /// Stops service Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> StopServiceAsync(CancellationToken cancellationToken)
     {
         var backendExePath = ResolveBackendExecutablePath();
@@ -224,6 +242,9 @@ public sealed class BackendServiceManager : IBackendServiceManager
         }
     }
 
+    /// <summary>
+    /// Sets service Auto Start Enabled Async.
+    /// </summary>
     public async Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken)
     {
         var backendExePath = ResolveBackendExecutablePath();

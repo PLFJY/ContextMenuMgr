@@ -1,5 +1,8 @@
-namespace ContextMenuMgr.Contracts;
+﻿namespace ContextMenuMgr.Contracts;
 
+/// <summary>
+/// Defines the available context Menu Scene Kind values.
+/// </summary>
 public enum ContextMenuSceneKind
 {
     LnkFile = 0,
