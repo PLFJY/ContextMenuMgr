@@ -6,7 +6,7 @@ using ContextMenuMgr.TrayHost;
 /// </summary>
 internal static class Program
 {
-    private const string TrayAppUserModelId = "PLFJY.ContextMenuManagerPlus";
+    private const string TrayAppUserModelId = "Context Menu Manager Plus";
 
     [STAThread]
     private static int Main()
