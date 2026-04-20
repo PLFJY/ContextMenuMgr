@@ -1,5 +1,7 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
+using System.IO.Pipes;
 using System.ServiceProcess;
+using System.Text;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
@@ -7,7 +9,7 @@ using Microsoft.Win32;
 namespace ContextMenuMgr.Backend.Hosting;
 
 /// <summary>
-/// Represents the backend Service Bootstrapper.
+/// Performs elevated service install/repair operations for the frontend.
 /// </summary>
 internal static class BackendServiceBootstrapper
 {
@@ -20,7 +22,7 @@ internal static class BackendServiceBootstrapper
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);
 
     /// <summary>
-    /// Attempts to run.
+    /// Tries to execute an elevated backend bootstrap command.
     /// </summary>
     public static bool TryRun(string[] args)
     {
@@ -33,6 +35,7 @@ internal static class BackendServiceBootstrapper
         var resultFilePath = TryGetArgumentValue(args, "--result-file");
         if (string.IsNullOrWhiteSpace(resultFilePath))
         {
+            Environment.ExitCode = 1;
             return true;
         }
 
@@ -97,12 +100,12 @@ internal static class BackendServiceBootstrapper
         }
         else
         {
-            using var service = new ServiceController(ServiceMetadata.ServiceName);
-            if (service.Status != ServiceControllerStatus.Stopped)
+            using var existingService = new ServiceController(ServiceMetadata.ServiceName);
+            if (existingService.Status != ServiceControllerStatus.Stopped)
             {
                 EnsureKeepFrontendMarker();
-                service.Stop();
-                service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+                existingService.Stop();
+                existingService.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
             }
 
             RunSc(
@@ -126,14 +129,26 @@ internal static class BackendServiceBootstrapper
             if (service.Status != ServiceControllerStatus.Running)
             {
                 service.Start();
-                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
+                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
             }
         }
 
         var status = GetServiceStatusText(ServiceMetadata.ServiceName);
-        return string.Equals(status, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase)
-            ? (true, "OK", "Running")
-            : (false, "SERVICE_NOT_RUNNING", status);
+        if (!string.Equals(status, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "SERVICE_NOT_RUNNING", status);
+        }
+
+        // Treat the service as healthy only after the backend pipe answers a
+        // real Ping request. This prevents false-positive "install succeeded"
+        // results when SCM reports Running but the runtime is still hung during
+        // startup and not yet accepting pipe connections.
+        if (!WaitForBackendPipeReady(TimeSpan.FromSeconds(20)))
+        {
+            return (false, "BACKEND_PIPE_NOT_READY", "Service is running but backend pipe did not become ready in time.");
+        }
+
+        return (true, "OK", "Running");
     }
 
     private static (bool Success, string Code, string Detail) UninstallService()
@@ -306,7 +321,6 @@ internal static class BackendServiceBootstrapper
         }
 
         using var process = Process.Start(startInfo);
-
         if (process is null)
         {
             throw new InvalidOperationException("Failed to start sc.exe.");
@@ -334,6 +348,73 @@ internal static class BackendServiceBootstrapper
         Directory.CreateDirectory(Path.GetDirectoryName(resultFilePath) ?? Path.GetTempPath());
         var payload = JsonSerializer.Serialize(new BootstrapResult(success, code, detail), JsonOptions);
         File.WriteAllText(resultFilePath, payload);
+    }
+
+    private static bool WaitForBackendPipeReady(TimeSpan timeout)
+    {
+        var deadlineUtc = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadlineUtc)
+        {
+            if (TryPingBackendPipe(TimeSpan.FromSeconds(2)))
+            {
+                return true;
+            }
+
+            Thread.Sleep(300);
+        }
+
+        return false;
+    }
+
+    private static bool TryPingBackendPipe(TimeSpan timeout)
+    {
+        try
+        {
+            using var pipe = new NamedPipeClientStream(
+                ".",
+                PipeConstants.PipeName,
+                PipeDirection.InOut,
+                PipeOptions.None);
+            pipe.Connect((int)timeout.TotalMilliseconds);
+
+            using var reader = new StreamReader(
+                pipe,
+                new UTF8Encoding(false),
+                detectEncodingFromByteOrderMarks: false,
+                leaveOpen: true);
+            using var writer = new StreamWriter(
+                pipe,
+                new UTF8Encoding(false),
+                leaveOpen: true)
+            {
+                AutoFlush = true
+            };
+
+            var payload = JsonSerializer.Serialize(new PipeEnvelope
+            {
+                MessageType = PipeMessageType.Request,
+                CorrelationId = Guid.NewGuid(),
+                Request = new PipeRequest
+                {
+                    Command = PipeCommand.Ping
+                }
+            }, JsonOptions);
+
+            writer.WriteLine(payload);
+            var line = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            var envelope = JsonSerializer.Deserialize<PipeEnvelope>(line, JsonOptions);
+            return envelope?.MessageType == PipeMessageType.Response
+                   && envelope.Response?.Success == true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string? TryGetArgumentValue(IReadOnlyList<string> args, string name)

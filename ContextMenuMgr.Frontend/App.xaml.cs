@@ -134,7 +134,26 @@ public partial class App : System.Windows.Application
 
         _singleInstanceMutex.Dispose();
         _singleInstanceMutex = null;
-        FrontendControlClient.TrySendAsync(initialRequest, CancellationToken.None).GetAwaiter().GetResult();
+
+        if (FrontendControlClient.TrySendAsync(initialRequest, CancellationToken.None).GetAwaiter().GetResult())
+        {
+            return false;
+        }
+
+        FrontendDebugLog.Info("App", "Detected an unresponsive existing frontend instance. Attempting stale-instance recovery.");
+        TerminateStaleFrontendProcesses();
+
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out createdNew);
+        if (createdNew)
+        {
+            _ownsSingleInstanceMutex = true;
+            FrontendDebugLog.Info("App", "Recovered single-instance ownership after terminating stale frontend processes.");
+            return true;
+        }
+
+        _singleInstanceMutex.Dispose();
+        _singleInstanceMutex = null;
+        FrontendDebugLog.Info("App", "Failed to recover single-instance ownership.");
         return false;
     }
 
@@ -168,6 +187,36 @@ public partial class App : System.Windows.Application
         }
 
         return null;
+    }
+
+    private static void TerminateStaleFrontendProcesses()
+    {
+        try
+        {
+            var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+            var candidates = System.Diagnostics.Process.GetProcessesByName(currentProcess.ProcessName)
+                .Where(process => process.Id != currentProcess.Id && process.SessionId == currentProcess.SessionId)
+                .ToArray();
+
+            foreach (var process in candidates)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: false);
+                    process.WaitForExit(1500);
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 
     private async Task<FrontendControlResponse> HandleFrontendControlRequestAsync(FrontendControlRequest request)

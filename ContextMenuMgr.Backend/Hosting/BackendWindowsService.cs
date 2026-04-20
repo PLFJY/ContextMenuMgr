@@ -36,7 +36,7 @@ public sealed class BackendWindowsService : ServiceBase
     {
         _serviceCts = new CancellationTokenSource();
         _runtime.StopRequested += OnRuntimeStopRequested;
-        _ = _runtime.StartAsync(_serviceCts.Token, ensureTrayHostOnStartup: true);
+        _ = StartRuntimeAsync(_serviceCts.Token);
     }
 
     protected override void OnStop()
@@ -60,6 +60,26 @@ public sealed class BackendWindowsService : ServiceBase
             {
             }
         });
+    }
+
+    private async Task StartRuntimeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Keep the SCM startup path fast. The frontend/bootstrapper performs
+            // the stricter "wait until pipe is ready" check separately.
+            await _runtime.StartAsync(cancellationToken, ensureTrayHostOnStartup: true);
+        }
+        catch
+        {
+            try
+            {
+                Stop();
+            }
+            catch
+            {
+            }
+        }
     }
 
     protected override void OnSessionChange(SessionChangeDescription changeDescription)
