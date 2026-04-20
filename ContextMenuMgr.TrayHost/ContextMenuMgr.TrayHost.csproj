@@ -8,8 +8,9 @@
     <BaseOutputPath>..\artifacts\trayhost\</BaseOutputPath>
     <AssemblyName>ContextMenuManagerPlus.TrayHost</AssemblyName>
     <Product>Context Menu Manager Plus</Product>
-    <Title>Context Menu Manager Plus Tray Host</Title>
-    <Description>Per-user tray host for Context Menu Manager Plus.</Description>
+    <Title>Context Menu Manager Plus</Title>
+    <Description>Context Menu Manager Plus</Description>
+    <FileDescription>Context Menu Manager Plus</FileDescription>
     <Company>PLFJY</Company>
     <FileVersion>1.5.1.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>

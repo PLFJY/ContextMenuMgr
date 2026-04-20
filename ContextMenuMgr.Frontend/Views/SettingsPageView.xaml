@@ -146,6 +146,7 @@
                                             Appearance="Primary"
                                             Command="{Binding ConfirmUninstallServiceCommand}"
                                             Content="{Binding ConfirmUninstallText}"
+                                            Foreground="#DCEBFF"
                                             Icon="{ui:SymbolIcon Symbol=Delete24}" />
                                         <ui:Button
                                             Appearance="Secondary"

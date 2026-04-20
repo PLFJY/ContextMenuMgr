@@ -354,6 +354,9 @@
   <data name="ApprovalRemoveWithoutRegistryConfirmation" xml:space="preserve">
     <value>这个待审核项对应的注册表项已经不存在，将只从待审核列表移除。</value>
   </data>
+  <data name="ApprovalRemoveConfirmation" xml:space="preserve">
+    <value>这个待审核项对应的注册表项仍然存在。确认后将从待审核列表移除；如果你还想彻底去掉菜单，请在对应页面里继续删除。</value>
+  </data>
   <data name="ServiceMissingTitle" xml:space="preserve">
     <value>后台服务未安装</value>
   </data>

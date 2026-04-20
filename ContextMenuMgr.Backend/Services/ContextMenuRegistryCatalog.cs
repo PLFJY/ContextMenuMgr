@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using System.Text.RegularExpressions;
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace ContextMenuMgr.Backend.Services;
 
@@ -17,7 +18,6 @@ public sealed class ContextMenuRegistryCatalog
 {
     private const string BlockedShellExtensionsPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     internal const string Windows11MonitoredRootPath = @"PackagedCom\Windows11ContextMenu";
-    private static readonly TimeSpan StartupMissingStatePreservationWindow = TimeSpan.FromMinutes(2);
 
     private static readonly RegistryRootDescriptor[] MonitoredRoots =
     [
@@ -69,7 +69,8 @@ public sealed class ContextMenuRegistryCatalog
     private readonly RegistryBackupService _backupService;
     private readonly BackendProtectionSettingsStore _protectionSettingsStore;
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
-    private readonly DateTimeOffset _catalogStartedAtUtc = DateTimeOffset.UtcNow;
+    private volatile bool _interactiveSessionObserved;
+    private volatile bool _interactiveSessionSnapshotSettled;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryCatalog"/> class.
@@ -97,6 +98,24 @@ public sealed class ContextMenuRegistryCatalog
             static state => MonitoredStableRootPaths.Contains(state.SourceRootPath) || state.IsWindows11ContextMenu,
             persistDiscoveredStates: true,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Marks that an interactive user session is available for menu enumeration.
+    /// </summary>
+    public void MarkInteractiveSessionObserved()
+    {
+        _interactiveSessionObserved = true;
+        _interactiveSessionSnapshotSettled = false;
+    }
+
+    /// <summary>
+    /// Marks that the first snapshot taken after an interactive session became available
+    /// was complete enough to be used as the runtime pruning baseline.
+    /// </summary>
+    public void MarkInteractiveSessionSnapshotSettled()
+    {
+        _interactiveSessionSnapshotSettled = true;
     }
 
     /// <summary>
@@ -160,6 +179,15 @@ public sealed class ContextMenuRegistryCatalog
         var results = new List<ContextMenuEntry>();
         var dirty = false;
         var missingStateIdsToRemove = new List<string>();
+        var preserveMissingStates = ShouldPreserveMissingStatesForCurrentSnapshot();
+        var observedSourceRoots = actualEntries.Values
+            .Select(static entry => entry.SourceRootPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var observedWindows11Packages = actualEntries.Values
+            .Where(static entry => entry.IsWindows11ContextMenu)
+            .Select(static entry => ContextMenuApprovalIdentity.ExtractWin11PackageKey(entry.RegistryPath))
+            .Where(static packageKey => !string.IsNullOrWhiteSpace(packageKey))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in actualEntries.Values.OrderBy(static item => item.Category).ThenBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
@@ -194,6 +222,12 @@ public sealed class ContextMenuRegistryCatalog
                 continue;
             }
 
+            if (state.ConsecutiveMissingSnapshots != 0)
+            {
+                state.ConsecutiveMissingSnapshots = 0;
+                dirty = true;
+            }
+
             dirty |= UpdateMetadata(state, merged);
         }
 
@@ -202,11 +236,12 @@ public sealed class ContextMenuRegistryCatalog
                      .OrderBy(static state => state.Category)
                      .ThenBy(static state => state.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            if (!state.IsDeleted && IsWithinStartupMissingStatePreservationWindow())
+            if (!state.IsDeleted && preserveMissingStates)
             {
                 // Service startup can happen before all per-user classes and packaged
-                // COM registrations are fully visible. Keeping the baseline alive for
-                // a short startup window prevents the entire catalog from being
+                // COM registrations are fully visible. Keeping the baseline alive
+                // until the first fully interactive snapshot has completed prevents the entire
+                // catalog from being
                 // re-quarantined as "new" once those registrations appear.
                 continue;
             }
@@ -216,8 +251,28 @@ public sealed class ContextMenuRegistryCatalog
             // reinstall looks like an old known item instead of a genuinely new one.
             if (!state.IsDeleted)
             {
-                missingStateIdsToRemove.Add(state.Id);
+                if (!CanPruneMissingStateForCurrentSnapshot(state, observedSourceRoots, observedWindows11Packages))
+                {
+                    if (state.ConsecutiveMissingSnapshots != 0)
+                    {
+                        state.ConsecutiveMissingSnapshots = 0;
+                        dirty = true;
+                    }
+
+                    continue;
+                }
+
+                state.ConsecutiveMissingSnapshots++;
                 dirty = true;
+                if (state.ConsecutiveMissingSnapshots < 2)
+                {
+                    // Require a settled item to be absent in more than one stable
+                    // snapshot before removing its baseline. This avoids startup
+                    // races where shell registrations arrive one polling cycle later.
+                    continue;
+                }
+
+                missingStateIdsToRemove.Add(state.Id);
                 continue;
             }
 
@@ -249,9 +304,25 @@ public sealed class ContextMenuRegistryCatalog
         return results;
     }
 
-    private bool IsWithinStartupMissingStatePreservationWindow()
+    private bool ShouldPreserveMissingStatesForCurrentSnapshot()
     {
-        return DateTimeOffset.UtcNow - _catalogStartedAtUtc < StartupMissingStatePreservationWindow;
+        return !_interactiveSessionObserved || !_interactiveSessionSnapshotSettled;
+    }
+
+    private static bool CanPruneMissingStateForCurrentSnapshot(
+        PersistedContextMenuState state,
+        ISet<string> observedSourceRoots,
+        ISet<string> observedWindows11Packages)
+    {
+        if (state.IsWindows11ContextMenu
+            || string.Equals(state.SourceRootPath, Windows11MonitoredRootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            var packageKey = ContextMenuApprovalIdentity.ExtractWin11PackageKey(state.RegistryPath);
+            return !string.IsNullOrWhiteSpace(packageKey)
+                   && observedWindows11Packages.Contains(packageKey);
+        }
+
+        return observedSourceRoots.Contains(state.SourceRootPath);
     }
 
     /// <summary>
@@ -318,6 +389,7 @@ public sealed class ContextMenuRegistryCatalog
 
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
 
             await _logger.LogAsync($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
 
@@ -478,6 +550,7 @@ public sealed class ContextMenuRegistryCatalog
             state.ShowAsDisabledIfHidden = attribute == ContextMenuShellAttribute.ShowAsDisabledIfHidden ? enable : state.ShowAsDisabledIfHidden;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
 
             await _logger.LogAsync($"Set attribute {attribute}={(enable ? "on" : "off")} for {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
 
@@ -553,6 +626,7 @@ public sealed class ContextMenuRegistryCatalog
             state.EditableText = parsedText;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
 
             var refreshed = (await GetSnapshotAsync(cancellationToken))
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
@@ -824,6 +898,7 @@ public sealed class ContextMenuRegistryCatalog
             state.DeletedAtUtc = DateTimeOffset.UtcNow;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
 
             await _logger.LogAsync($"Deleted {item.DisplayName} with backup {backupFilePath}.", cancellationToken);
 
@@ -941,6 +1016,7 @@ public sealed class ContextMenuRegistryCatalog
             state.DesiredEnabled = null;
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
 
             await _logger.LogAsync($"Restored deleted item {state.DisplayName}.", cancellationToken);
 
@@ -1043,6 +1119,7 @@ public sealed class ContextMenuRegistryCatalog
         state.BackupFilePath = null;
         state.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await _stateStore.SaveAsync(states, cancellationToken);
+        ShellChangeNotifier.NotifyAssociationsChanged();
 
         await _logger.LogAsync($"Quarantined new menu item pending approval: {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
 
@@ -2451,4 +2528,18 @@ public sealed class ContextMenuRegistryCatalog
         /// </summary>
         public string ComposeAbsolutePath(string relativePath) => $@"{AbsoluteRootPath}\{relativePath}";
     }
+}
+
+internal static class ShellChangeNotifier
+{
+    private const uint SHCNE_ASSOCCHANGED = 0x08000000;
+    private const uint SHCNF_IDLIST = 0x0000;
+
+    public static void NotifyAssociationsChanged()
+    {
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 }

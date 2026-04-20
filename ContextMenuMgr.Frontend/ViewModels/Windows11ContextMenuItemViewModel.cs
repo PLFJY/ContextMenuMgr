@@ -85,6 +85,8 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
 
     public string OpenFileLocationText => _localization.Translate("DetailsFileLocation");
 
+    public string PendingApprovalText => _localization.Translate("PendingApprovalBadge");
+
     /// <summary>
     /// Gets or sets a value indicating whether enabled.
     /// </summary>
@@ -98,6 +100,12 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsBusy { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this grouped item is pending approval.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsPendingApproval { get; set; }
 
     public bool IsMachineBlocked => Definitions.Any(static definition => definition.IsMachineBlocked);
 
@@ -117,6 +125,14 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         {
             _suppressSync = false;
         }
+    }
+
+    /// <summary>
+    /// Refreshes the pending-approval state for the grouped item.
+    /// </summary>
+    public void RefreshPendingApproval(bool isPendingApproval)
+    {
+        IsPendingApproval = isPendingApproval;
     }
 
     partial void OnIsEnabledChanged(bool oldValue, bool newValue)

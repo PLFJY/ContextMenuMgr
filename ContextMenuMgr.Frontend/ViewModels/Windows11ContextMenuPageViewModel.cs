@@ -1,8 +1,11 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
@@ -14,16 +17,19 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 {
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
+    private readonly ContextMenuWorkspaceService _workspace;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Windows11ContextMenuPageViewModel"/> class.
     /// </summary>
     public Windows11ContextMenuPageViewModel(
         Windows11ContextMenuService service,
-        LocalizationService localization)
+        LocalizationService localization,
+        ContextMenuWorkspaceService workspace)
     {
         _service = service;
         _localization = localization;
+        _workspace = workspace;
 
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
@@ -31,6 +37,12 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
         _localization.LanguageChanged += OnLanguageChanged;
         _service.ItemsChanged += OnItemsChanged;
+        _workspace.Items.CollectionChanged += OnWorkspaceItemsChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged += OnWorkspaceItemPropertyChanged;
+        }
+
         if (_service.IsSupported)
         {
             if (_service.HasLoaded)
@@ -88,12 +100,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     [RelayCommand]
     public async Task RefreshAsync()
     {
-        if (!_service.IsSupported)
-        {
-            return;
-        }
-
-        if (IsLoading)
+        if (!_service.IsSupported || IsLoading)
         {
             return;
         }
@@ -160,6 +167,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     private void RebuildItems(IReadOnlyList<Windows11ContextMenuItemDefinition> items)
     {
+        var pendingApprovalKeys = GetPendingApprovalKeys();
+
         foreach (var existing in Items)
         {
             existing.Dispose();
@@ -171,7 +180,9 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
                      .OrderBy(static group => group.First().Package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
                      .ThenBy(static group => group.First().DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            Items.Add(new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization));
+            var itemViewModel = new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization);
+            itemViewModel.RefreshPendingApproval(pendingApprovalKeys.Contains(group.Key));
+            Items.Add(itemViewModel);
         }
 
         ItemsView.Refresh();
@@ -179,10 +190,13 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     private static string CreateLogicalGroupKey(Windows11ContextMenuItemDefinition item)
     {
-        return string.Join("|",
-            item.Package.FamilyName,
+        var filePath = File.Exists(item.ComServer.Path ?? string.Empty)
+            ? item.ComServer.Path
+            : item.Package.InstallPath;
+        return ContextMenuApprovalIdentity.CreateWindows11LogicalItemKey(
+            item.Package.FullName,
             item.DisplayName,
-            item.ComServer.Path ?? string.Empty);
+            filePath);
     }
 
     private bool FilterItem(object obj)
@@ -218,9 +232,62 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     {
         _localization.LanguageChanged -= OnLanguageChanged;
         _service.ItemsChanged -= OnItemsChanged;
+        _workspace.Items.CollectionChanged -= OnWorkspaceItemsChanged;
+        foreach (var item in _workspace.Items)
+        {
+            item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
+        }
+
         foreach (var item in Items)
         {
             item.Dispose();
+        }
+    }
+
+    private HashSet<string> GetPendingApprovalKeys()
+    {
+        return _workspace.Items
+            .Where(static item => item.IsPendingApproval && item.IsWindows11ContextMenu)
+            .Select(static item => ContextMenuApprovalIdentity.CreateLogicalItemKey(item.Entry))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void RefreshPendingApprovalStates()
+    {
+        var pendingApprovalKeys = GetPendingApprovalKeys();
+        foreach (var item in Items)
+        {
+            item.RefreshPendingApproval(pendingApprovalKeys.Contains(CreateLogicalGroupKey(item.Definitions[0])));
+        }
+    }
+
+    private void OnWorkspaceItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems is not null)
+        {
+            foreach (ContextMenuItemViewModel item in e.NewItems)
+            {
+                item.PropertyChanged += OnWorkspaceItemPropertyChanged;
+            }
+        }
+
+        if (e.OldItems is not null)
+        {
+            foreach (ContextMenuItemViewModel item in e.OldItems)
+            {
+                item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
+            }
+        }
+
+        RefreshPendingApprovalStates();
+    }
+
+    private void OnWorkspaceItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.IsPendingApproval)
+            or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu))
+        {
+            RefreshPendingApprovalStates();
         }
     }
 }

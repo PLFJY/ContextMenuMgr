@@ -354,6 +354,9 @@
   <data name="ApprovalRemoveWithoutRegistryConfirmation" xml:space="preserve">
     <value>This review item no longer exists in the registry. It will only be removed from the review list.</value>
   </data>
+  <data name="ApprovalRemoveConfirmation" xml:space="preserve">
+    <value>This review item still exists in the registry. Confirming will only remove it from the review queue; delete it from its page if you also want to remove the menu entry.</value>
+  </data>
   <data name="ServiceMissingTitle" xml:space="preserve">
     <value>Backend service missing</value>
   </data>

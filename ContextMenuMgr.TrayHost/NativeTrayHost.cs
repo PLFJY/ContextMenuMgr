@@ -119,7 +119,7 @@ internal sealed class NativeTrayHost : IDisposable
         _hwnd = CreateWindowEx(
             WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
             WindowClassName,
-            "Context Menu Manager Plus Tray Host",
+            "Context Menu Manager Plus",
             WS_OVERLAPPED,
             0,
             0,

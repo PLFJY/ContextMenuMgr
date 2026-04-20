@@ -153,6 +153,11 @@ public sealed class PersistedContextMenuState
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>
+    /// Gets or sets the number of consecutive settled snapshots where this item was missing.
+    /// </summary>
+    public int ConsecutiveMissingSnapshots { get; set; }
+
+    /// <summary>
     /// Executes to Deleted Entry.
     /// </summary>
     public ContextMenuEntry ToDeletedEntry(string? consistencyIssue = null)
@@ -226,6 +231,7 @@ public sealed class PersistedContextMenuState
             IsPendingApproval = entry.IsPendingApproval,
             BackupFilePath = null,
             DeletedAtUtc = entry.DeletedAtUtc,
+            ConsecutiveMissingSnapshots = 0,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
     }

@@ -13,6 +13,7 @@ public sealed class ContextMenuRegistryMonitor
     private readonly FileLogger _logger;
     private readonly TimeSpan _pollInterval;
     private Task? _monitorTask;
+    private volatile bool _interactiveBaselineResetRequested;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryMonitor"/> class.
@@ -30,6 +31,15 @@ public sealed class ContextMenuRegistryMonitor
     public ContextMenuRegistryCatalog Catalog => _catalog;
 
     public event EventHandler<ContextMenuEntry>? ItemDetected;
+
+    /// <summary>
+    /// Requests that the monitor rebuild its runtime baseline from the first snapshot
+    /// captured after an interactive user session becomes available.
+    /// </summary>
+    public void NotifyInteractiveSessionObserved()
+    {
+        _interactiveBaselineResetRequested = true;
+    }
 
     /// <summary>
     /// Executes start.
@@ -54,6 +64,21 @@ public sealed class ContextMenuRegistryMonitor
                 var currentSnapshot = (await _catalog.GetSnapshotAsync(cancellationToken))
                     .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                     .ToList();
+
+                if (_interactiveBaselineResetRequested)
+                {
+                    // The first post-login snapshot is used to rebuild the monitor
+                    // baseline instead of generating "new item" events. Many per-user
+                    // HKCU/HKU handlers and packaged COM registrations only become
+                    // visible once the interactive shell is fully online.
+                    knownItems = currentSnapshot.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+                    _catalog.MarkInteractiveSessionSnapshotSettled();
+                    _interactiveBaselineResetRequested = false;
+                    await _logger.LogAsync(
+                        $"Interactive-session snapshot settled. Rebuilt monitor baseline with {knownItems.Count} visible items.",
+                        cancellationToken);
+                    continue;
+                }
 
                 foreach (var item in currentSnapshot.Where(item => !knownItems.ContainsKey(item.Id)))
                 {

@@ -99,6 +99,17 @@
                                         <Border
                                             Margin="0,0,8,8"
                                             Padding="8,2"
+                                            Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                            CornerRadius="4"
+                                            Visibility="{Binding IsPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                                Text="{Binding PendingApprovalText}" />
+                                        </Border>
+                                        <Border
+                                            Margin="0,0,8,8"
+                                            Padding="8,2"
                                             Background="{DynamicResource AccentFillColorSecondaryBrush}"
                                             CornerRadius="4">
                                             <TextBlock FontSize="11" Text="{Binding ContextTypesText}" />

@@ -115,6 +115,7 @@ public sealed class BackendRuntime : IDisposable
     {
         _ensureTrayHostOnStartup = ensureTrayHostOnStartup;
         _shutdownFrontendOnStop = true;
+        await _logger.LogAsync("========== Backend start ==========", cancellationToken);
         await _logger.LogAsync("Backend starting.", cancellationToken);
         await _monitor.Catalog.LogConsistencySummaryAsync(cancellationToken);
 
@@ -125,6 +126,7 @@ public sealed class BackendRuntime : IDisposable
         _pipeServer.Start(cancellationToken);
 
         await _logger.LogAsync("Backend started.", cancellationToken);
+        await _logger.LogAsync("========== Backend started ==========", cancellationToken);
 
         if (_ensureTrayHostOnStartup)
         {
@@ -153,7 +155,9 @@ public sealed class BackendRuntime : IDisposable
         }
 
         _pipeServer.Stop();
+        await _logger.LogAsync("========== Backend stop ==========");
         await _logger.LogAsync("Backend stopped.");
+        await _logger.LogAsync("========== Backend stopped ==========");
     }
 
     private static bool ConsumeKeepFrontendOnStopMarker()
@@ -188,6 +192,9 @@ public sealed class BackendRuntime : IDisposable
     /// </summary>
     public void NotifyInteractiveSessionAvailable(int sessionId)
     {
+        _monitor.Catalog.MarkInteractiveSessionObserved();
+        _monitor.NotifyInteractiveSessionObserved();
+
         if (!_ensureTrayHostOnStartup)
         {
             return;
@@ -244,6 +251,8 @@ public sealed class BackendRuntime : IDisposable
 
     private void OnEnsureTrayHostRequested(object? sender, EventArgs e)
     {
+        _monitor.Catalog.MarkInteractiveSessionObserved();
+        _monitor.NotifyInteractiveSessionObserved();
         TryEnsureTrayHost(null, requireAutostartPolicy: false);
     }
 
