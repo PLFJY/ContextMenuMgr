@@ -17,6 +17,7 @@ public sealed class ContextMenuRegistryCatalog
 {
     private const string BlockedShellExtensionsPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     internal const string Windows11MonitoredRootPath = @"PackagedCom\Windows11ContextMenu";
+    private static readonly TimeSpan StartupMissingStatePreservationWindow = TimeSpan.FromMinutes(2);
 
     private static readonly RegistryRootDescriptor[] MonitoredRoots =
     [
@@ -68,6 +69,7 @@ public sealed class ContextMenuRegistryCatalog
     private readonly RegistryBackupService _backupService;
     private readonly BackendProtectionSettingsStore _protectionSettingsStore;
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
+    private readonly DateTimeOffset _catalogStartedAtUtc = DateTimeOffset.UtcNow;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryCatalog"/> class.
@@ -200,6 +202,15 @@ public sealed class ContextMenuRegistryCatalog
                      .OrderBy(static state => state.Category)
                      .ThenBy(static state => state.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
+            if (!state.IsDeleted && IsWithinStartupMissingStatePreservationWindow())
+            {
+                // Service startup can happen before all per-user classes and packaged
+                // COM registrations are fully visible. Keeping the baseline alive for
+                // a short startup window prevents the entire catalog from being
+                // re-quarantined as "new" once those registrations appear.
+                continue;
+            }
+
             // External removals are intentionally silent in the UI, but they still
             // need to be removed from the persisted baseline. Otherwise a later
             // reinstall looks like an old known item instead of a genuinely new one.
@@ -236,6 +247,11 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         return results;
+    }
+
+    private bool IsWithinStartupMissingStatePreservationWindow()
+    {
+        return DateTimeOffset.UtcNow - _catalogStartedAtUtc < StartupMissingStatePreservationWindow;
     }
 
     /// <summary>
