@@ -204,3 +204,9 @@ scoop install PLFJY/ContextMenuMgrPlus-Beta
 
 ## ⭐ Stargazers over time
 [![Stargazers over time](https://starchart.cc/PLFJY/ContextMenuMgr.svg?variant=adaptive)](https://starchart.cc/PLFJY/ContextMenuMgr)
+
+## 其它 Git 镜像仓库
+
+[![AtomGitStars](https://gitcode.com/PLFJY/ContextMenuMgr/star/new_badge.svg)](https://gitcode.com/PLFJY/ContextMenuMgr)
+
+https://gitcode.com/PLFJY/ContextMenuMgr
