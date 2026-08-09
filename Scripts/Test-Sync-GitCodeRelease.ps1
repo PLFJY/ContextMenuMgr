@@ -96,6 +96,9 @@ foreach ($uploadPathCase in $uploadPathCases) {
     $expectedPath = "/repos/PLFJY/ContextMenuMgr/releases/v1.7.2/upload_url?file_name=$($uploadPathCase.Expected)"
     Assert-True ($actualPath -ceq $expectedPath) "Upload URL path must URI-encode '$($uploadPathCase.FileName)'."
 }
+Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 1MB).TotalMinutes -eq 30) 'Small uploads must retain the 30-minute bounded timeout.'
+Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 72MB).TotalMinutes -eq 87) 'Large uploads must receive a size-aware bounded timeout.'
+Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 500MB).TotalMinutes -eq 90) 'Upload timeout must remain bounded.'
 
 $expected = @((New-Asset 'installer x64.exe'), (New-Asset 'portable.zip'), (New-Asset '说明.txt'))
 $none = Get-GitCodeAssetPlan -ExpectedAssets $expected -ExistingAssets @()

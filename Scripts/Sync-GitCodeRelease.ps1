@@ -548,6 +548,17 @@ function Get-GitCodeUploadDescriptor {
     return ConvertTo-GitCodeUploadDescriptor -Response $response.Json
 }
 
+function Get-GitCodeAttachmentUploadTimeout {
+    param([Parameter(Mandatory)] [Int64] $FileLength)
+
+    # AtomGit's OBS endpoint is reached from a hosted runner in the US. Allow
+    # sufficient time for the self-contained packages, but keep every request
+    # bounded. The 90-minute cap also leaves room for a bounded retry.
+    $sizeInMiB = [Math]::Ceiling($FileLength / 1MB)
+    $minutes = [Math]::Max(30, 15 + $sizeInMiB)
+    return [TimeSpan]::FromMinutes([Math]::Min(90, $minutes))
+}
+
 function Invoke-GitCodeAttachmentUpload {
     param(
         [Parameter(Mandatory)] [object] $UploadDescriptor,
@@ -560,7 +571,7 @@ function Invoke-GitCodeAttachmentUpload {
     # Release installers can take longer than HttpClient's default 100-second
     # timeout to reach the OBS endpoint. Keep this bounded, while retaining a
     # fresh client and a fresh signed URL for every retry attempt.
-    $client.Timeout = [TimeSpan]::FromMinutes(30)
+    $client.Timeout = Get-GitCodeAttachmentUploadTimeout -FileLength (Get-Item -LiteralPath $FilePath).Length
     $stream = $null
     $request = $null
     $response = $null
