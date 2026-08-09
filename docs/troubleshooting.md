@@ -219,6 +219,3 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的代码 | `ContextMenuRegistryCatalog.cs`、`IconPreviewService.cs`、`Windows11ContextMenuCatalog.cs`、`ContextMenuDeepAnalysisService.cs`。 |
 | 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
 | 常见修复方向 | 把解析结果视为 best-effort；不要用显示名或图标路径作为唯一 identity；必要时用 Deep Analysis 辅助确认实际菜单文字。 |
-# Persistent ShellProxy wrappers
-
-An existing wrapped classic handler does not require ContextMenuMgr to be running. If a third-party installer later rewrites its exact `ContextMenuHandlers` value while the service is stopped, the top-level registration can temporarily return until ContextMenuMgr is next started and reconciliation runs. Uninstall deliberately retains persistent proxy registrations and binaries; reinstall can rediscover them. Use the explicit “Restore original top-level menu” action before removing a wrapper.

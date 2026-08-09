@@ -161,7 +161,4 @@ public interface IBackendClient : IAsyncDisposable
         DocumentIconProvider provider,
         CancellationToken cancellationToken);
 
-    Task<ShellProxyWrapperStatus?> CreateShellProxyWrapperAsync(ContextMenuEntry item, string title, CancellationToken cancellationToken);
-    Task RemoveShellProxyWrapperAsync(ContextMenuEntry item, CancellationToken cancellationToken);
-    Task<ShellProxyWrapperStatus?> UpdateShellProxyWrapperAsync(ContextMenuEntry item, string title, CancellationToken cancellationToken);
 }

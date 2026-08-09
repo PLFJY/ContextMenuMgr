@@ -25,7 +25,6 @@ public sealed class NamedPipeBackendServer
     private readonly AutoStartService _autoStartService;
     private readonly FileTypeSceneMenuService _fileTypeSceneMenuService;
     private readonly ExplorerRestartService _explorerRestartService;
-    private readonly ShellProxyManager _shellProxyManager;
     private readonly FileLogger _logger;
     private readonly ConcurrentDictionary<Guid, PipeClientConnection> _clients = new();
     private CancellationTokenSource? _acceptLoopCts;
@@ -45,7 +44,6 @@ public sealed class NamedPipeBackendServer
         AutoStartService autoStartService,
         FileTypeSceneMenuService fileTypeSceneMenuService,
         ExplorerRestartService explorerRestartService,
-        ShellProxyManager shellProxyManager,
         FileLogger logger)
     {
         _catalog = catalog;
@@ -55,7 +53,6 @@ public sealed class NamedPipeBackendServer
         _autoStartService = autoStartService;
         _fileTypeSceneMenuService = fileTypeSceneMenuService;
         _explorerRestartService = explorerRestartService;
-        _shellProxyManager = shellProxyManager;
         _logger = logger;
     }
 
@@ -519,14 +516,6 @@ public sealed class NamedPipeBackendServer
                 },
             PipeCommand.SetDocumentIconProvider when request.DocumentIconProvider is not null
                 => await HandleSetDocumentIconProviderAsync(request.DocumentIconProvider.Value, stream, cancellationToken),
-            PipeCommand.CreateShellProxyWrapper when request.ShellProxyWrapper is not null
-                => await _shellProxyManager.CreateAsync(request.ShellProxyWrapper, await ResolveFrontendUserContextAsync(stream, cancellationToken), cancellationToken),
-            PipeCommand.RemoveShellProxyWrapper when request.ShellProxyWrapper is not null
-                => await _shellProxyManager.RemoveAsync(request.ShellProxyWrapper, cancellationToken),
-            PipeCommand.GetShellProxyWrapperStatus when request.ShellProxyWrapper is not null
-                => _shellProxyManager.GetStatus(request.ShellProxyWrapper),
-            PipeCommand.UpdateShellProxyWrapper when request.ShellProxyWrapper is not null
-                => _shellProxyManager.UpdateAsync(request.ShellProxyWrapper),
             _ => new PipeResponse
             {
                 Success = false,

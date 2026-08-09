@@ -404,8 +404,6 @@
                                                     <MenuItem Header="{Binding NeverDefaultLabel}" IsCheckable="True" IsChecked="{Binding NeverDefault, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEditShellAttributes}" />
                                                     <MenuItem Header="{Binding ShowAsDisabledIfHiddenLabel}" IsCheckable="True" IsChecked="{Binding ShowAsDisabledIfHidden, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEditShellAttributes}" />
                                                 </MenuItem>
-                                                <MenuItem Header="{Binding ShellProxyWrapText}" Command="{Binding ConfigureShellProxyCommand}" Visibility="{Binding CanManageShellProxy, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <MenuItem Header="{Binding ShellProxyRestoreText}" Command="{Binding RestoreShellProxyCommand}" Visibility="{Binding IsShellProxyWrapped, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <MenuItem Header="{Binding DetailsTitle}" Visibility="{Binding HasDetailsActions, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <MenuItem Header="{Binding DetailsChangeTextLabel}" Command="{Binding ChangeTextCommand}" Visibility="{Binding CanEditText, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                     <MenuItem Header="{Binding DetailsSearchOnline}" Command="{Binding SearchOnlineCommand}" Visibility="{Binding CanSearchOnline, Converter={StaticResource BooleanToVisibilityConverter}}" />

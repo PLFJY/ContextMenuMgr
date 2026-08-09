@@ -182,6 +182,4 @@ public sealed record PipeRequest
 
     public DocumentIconProvider? DocumentIconProvider { get; init; }
 
-    /// <summary>Typed request for persistent classic shell-extension submenu wrapping.</summary>
-    public ShellProxyWrapperRequest? ShellProxyWrapper { get; init; }
 }

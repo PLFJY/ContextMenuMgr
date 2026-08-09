@@ -1525,9 +1525,6 @@
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>受保護的檔案類型 open/edit 項目不能在這裡刪除，請改用關閉開關。</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>找不到相關檔案類型選單項目。</value></data>
   <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>要刪除 {0} 個相關項目嗎？刪除前會建立登錄備份。{1} 個受保護的 open/edit 項目會被略過。</value></data>
-  <data name="ShellProxyWrapText" xml:space="preserve"><value>將處理常式選單移入子選單</value></data>
-  <data name="ShellProxyUpdateText" xml:space="preserve"><value>更新子選單標題</value></data>
-  <data name="ShellProxyRestoreText" xml:space="preserve"><value>還原原始頂層選單</value></data>
   <data name="CompactView" xml:space="preserve"><value>精簡</value></data>
   <data name="DisplayMode" xml:space="preserve"><value>顯示模式</value></data>
   <data name="DetailedView" xml:space="preserve"><value>詳細</value></data>

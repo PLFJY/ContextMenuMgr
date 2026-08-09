@@ -72,5 +72,4 @@ public sealed record PipeResponse
 
     public OfficeSuiteCoexistenceStatus? OfficeSuiteCoexistence { get; init; }
 
-    public ShellProxyWrapperStatus? ShellProxyWrapper { get; init; }
 }

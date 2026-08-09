@@ -2334,15 +2334,6 @@ public sealed class ContextMenuRegistryCatalog
                 var handlerClsid = root.EntryKind == ContextMenuEntryKind.ShellExtension
                     ? ResolveShellExtensionHandlerClsid(subKeyName, defaultValue)
                     : null;
-                ShellProxyManager.ShellProxyMetadata? shellProxy = null;
-                var shellProxyHealth = ShellProxyHealth.Unknown;
-                if (root.EntryKind == ContextMenuEntryKind.ShellExtension
-                    && !string.IsNullOrWhiteSpace(handlerClsid)
-                    && ShellProxyManager.TryProject(handlerClsid, instance.ComposeAbsolutePath($@"{root.RelativePath}\{subKeyName}"), out var projectedProxy, out shellProxyHealth))
-                {
-                    shellProxy = projectedProxy;
-                    handlerClsid = projectedProxy.OriginalHandlerClsid;
-                }
                 var displayName = ResolveDisplayName(root, itemKey, subKeyName, defaultValue, handlerClsid);
                 var editableText = root.EntryKind == ContextMenuEntryKind.ShellVerb
                     ? ResolveEditableText(itemKey, defaultValue)
@@ -2393,11 +2384,6 @@ public sealed class ContextMenuRegistryCatalog
                     CommandText = commandText,
                     CanEditCommandText = canEditCommandText,
                     HandlerClsid = handlerClsid,
-                    IsShellProxyWrapped = shellProxy is not null,
-                    ShellProxyClsid = shellProxy?.ProxyClsid,
-                    ShellProxyOriginalHandlerClsid = shellProxy?.OriginalHandlerClsid,
-                    ShellProxyMenuTitle = shellProxy?.MenuTitle,
-                    ShellProxyHealth = shellProxyHealth,
                     IconPath = iconPath,
                     IconIndex = iconIndex,
                     FilePath = filePath,

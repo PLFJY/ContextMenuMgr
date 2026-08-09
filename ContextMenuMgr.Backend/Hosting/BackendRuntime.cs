@@ -108,12 +108,11 @@ public sealed class BackendRuntime : IDisposable
 
         BackendEmergencyLogger.Log("CreateDefault: creating ContextMenuRegistryMonitor.");
         var userContextResolver = new BackendUserContextResolver(logger);
-        var shellProxyManager = new ShellProxyManager(logger);
-        var monitor = new ContextMenuRegistryMonitor(catalog, shellProxyManager, logger, userContextResolver);
+        var monitor = new ContextMenuRegistryMonitor(catalog, logger, userContextResolver);
         BackendEmergencyLogger.Log("CreateDefault: ContextMenuRegistryMonitor created.");
 
         BackendEmergencyLogger.Log("CreateDefault: creating NamedPipeBackendServer.");
-        var pipeServer = new NamedPipeBackendServer(catalog, specialMenuService, windows11BlocksService, win11ClassicContextMenuService, autoStartService, fileTypeSceneMenuService, explorerRestartService, shellProxyManager, logger);
+        var pipeServer = new NamedPipeBackendServer(catalog, specialMenuService, windows11BlocksService, win11ClassicContextMenuService, autoStartService, fileTypeSceneMenuService, explorerRestartService, logger);
         BackendEmergencyLogger.Log("CreateDefault: NamedPipeBackendServer created.");
         stateStore.PortableHostMismatchDetected += (_, message) =>
         {

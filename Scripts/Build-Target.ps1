@@ -57,7 +57,6 @@ try {
     $backendProject = Join-Path $repoRoot 'ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj'
     $trayHostProject = Join-Path $repoRoot 'ContextMenuMgr.TrayHost\ContextMenuMgr.TrayHost.csproj'
     $probeHostProject = Join-Path $repoRoot 'ContextMenuMgr.ProbeHost\ContextMenuMgr.ProbeHost.vcxproj'
-    $shellProxyProject = Join-Path $repoRoot 'ContextMenuMgr.ShellProxy\ContextMenuMgr.ShellProxy.vcxproj'
     $nuGetConfig = Join-Path $repoRoot 'NuGet.Config'
     $installerIss = Join-Path $repoRoot 'Installer\build_Installer.iss'
     if ([string]::IsNullOrWhiteSpace($PublishRoot)) {
@@ -86,7 +85,6 @@ try {
     Ensure-FileExists -Path $backendProject -Description 'Backend project'
     Ensure-FileExists -Path $trayHostProject -Description 'Tray host project'
     Ensure-FileExists -Path $probeHostProject -Description 'Native ProbeHost project'
-    Ensure-FileExists -Path $shellProxyProject -Description 'Native ShellProxy project'
     Ensure-FileExists -Path $nuGetConfig -Description 'NuGet config'
     Ensure-FileExists -Path $installerIss -Description 'Inno Setup script'
 

@@ -113,10 +113,6 @@ artifacts\probehost-native\<Configuration>\obj\arm64\
 
 ## 6. ProbeHost 多架构
 
-## ShellProxy 多架构 DLL
-
-`ContextMenuMgr.ShellProxy` is a separate native C++20 in-process COM DLL, not a ProbeHost replacement and not a shipped helper executable. Build/publish output places x86, x64, and arm64 deployment sources under `ShellProxy\<arch>\ContextMenuMgr.ShellProxy.dll`. Packaging verifies the DLL PE machine before placing it in each architecture directory. At first wrap, the service copies a validated version to the persistent ProgramData proxy root; it never overwrites a potentially Explorer-loaded DLL.
-
 `Get-ProbeHostArchitectureMap` 定义发布包应携带的 ProbeHost 架构：
 
 | 发布平台 | ProbeHost 架构 |
