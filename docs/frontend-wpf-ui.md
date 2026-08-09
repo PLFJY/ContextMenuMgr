@@ -207,7 +207,7 @@ SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`�
     ...>
 ```
 
-该附加属性以 `handledEventsToo: true` 注册 `RequestBringIntoViewEvent`，在 ListBox 层标记 `Handled = true`，阻止事件冒泡到外层滚动宿主。由于 ListBox 内部 ScrollViewer 位于 ListBox 之下（事件先到达内层），列表自身的滚动行为不受影响。当前在传统菜单页（`CategoryPageView`）和 Win11 菜单页（`Windows11ContextMenuPageView`）的 ListBox 上启用。其它使用 `ScrollableListBoxItemStyle` 且会在运行时 `Refresh` 的列表如出现同样的“开关后滚动跳动”现象，可同样启用。
+该附加属性以 `handledEventsToo: true` 注册 `RequestBringIntoViewEvent`，在列表控件层标记 `Handled = true`，阻止事件冒泡到外层滚动宿主。由于 ListBox 内部 ScrollViewer 位于 ListBox 之下（事件先到达内层），列表自身的滚动行为不受影响。当前在传统菜单页（`CategoryPageView`）、Win11 菜单页（`Windows11ContextMenuPageView`）的 ListBox，以及 ShellNew 等 SpecialMenu 所用的 `SpecialMenuContentView` ItemsControl 上启用。其它运行时刷新或回写条目的列表如出现同样的“开关后滚动跳动”现象，可同样启用。
 
 ## 8. AutoSuggestBox 与全局搜索
 
@@ -331,6 +331,8 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
 
 同一处还提供“隐藏已禁用项”，它直接使用 `FrontendSettings.HideDisabledItems`。开启后只隐藏未删除且已禁用的项目；已删除项目必须继续可见，以便撤销或永久删除。切换视图模式不会刷新后端、重建 workspace 或清空搜索文本；切换此筛选只刷新当前 `ItemsView`，不修改注册表。排序固定为 attention、deleted-state、display name，不能加入 `IsEnabled`，否则用户开关项目时会造成列表跳位。
+
+SpecialMenu 行内操作的结构性可见性不能依赖临时 `IsBusy` 状态。例如可移动项目在 Busy 时仍显示 Move Up/Down 按钮，只通过 `CanMoveUp` / `CanMoveDown` 禁用它们；只有项目不支持移动、已删除或不存在可用方向时才折叠按钮。这样右侧 `Auto` 宽度操作区在异步操作期间保持稳定，不会发生横向跳动。
 
 ## 13. InfoBar、错误提示与用户友好失败
 

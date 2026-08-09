@@ -94,7 +94,9 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         && Entry.Metadata.GetValueOrDefault("CanEditDetails") != "false"
         && !IsDeleted;
 
-    public bool ShowMove => CanMoveUp || CanMoveDown;
+    public bool ShowMove => Entry.CanMove
+        && !IsDeleted
+        && (_canMoveUp || _canMoveDown);
 
     public bool ShowToggle => Entry.CanEdit
         && Entry.Metadata.GetValueOrDefault("EntryType") is not ("DefaultDropEffect" or "Separator")
@@ -136,7 +138,6 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanMove))]
     [NotifyPropertyChangedFor(nameof(CanMoveDown))]
     [NotifyPropertyChangedFor(nameof(CanMoveUp))]
-    [NotifyPropertyChangedFor(nameof(ShowMove))]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsBusy { get; set; }
 

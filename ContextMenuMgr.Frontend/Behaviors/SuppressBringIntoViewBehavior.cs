@@ -7,13 +7,13 @@ namespace ContextMenuMgr.Frontend.Behaviors;
 /// 阻止其继续冒泡到外层导航滚动宿主。
 /// </summary>
 /// <remarks>
-/// 适用于绑定到 <see cref="System.Windows.Data.CollectionView"/> 的 ListBox 等列表控件：
+/// 适用于绑定到 <see cref="System.Windows.Data.CollectionView"/> 的 ListBox、ItemsControl 等列表控件：
 /// 列表刷新（<c>ItemsView.Refresh()</c>）会重新生成 item 容器，WPF 框架可能在此期间引发
 /// <see cref="FrameworkElement.RequestBringIntoViewEvent"/>（焦点恢复 / 选中项恢复）。
 /// 列表内部的 ScrollViewer 在容器尚未完成布局时无法正确处理该事件，事件会冒泡到外层
 /// <c>ModernScrollViewer</c>，导致外层滚动位置跳动（例如把页头筛选框滚出视野）。
-/// 在 ListBox 上启用本行为后，事件在 ListBox 层被标记为已处理，不再冒泡到外层；
-/// 列表内部 ScrollViewer 位于 ListBox 之下，其自身滚动行为不受影响。
+/// 在列表控件上启用本行为后，事件在该层被标记为已处理，不再冒泡到外层；
+/// 若列表内部有 ScrollViewer，它位于控件之下，其自身滚动行为不受影响。
 /// </remarks>
 public static class SuppressBringIntoViewBehavior
 {
