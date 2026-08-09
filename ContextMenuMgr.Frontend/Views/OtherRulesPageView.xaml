@@ -148,7 +148,7 @@
                                 <Border
                                     Grid.Row="1"
                                     Style="{StaticResource OtherRulesScrollViewportStyle}">
-                                    <ScrollViewer
+                                    <modernScroll:ModernScrollViewer
                                         HorizontalScrollBarVisibility="Disabled"
                                         VerticalScrollBarVisibility="Auto">
                                         <ItemsControl
@@ -228,7 +228,7 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                    </ScrollViewer>
+                                    </modernScroll:ModernScrollViewer>
                                 </Border>
                             </Grid>
                         </Border>
@@ -369,7 +369,7 @@
                                 <Border
                                     Grid.Row="1"
                                     Style="{StaticResource OtherRulesScrollViewportStyle}">
-                                    <ScrollViewer
+                                    <modernScroll:ModernScrollViewer
                                         HorizontalScrollBarVisibility="Disabled"
                                         VerticalScrollBarVisibility="Auto">
                                         <ItemsControl
@@ -440,7 +440,7 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                    </ScrollViewer>
+                                    </modernScroll:ModernScrollViewer>
                                 </Border>
                             </Grid>
                         </Border>

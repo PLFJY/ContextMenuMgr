@@ -320,7 +320,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     {
         if (showBusy)
         {
-            IsBusy = true;
+            await SetBusyAsync(true);
+            await YieldToUiAsync();
         }
 
         try
@@ -336,6 +337,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            await ApplySnapshotAsync(snapshot);
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRefreshGeneration(generation))
@@ -343,7 +345,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     return;
                 }
 
-                ApplySnapshot(snapshot);
                 StatusText = string.Empty;
                 if (markLoaded)
                 {
@@ -390,7 +391,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         {
             if (showBusy && IsCurrentRefreshGeneration(generation))
             {
-                IsBusy = false;
+                await SetBusyAsync(false);
             }
         }
     }
@@ -1015,41 +1016,82 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         return null;
     }
 
-    private void ApplySnapshot(IEnumerable<SpecialMenuEntry> snapshot)
+    private async Task ApplySnapshotAsync(IEnumerable<SpecialMenuEntry> snapshot)
     {
         var entries = snapshot.ToArray();
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        if (!dispatcher.CheckAccess())
+        {
+            await dispatcher.InvokeAsync(() => ApplySnapshotCoreAsync(entries)).Task.Unwrap();
+            return;
+        }
+
+        await ApplySnapshotCoreAsync(entries);
+    }
+
+    private async Task ApplySnapshotCoreAsync(IReadOnlyList<SpecialMenuEntry> entries)
+    {
         if (Kind == SpecialMenuKind.WinX)
         {
             ApplyWinXSnapshotIncrementally(entries);
             return;
         }
 
-        var existing = new Dictionary<string, SpecialMenuItemViewModel>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in Items)
+        var isInitialLoad = Items.Count == 0;
+        if (isInitialLoad)
         {
-            existing[item.Id] = item;
+            await AddInitialItemsAsync(entries);
         }
-
-        Items.Clear();
-        foreach (var entry in entries)
+        else
         {
-            if (existing.TryGetValue(entry.Id, out var current))
-            {
-                current.Update(entry);
-            }
-            else
-            {
-                current = new SpecialMenuItemViewModel(entry, _iconPreviewService, _localization, SetEnabledAsync);
-            }
-
-            Items.Add(current);
+            ReconcileItemsIncrementally(entries);
         }
 
         UpdatePageStateFromSnapshot(entries);
         UpdateShellNewMoveAvailability();
         RebuildWinXGroups();
-        ItemsView.Refresh();
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            ItemsView.Refresh();
+        }
+
         RefreshListPlaceholderState();
+    }
+
+    private async Task AddInitialItemsAsync(IReadOnlyList<SpecialMenuEntry> entries)
+    {
+        for (var index = 0; index < entries.Count; index++)
+        {
+            Items.Add(new SpecialMenuItemViewModel(
+                entries[index],
+                _iconPreviewService,
+                _localization,
+                SetEnabledAsync));
+
+            if ((index + 1) % 32 == 0)
+            {
+                await YieldToUiAsync();
+            }
+        }
+    }
+
+    private static async Task YieldToUiAsync()
+    {
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(
+            static () => { },
+            System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private async Task SetBusyAsync(bool value)
+    {
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        if (dispatcher.CheckAccess())
+        {
+            IsBusy = value;
+            return;
+        }
+
+        await dispatcher.InvokeAsync(() => IsBusy = value);
     }
 
     private void ApplyWinXSnapshotIncrementally(IReadOnlyList<SpecialMenuEntry> entries)
@@ -1668,6 +1710,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private void StartAutoRefreshLoop()
     {
+        if (Kind == SpecialMenuKind.CommandStore)
+        {
+            return;
+        }
+
         if (_autoRefreshTask is { IsCompleted: false })
         {
             return;

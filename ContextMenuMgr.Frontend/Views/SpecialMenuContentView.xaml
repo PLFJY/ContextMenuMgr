@@ -2,6 +2,7 @@
     x:Class="ContextMenuMgr.Frontend.Views.SpecialMenuContentView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
@@ -143,8 +144,12 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="1" MinHeight="240">
-            <ItemsControl ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
+        <modernScroll:ModernScrollViewer
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <Grid MinHeight="240">
+                <ItemsControl ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.Resources>
                     <DataTemplate x:Key="WinXEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
                         <Border
@@ -410,9 +415,9 @@
                         </Expander>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ItemsControl>
 
-            <ItemsControl ItemsSource="{Binding ItemsView}" Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <ItemsControl ItemsSource="{Binding ItemsView}" Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
                         <Border
@@ -580,20 +585,20 @@
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ItemsControl>
 
-            <Border
-                Padding="24,18"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Panel.ZIndex="100"
-                Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="12"
-                IsHitTestVisible="False"
-                Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel MinWidth="180" HorizontalAlignment="Center">
+                <Border
+                    Padding="24,18"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Panel.ZIndex="100"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    IsHitTestVisible="False"
+                    Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel MinWidth="180" HorizontalAlignment="Center">
                     <ProgressBar
                         Width="120"
                         Height="4"
@@ -623,8 +628,9 @@
                             </Style>
                         </ui:TextBlock.Style>
                     </ui:TextBlock>
-                </StackPanel>
-            </Border>
-        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </modernScroll:ModernScrollViewer>
     </Grid>
 </UserControl>

@@ -188,6 +188,12 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 OtherRules 这类复杂页面要区分外层导航滚动、TabControl 页面滚动、左侧列表滚动和右侧详情滚动。不要因为滚动异常去改后端、注册表或菜单状态逻辑。
 
+OtherRules 和 FileTypes 页面自身声明 `ModernScroll.Ownership="Self"`，由 Tab 内容管理内部滚动。OtherRules 的两个规则详情面板、`DragDrop` / `CommandStore` / `GuidBlock` 复用的 `SpecialMenuContentView`、以及 FileTypes 的 `SceneBrowserView` 和文件类型批量管理视图，必须以 `ModernScrollViewer` 承载可增长的内容；不要依赖 `ListBox` 的默认滚动条。
+
+其它导航页面没有声明 `Ownership="Self"`，因此继续使用 `ModernFrame.ContentScrollHost` 这一共享的 `ModernScrollViewer`。不要在这些页面再包一层无约束的滚动宿主，否则会产生嵌套滚动或无限测量，反而使滚动失效。
+
+SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`，再请求后端快照。`CommandStore` 等结果较多的快照仅在首次加载时分批加入绑定集合，并异步提取图标；后续刷新必须原地差量更新，不能清空集合后重新添加。`CommandStore` 不启用定时全量刷新，依赖用户手动刷新和后端通知更新，避免持续重建列表造成滚动和布局卡顿。
+
 ### 7.1 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
 
 绑定到 `ListCollectionView`（`ItemsView`）的 ListBox 在运行时调用 `ItemsView.Refresh()`（例如传统菜单页开关菜单项、Win11 页 `RebuildItems`）会触发 `CollectionChanged(Reset)`，导致 ListBox 重新生成所有 item 容器。容器重新生成期间，WPF 框架的焦点恢复 / 选中项恢复逻辑会引发 `FrameworkElement.RequestBringIntoView` 路由事件。此时 ListBox 内部 ScrollViewer 因容器尚未完成布局无法正确处理该事件，事件会继续**冒泡**到外层 `ModernScrollViewer`，外层滚动到让 ListBox 顶部可见——表现为页头标题与筛选框被滚出视野、列表顶部对齐窗口顶部。

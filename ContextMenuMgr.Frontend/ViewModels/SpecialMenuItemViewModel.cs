@@ -17,6 +17,9 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     private bool _canMoveDown = true;
     private bool _canMoveUp = true;
     private bool _suppressSync;
+    private ImageSource? _iconSource;
+    private int _iconLoadGeneration;
+    private string? _iconRequestKey;
 
     public SpecialMenuItemViewModel(
         SpecialMenuEntry entry,
@@ -38,6 +41,8 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         {
             _suppressSync = false;
         }
+
+        RequestIconLoad();
     }
 
     public SpecialMenuEntry Entry { get; private set; }
@@ -97,7 +102,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool IsSeparator => Entry.Metadata.GetValueOrDefault("EntryType") == "Separator";
 
-    public ImageSource? IconSource => _iconPreviewService.GetIcon(Entry.IconPath, Entry.IconIndex, Entry.TargetPath ?? Entry.Path);
+    public ImageSource? IconSource => _iconSource;
 
     public string DeletedAtText => _localization.Format("DeletedAt", Entry.Metadata.TryGetValue("DeletedAt", out var deletedAt) ? deletedAt : string.Empty);
 
@@ -188,7 +193,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowMove));
         OnPropertyChanged(nameof(ShowToggle));
         OnPropertyChanged(nameof(IsSeparator));
-        OnPropertyChanged(nameof(IconSource));
+        RequestIconLoad();
         OnPropertyChanged(nameof(DeletedAtText));
         OnPropertyChanged(nameof(CardOpacity));
     }
@@ -212,6 +217,41 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CanMoveUp));
         OnPropertyChanged(nameof(CanMoveDown));
         OnPropertyChanged(nameof(ShowMove));
+    }
+
+    private void RequestIconLoad()
+    {
+        var fallbackFilePath = Entry.TargetPath ?? Entry.Path;
+        var requestKey = $"{Entry.IconPath}\u001f{Entry.IconIndex}\u001f{fallbackFilePath}";
+        if (string.Equals(_iconRequestKey, requestKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _iconRequestKey = requestKey;
+        var generation = ++_iconLoadGeneration;
+        _ = LoadIconAsync(generation, Entry.IconPath, Entry.IconIndex, fallbackFilePath);
+    }
+
+    private async Task LoadIconAsync(int generation, string? iconPath, int iconIndex, string? fallbackFilePath)
+    {
+        try
+        {
+            var icon = await _iconPreviewService.GetIconAsync(iconPath, iconIndex, fallbackFilePath);
+            if (generation != _iconLoadGeneration)
+            {
+                return;
+            }
+
+            _iconSource = icon;
+            OnPropertyChanged(nameof(IconSource));
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Info(
+                "SpecialMenuItemViewModel",
+                $"Icon load skipped. ItemId={Id}, Message={ex.Message}");
+        }
     }
 
     partial void OnIsEnabledChanged(bool oldValue, bool newValue)

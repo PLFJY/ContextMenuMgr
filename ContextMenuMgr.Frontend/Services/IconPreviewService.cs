@@ -19,6 +19,7 @@ public sealed class IconPreviewService
     private const int DefaultExeIconIndex = -15;
 
     private readonly ConcurrentDictionary<string, ImageSource?> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _backgroundLoadLimiter = new(initialCount: 4, maxCount: 4);
 
     /// <summary>
     /// Gets icon.
@@ -39,6 +40,29 @@ public sealed class IconPreviewService
             : NormalizeIconPath(fallbackFilePath);
         var cacheKey = $"{normalizedPath}|{normalizedIndex}|{normalizedFallbackFilePath}|{hasExplicitIcon}";
         return _cache.GetOrAdd(cacheKey, _ => LoadIcon(normalizedPath, normalizedIndex, normalizedFallbackFilePath, preferFallback: !hasExplicitIcon));
+    }
+
+    /// <summary>
+    /// Gets an icon without blocking the UI thread on shell or file-system icon extraction.
+    /// </summary>
+    public async Task<ImageSource?> GetIconAsync(
+        string? iconPath,
+        int iconIndex,
+        string? fallbackFilePath = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _backgroundLoadLimiter.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(
+                    () => GetIcon(iconPath, iconIndex, fallbackFilePath),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _backgroundLoadLimiter.Release();
+        }
     }
 
     private static ImageSource? LoadIcon(string iconPath, int iconIndex, string? fallbackFilePath, bool preferFallback = false)
