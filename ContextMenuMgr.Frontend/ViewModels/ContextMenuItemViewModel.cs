@@ -504,7 +504,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string DetailsTitle => _localization.Translate("DetailsTitle");
 
-    public string ViewApplicationGroupText => _localization.Translate("ApplicationGroupsPageTitle");
+    public string ManageApplicationMenusText => _localization.Translate("ManageApplicationMenus");
 
     public string OnlyWithShiftLabel => _localization.Translate("OnlyWithShiftLabel");
 
@@ -1015,7 +1015,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MoreActionsText));
         OnPropertyChanged(nameof(OtherAttributesTitle));
         OnPropertyChanged(nameof(DetailsTitle));
-        OnPropertyChanged(nameof(ViewApplicationGroupText));
+        OnPropertyChanged(nameof(ManageApplicationMenusText));
         OnPropertyChanged(nameof(OnlyWithShiftLabel));
         OnPropertyChanged(nameof(OnlyInExplorerLabel));
         OnPropertyChanged(nameof(NoWorkingDirectoryLabel));

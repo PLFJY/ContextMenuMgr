@@ -1499,12 +1499,14 @@
   <data name="RegistryProtectionCancelText" xml:space="preserve">
     <value>取消</value>
   </data>
-  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>应用分组</value></data>
-  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>按应用程序或注册表标识对传统右键菜单项分组。</value></data>
+  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>按应用管理</value></data>
+  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>查看同一应用在不同位置注册的右键菜单，并进行批量管理。</value></data>
+  <data name="ManageApplicationMenus" xml:space="preserve"><value>管理该应用的菜单</value></data>
+  <data name="ApplicationGroupsNoItems" xml:space="preserve"><value>未找到属于同一应用的其他菜单项</value></data>
   <data name="DetailsEditUserNote" xml:space="preserve"><value>编辑备注</value></data>
   <data name="UserNoteLabel" xml:space="preserve"><value>本地备注</value></data>
   <data name="UserNoteDisplayFormat" xml:space="preserve"><value>备注：{0}</value></data>
-  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>正在显示所选项目的应用分组。</value></data>
+  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>正在显示所选应用的菜单。</value></data>
   <data name="ClearApplicationGroupFilter" xml:space="preserve"><value>清除筛选</value></data>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} 个菜单项</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>全部禁用</value></data>

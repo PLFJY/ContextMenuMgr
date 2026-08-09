@@ -1499,12 +1499,14 @@ Continue anyway? (Not recommended)</value>
   <data name="RegistryProtectionCancelText" xml:space="preserve">
     <value>Cancel</value>
   </data>
-  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>Application groups</value></data>
-  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>Classic context menu entries grouped by application or registry identity.</value></data>
+  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>Manage by App</value></data>
+  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>View context menu entries registered by the same application across different locations and manage them together.</value></data>
+  <data name="ManageApplicationMenus" xml:space="preserve"><value>Manage This App's Menus</value></data>
+  <data name="ApplicationGroupsNoItems" xml:space="preserve"><value>No other menu entries for the same application were found</value></data>
   <data name="DetailsEditUserNote" xml:space="preserve"><value>Edit note</value></data>
   <data name="UserNoteLabel" xml:space="preserve"><value>Local note</value></data>
   <data name="UserNoteDisplayFormat" xml:space="preserve"><value>Note: {0}</value></data>
-  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>Showing the selected application group.</value></data>
+  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>Showing menus for the selected app.</value></data>
   <data name="ClearApplicationGroupFilter" xml:space="preserve"><value>Clear filter</value></data>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} entries</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>Disable all</value></data>

@@ -1499,12 +1499,14 @@
   <data name="RegistryProtectionCancelText" xml:space="preserve">
     <value>取消</value>
   </data>
-  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>應用程式群組</value></data>
-  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>依應用程式或登錄識別將傳統快顯功能表項目分組。</value></data>
+  <data name="ApplicationGroupsPageTitle" xml:space="preserve"><value>依應用程式管理</value></data>
+  <data name="ApplicationGroupsPageDescription" xml:space="preserve"><value>查看同一應用程式在不同位置註冊的右鍵選單，並進行批次管理。</value></data>
+  <data name="ManageApplicationMenus" xml:space="preserve"><value>管理此應用程式的選單</value></data>
+  <data name="ApplicationGroupsNoItems" xml:space="preserve"><value>找不到屬於同一應用程式的其他選單項目</value></data>
   <data name="DetailsEditUserNote" xml:space="preserve"><value>編輯備註</value></data>
   <data name="UserNoteLabel" xml:space="preserve"><value>本機備註</value></data>
   <data name="UserNoteDisplayFormat" xml:space="preserve"><value>備註：{0}</value></data>
-  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>正在顯示所選項目的應用程式群組。</value></data>
+  <data name="ApplicationGroupFilterActive" xml:space="preserve"><value>正在顯示所選應用程式的選單。</value></data>
   <data name="ClearApplicationGroupFilter" xml:space="preserve"><value>清除篩選</value></data>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} 個項目</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>全部停用</value></data>

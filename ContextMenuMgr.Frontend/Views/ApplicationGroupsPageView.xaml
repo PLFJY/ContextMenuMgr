@@ -37,10 +37,11 @@
                               TextWrapping="Wrap" />
             </DockPanel>
         </Border>
-        <ItemsControl Grid.Row="3" ItemsSource="{Binding Groups}">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Margin="0,0,0,12" Padding="16" Style="{StaticResource CardBorderStyle}">
+        <Grid Grid.Row="3">
+            <ItemsControl ItemsSource="{Binding Groups}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,0,0,12" Padding="16" Style="{StaticResource CardBorderStyle}">
                         <StackPanel>
                             <DockPanel>
                                 <ui:Button DockPanel.Dock="Right" Appearance="Secondary" Command="{Binding DisableAllCommand}" Content="{Binding DisableAllText}" />
@@ -128,9 +129,17 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </StackPanel>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ui:TextBlock
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Opacity="0.72"
+                Text="{Binding NoItemsText}"
+                TextWrapping="Wrap"
+                Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
+        </Grid>
     </Grid>
 </Page>

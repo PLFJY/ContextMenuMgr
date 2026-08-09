@@ -195,10 +195,10 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 项目 | 内容 |
 | --- | --- |
 | 现象 | 搜索跳转到页面，但列表没有自动筛选到目标项。 |
-| 可能原因 | `GlobalSearchNavigationFilterService` 请求未消费、页面 ViewModel 未订阅、目标页面先后加载顺序问题；应用分组页还需要 pending request 携带稳定 item id，不能只依赖显示文本匹配。 |
+| 可能原因 | `GlobalSearchNavigationFilterService` 请求未消费、页面 ViewModel 未订阅、目标页面先后加载顺序问题；按应用管理页面还需要 pending request 携带稳定 item id，不能只依赖显示文本匹配。 |
 | 优先查看的代码 | `GlobalSearchNavigationFilterService.cs`、`CategoryPageViewModel.cs`、`ApplicationGroupsPageViewModel.cs`、`Windows11ContextMenuPageViewModel.cs`、`SpecialMenuPageViewModel.cs`。 |
 | 优先查看的日志 | `frontend-debug.log` 中 `GlobalSearchFilterApplied`。 |
-| 常见修复方向 | 确认页面初始化时消费 pending request；跳转后筛选文本应设置为目标菜单项名称或过滤文本。应用分组页的精确筛选应以 item id 找目标项，只显示目标分组和目标项本身，不应通过导航后滚动定位来补救。 |
+| 常见修复方向 | 确认页面初始化时消费 pending request；跳转后筛选文本应设置为目标菜单项名称或过滤文本。按应用管理页面的精确筛选应以 item id 找目标项，只显示目标分组和目标项本身，不应通过导航后滚动定位来补救。 |
 
 ## 17. 主题启动时没有应用
 

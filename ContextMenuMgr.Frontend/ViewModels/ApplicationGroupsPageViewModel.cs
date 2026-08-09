@@ -42,6 +42,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     public string Title => _localization.Translate("ApplicationGroupsPageTitle");
     public string Description => _localization.Translate("ApplicationGroupsPageDescription");
+    public string NoItemsText => _localization.Translate("ApplicationGroupsNoItems");
     public string SearchLabel => _localization.Translate("SearchLabel");
     public string NavigationFilterBannerText => _localization.Translate("ApplicationGroupFilterActive");
     public string ClearFilterText => _localization.Translate("ClearApplicationGroupFilter");
@@ -57,6 +58,8 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     [ObservableProperty]
     public partial bool IsNavigationFilterActive { get; private set; }
+
+    public bool IsEmpty => Groups.Count == 0;
 
     partial void OnSearchTextChanged(string value)
     {
@@ -89,6 +92,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
                     [targetItem],
                     _workspace,
                     _localization));
+                OnPropertyChanged(nameof(IsEmpty));
                 return;
             }
 
@@ -113,6 +117,8 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         {
             Groups.Add(group);
         }
+
+        OnPropertyChanged(nameof(IsEmpty));
     }
 
     private string GetGroupIdentity(ContextMenuItemViewModel item) => _identityService.GetIdentity(item).Identity;
@@ -190,6 +196,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     {
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Description));
+        OnPropertyChanged(nameof(NoItemsText));
         OnPropertyChanged(nameof(SearchLabel));
         OnPropertyChanged(nameof(NavigationFilterBannerText));
         OnPropertyChanged(nameof(ClearFilterText));

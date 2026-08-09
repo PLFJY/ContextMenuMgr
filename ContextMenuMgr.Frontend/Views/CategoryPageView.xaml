@@ -269,7 +269,7 @@
                                         Padding="12,5"
                                         Appearance="Secondary"
                                         Click="OpenApplicationGroup_Click"
-                                        Content="{Binding ViewApplicationGroupText}"
+                                        Content="{Binding ManageApplicationMenusText}"
                                         Icon="{ui:SymbolIcon Symbol=AppsListDetail24}" />
                                     <ui:ToggleSwitch
                                         MinWidth="72"

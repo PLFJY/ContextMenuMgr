@@ -278,7 +278,7 @@ Restart Explorer 通过 pipe 命令 `RestartExplorer` 进入后端。`NamedPipeB
 
 File Types 页提供隐藏的文件类型相关项批量管理子视图，不作为普通导航页面，也不增加可直接选择的 TabItem。入口在 File Types 的 scene 菜单项卡片上；前端用 `ContextMenuApplicationIdentityService` 生成菜单身份，后端通过 `PipeCommand.FindRelatedFileTypeMenuItems` 按需扫描 HKLM 与前端用户 `Software\Classes` 中的扩展名、ProgId 和 `SystemFileAssociations` 根。ShellVerb 只按规范化命令程序路径加 key name 匹配，ShellExtension 只按 Handler CLSID 匹配，不按显示名匹配。查询结果不写入普通 workspace，也不扩展服务启动检测 baseline；批量启用、禁用和删除复用现有 per-item 操作与备份/保护逻辑。
 
-`CategoryPageView` 中的传统菜单项可以携带稳定 item id 跳转到 `ApplicationGroupsPage`。跳转请求复用 `GlobalSearchNavigationFilterService` 的 pending request 机制；应用分组页按 item id 找到目标传统菜单项，进入导航精确筛选模式，只渲染目标项所属的一个分组，并且该分组内只包含目标项本身。搜索框显示目标项的可读名称；用户手动修改搜索框或点击清除筛选后，页面退出精确筛选并恢复普通分组搜索。该定位过程只使用前端已加载数据，不触发新的后端、注册表、文件系统查询或导航后滚动定位。
+`CategoryPageView` 中的传统菜单项可以携带稳定 item id 跳转到 `ApplicationGroupsPage`。跳转请求复用 `GlobalSearchNavigationFilterService` 的 pending request 机制；按应用管理页面按 item id 找到目标传统菜单项，进入导航精确筛选模式，只渲染目标项所属的一个分组，并且该分组内只包含目标项本身。搜索框显示目标项的可读名称；用户手动修改搜索框或点击清除筛选后，页面退出精确筛选并恢复普通分组搜索。该定位过程只使用前端已加载数据，不触发新的后端、注册表、文件系统查询或导航后滚动定位。
 
 ## 13. Deep Analysis 与 ProbeHost
 

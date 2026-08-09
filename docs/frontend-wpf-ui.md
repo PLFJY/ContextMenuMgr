@@ -177,7 +177,7 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 需要在导航后定位共享外层滚动区域的页面应实现 `INavigationScrollTarget`。内容真正呈现后，`ModernFrame` 先 reset 外层 `ContentScrollHost`，再把该 `ScrollViewer` 传给当前内容或其可视树中的定位目标。定位回调执行完毕后才触发 `ModernFrame.NavigationCompleted`，`ModernNavigationView` 会转发该事件；需要等待页面就位的功能应订阅事件，不要使用固定 `Task.Delay`。`MainWindow` 不再查找 WPF-UI `NavigationViewContentPresenter`。
 
-`ApplicationGroupsPage` 不再使用导航后滚动定位。分类页跳转到应用分组页时，页面通过 `GlobalSearchNavigationFilterService` 携带的 item id 进入精确筛选模式，只显示目标项所属分组和目标项本身。这样避免首次进入时全量渲染后再调用 `UpdateLayout` / 查找可视树。
+`ApplicationGroupsPage` 不再使用导航后滚动定位。分类页跳转到按应用管理页面时，页面通过 `GlobalSearchNavigationFilterService` 携带的 item id 进入精确筛选模式，只显示目标项所属分组和目标项本身。这样避免首次进入时全量渲染后再调用 `UpdateLayout` / 查找可视树。
 
 边界规则：
 
@@ -215,7 +215,7 @@ SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`�
 
 原因是本项目需要多字段搜索、自定义评分、经典菜单和 Win11 菜单合并、菜单项真实图标、跳转目标页面，以及跳转后给目标页面设置筛选文本。
 
-传统菜单分类页、标题栏全局搜索和应用分组页都使用 `ContextMenuSearchMatcher` 的宽松匹配；标点、分隔符和符号不影响匹配。全局搜索候选来自已加载的 workspace/Win11 缓存，并包含传统菜单项与 Win11 菜单项的本地用户备注，输入时不得访问后端、注册表或文件系统。
+传统菜单分类页、标题栏全局搜索和按应用管理页面都使用 `ContextMenuSearchMatcher` 的宽松匹配；标点、分隔符和符号不影响匹配。全局搜索候选来自已加载的 workspace/Win11 缓存，并包含传统菜单项与 Win11 菜单项的本地用户备注，输入时不得访问后端、注册表或文件系统。
 
 ### 8.1 必须拦截 TextChanged 默认过滤
 
