@@ -1528,4 +1528,10 @@ Continue anyway? (Not recommended)</value>
   <data name="ShellProxyWrapText" xml:space="preserve"><value>Move handler menus into submenu</value></data>
   <data name="ShellProxyUpdateText" xml:space="preserve"><value>Update submenu title</value></data>
   <data name="ShellProxyRestoreText" xml:space="preserve"><value>Restore original top-level menu</value></data>
+  <data name="CompactView" xml:space="preserve"><value>Compact</value></data>
+  <data name="DisplayMode" xml:space="preserve"><value>Display mode</value></data>
+  <data name="DetailedView" xml:space="preserve"><value>Detailed</value></data>
+  <data name="HideDisabledItems" xml:space="preserve"><value>Hide disabled items</value></data>
+  <data name="CompactViewTooltip" xml:space="preserve"><value>Show compact context-menu entry cards</value></data>
+  <data name="DetailedViewTooltip" xml:space="preserve"><value>Show detailed context-menu entry cards</value></data>
 </root>

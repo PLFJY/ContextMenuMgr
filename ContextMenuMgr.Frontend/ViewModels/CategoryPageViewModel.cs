@@ -23,6 +23,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
     private readonly HashSet<string> _loggedDesktopCompatibilityItemIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool _lastHideDisabledItems;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CategoryPageViewModel"/> class.
@@ -43,6 +44,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         _settingsService = settingsService;
         _placeholderDebug = placeholderDebug;
         _globalSearchFilterService = globalSearchFilterService;
+        _lastHideDisabledItems = settingsService.Current.HideDisabledItems;
         _localization.LanguageChanged += OnLanguageChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _workspace.PropertyChanged += OnWorkspacePropertyChanged;
@@ -54,11 +56,10 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             item.PropertyChanged += OnItemPropertyChanged;
         }
 
-        ItemsView = new ListCollectionView(_workspace.Items);
-        ItemsView.Filter = FilterItem;
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.SortAttentionWeight), ListSortDirection.Ascending));
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.SortDeletedWeight), ListSortDirection.Ascending));
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+        var itemsView = new ListCollectionView(_workspace.Items);
+        itemsView.Filter = FilterItem;
+        ContextMenuListPresentation.ConfigureSort(itemsView);
+        ItemsView = itemsView;
 
         RefreshLocalizedText();
         RefreshListPlaceholderState();
@@ -74,6 +75,36 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     /// Gets the items View.
     /// </summary>
     public ICollectionView ItemsView { get; }
+
+    public bool HideDisabledItems
+    {
+        get => _settingsService.Current.HideDisabledItems;
+        set => _settingsService.UpdateHideDisabledItems(value);
+    }
+
+    public bool IsCompactView
+    {
+        get => _settingsService.Current.ContextMenuListViewMode == ContextMenuListViewMode.Compact;
+        set
+        {
+            if (value)
+            {
+                _settingsService.UpdateContextMenuListViewMode(ContextMenuListViewMode.Compact);
+            }
+        }
+    }
+
+    public bool IsDetailedView
+    {
+        get => _settingsService.Current.ContextMenuListViewMode == ContextMenuListViewMode.Detailed;
+        set
+        {
+            if (value)
+            {
+                _settingsService.UpdateContextMenuListViewMode(ContextMenuListViewMode.Detailed);
+            }
+        }
+    }
 
     /// <summary>
     /// Gets or sets the title.
@@ -100,6 +131,18 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     public string SearchLabel => _localization.Translate("SearchLabel");
 
     public string AddMenuItemText => _localization.Translate("AddMenuItem");
+
+    public string CompactViewText => _localization.Translate("CompactView");
+
+    public string DetailedViewText => _localization.Translate("DetailedView");
+
+    public string HideDisabledItemsText => _localization.Translate("HideDisabledItems");
+
+    public string DisplayModeText => _localization.Translate("DisplayMode");
+
+    public string CompactViewTooltip => _localization.Translate("CompactViewTooltip");
+
+    public string DetailedViewTooltip => _localization.Translate("DetailedViewTooltip");
 
     public string DeleteText => _localization.Translate("Delete");
 
@@ -251,7 +294,10 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        if (_settingsService.Current.HideDisabledItems && !item.IsEnabled && !item.IsDeleted)
+        if (!ContextMenuListPresentation.IsVisibleWithDisabledFilter(
+                item.IsEnabled,
+                item.IsDeleted,
+                _settingsService.Current.HideDisabledItems))
         {
             return false;
         }
@@ -373,6 +419,12 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RegistryMissingText));
         OnPropertyChanged(nameof(SearchLabel));
         OnPropertyChanged(nameof(AddMenuItemText));
+        OnPropertyChanged(nameof(CompactViewText));
+        OnPropertyChanged(nameof(DetailedViewText));
+        OnPropertyChanged(nameof(HideDisabledItemsText));
+        OnPropertyChanged(nameof(DisplayModeText));
+        OnPropertyChanged(nameof(CompactViewTooltip));
+        OnPropertyChanged(nameof(DetailedViewTooltip));
         OnPropertyChanged(nameof(DeleteText));
         OnPropertyChanged(nameof(CancelText));
         OnPropertyChanged(nameof(LoadingItemsText));
@@ -382,8 +434,17 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
-        ItemsView.Refresh();
-        RefreshListPlaceholderState();
+        var hideDisabledItems = _settingsService.Current.HideDisabledItems;
+        if (_lastHideDisabledItems != hideDisabledItems)
+        {
+            _lastHideDisabledItems = hideDisabledItems;
+            ItemsView.Refresh();
+            RefreshListPlaceholderState();
+        }
+
+        OnPropertyChanged(nameof(HideDisabledItems));
+        OnPropertyChanged(nameof(IsCompactView));
+        OnPropertyChanged(nameof(IsDetailedView));
     }
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)

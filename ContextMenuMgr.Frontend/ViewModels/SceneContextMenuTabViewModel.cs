@@ -30,6 +30,7 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     private int _refreshGeneration;
     private bool _hasLoaded;
     private bool _disposed;
+    private bool _lastHideDisabledItems;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SceneContextMenuTabViewModel"/> class.
@@ -61,12 +62,12 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         _settingsService = settingsService;
         _identityService = identityService;
         _openBatchManagementAsync = openBatchManagementAsync;
+        _lastHideDisabledItems = settingsService.Current.HideDisabledItems;
 
-        ItemsView = new ListCollectionView(Items);
-        ItemsView.Filter = FilterItem;
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.SortAttentionWeight), ListSortDirection.Ascending));
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.SortDeletedWeight), ListSortDirection.Ascending));
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+        var itemsView = new ListCollectionView(Items);
+        itemsView.Filter = FilterItem;
+        ContextMenuListPresentation.ConfigureSort(itemsView);
+        ItemsView = itemsView;
 
         _fixedScopeValue = fixedScopeValue;
         ScopeValue = fixedScopeValue ?? string.Empty;
@@ -98,6 +99,36 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     /// Gets the items View.
     /// </summary>
     public ICollectionView ItemsView { get; }
+
+    public bool HideDisabledItems
+    {
+        get => _settingsService.Current.HideDisabledItems;
+        set => _settingsService.UpdateHideDisabledItems(value);
+    }
+
+    public bool IsCompactView
+    {
+        get => _settingsService.Current.ContextMenuListViewMode == ContextMenuListViewMode.Compact;
+        set
+        {
+            if (value)
+            {
+                _settingsService.UpdateContextMenuListViewMode(ContextMenuListViewMode.Compact);
+            }
+        }
+    }
+
+    public bool IsDetailedView
+    {
+        get => _settingsService.Current.ContextMenuListViewMode == ContextMenuListViewMode.Detailed;
+        set
+        {
+            if (value)
+            {
+                _settingsService.UpdateContextMenuListViewMode(ContextMenuListViewMode.Detailed);
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the icon Symbol.
@@ -163,6 +194,18 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
     [ObservableProperty]
     public partial string BatchManagementText { get; set; }
+
+    public string CompactViewText => _localization.Translate("CompactView");
+
+    public string DetailedViewText => _localization.Translate("DetailedView");
+
+    public string HideDisabledItemsText => _localization.Translate("HideDisabledItems");
+
+    public string DisplayModeText => _localization.Translate("DisplayMode");
+
+    public string CompactViewTooltip => _localization.Translate("CompactViewTooltip");
+
+    public string DetailedViewTooltip => _localization.Translate("DetailedViewTooltip");
 
     public bool HasBatchManagementAction => _openBatchManagementAsync is not null;
 
@@ -530,7 +573,10 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
             return false;
         }
 
-        if (_settingsService.Current.HideDisabledItems && !item.IsEnabled && !item.IsDeleted)
+        if (!ContextMenuListPresentation.IsVisibleWithDisabledFilter(
+                item.IsEnabled,
+                item.IsDeleted,
+                _settingsService.Current.HideDisabledItems))
         {
             return false;
         }
@@ -584,7 +630,16 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
-        ItemsView.Refresh();
+        var hideDisabledItems = _settingsService.Current.HideDisabledItems;
+        if (_lastHideDisabledItems != hideDisabledItems)
+        {
+            _lastHideDisabledItems = hideDisabledItems;
+            ItemsView.Refresh();
+        }
+
+        OnPropertyChanged(nameof(HideDisabledItems));
+        OnPropertyChanged(nameof(IsCompactView));
+        OnPropertyChanged(nameof(IsDetailedView));
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -597,6 +652,12 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         SearchLabel = _localization.Translate("SearchLabel");
         AddMenuItemText = _localization.Translate("AddMenuItem");
         BatchManagementText = _localization.Translate("FileTypeBatchManageAction");
+        OnPropertyChanged(nameof(CompactViewText));
+        OnPropertyChanged(nameof(DetailedViewText));
+        OnPropertyChanged(nameof(HideDisabledItemsText));
+        OnPropertyChanged(nameof(DisplayModeText));
+        OnPropertyChanged(nameof(CompactViewTooltip));
+        OnPropertyChanged(nameof(DetailedViewTooltip));
         if (!Items.Any())
         {
             EmptyText = RequiresScopeValue() && string.IsNullOrWhiteSpace(ResolveScopeValue())

@@ -3,6 +3,12 @@
 /// <summary>
 /// Represents the frontend Settings.
 /// </summary>
+public enum ContextMenuListViewMode
+{
+    Detailed,
+    Compact
+}
+
 public sealed class FrontendSettings
 {
     public Dictionary<string, string> ContextMenuItemNotes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -51,6 +57,11 @@ public sealed class FrontendSettings
     /// Gets or sets the hide Disabled Items.
     /// </summary>
     public bool HideDisabledItems { get; set; }
+
+    /// <summary>
+    /// Gets or sets the shared context-menu list presentation mode.
+    /// </summary>
+    public ContextMenuListViewMode ContextMenuListViewMode { get; set; } = ContextMenuListViewMode.Compact;
 
     /// <summary>
     /// Gets or sets the open More Regedit.

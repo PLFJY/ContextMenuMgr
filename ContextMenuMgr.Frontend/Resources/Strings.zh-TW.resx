@@ -1528,4 +1528,10 @@
   <data name="ShellProxyWrapText" xml:space="preserve"><value>將處理常式選單移入子選單</value></data>
   <data name="ShellProxyUpdateText" xml:space="preserve"><value>更新子選單標題</value></data>
   <data name="ShellProxyRestoreText" xml:space="preserve"><value>還原原始頂層選單</value></data>
+  <data name="CompactView" xml:space="preserve"><value>精簡</value></data>
+  <data name="DisplayMode" xml:space="preserve"><value>顯示模式</value></data>
+  <data name="DetailedView" xml:space="preserve"><value>詳細</value></data>
+  <data name="HideDisabledItems" xml:space="preserve"><value>隱藏已停用項目</value></data>
+  <data name="CompactViewTooltip" xml:space="preserve"><value>以精簡卡片顯示右鍵選單項目</value></data>
+  <data name="DetailedViewTooltip" xml:space="preserve"><value>以詳細卡片顯示右鍵選單項目</value></data>
 </root>

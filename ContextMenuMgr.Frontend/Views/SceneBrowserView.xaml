@@ -26,15 +26,39 @@
                     Opacity="0.72"
                     Text="{Binding Description}"
                     TextWrapping="Wrap" />
-                <DockPanel Margin="0,12,0,0">
+                <WrapPanel Margin="0,12,0,0" HorizontalAlignment="Right">
+                    <ui:TextBlock
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Opacity="0.72"
+                        Text="{Binding DisplayModeText}" />
+                    <RadioButton
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        Content="{Binding CompactViewText}"
+                        GroupName="SceneContextMenuListViewMode"
+                        IsChecked="{Binding IsCompactView, Mode=TwoWay}"
+                        ToolTip="{Binding CompactViewTooltip}" />
+                    <RadioButton
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        Content="{Binding DetailedViewText}"
+                        GroupName="SceneContextMenuListViewMode"
+                        IsChecked="{Binding IsDetailedView, Mode=TwoWay}"
+                        ToolTip="{Binding DetailedViewTooltip}" />
+                    <CheckBox
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        Content="{Binding HideDisabledItemsText}"
+                        IsChecked="{Binding HideDisabledItems, Mode=TwoWay}"
+                        ToolTip="{Binding HideDisabledItemsText}" />
                     <ui:Button
                         Padding="14,6"
-                        HorizontalAlignment="Right"
                         Command="{Binding AddMenuItemCommand}"
                         Content="{Binding AddMenuItemText}"
-                        DockPanel.Dock="Right"
                         Icon="{ui:SymbolIcon Symbol=Add24}" />
-                </DockPanel>
+                </WrapPanel>
 
                 <StackPanel
                     Margin="0,12,0,0"
@@ -192,23 +216,58 @@
                                                 Margin="0,3,0,0"
                                                 FontSize="11"
                                                 Opacity="0.6"
-                                                Text="{Binding KeyName}"
-                                                Visibility="{Binding ShowKeyName, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                Text="{Binding KeyName}">
+                                                <ui:TextBlock.Style>
+                                                    <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding ShowKeyName}" Value="True" />
+                                                                    <Condition Binding="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ui:TextBlock.Style>
+                                            </ui:TextBlock>
                                         </StackPanel>
                                     </Grid>
 
                                     <ui:TextBlock
-                                        Margin="0,6,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="11"
+                                        Margin="38,3,0,0"
                                         Opacity="0.72"
-                                        Text="{Binding RegistryPath}" />
-                                    <ui:TextBlock
-                                        Margin="0,8,0,0"
-                                        Opacity="0.78"
-                                        Text="{Binding Notes}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding ShowNotes, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        Text="{Binding CompactApplicationName}">
+                                        <ui:TextBlock.Style>
+                                            <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding HasCompactApplicationName}" Value="True" />
+                                                            <Condition Binding="{Binding DataContext.IsCompactView, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ui:TextBlock.Style>
+                                    </ui:TextBlock>
+                                    <StackPanel Visibility="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ui:TextBlock
+                                            Margin="0,6,0,0"
+                                            FontFamily="Consolas"
+                                            FontSize="11"
+                                            Opacity="0.72"
+                                            Text="{Binding RegistryPath}" />
+                                        <ui:TextBlock
+                                            Margin="0,8,0,0"
+                                            Opacity="0.78"
+                                            Text="{Binding Notes}"
+                                            TextWrapping="Wrap"
+                                            Visibility="{Binding ShowNotes, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
                                     <ui:TextBlock
                                         Margin="0,6,0,0"
                                         Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
@@ -250,13 +309,25 @@
                                     Grid.Column="1"
                                     Margin="12,0,0,0"
                                     HorizontalAlignment="Right">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Orientation" Value="Vertical" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding DataContext.IsCompactView, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                    <Setter Property="Orientation" Value="Horizontal" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <ui:ToggleSwitch
                                         MinWidth="72"
                                         Margin="0,0,0,8"
+                                        VerticalAlignment="Center"
                                         Content="{Binding ToggleLabel}"
                                         IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         IsEnabled="{Binding CanToggle}"
                                         Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <StackPanel Visibility="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <ui:Button
                                         MinWidth="88"
                                         Padding="12,5"
@@ -273,16 +344,40 @@
                                         Content="{Binding PrimaryActionLabel}"
                                         Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
                                         Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
                                     <ui:DropDownButton
                                         MinWidth="88"
                                         Margin="0,8,0,0"
                                         Appearance="Secondary"
+                                        VerticalAlignment="Center"
                                         Content="{Binding MoreActionsText}"
                                         Icon="{ui:SymbolIcon Symbol=MoreHorizontal24}"
                                         Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         Visibility="{Binding HasActionFlyout, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <ui:DropDownButton.Flyout>
-                                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <ContextMenu
+                                                DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                                Tag="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem
+                                                    Command="{Binding DeepAnalyzeMenuItemCommand}"
+                                                    Header="{Binding DeepAnalyzeMenuItemText}"
+                                                    Visibility="{Binding CanDeepAnalyzeMenuItem, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <MenuItem
+                                                    Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                    CommandParameter="{Binding}"
+                                                    Header="{Binding PlacementTarget.Tag.DeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                    Visibility="{Binding IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                <MenuItem
+                                                    Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                    CommandParameter="{Binding}"
+                                                    Header="{Binding PrimaryActionLabel}"
+                                                    Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <MenuItem
+                                                    Command="{Binding PlacementTarget.Tag.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                    CommandParameter="{Binding}"
+                                                    Header="{Binding PlacementTarget.Tag.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                    Visibility="{Binding CanPermanentlyDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <Separator />
                                                 <MenuItem
                                                     Command="{Binding PlacementTarget.Tag.OpenBatchManagementCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                     CommandParameter="{Binding}"
@@ -327,6 +422,19 @@
                                     <Grid
                                         Margin="0,8,0,0"
                                         Visibility="{Binding CanPermanentlyDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Grid.Style>
+                                            <Style TargetType="Grid">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding DataContext.IsCompactView, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                                                        <Setter Property="Width" Value="0" />
+                                                        <Setter Property="Height" Value="0" />
+                                                        <Setter Property="Margin" Value="0" />
+                                                        <Setter Property="Opacity" Value="0" />
+                                                        <Setter Property="IsHitTestVisible" Value="False" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Grid.Style>
                                         <ui:Flyout
                                             IsOpen="{Binding IsPermanentDeleteFlyoutOpen, Mode=TwoWay}"
                                             Placement="Top">

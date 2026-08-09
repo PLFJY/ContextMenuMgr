@@ -93,6 +93,14 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string Subtitle => KeyName;
 
+    /// <summary>
+    /// Gets a safe optional application/source subtitle for compact cards.
+    /// It is derived only from an already available executable path.
+    /// </summary>
+    public string? CompactApplicationName => ContextMenuApplicationIdentityService.GetFriendlyApplicationName(Entry);
+
+    public bool HasCompactApplicationName => !string.IsNullOrWhiteSpace(CompactApplicationName);
+
     public string ShellPathTail => GetShellPathTail(RegistryPath);
 
     public string EditableText => Entry.EditableText ?? DisplayName;
@@ -175,7 +183,13 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanEditShellAttributes => HasOtherAttributesSection && !IsAttributesBusy;
 
-    public bool HasActionFlyout => HasOtherAttributesSection || HasDetailsActions || CanOpenFileTypeBatchManagement;
+    public bool HasActionFlyout => HasOtherAttributesSection
+        || HasDetailsActions
+        || CanOpenFileTypeBatchManagement
+        || CanPrimaryAction
+        || CanPermanentlyDelete
+        || CanDeepAnalyzeMenuItem
+        || CanManageShellProxy;
 
     public bool CanEditText => Entry.EntryKind == ContextMenuEntryKind.ShellVerb
         && IsPresentInRegistry
@@ -606,6 +620,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowReadOnlyCommandText));
         OnPropertyChanged(nameof(ShowInlineCommandText));
         OnPropertyChanged(nameof(InlineCommandText));
+        OnPropertyChanged(nameof(CompactApplicationName));
+        OnPropertyChanged(nameof(HasCompactApplicationName));
         OnPropertyChanged(nameof(CanDeepAnalyzeMenuItem));
         OnPropertyChanged(nameof(CanManageShellProxy));
         OnPropertyChanged(nameof(IsShellProxyWrapped));

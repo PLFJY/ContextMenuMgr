@@ -1528,4 +1528,10 @@
   <data name="ShellProxyWrapText" xml:space="preserve"><value>将处理器菜单移入子菜单</value></data>
   <data name="ShellProxyUpdateText" xml:space="preserve"><value>更新子菜单标题</value></data>
   <data name="ShellProxyRestoreText" xml:space="preserve"><value>还原原始顶级菜单</value></data>
+  <data name="CompactView" xml:space="preserve"><value>精简</value></data>
+  <data name="DisplayMode" xml:space="preserve"><value>显示模式</value></data>
+  <data name="DetailedView" xml:space="preserve"><value>详细</value></data>
+  <data name="HideDisabledItems" xml:space="preserve"><value>隐藏已禁用项</value></data>
+  <data name="CompactViewTooltip" xml:space="preserve"><value>以精简卡片显示右键菜单项</value></data>
+  <data name="DetailedViewTooltip" xml:space="preserve"><value>以详细卡片显示右键菜单项</value></data>
 </root>

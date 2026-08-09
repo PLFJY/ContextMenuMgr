@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.RegularExpressions;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.ViewModels;
@@ -65,6 +66,23 @@ public sealed class ContextMenuApplicationIdentityService
             ContextMenuEntryKind.ShellExtension => !string.IsNullOrWhiteSpace(identity.HandlerClsid),
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Returns a compact, display-safe source label when an executable path is
+    /// already present in entry metadata. This deliberately never falls back to
+    /// a CLSID, registry path, or internal identity key.
+    /// </summary>
+    public static string? GetFriendlyApplicationName(ContextMenuEntry entry)
+    {
+        var executablePath = ResolveCommandExecutablePath(entry);
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(executablePath.Trim());
+        return string.IsNullOrWhiteSpace(fileName) ? null : fileName;
     }
 
     private static string? ResolveCommandExecutablePath(ContextMenuEntry entry)

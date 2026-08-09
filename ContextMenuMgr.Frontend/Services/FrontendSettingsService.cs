@@ -16,17 +16,33 @@ public sealed class FrontendSettingsService
     };
 
     private readonly string _settingsPath;
-    private readonly RuntimeDataAclRepairClient _aclRepairClient;
+    private readonly RuntimeDataAclRepairClient? _aclRepairClient;
     private readonly Lock _syncRoot = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FrontendSettingsService"/> class.
     /// </summary>
     public FrontendSettingsService(RuntimeDataAclRepairClient aclRepairClient)
+        : this(aclRepairClient, RuntimePaths.SettingsPath, migrateLegacySettings: true)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a settings service for an explicit settings path. This keeps
+    /// settings persistence independently testable without using runtime paths.
+    /// </summary>
+    public FrontendSettingsService(
+        RuntimeDataAclRepairClient? aclRepairClient,
+        string settingsPath,
+        bool migrateLegacySettings = false)
     {
         _aclRepairClient = aclRepairClient;
-        _settingsPath = RuntimePaths.SettingsPath;
-        TryMigrateLegacySettings();
+        _settingsPath = settingsPath;
+        if (migrateLegacySettings)
+        {
+            TryMigrateLegacySettings();
+        }
+
         Current = Load();
     }
 
@@ -195,6 +211,20 @@ public sealed class FrontendSettingsService
     }
 
     /// <summary>
+    /// Updates the shared context-menu list presentation mode.
+    /// </summary>
+    public void UpdateContextMenuListViewMode(ContextMenuListViewMode viewMode)
+    {
+        if (Current.ContextMenuListViewMode == viewMode)
+        {
+            return;
+        }
+
+        Current.ContextMenuListViewMode = viewMode;
+        Save();
+    }
+
+    /// <summary>
     /// Updates open More Regedit.
     /// </summary>
     public void UpdateOpenMoreRegedit(bool openMoreRegedit)
@@ -330,6 +360,11 @@ public sealed class FrontendSettingsService
 
     private RuntimeDataAclRepairClientResult RepairRuntimeDataAclForSynchronousSave()
     {
+        if (_aclRepairClient is null)
+        {
+            return new RuntimeDataAclRepairClientResult(false, false, "ACL_REPAIR_UNAVAILABLE", "No runtime data ACL repair client is configured.");
+        }
+
         try
         {
             // Save is intentionally synchronous because it is called from many

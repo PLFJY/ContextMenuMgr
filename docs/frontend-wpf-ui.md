@@ -328,6 +328,10 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 
 加载中 / 空状态是前端 UI 状态，不应触发后端状态修改。
 
+传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
+
+同一处还提供“隐藏已禁用项”，它直接使用 `FrontendSettings.HideDisabledItems`。开启后只隐藏未删除且已禁用的项目；已删除项目必须继续可见，以便撤销或永久删除。切换视图模式不会刷新后端、重建 workspace 或清空搜索文本；切换此筛选只刷新当前 `ItemsView`，不修改注册表。排序固定为 attention、deleted-state、display name，不能加入 `IsEnabled`，否则用户开关项目时会造成列表跳位。
+
 ## 13. InfoBar、错误提示与用户友好失败
 
 `MainWindow.xaml` 中的 `RootInfoBar` 由 `InfoBarService` 管理。它适合展示全局、非阻塞、用户可读的状态，例如服务状态提醒、需要重启 Explorer、更新提示或某些操作失败的简短说明。
