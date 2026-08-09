@@ -231,6 +231,9 @@ source 和 destination 均位于同一个 `HKLM\SOFTWARE\Classes` 或
 报告一致性问题并拒绝自动覆盖；请先安全地核对两个键的内容。
 
 全局 Blocked 值可能来自旧版应用、管理员或其它工具；它是独立的 CLSID 机制，普通经典
-ShellEx 开关不会自动删除它。如需有意更改该全局状态，请在“其他规则 / GUID 阻止”页面操作。
+ShellEx 开关不会自动删除它。升级自 1.7.2 时，如果一个启用中的经典注册项命中这个旧全局值，列表会
+显示一致性警告；如需有意更改该全局状态，请在“其他规则 / GUID 阻止”页面操作。
+`PropertySheetHandlers`（当前仅 Recycle Bin）不是 `ContextMenuHandlers` 的可替换形式，当前会作为只读
+注册项显示，不会有普通开关，也不会自动隔离或 reconciliation。
 Windows 11 packaged context-menu 项仍使用其既有的
 blocked-list 实现。

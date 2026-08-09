@@ -71,7 +71,9 @@
 | `IsDeleted` | 项目状态库认为该项已删除。 |
 | `IsPendingApproval` | 新增项或外部变化需要用户审核。 |
 | `HasBackup` / `DeletedAtUtc` | 删除备份相关状态。 |
+| `CanToggle` | 是否具有经过验证的普通启用/禁用操作。`PropertySheetHandlers` 等未验证类型为只读。 |
 | `HasConsistencyIssue` / `ConsistencyIssue` | 状态库和真实注册表不一致时的诊断信息。 |
+| `HasLegacyGlobalShellExtensionBlock` | 兼容性诊断：经典 handler 的 CLSID 同时存在于旧版机器级全局 Blocked 列表；不改变当前注册项的开关状态。 |
 | `DetectedChangeKind` / `DetectedChangeDetails` | 监控发现的新增、删除、修改等变化。 |
 | `IsWindows11ContextMenu` | 标识 Win11 packaged context menu。传统菜单通常为 `false`。 |
 | `Notes` | 诊断和补充说明，不应参与主逻辑判断。 |
@@ -301,6 +303,16 @@ reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledI
 与 disabled 物理键同时存在，目录将显示一致性问题且拒绝覆盖式切换。
 需要管理全局 CLSID 阻止项时，使用“其他规则 / GUID 阻止”页面；该页面的操作影响所有使用
 该 CLSID 的注册项。
+
+`RecycleBin\...\shellex\PropertySheetHandlers` 仍会被枚举以保留可见性和删除/恢复信息，
+但它不是参考实现已验证的 `ContextMenuHandlers` 容器类型。它的 `CanToggle=false`：前端不显示普通
+开关，后端拒绝 `SetEnabled`，监控也不会对它执行自动隔离或 disabled-state reconciliation。不能把
+`PropertySheetHandlers` 套用到 `-ContextMenuHandlers`；若将来支持它，必须先有独立且经验证的注册表策略。
+
+升级兼容：1.7.2 曾把经典 Shell Extension 的 CLSID 写入机器级
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked`。当前版本发现一个**启用中**的
+经典注册项仍命中该列表时，会显示一致性警告并引导至“其他规则 / GUID 阻止”。应用绝不自动删除该值，
+因为它可能由管理员、Autoruns 或其它软件创建；用户必须在该页面明确决定是否移除全局阻止。
 
 Windows 注册表继承仍可能使 `AllFilesystemObjects` 中的另一个已启用注册项出现在
 File/Folder 场景；应用保证的是注册项独立控制，而不是绕过 Explorer 的继承规则。

@@ -432,9 +432,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanReviewApproval => IsPendingApproval && IsPresentInRegistry && !IsDeleted;
 
-    public bool CanToggle => !IsDeleted && IsPresentInRegistry && !IsToggleBusy;
+    public bool CanToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry && !IsToggleBusy;
 
-    public bool ShowToggle => !IsDeleted && IsPresentInRegistry;
+    public bool ShowToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry;
 
     public bool CanPrimaryAction => IsDeleted || IsPresentInRegistry;
 
@@ -446,7 +446,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string ConsistencyText => string.IsNullOrWhiteSpace(ConsistencyIssue)
         ? string.Empty
-        : _localization.Translate("ConsistencyIssueGeneric");
+        : Entry.HasLegacyGlobalShellExtensionBlock
+            ? _localization.Translate("LegacyGlobalShellExtensionBlockWarning")
+            : _localization.Translate("ConsistencyIssueGeneric");
 
     public bool CanDismissConsistencyIssue => HasConsistencyIssue;
 
@@ -619,6 +621,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasDetailsActions));
         OnPropertyChanged(nameof(HasActionFlyout));
         OnPropertyChanged(nameof(CanSearchOnline));
+        OnPropertyChanged(nameof(CanToggle));
+        OnPropertyChanged(nameof(ShowToggle));
     }
 
     private void ApplyEntry(ContextMenuEntry entry)
@@ -966,6 +970,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ToggleLabel));
         OnPropertyChanged(nameof(PendingApprovalBadgeText));
         OnPropertyChanged(nameof(CanReviewApproval));
+        OnPropertyChanged(nameof(CanToggle));
+        OnPropertyChanged(nameof(ShowToggle));
         OnPropertyChanged(nameof(PrimaryActionLabel));
         OnPropertyChanged(nameof(ConsistencyText));
         OnPropertyChanged(nameof(DetectedChangeBadgeText));

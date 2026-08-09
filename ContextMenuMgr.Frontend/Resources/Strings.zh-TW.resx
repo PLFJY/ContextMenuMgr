@@ -372,6 +372,9 @@
   <data name="ConsistencyIssueGeneric" xml:space="preserve">
     <value>目前登錄檔狀態與軟體記錄不一致。</value>
   </data>
+  <data name="LegacyGlobalShellExtensionBlockWarning" xml:space="preserve">
+    <value>此處理常式的 CLSID 仍在全域封鎖清單中。目前分類開關只控制此登錄項；如需全域啟用，請到「其他規則」&gt;「GUID 封鎖」中檢查。程式不會自動移除既有的全域封鎖項目。</value>
+  </data>
   <data name="StartupChangeNotificationFormat" xml:space="preserve">
     <value>{1} 在「{0}」分類下偵測到外部變更。</value>
   </data>

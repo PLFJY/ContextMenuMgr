@@ -372,6 +372,9 @@
   <data name="ConsistencyIssueGeneric" xml:space="preserve">
     <value>当前注册表状态与软件记录不一致。</value>
   </data>
+  <data name="LegacyGlobalShellExtensionBlockWarning" xml:space="preserve">
+    <value>此处理程序的 CLSID 仍在全局阻止列表中。当前分类开关只控制该注册项；如需全局启用，请到“其他规则”&gt;“GUID 阻止”中检查。程序不会自动删除已有的全局阻止项。</value>
+  </data>
   <data name="StartupChangeNotificationFormat" xml:space="preserve">
     <value>{1} 在“{0}”分类下检测到外部变化。</value>
   </data>

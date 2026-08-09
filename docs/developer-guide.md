@@ -109,7 +109,7 @@ ContextMenuRegistryMonitor 轮询快照
 | 类型 | 示例路径 | 处理方式 |
 | --- | --- | --- |
 | `shell` verb | `*\shell`、`Directory\Background\shell` | 读取命令、图标和属性；通过移动/改写相关键和值实现启用/禁用和属性修改。 |
-| `shellex\ContextMenuHandlers` | `*\shellex\ContextMenuHandlers` | 读取 handler CLSID；禁用通常涉及 disabled container 或 blocked shell extensions。 |
+| `shellex\ContextMenuHandlers` | `*\shellex\ContextMenuHandlers` | 读取 handler CLSID；普通开关在当前注册项的 `ContextMenuHandlers` / `-ContextMenuHandlers` 容器之间移动。`Shell Extensions\Blocked` 是独立的 CLSID 全局规则。 |
 
 普通 legacy `shell` verb 的命令文本编辑通过 `PipeCommand.SetCommandText` 进入 `ContextMenuRegistryCatalog.ApplyCommandTextAsync`，写 `<verb>\command` 的默认 `REG_SZ`。后端只为没有 `SubCommands` / `ExtendedSubCommandsKey`、没有 `DelegateExecute`、没有 `DropTarget\CLSID`、没有 `ExplorerCommandHandler` 的传统 ShellVerb 设置 `CanEditCommandText=true`；Shell Extension、Windows 11 packaged context menu 和多命令父级不走这条编辑路径。
 

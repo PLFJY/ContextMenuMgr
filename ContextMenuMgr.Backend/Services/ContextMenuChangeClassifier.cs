@@ -137,6 +137,7 @@ internal static class ContextMenuChangeClassifier
     public static bool ShouldReconcileDisabledState(ContextMenuEntry entry, PersistedContextMenuState? state)
     {
         return state is not null
+               && entry.CanToggle
                && !state.IsDeleted
                && state.DesiredEnabled == false
                && entry.IsEnabled

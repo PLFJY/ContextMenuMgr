@@ -372,6 +372,9 @@
   <data name="ConsistencyIssueGeneric" xml:space="preserve">
     <value>The current registry state does not match the app's saved state.</value>
   </data>
+  <data name="LegacyGlobalShellExtensionBlockWarning" xml:space="preserve">
+    <value>This handler is also globally blocked by its CLSID. This category switch controls only this registration; to enable the handler globally, review Other Rules &gt; GUID Block. The existing global block was not removed automatically.</value>
+  </data>
   <data name="StartupChangeNotificationFormat" xml:space="preserve">
     <value>Detected an external change for {1} in the {0} category.</value>
   </data>

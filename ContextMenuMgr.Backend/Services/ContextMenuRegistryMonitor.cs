@@ -129,8 +129,9 @@ public sealed class ContextMenuRegistryMonitor
                     // previously-deleted-then-recreated (Reappeared) items.
                     // Modified items and items appearing under additional roots
                     // after the baseline are silently absorbed.
-                    if (item.DetectedChangeKind is ContextMenuChangeKind.Added
-                        or ContextMenuChangeKind.Reappeared)
+                    if (item.CanToggle
+                        && item.DetectedChangeKind is (ContextMenuChangeKind.Added
+                            or ContextMenuChangeKind.Reappeared))
                     {
                         await _logger.LogAsync(
                             $"RegistryMonitorChangeDetected: Kind={item.DetectedChangeKind}, ItemId={item.Id}, " +

@@ -61,6 +61,11 @@ public sealed record ContextMenuEntry
     public bool CanEditCommandText { get; init; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the entry has a verified normal enable/disable operation.
+    /// </summary>
+    public bool CanToggle { get; init; } = true;
+
+    /// <summary>
     /// Gets or sets the handler Clsid.
     /// </summary>
     public string? HandlerClsid { get; init; }
@@ -159,6 +164,12 @@ public sealed record ContextMenuEntry
     /// Gets or sets a value indicating whether consistency Issue.
     /// </summary>
     public bool HasConsistencyIssue { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a classic handler is also present in the legacy global blocked list.
+    /// This is a diagnostic only; it does not change the per-registration toggle state.
+    /// </summary>
+    public bool HasLegacyGlobalShellExtensionBlock { get; init; }
 
     /// <summary>
     /// Gets or sets the consistency Issue.

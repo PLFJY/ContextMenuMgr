@@ -22,6 +22,7 @@ public sealed class ContextMenuRegistryCatalog
     private const string RecycleBinPinToHomeRegistryPath = @"HKEY_CLASSES_ROOT\Folder\shell\pintohome";
     private const string RecycleBinPinToHomeSourceRootPath = @"Folder\shell";
     private const string RecycleBinParsingNameExclusion = @"System.ParsingName:<>""::{645FF040-5081-101B-9F08-00AA002F954E}""";
+    private const string LegacyGlobalShellExtensionsBlockedPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     private static readonly string[] ContextMenuSubRootRelativePaths =
     [
         "shell",
@@ -395,7 +396,13 @@ public sealed class ContextMenuRegistryCatalog
                 dirty = true;
             }
 
-            var issue = GetConsistencyIssue(entry, state);
+            // 1.7.2 used this global CLSID list for classic Shell Extension
+            // toggles. It is deliberately not mutated here: the value might have
+            // been created by an administrator or another tool. Surface it as a
+            // separate compatibility warning instead of claiming this physical
+            // registration is effectively enabled.
+            var hasLegacyGlobalShellExtensionBlock = HasLegacyGlobalShellExtensionBlock(entry);
+            var issue = GetConsistencyIssue(entry, state, hasLegacyGlobalShellExtensionBlock);
             var changeKind = IsWpsOfficeSyntheticId(entry.Id)
                 ? entry.DetectedChangeKind
                 : GetDetectedChangeKind(entry, state, hasBaseline);
@@ -410,6 +417,7 @@ public sealed class ContextMenuRegistryCatalog
                 IsPresentInRegistry = true,
                 HasConsistencyIssue = !string.IsNullOrWhiteSpace(issue),
                 ConsistencyIssue = issue,
+                HasLegacyGlobalShellExtensionBlock = hasLegacyGlobalShellExtensionBlock,
                 DetectedChangeKind = changeKind,
                 DetectedChangeDetails = changeDetails
             };
@@ -602,6 +610,11 @@ public sealed class ContextMenuRegistryCatalog
         if (item.IsDeleted)
         {
             return CreateFailure($"Menu item '{item.DisplayName}' is deleted. Undo the deletion before changing its state.");
+        }
+
+        if (!item.CanToggle)
+        {
+            return CreateFailure($"Menu item '{item.DisplayName}' uses a Shell Extension registration type without a verified enable/disable operation.", item);
         }
 
         try
@@ -1762,6 +1775,8 @@ public sealed class ContextMenuRegistryCatalog
                 SourceRootPath = stableRelativePath,
                 CommandText = commandText,
                 CanEditCommandText = canEditCommandText,
+                CanToggle = entryKind != ContextMenuEntryKind.ShellExtension
+                    || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
                 HandlerClsid = handlerClsid,
                 IconPath = iconPath,
                 IconIndex = iconIndex,
@@ -2330,6 +2345,8 @@ public sealed class ContextMenuRegistryCatalog
                     SourceRootPath = root.StableRelativePath,
                     CommandText = commandText,
                     CanEditCommandText = canEditCommandText,
+                    CanToggle = root.EntryKind != ContextMenuEntryKind.ShellExtension
+                        || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
                     HandlerClsid = handlerClsid,
                     IconPath = iconPath,
                     IconIndex = iconIndex,
@@ -2422,10 +2439,56 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
-    private static string? GetConsistencyIssue(ContextMenuEntry entry, PersistedContextMenuState? state)
+    private static string? GetConsistencyIssue(
+        ContextMenuEntry entry,
+        PersistedContextMenuState? state,
+        bool hasLegacyGlobalShellExtensionBlock = false)
         => !string.IsNullOrWhiteSpace(entry.ConsistencyIssue)
             ? entry.ConsistencyIssue
-            : ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
+            : GetLegacyGlobalShellExtensionBlockConsistencyIssue(entry, hasLegacyGlobalShellExtensionBlock)
+                ?? ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
+
+    internal static string? GetLegacyGlobalShellExtensionBlockConsistencyIssue(
+        ContextMenuEntry entry,
+        bool hasLegacyGlobalShellExtensionBlock)
+    {
+        if (!hasLegacyGlobalShellExtensionBlock
+            || entry.IsWindows11ContextMenu
+            || entry.EntryKind != ContextMenuEntryKind.ShellExtension
+            || !entry.IsEnabled)
+        {
+            return null;
+        }
+
+        return "The handler CLSID is also in the legacy global Shell Extensions\\Blocked list.";
+    }
+
+    private static bool HasLegacyGlobalShellExtensionBlock(ContextMenuEntry entry)
+    {
+        if (entry.IsWindows11ContextMenu
+            || entry.EntryKind != ContextMenuEntryKind.ShellExtension
+            || !entry.IsEnabled
+            || !Guid.TryParse(entry.HandlerClsid, out var handlerGuid))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var blockedKey = Registry.LocalMachine.OpenSubKey(LegacyGlobalShellExtensionsBlockedPath, writable: false);
+            return blockedKey?.GetValueNames()
+                .Any(valueName => Guid.TryParse(valueName, out var blockedGuid) && blockedGuid == handlerGuid)
+                ?? false;
+        }
+        catch (SecurityException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private static ContextMenuChangeKind GetDetectedChangeKind(ContextMenuEntry entry, PersistedContextMenuState? state, bool hasBaseline)
         => ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
@@ -2872,6 +2935,12 @@ public sealed class ContextMenuRegistryCatalog
             throw new InvalidOperationException("Windows 11 context menu entries must use the Windows 11 blocked-list path.");
         }
 
+        if (!item.CanToggle || !SupportsClassicShellExtensionContainerToggle(item.BackendRegistryPath))
+        {
+            throw new InvalidOperationException(
+                $"'{item.RegistryPath}' is not a classic ContextMenuHandlers registration and has no verified per-registration toggle operation.");
+        }
+
         var sourcePath = item.BackendRegistryPath;
         var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
         if (enable == !sourceIsDisabled)
@@ -2920,7 +2989,11 @@ public sealed class ContextMenuRegistryCatalog
     internal static bool IsDisabledContextMenuHandlersPath(string path)
         => path.Contains(@"\shellex\-ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase);
 
-    private static void MoveRegistryKeySafely(string sourcePath, string destinationPath)
+    internal static bool SupportsClassicShellExtensionContainerToggle(string path)
+        => path.Contains(@"\shellex\ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase)
+           || IsDisabledContextMenuHandlersPath(path);
+
+    internal static void MoveRegistryKeySafely(string sourcePath, string destinationPath)
     {
         if (string.Equals(sourcePath, destinationPath, StringComparison.OrdinalIgnoreCase))
         {
