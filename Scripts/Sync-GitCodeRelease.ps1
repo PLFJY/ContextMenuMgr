@@ -557,6 +557,10 @@ function Invoke-GitCodeAttachmentUpload {
     # The documented upload endpoint is an object-storage PUT. Send only the four
     # headers returned by GitCode; never forward the API bearer token or log the URL.
     $client = [System.Net.Http.HttpClient]::new()
+    # Release installers can take longer than HttpClient's default 100-second
+    # timeout to reach the OBS endpoint. Keep this bounded, while retaining a
+    # fresh client and a fresh signed URL for every retry attempt.
+    $client.Timeout = [TimeSpan]::FromMinutes(30)
     $stream = $null
     $request = $null
     $response = $null
