@@ -100,11 +100,10 @@ if ($comparison -le 0) {
 Beta version gate failed.
 Beta base version '$betaBase' $relation the latest stable version '$stableVersion'.
 
-The Beta package tracks the latest version including stable releases. When a
-stable release is published, the Beta package version is set to the stable
-version directly (e.g. 1.7.3). A Beta release for the same base version would
-produce a pre-release-suffixed package version (e.g. 1.7.3-beta.20260704135822)
-which is lower than 1.7.3 in SemVer ordering, causing a package downgrade.
+The Beta package-manager channel only publishes GitHub Pre-releases and does not
+track Stable GitHub Releases. Once a Stable release exists at version
+'$stableVersion', a Beta prerelease must use a strictly newer base version so the
+Beta release line stays ahead of the latest Stable release.
 
 Publish a Beta release with a base version strictly higher than '$stableVersion'.
 "@

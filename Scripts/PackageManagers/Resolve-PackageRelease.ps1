@@ -5,9 +5,7 @@ param(
 
     [string] $OutputPath = '',
 
-    [string] $GitHubOutput = '',
-
-    [string] $TargetChannel = ''
+    [string] $GitHubOutput = ''
 )
 
 Set-StrictMode -Version Latest
@@ -106,22 +104,14 @@ if ($assetVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?([\-+].+)?$') {
     throw "Cannot parse asset version from release tag '$tagName'."
 }
 
-# Determine the effective channel:
-#   - $TargetChannel 'beta' forces the Beta channel (used to publish a Beta
-#     manifest from a stable release so the Beta package tracks the latest
-#     version including stable releases).
-#   - $TargetChannel 'stable' forces the Stable channel.
-#   - Empty $TargetChannel auto-detects from the release prerelease flag.
-$forceBeta = [string]::Equals($TargetChannel, 'beta', [System.StringComparison]::OrdinalIgnoreCase)
-$forceStable = [string]::Equals($TargetChannel, 'stable', [System.StringComparison]::OrdinalIgnoreCase)
-
-if ($forceStable -and $prerelease) {
-    throw "Cannot publish stable channel from a prerelease release."
-}
-
-$isBetaChannel = $forceBeta -or (-not $forceStable -and $prerelease)
-
-if ($isBetaChannel) {
+# Channel resolution is fixed and derived only from the GitHub Release
+# prerelease flag:
+#   - GitHub Pre-release (prerelease=true)  -> beta channel
+#   - GitHub Stable Release (prerelease=false) -> stable channel
+# Beta package-manager manifests are generated only from GitHub Pre-releases.
+# There is no override and no way to force a Stable Release into the Beta
+# channel; a Stable Release never produces Beta manifests.
+if ($prerelease) {
     $channel = 'beta'
     $wingetPackageIdentifier = 'PLFJY.ContextMenuMgrPlus.Beta'
     $wingetPackageName = 'Context Menu Manager Plus Beta'
@@ -129,33 +119,19 @@ if ($isBetaChannel) {
     $scoopManifestFile = 'contextmenumgrplus-beta.json'
     $scoopShortcutName = 'Context Menu Manager Plus Beta'
 
-    if ($prerelease) {
-        # Actual Beta release: version includes a timestamp stamp for ordering.
-        $baseVersion = Get-StableBaseVersion -AssetVersion $assetVersion
-        $publishedStamp = ConvertTo-PackageStamp -PublishedAt $publishedAt
-        $packageVersion = "$baseVersion-beta.$publishedStamp"
-    }
-    else {
-        # Stable release targeting the Beta channel: the Beta package tracks the
-        # latest version including stable releases, so the Beta package version
-        # equals the stable version directly. This avoids a SemVer downgrade
-        # because a beta-suffixed version (1.7.3-beta.xxx) would be lower than
-        # the stable version (1.7.3) the Beta package previously pointed to.
-        if ($assetVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
-            throw "Stable release version '$assetVersion' must be a plain semantic version when targeting the Beta channel."
-        }
-        $baseVersion = $assetVersion
-        $publishedStamp = ''
-        $packageVersion = $assetVersion
-    }
+    # Beta prerelease version includes a publish-time stamp for deterministic
+    # ordering within the Beta channel.
+    $baseVersion = Get-StableBaseVersion -AssetVersion $assetVersion
+    $publishedStamp = ConvertTo-PackageStamp -PublishedAt $publishedAt
+    $packageVersion = "$baseVersion-beta.$publishedStamp"
 }
 else {
     $channel = 'stable'
-    $baseVersion = $assetVersion
-    if ($baseVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+    if ($assetVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
         throw "Stable release version '$assetVersion' must be a plain semantic version."
     }
 
+    $baseVersion = $assetVersion
     $publishedStamp = ''
     $packageVersion = $assetVersion
     $wingetPackageIdentifier = 'PLFJY.ContextMenuMgrPlus'
@@ -184,7 +160,6 @@ $metadata = [ordered] @{
     publishedAt = $publishedAt
     htmlUrl = $htmlUrl
     channel = $channel
-    targetChannel = $TargetChannel
     assetVersion = $assetVersion
     baseVersion = $baseVersion
     publishedStamp = $publishedStamp

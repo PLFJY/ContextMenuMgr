@@ -183,6 +183,34 @@ resolve-metadata
 
 `.github/workflows/publish-package-managers.yml` 是包管理器发布 workflow。它在 GitHub Release 从 draft 被维护者手动发布后，通过 `release.published` 触发，读取已公开的 Release assets，生成并发布 Scoop / winget manifests。Scoop 和 winget 的详细渠道、变量、secret、dry-run 和首个 Beta 验证流程见 [包管理器发布说明](./package-managers.md)。
 
+### GitHub Release 同步到 GitCode
+
+GitHub Release 是发布元数据和用户下载附件的唯一 source of truth；Git 仓库镜像与 Release 附件镜像是两件独立的事情。`.github/workflows/manual-release.yml` 仍然只负责构建、生成 Release body/checksum 表并创建 GitHub draft Release。维护者发布该 draft 后，`.github/workflows/sync-gitcode-release.yml`（Actions 页面名称为 **Sync Release to GitCode**）会由 `release.published` 自动触发，将已发布的 GitHub Release 同步到 `PLFJY/ContextMenuMgr` GitCode 仓库。
+
+同步 workflow 只使用 AtomGit / GitCode API 2.0 的 `https://api.atomgit.com/api/v5`，并需要仓库 secret：
+
+```text
+GITCODE_ACCESS_TOKEN
+```
+
+令牌仅以内存中的 `Authorization: Bearer` 请求头发送；不要改用 query string token，也不要新增第二个 GitCode token secret。
+
+同步会重新从 GitHub Release API 查询指定 tag，因此自动和手动路径使用完全相同的逻辑：读取 tag、名称、原始 Markdown body、prerelease 状态、目标 commit，以及 GitHub Release API 中的实际 uploaded assets。Actions artifact 和 GitHub 自动生成的 source archive 不会被当作要镜像的附件。Release body 使用 UTF-8 JSON 序列化传递，不会重新调用 `New-ReleaseNotes.ps1` 或从提交重新生成内容。
+
+为方便首轮验证、补历史 Release 和故障恢复，workflow 也提供 **Run workflow**。唯一输入是 GitHub Release tag（例如 `v1.7.1`）；它是一次实际同步，不是 dry run。手动输入仍为 draft 的 GitHub Release 会被拒绝。
+
+创建 GitCode Release 前，脚本会等待 GitCode mirror 中同名 tag 出现，并校验它解析到与 GitHub Release tag 相同的 commit。等待使用有界重试（默认 15 次、每次 12 秒）；它绝不会为使 Release 创建成功而把 tag 指向 `main` 或另一 commit。若镜像尚未同步，workflow 会明确失败，之后可用同一 tag 再次手动运行。
+
+同步按 tag 查询 GitCode Release：不存在则创建，存在则 PATCH 更新支持的 tag、`target_commitish`、名称、body 和 prerelease 字段。附件上传前会先完整下载 GitHub Release 的真实附件到临时目录，并验证每个文件名、大小及 GitHub 提供的 SHA-256 digest（若有）。随后脚本通过 GitCode Release 的 `upload_url` 获取上传地址，并按文档使用 multipart `file` 字段上传；上传 endpoint 不会自动收到 GitCode API Bearer token，且 signed upload URL 不会写入日志。
+
+手动重跑是幂等的：脚本会按精确文件名枚举 GitCode 已有附件，只上传缺失的文件。例如六个附件已有四个时，重跑只会补传剩余两个。GitCode API 的 Release attachment schema 没有可用于安全替换的大小/checksum 字段时，已有同名附件不会被重复上传；若同名附件重复导致状态不明确，脚本会失败而不是声称附件已完全一致。最后会再次读取 GitCode Release，验证元数据和所有 GitHub uploaded asset 文件名；缺少任何预期附件都会使 workflow 失败。每次运行会在 Actions summary 中记录创建/更新、已存在、已上传和最终验证计数，但不会包含 token 或 signed URL。
+
+纯 PowerShell 判定逻辑由以下命令本地验证，不会访问或修改 GitCode：
+
+```powershell
+.\Scripts\Test-Sync-GitCodeRelease.ps1
+```
+
 ## 9. 构建排错
 
 | 问题 | 优先检查 |

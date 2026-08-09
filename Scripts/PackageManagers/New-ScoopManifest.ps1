@@ -57,12 +57,9 @@ $notes = @(
 )
 
 if ($metadata.channel -eq 'beta') {
-    if ([bool]$metadata.prerelease) {
-        $notes += 'Beta builds may contain regressions; use them only when you want to validate prerelease changes.'
-    }
-    else {
-        $notes += 'This Beta channel package currently tracks the latest stable release.'
-    }
+    # The Beta package-manager channel only originates from a GitHub
+    # Pre-release, so it always uses the prerelease regression warning.
+    $notes += 'Beta builds may contain regressions; use them only when you want to validate prerelease changes.'
 }
 
 $shortcutEntry = [object[]] @('ContextMenuManagerPlus.exe', [string] $metadata.scoopShortcutName)

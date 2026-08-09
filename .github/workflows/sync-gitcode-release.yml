@@ -1,0 +1,58 @@
+name: Sync Release to GitCode
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag to synchronize
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve source Release tag
+        id: tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            tag="$RELEASE_TAG"
+          else
+            tag="$INPUT_TAG"
+          fi
+          if [[ -z "$tag" ]]; then
+            echo "Release tag is required." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  sync:
+    needs: resolve-tag
+    runs-on: windows-latest
+    concurrency:
+      group: gitcode-release-${{ needs.resolve-tag.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Synchronize published GitHub Release
+        shell: pwsh
+        env:
+          SOURCE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GITCODE_ACCESS_TOKEN: ${{ secrets.GITCODE_ACCESS_TOKEN }}
+        run: .\Scripts\Sync-GitCodeRelease.ps1 -Tag $env:SOURCE_TAG -Trigger $env:GITHUB_EVENT_NAME

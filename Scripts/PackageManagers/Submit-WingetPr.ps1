@@ -303,7 +303,7 @@ Generated from PLFJY/ContextMenuMgr release $ReleaseTag.
 
 Stable and Beta are mutually exclusive channels and share the same installer AppId and service identity intentionally.
 
-The Beta channel always tracks the latest release. For Beta prereleases the version is derived from the GitHub Release publish time; when a stable release is published the Beta package version equals the stable version directly.
+The Beta package-manager channel only tracks GitHub Pre-releases. Stable GitHub Releases do not generate or update this Beta manifest. For Beta prereleases the package version is derived from the GitHub Release publish time.
 "@
 
 $title = "New version: $PackageIdentifier version $PackageVersion"

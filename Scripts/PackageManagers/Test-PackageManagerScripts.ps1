@@ -128,7 +128,7 @@ function Invoke-GenerationCase {
         [Parameter(Mandatory)] [string] $ExpectedPackageVersion,
         [Parameter(Mandatory)] [string] $ExpectedWingetId,
         [Parameter(Mandatory)] [string] $ExpectedScoopFile,
-        [string] $TargetChannel = ''
+        [Parameter(Mandatory)] [string] $ExpectedChannel
     )
 
     $caseRoot = Join-Path $Root $Name
@@ -153,20 +153,32 @@ function Invoke-GenerationCase {
 
     New-SampleAssets -Path $assetPath -Tag $Tag -AssetVersion $assetVersion
 
-    $resolveArgs = @{
-        ReleaseEventJson = $eventPath
-        OutputPath = $metadataPath
-    }
-    if (-not [string]::IsNullOrWhiteSpace($TargetChannel)) {
-        $resolveArgs['TargetChannel'] = $TargetChannel
-    }
-    & (Join-Path $scriptDir 'Resolve-PackageRelease.ps1') @resolveArgs
+    & (Join-Path $scriptDir 'Resolve-PackageRelease.ps1') `
+        -ReleaseEventJson $eventPath `
+        -OutputPath $metadataPath
     & (Join-Path $scriptDir 'New-ScoopManifest.ps1') -ReleaseMetadataJson $metadataPath -AssetManifestJson $assetPath -OutputDirectory $scoopOut | Out-Null
     & (Join-Path $scriptDir 'New-WingetManifest.ps1') -ReleaseMetadataJson $metadataPath -AssetManifestJson $assetPath -OutputDirectory $wingetOut | Out-Null
 
     $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    Assert-Equal -Actual $metadata.channel -Expected $ExpectedChannel -Message "$Name channel mismatch."
     Assert-Equal -Actual $metadata.packageVersion -Expected $ExpectedPackageVersion -Message "$Name package version mismatch."
     Assert-Equal -Actual $metadata.wingetPackageIdentifier -Expected $ExpectedWingetId -Message "$Name winget PackageIdentifier mismatch."
+    Assert-True -Condition ($metadata.PSObject.Properties.Name -notcontains 'targetChannel') -Message "$Name metadata must not expose targetChannel."
+    Assert-True -Condition ([bool]$metadata.prerelease -eq $Prerelease) -Message "$Name metadata prerelease flag mismatch."
+
+    # Channel invariant: a Stable Release must never resolve to the Beta channel,
+    # and a Pre-release must never resolve to the Stable channel.
+    if ($Prerelease) {
+        Assert-True -Condition ($metadata.channel -eq 'beta') -Message "$Name prerelease must resolve to beta channel."
+    }
+    else {
+        Assert-True -Condition ($metadata.channel -eq 'stable') -Message "$Name stable release must resolve to stable channel."
+    }
+
+    # Only the resolved channel's manifest must be generated. The opposite
+    # channel's Scoop manifest file must not appear in this run's output.
+    $oppositeScoopFile = if ($ExpectedChannel -eq 'beta') { 'contextmenumgrplus.json' } else { 'contextmenumgrplus-beta.json' }
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $scoopOut $oppositeScoopFile))) -Message "$Name must not generate the opposite channel Scoop manifest."
 
     $scoopPath = Join-Path $scoopOut $ExpectedScoopFile
     Assert-True -Condition (Test-Path -LiteralPath $scoopPath) -Message "$Name Scoop manifest was not created."
@@ -188,10 +200,13 @@ function Invoke-GenerationCase {
     Assert-True -Condition ([string] $scoop.architecture.arm64.url -match 'arm64-self-contained-portable\.zip') -Message "$Name Scoop arm64 URL must point to arm64 self-contained portable zip."
     Assert-True -Condition (($scoop.notes -join "`n") -notmatch '\.NET 10 Desktop Runtime') -Message "$Name Scoop notes must not mention .NET runtime requirement."
 
-    if ($metadata.channel -eq 'beta' -and -not [bool]$metadata.prerelease) {
+    # Beta channel now always originates from a GitHub Pre-release, so the notes
+    # must always carry the regression warning and must never claim to track a
+    # stable release.
+    if ($metadata.channel -eq 'beta') {
         $notesText = ($scoop.notes -join "`n")
-        Assert-True -Condition ($notesText -match 'tracks the latest stable release') -Message "$Name Scoop notes must mention tracking stable release for stable-to-beta."
-        Assert-True -Condition ($notesText -notmatch 'may contain regressions') -Message "$Name Scoop notes must not mention regressions for stable-to-beta."
+        Assert-True -Condition ($notesText -match 'may contain regressions') -Message "$Name Beta Scoop notes must mention prerelease regressions."
+        Assert-True -Condition ($notesText -notmatch 'tracks the latest stable release') -Message "$Name Beta Scoop notes must not claim to track stable."
     }
 
     $preInstall = ($scoop.pre_install -join "`n")
@@ -266,7 +281,8 @@ try {
         -PublishedAt '2026-07-04T13:58:22Z' `
         -ExpectedPackageVersion '1.7.3' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus' `
-        -ExpectedScoopFile 'contextmenumgrplus.json'
+        -ExpectedScoopFile 'contextmenumgrplus.json' `
+        -ExpectedChannel 'stable'
 
     Invoke-GenerationCase `
         -Root $root `
@@ -276,18 +292,48 @@ try {
         -PublishedAt '2026-07-04T13:58:22Z' `
         -ExpectedPackageVersion '1.7.3-beta.20260704135822' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus.Beta' `
-        -ExpectedScoopFile 'contextmenumgrplus-beta.json'
+        -ExpectedScoopFile 'contextmenumgrplus-beta.json' `
+        -ExpectedChannel 'beta'
 
+    # A newer-base Beta prerelease (e.g. after a 1.7.3 stable release) must
+    # still resolve to the Beta channel with a publish-stamped version.
     Invoke-GenerationCase `
         -Root $root `
-        -Name 'stable-to-beta' `
-        -Tag 'v1.7.3' `
-        -Prerelease $false `
-        -PublishedAt '2026-07-05T10:00:00Z' `
-        -ExpectedPackageVersion '1.7.3' `
+        -Name 'beta-newer-base' `
+        -Tag 'v1.9.0-Beta+abcdef0' `
+        -Prerelease $true `
+        -PublishedAt '2026-08-09T09:15:00Z' `
+        -ExpectedPackageVersion '1.9.0-beta.20260809091500' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus.Beta' `
         -ExpectedScoopFile 'contextmenumgrplus-beta.json' `
-        -TargetChannel 'beta'
+        -ExpectedChannel 'beta'
+
+    # Resolve-PackageRelease.ps1 must no longer accept a -TargetChannel
+    # parameter. The old stable-to-beta override has been removed entirely.
+    $resolverScript = Join-Path $scriptDir 'Resolve-PackageRelease.ps1'
+    $gateRoot = Join-Path $root 'target-channel-rejected'
+    New-Item -ItemType Directory -Force -Path $gateRoot | Out-Null
+    $gateEvent = Join-Path $gateRoot 'release-event.json'
+    $gateMetadata = Join-Path $gateRoot 'release-metadata.json'
+    Write-Json -Path $gateEvent -Value ([ordered] @{
+        release = [ordered] @{
+            tag_name = 'v1.7.3'
+            name = 'v1.7.3'
+            prerelease = $false
+            published_at = '2026-07-04T13:58:22Z'
+            html_url = 'https://github.com/PLFJY/ContextMenuMgr/releases/tag/v1.7.3'
+        }
+    })
+
+    $targetChannelThrew = $false
+    try {
+        & $resolverScript -ReleaseEventJson $gateEvent -OutputPath $gateMetadata -TargetChannel 'beta'
+    }
+    catch {
+        $targetChannelThrew = $true
+    }
+    Assert-True -Condition $targetChannelThrew -Message 'Resolve-PackageRelease.ps1 must reject the removed -TargetChannel parameter.'
+    Assert-True -Condition (-not (Test-Path -LiteralPath $gateMetadata)) -Message 'Resolve-PackageRelease.ps1 must not write metadata when called with the removed -TargetChannel parameter.'
 
     Write-Host "Package manager script tests passed. Fixture root: $root"
 }

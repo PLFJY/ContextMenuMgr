@@ -158,50 +158,6 @@ jobs:
           pwsh Scripts\PackageManagers\Test-WingetManifest.ps1 `
             -ManifestDirectory (Join-Path $env:PACKAGE_OUTPUT_DIR 'winget')
 
-      - name: Resolve Beta release metadata (stable tracks latest)
-        if: steps.release.outputs.channel == 'stable'
-        id: release_beta
-        shell: pwsh
-        run: |
-          .\Scripts\PackageManagers\Resolve-PackageRelease.ps1 `
-            -ReleaseEventJson (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-event.json') `
-            -OutputPath (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-metadata-beta.json') `
-            -TargetChannel beta
-
-      - name: Generate Beta Scoop manifest (stable tracks latest)
-        if: steps.release.outputs.channel == 'stable'
-        shell: pwsh
-        run: |
-          .\Scripts\PackageManagers\New-ScoopManifest.ps1 `
-            -ReleaseMetadataJson (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-metadata-beta.json') `
-            -AssetManifestJson (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-assets.json') `
-            -OutputDirectory (Join-Path $env:PACKAGE_OUTPUT_DIR 'scoop-beta')
-
-      - name: Validate Beta Scoop manifest (stable tracks latest)
-        if: steps.release.outputs.channel == 'stable'
-        shell: pwsh
-        run: |
-          pwsh Scripts\PackageManagers\Test-ScoopManifest.ps1 `
-            -ManifestPath (Join-Path (Join-Path $env:PACKAGE_OUTPUT_DIR 'scoop-beta') 'contextmenumgrplus-beta.json') `
-            -ExpectedAppName 'contextmenumgrplus-beta' `
-            -ExpectedVersion '${{ steps.release.outputs.package_version }}'
-
-      - name: Generate Beta winget manifests (stable tracks latest)
-        if: steps.release.outputs.channel == 'stable'
-        shell: pwsh
-        run: |
-          .\Scripts\PackageManagers\New-WingetManifest.ps1 `
-            -ReleaseMetadataJson (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-metadata-beta.json') `
-            -AssetManifestJson (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-assets.json') `
-            -OutputDirectory (Join-Path $env:PACKAGE_OUTPUT_DIR 'winget-beta')
-
-      - name: Validate Beta winget manifests (stable tracks latest)
-        if: steps.release.outputs.channel == 'stable'
-        shell: pwsh
-        run: |
-          pwsh Scripts\PackageManagers\Test-WingetManifest.ps1 `
-            -ManifestDirectory (Join-Path $env:PACKAGE_OUTPUT_DIR 'winget-beta')
-
       - name: Upload generated package manager manifests
         if: always()
         uses: actions/upload-artifact@v7
@@ -229,25 +185,6 @@ jobs:
 
           & .\Scripts\PackageManagers\Update-ScoopBucket.ps1 @arguments
 
-      - name: Update Scoop bucket (Beta tracks latest)
-        if: steps.release.outputs.channel == 'stable' && (steps.options.outputs.enable_scoop_push == 'true' || steps.options.outputs.dry_run == 'true')
-        shell: pwsh
-        env:
-          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-        run: |
-          $manifestPath = Join-Path (Join-Path $env:PACKAGE_OUTPUT_DIR 'scoop-beta') 'contextmenumgrplus-beta.json'
-          $arguments = @{
-            ManifestPath = $manifestPath
-            BucketRepository = $env:SCOOP_BUCKET_REPOSITORY
-            TokenEnvVar = 'SCOOP_BUCKET_TOKEN'
-          }
-
-          if ('${{ steps.options.outputs.dry_run }}' -eq 'true' -or '${{ steps.options.outputs.enable_scoop_push }}' -ne 'true') {
-            $arguments['DryRun'] = $true
-          }
-
-          & .\Scripts\PackageManagers\Update-ScoopBucket.ps1 @arguments
-
       - name: Submit winget PR
         if: steps.options.outputs.enable_winget_pr == 'true'
         shell: pwsh
@@ -263,33 +200,6 @@ jobs:
             WingetForkRepository = $env:WINGET_FORK_REPOSITORY
             PackageIdentifier = '${{ steps.release.outputs.winget_package_identifier }}'
             PackageVersion = '${{ steps.release.outputs.package_version }}'
-            ReleaseTag = '${{ steps.release.outputs.release_tag }}'
-            TokenEnvVar = 'WINGET_PR_TOKEN'
-          }
-
-          if ('${{ steps.options.outputs.dry_run }}' -eq 'true') {
-            $arguments['DryRun'] = $true
-          }
-
-          & .\Scripts\PackageManagers\Submit-WingetPr.ps1 @arguments
-
-      - name: Submit winget PR (Beta tracks latest)
-        if: steps.release.outputs.channel == 'stable' && steps.options.outputs.enable_winget_pr == 'true'
-        shell: pwsh
-        env:
-          WINGET_PR_TOKEN: ${{ secrets.WINGET_PR_TOKEN }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINGET_FORK_REPOSITORY)) {
-            throw 'WINGET_FORK_REPOSITORY is required when ENABLE_WINGET_PR is true.'
-          }
-
-          $betaMetadata = Get-Content (Join-Path $env:PACKAGE_OUTPUT_DIR 'release-metadata-beta.json') -Raw | ConvertFrom-Json
-
-          $arguments = @{
-            ManifestDirectory = (Join-Path $env:PACKAGE_OUTPUT_DIR 'winget-beta')
-            WingetForkRepository = $env:WINGET_FORK_REPOSITORY
-            PackageIdentifier = $betaMetadata.wingetPackageIdentifier
-            PackageVersion = $betaMetadata.packageVersion
             ReleaseTag = '${{ steps.release.outputs.release_tag }}'
             TokenEnvVar = 'WINGET_PR_TOKEN'
           }
