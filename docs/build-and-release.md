@@ -199,9 +199,11 @@ GITCODE_ACCESS_TOKEN
 
 为方便首轮验证、补历史 Release 和故障恢复，workflow 也提供 **Run workflow**。唯一输入是 GitHub Release tag（例如 `v1.7.1`）；它是一次实际同步，不是 dry run。手动输入仍为 draft 的 GitHub Release 会被拒绝。
 
-创建 GitCode Release 前，脚本会等待 GitCode mirror 中同名 tag 出现，并校验它解析到与 GitHub Release tag 相同的 commit。等待使用有界重试（默认 15 次、每次 12 秒）；它绝不会为使 Release 创建成功而把 tag 指向 `main` 或另一 commit。若镜像尚未同步，workflow 会明确失败，之后可用同一 tag 再次手动运行。
+创建 GitCode Release 前，脚本会通过 `GET /repos/:owner/:repo/tags` 分页查找同名 tag，并校验它解析到与 GitHub Release tag 相同的 commit。GitCode API 2.0 没有提供按名称 GET 单个普通 tag 的接口；`/tags/:tag_name` 只用于 DELETE，不能用 GET。等待使用有界重试（默认 15 次、每次 12 秒）；脚本绝不会为使 Release 创建成功而把 tag 指向 `main` 或另一 commit。若镜像尚未同步，workflow 会明确失败，之后可用同一 tag 再次手动运行。
 
-同步按 tag 查询 GitCode Release：不存在则创建，存在则 PATCH 更新支持的 tag、`target_commitish`、名称、body 和 prerelease 字段。附件上传前会先完整下载 GitHub Release 的真实附件到临时目录，并验证每个文件名、大小及 GitHub 提供的 SHA-256 digest（若有）。随后脚本通过 GitCode Release 的 `upload_url` 获取上传地址，并按文档使用 multipart `file` 字段上传；上传 endpoint 不会自动收到 GitCode API Bearer token，且 signed upload URL 不会写入日志。
+同步按 tag 查询 GitCode Release：不存在则创建，存在则 PATCH 更新。创建请求发送文档支持的 `tag_name`、`name`、`body`、`target_commitish` 和 `release_status`；PATCH 只发送其文档支持的 `name`、`body` 和 `release_status`。GitHub prerelease 映射为 GitCode `release_status=pre`，稳定版映射为 `release_status=latest`。对于已存在的 Release，API 不支持通过 PATCH 修改 tag 或 `target_commitish`，因此最终校验发现目标 commit 不一致时会失败并明确报告，而不是伪造同步成功。
+
+附件上传前会先完整下载 GitHub Release 的真实附件到临时目录，并验证每个文件名、大小及 GitHub 提供的 SHA-256 digest（若有）。随后脚本通过 GitCode Release 的 `upload_url` 接口获取文档所述的 `url` 和 `headers`，使用原始文件内容执行 HTTP PUT，并且只发送返回的 `x-obs-meta-project-id`、`x-obs-acl`、`x-obs-callback` 和 `Content-Type` 四个对象存储 header。对象存储 endpoint 不会收到 GitCode API Bearer token，signed upload URL 也不会写入日志。
 
 手动重跑是幂等的：脚本会按精确文件名枚举 GitCode 已有附件，只上传缺失的文件。例如六个附件已有四个时，重跑只会补传剩余两个。GitCode API 的 Release attachment schema 没有可用于安全替换的大小/checksum 字段时，已有同名附件不会被重复上传；若同名附件重复导致状态不明确，脚本会失败而不是声称附件已完全一致。最后会再次读取 GitCode Release，验证元数据和所有 GitHub uploaded asset 文件名；缺少任何预期附件都会使 workflow 失败。每次运行会在 Actions summary 中记录创建/更新、已存在、已上传和最终验证计数，但不会包含 token 或 signed URL。
 

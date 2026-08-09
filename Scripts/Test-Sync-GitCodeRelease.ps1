@@ -51,11 +51,38 @@ $sourceRelease = [pscustomobject]@{
 }
 $payload = New-GitCodeReleasePayload -GitHubRelease $sourceRelease
 Assert-True ($payload.body -ceq $markdown) 'Multiline Chinese Markdown must be preserved exactly.'
-Assert-True (-not $payload.prerelease) 'Stable release must remain stable.'
+Assert-True ($payload.Count -eq 5) 'Create payload must contain exactly the five documented fields.'
+Assert-True ($payload.release_status -ceq 'latest') 'Stable release must use the documented latest status.'
+Assert-True (-not $payload.Contains('prerelease')) 'Create payload must not invent a writable prerelease field.'
 $sourceRelease.prerelease = $true
-Assert-True ((New-GitCodeReleasePayload -GitHubRelease $sourceRelease).prerelease) 'Prerelease flag must remain true.'
+Assert-True ((New-GitCodeReleasePayload -GitHubRelease $sourceRelease).release_status -ceq 'pre') 'Prerelease must use the documented pre status.'
+$updatePayload = New-GitCodeReleaseUpdatePayload -GitHubRelease $sourceRelease
+Assert-True ($updatePayload.Count -eq 3) 'Update payload must contain exactly the three documented fields.'
+Assert-True ($updatePayload.release_status -ceq 'pre') 'Update payload must preserve prerelease state.'
+Assert-True (-not $updatePayload.Contains('tag_name') -and -not $updatePayload.Contains('target_commitish')) 'Update payload must contain only fields supported by PATCH.'
 Assert-True ((Get-GitCodeReleaseOperation -ExistingRelease $null) -eq 'created') 'Missing GitCode Release must create.'
 Assert-True ((Get-GitCodeReleaseOperation -ExistingRelease ([pscustomobject]@{})) -eq 'updated') 'Existing GitCode Release must update.'
+
+$tagOne = [pscustomobject]@{ name = 'v1.7.2'; commit = [pscustomobject]@{ sha = 'abc' } }
+$tagTwo = [pscustomobject]@{ name = 'v1.7.1'; commit = [pscustomobject]@{ sha = 'def' } }
+Assert-True ($null -eq (Find-GitCodeTag -ReleaseTag 'v1.7.2' -Tags $null)) 'No tags must report the source tag as missing.'
+Assert-True ((Find-GitCodeTag -ReleaseTag 'v1.7.2' -Tags $tagOne).commit.sha -ceq 'abc') 'Scalar tag response must be normalized.'
+Assert-True ((Find-GitCodeTag -ReleaseTag 'v1.7.1' -Tags @($tagOne, $tagTwo)).commit.sha -ceq 'def') 'Multiple tags must be matched by exact name.'
+
+$uploadResponse = [pscustomobject]@{
+    url = 'https://object-storage.example/upload?signed=redacted'
+    headers = [pscustomobject]@{
+        'x-obs-meta-project-id' = 'project'
+        'x-obs-acl' = 'private'
+        'x-obs-callback' = 'callback'
+        'Content-Type' = 'application/octet-stream'
+        'Authorization' = 'must-not-forward'
+    }
+}
+$uploadDescriptor = ConvertTo-GitCodeUploadDescriptor -Response $uploadResponse
+Assert-True ($uploadDescriptor.Headers.Count -eq 4) 'Upload must forward only the four documented OBS headers.'
+Assert-True (-not $uploadDescriptor.Headers.Contains('Authorization')) 'Upload must never forward Authorization to object storage.'
+Assert-Throws { ConvertTo-GitCodeUploadDescriptor -Response ([pscustomobject]@{ url = 'https://example/upload'; headers = [pscustomobject]@{} }) } 'Missing required upload headers must fail.'
 
 $expected = @((New-Asset 'installer x64.exe'), (New-Asset 'portable.zip'), (New-Asset '说明.txt'))
 $none = Get-GitCodeAssetPlan -ExpectedAssets $expected -ExistingAssets @()
@@ -79,9 +106,9 @@ Assert-Throws { Assert-GitCodeUploadSucceeded -Succeeded $false -FileName 'bad.e
 
 $sourceRelease.prerelease = $false
 $sourceRelease.assets = $expected
-$matchingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; name = $sourceRelease.name; body = $markdown; prerelease = $false; assets = $expected }
+$matchingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = $expected }
 Assert-True ((Assert-GitCodeReleaseParity -GitHubRelease $sourceRelease -GitCodeRelease $matchingTarget) -eq 3) 'Matching release must verify every expected asset.'
-$missingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; name = $sourceRelease.name; body = $markdown; prerelease = $false; assets = @((New-Asset 'portable.zip')) }
+$missingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = @((New-Asset 'portable.zip')) }
 Assert-Throws { Assert-GitCodeReleaseParity -GitHubRelease $sourceRelease -GitCodeRelease $missingTarget } 'Final verification must fail for a missing asset.'
 Assert-Throws { Test-ReleaseAssetFilename -Name 'folder/file.exe' } 'Nested filenames must not escape the download directory.'
 

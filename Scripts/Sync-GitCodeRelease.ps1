@@ -172,15 +172,35 @@ function Assert-GitCodeUploadSucceeded {
     }
 }
 
+function Get-GitCodeReleaseStatus {
+    param([Parameter(Mandatory)] [bool] $Prerelease)
+
+    if ($Prerelease) {
+        return 'pre'
+    }
+
+    return 'latest'
+}
+
 function New-GitCodeReleasePayload {
     param([Parameter(Mandatory)] [object] $GitHubRelease)
 
     return [ordered]@{
         tag_name = [string] $GitHubRelease.tag_name
-        target_commitish = [string] $GitHubRelease.target_commitish
-        prerelease = [bool] $GitHubRelease.prerelease
         name = [string] $GitHubRelease.name
         body = [string] $GitHubRelease.body
+        target_commitish = [string] $GitHubRelease.target_commitish
+        release_status = Get-GitCodeReleaseStatus -Prerelease ([bool] $GitHubRelease.prerelease)
+    }
+}
+
+function New-GitCodeReleaseUpdatePayload {
+    param([Parameter(Mandatory)] [object] $GitHubRelease)
+
+    return [ordered]@{
+        name = [string] $GitHubRelease.name
+        body = [string] $GitHubRelease.body
+        release_status = Get-GitCodeReleaseStatus -Prerelease ([bool] $GitHubRelease.prerelease)
     }
 }
 
@@ -223,17 +243,20 @@ function Assert-GitCodeReleaseParity {
         [Parameter(Mandatory)] [object] $GitCodeRelease
     )
 
-    foreach ($field in @('tag_name', 'name', 'body', 'prerelease')) {
+    foreach ($field in @('tag_name', 'target_commitish', 'name', 'body')) {
         $expected = $GitHubRelease.$field
         $actual = $GitCodeRelease.$field
-        if ($field -eq 'prerelease') {
-            if ([bool] $expected -ne [bool] $actual) {
-                throw "GitCode Release metadata verification failed for '$field'."
-            }
-        }
-        elseif ([string] $expected -cne [string] $actual) {
+        if ([string] $expected -cne [string] $actual) {
             throw "GitCode Release metadata verification failed for '$field'."
         }
+    }
+
+    $expectedStatus = Get-GitCodeReleaseStatus -Prerelease ([bool] $GitHubRelease.prerelease)
+    if ([string] $GitCodeRelease.release_status -cne $expectedStatus) {
+        throw "GitCode Release metadata verification failed for 'release_status'."
+    }
+    if ([bool] $GitCodeRelease.prerelease -ne [bool] $GitHubRelease.prerelease) {
+        throw "GitCode Release metadata verification failed for 'prerelease'."
     }
 
     $plan = Get-GitCodeAssetPlan -ExpectedAssets (ConvertTo-ReleaseArray $GitHubRelease.assets) -ExistingAssets (ConvertTo-ReleaseArray $GitCodeRelease.assets)
@@ -323,11 +346,34 @@ function Get-GitCodeRelease {
     return $response.Json
 }
 
+function Find-GitCodeTag {
+    param(
+        [Parameter(Mandatory)] [string] $ReleaseTag,
+        [AllowNull()] [object] $Tags
+    )
+
+    return @((ConvertTo-ReleaseArray $Tags) | Where-Object {
+            [string]::Equals([string] $_.name, $ReleaseTag, [System.StringComparison]::Ordinal)
+        }) | Select-Object -First 1
+}
+
 function Get-GitCodeTag {
     param([Parameter(Mandatory)] [string] $ReleaseTag)
 
-    $encodedTag = ConvertTo-GitCodePathSegment -Value $ReleaseTag
-    return Invoke-GitCodeApi -Method GET -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/tags/$encodedTag" -AllowStatusCodes @(404)
+    $perPage = 100
+    for ($page = 1; $page -le 10; $page++) {
+        $response = Invoke-GitCodeApi -Method GET -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/tags?page=$page&per_page=$perPage"
+        $tags = @(ConvertTo-ReleaseArray $response.Json)
+        $matchingTag = Find-GitCodeTag -ReleaseTag $ReleaseTag -Tags $tags
+        if ($null -ne $matchingTag) {
+            return $matchingTag
+        }
+        if ($tags.Count -lt $perPage) {
+            return $null
+        }
+    }
+
+    throw "GitCode tag lookup exceeded 10 pages while searching for '$ReleaseTag'."
 }
 
 function Wait-GitCodeTag {
@@ -339,9 +385,9 @@ function Wait-GitCodeTag {
     )
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        $tagResponse = Get-GitCodeTag -ReleaseTag $ReleaseTag
-        if ($tagResponse.StatusCode -eq 200) {
-            $commit = Get-JsonPropertyValue -Object $tagResponse.Json -Names @('commit')
+        $gitCodeTag = Get-GitCodeTag -ReleaseTag $ReleaseTag
+        if ($null -ne $gitCodeTag) {
+            $commit = Get-JsonPropertyValue -Object $gitCodeTag -Names @('commit')
             $actualCommit = if ($null -ne $commit) { Get-JsonPropertyValue -Object $commit -Names @('sha', 'id') } else { $null }
             if ([string]::IsNullOrWhiteSpace([string] $actualCommit)) {
                 throw "GitCode tag '$ReleaseTag' was found, but its commit SHA was not returned by the API."
@@ -428,42 +474,63 @@ function Update-GitCodeRelease {
     param([Parameter(Mandatory)] [object] $GitHubRelease)
 
     $encodedTag = ConvertTo-GitCodePathSegment -Value ([string] $GitHubRelease.tag_name)
-    return (Invoke-GitCodeApi -Method PATCH -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/releases/$encodedTag" -Body (New-GitCodeReleasePayload -GitHubRelease $GitHubRelease)).Json
+    return (Invoke-GitCodeApi -Method PATCH -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/releases/$encodedTag" -Body (New-GitCodeReleaseUpdatePayload -GitHubRelease $GitHubRelease)).Json
 }
 
-function Get-GitCodeUploadUrl {
+function ConvertTo-GitCodeUploadDescriptor {
+    param([Parameter(Mandatory)] [object] $Response)
+
+    $uploadUrl = Get-JsonPropertyValue -Object $Response -Names @('url')
+    $responseHeaders = Get-JsonPropertyValue -Object $Response -Names @('headers')
+    if ([string]::IsNullOrWhiteSpace([string] $uploadUrl) -or $null -eq $responseHeaders) {
+        throw 'GitCode did not return the documented Release attachment upload url and headers.'
+    }
+
+    $headers = [ordered]@{}
+    foreach ($headerName in @('x-obs-meta-project-id', 'x-obs-acl', 'x-obs-callback', 'Content-Type')) {
+        $headerValue = Get-JsonPropertyValue -Object $responseHeaders -Names @($headerName)
+        if ([string]::IsNullOrWhiteSpace([string] $headerValue)) {
+            throw "GitCode upload response is missing required header '$headerName'."
+        }
+        $headers[$headerName] = [string] $headerValue
+    }
+
+    return [pscustomobject]@{
+        Url = [string] $uploadUrl
+        Headers = $headers
+    }
+}
+
+function Get-GitCodeUploadDescriptor {
     param([Parameter(Mandatory)] [string] $ReleaseTag)
 
     $encodedTag = ConvertTo-GitCodePathSegment -Value $ReleaseTag
     $response = Invoke-GitCodeApi -Method GET -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/releases/$encodedTag/upload_url"
-    $uploadUrl = Get-JsonPropertyValue -Object $response.Json -Names @('upload_url')
-    if ([string]::IsNullOrWhiteSpace([string] $uploadUrl)) {
-        throw "GitCode did not return an upload_url for Release '$ReleaseTag'."
-    }
-
-    return [string] $uploadUrl
+    return ConvertTo-GitCodeUploadDescriptor -Response $response.Json
 }
 
 function Invoke-GitCodeAttachmentUpload {
     param(
-        [Parameter(Mandatory)] [string] $UploadUrl,
-        [Parameter(Mandatory)] [string] $FilePath,
-        [Parameter(Mandatory)] [string] $FileName
+        [Parameter(Mandatory)] [object] $UploadDescriptor,
+        [Parameter(Mandatory)] [string] $FilePath
     )
 
-    # The upload URL is handled as an independent upload endpoint. Do not forward
-    # the GitCode API bearer token or log the (potentially signed) URL.
+    # The documented upload endpoint is an object-storage PUT. Send only the four
+    # headers returned by GitCode; never forward the API bearer token or log the URL.
     $client = [System.Net.Http.HttpClient]::new()
     $stream = $null
-    $content = $null
+    $request = $null
     $response = $null
     try {
         $stream = [System.IO.File]::OpenRead($FilePath)
         $fileContent = [System.Net.Http.StreamContent]::new($stream)
-        $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::new('application/octet-stream')
-        $content = [System.Net.Http.MultipartFormDataContent]::new()
-        $content.Add($fileContent, 'file', $FileName)
-        $response = $client.PostAsync($UploadUrl, $content).GetAwaiter().GetResult()
+        $fileContent.Headers.TryAddWithoutValidation('Content-Type', [string] $UploadDescriptor.Headers['Content-Type']) | Out-Null
+        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, [string] $UploadDescriptor.Url)
+        $request.Content = $fileContent
+        foreach ($headerName in @('x-obs-meta-project-id', 'x-obs-acl', 'x-obs-callback')) {
+            $request.Headers.TryAddWithoutValidation($headerName, [string] $UploadDescriptor.Headers[$headerName]) | Out-Null
+        }
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
         $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
         return [pscustomobject]@{
             StatusCode = [int] $response.StatusCode
@@ -474,7 +541,7 @@ function Invoke-GitCodeAttachmentUpload {
     }
     finally {
         if ($null -ne $response) { $response.Dispose() }
-        if ($null -ne $content) { $content.Dispose() }
+        if ($null -ne $request) { $request.Dispose() }
         if ($null -ne $stream) { $stream.Dispose() }
         $client.Dispose()
     }
@@ -533,8 +600,8 @@ function Sync-GitCodeReleaseAssets {
         $completed = $false
         for ($attempt = 1; $attempt -le 4; $attempt++) {
             # Request a fresh URL for every attempt; this is safe for single-use URLs.
-            $uploadUrl = Get-GitCodeUploadUrl -ReleaseTag $ReleaseTag
-            $result = Invoke-GitCodeAttachmentUpload -UploadUrl $uploadUrl -FilePath $filePath -FileName $fileName
+            $uploadDescriptor = Get-GitCodeUploadDescriptor -ReleaseTag $ReleaseTag
+            $result = Invoke-GitCodeAttachmentUpload -UploadDescriptor $uploadDescriptor -FilePath $filePath
             if ($result.Success) {
                 $completed = $true
                 $uploaded++
