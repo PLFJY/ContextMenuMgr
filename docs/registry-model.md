@@ -282,11 +282,34 @@ reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledI
 
 不因注册表 key 缺失就重置 `DesiredEnabled=false`。
 
-### 10.12 竞争处理
+### 10.12 传统 Shell Extension 的注册项状态
+
+传统 Shell Extension 的普通开关以单个注册项为单位，而不是以 CLSID 为单位：
+
+- 启用：`<root>\shellex\ContextMenuHandlers\<name>`；
+- 禁用：`<root>\shellex\-ContextMenuHandlers\<name>`。
+
+两个物理根使用同一个稳定逻辑根，因此移动前后 `Id` 保持为
+`<root>\shellex\ContextMenuHandlers|<name>`。移动根据条目的
+`BackendRegistryPath` 派生同一 hive 内的兄弟路径；机器级条目保持在
+`HKLM\SOFTWARE\Classes`，用户级条目保持在 `HKEY_USERS\<SID>\Software\Classes`。
+复制完成并递归验证值类型、值和子键后才删除源键。新键继承目标容器的 ACL；
+本实现不复制源键的显式安全描述符。
+
+`Shell Extensions\Blocked` 是按 CLSID 生效的独立全局机制，不能作为经典 ShellEx
+普通注册项开关的状态来源。普通传统开关不会写入或删除该列表。若同一逻辑注册项的 active
+与 disabled 物理键同时存在，目录将显示一致性问题且拒绝覆盖式切换。
+需要管理全局 CLSID 阻止项时，使用“其他规则 / GUID 阻止”页面；该页面的操作影响所有使用
+该 CLSID 的注册项。
+
+Windows 注册表继承仍可能使 `AllFilesystemObjects` 中的另一个已启用注册项出现在
+File/Folder 场景；应用保证的是注册项独立控制，而不是绕过 Explorer 的继承规则。
+
+### 10.13 竞争处理
 
 - key 在 snapshot 枚举和禁用写入之间消失：reconciliation 写入失败，记录日志，后续轮询自然重试；
 - 第三方程序在 reconciliation 后立即重建 key：下一轮 polling 会再次 reconcile；
-- reconciliation 改变多个 linked ShellExtension 投影：`UpdateLinkedShellExtensionObservedEnabled` 统一更新同 CLSID 的所有 state；
+- reconciliation 只移动发生 drift 的单个 ShellExtension 注册项；相同 CLSID 的其它分类 state 不会被更新；
 - 交互式 session baseline 重建与正常 poll 并发：monitor 串行处理；
 - ContextMenuMgr 自己的纠正写入在下一 snapshot 可见：monitor 从 post-reconciliation snapshot 更新 knownItems；
 - `SuppressNextDetection` 不永久隐藏真正的后续重建：monitor 在 baseline 建立时消费该标志；

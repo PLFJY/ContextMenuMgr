@@ -395,3 +395,4 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 | 深入分析失败 | `ContextMenuDeepAnalysisService.cs`、`ContextMenuMgr.ProbeHost/src` | `frontend-debug.log` 的 ProbeHost diagnostics | 把 COM 探测失败当成菜单管理失败。 |
 | 全局搜索搜得到但不跳转 | `ShellViewModel.cs`、`GlobalSearchNavigationFilterService.cs`、目标页面 ViewModel | `frontend-debug.log` 中 `GlobalSearchOpenResult`、`GlobalSearchFilterRequested` | 只导航，没消费 pending filter 或 target page type 不匹配。 |
 | 主题启动时不生效 | `FrontendThemeService.cs`、`SettingsPageViewModel.cs` | `frontend-debug.log` 中 `ThemeStartupInitialize` | 设置服务没加载、System watcher 状态和显式主题混用。 |
+| 传统 Shell Extension 开关影响其它分类 | `ContextMenuRegistryCatalog.cs`、`ContextMenuStateStore.cs` | `backend.log` 中 `ClassicShellExtensionMove*` | 误把注册项状态当作 CLSID 全局 Blocked 状态；确认 active/disabled sibling container 和 frontend SID hive。 |

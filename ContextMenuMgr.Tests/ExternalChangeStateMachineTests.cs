@@ -17,6 +17,66 @@ namespace ContextMenuMgr.Tests;
 /// </summary>
 public sealed class ExternalChangeStateMachineTests
 {
+    [Fact]
+    public void ClassicShellExtensionPaths_UseStableIdentityAndPerRegistrationContainers()
+    {
+        const string activePath = @"HKEY_USERS\S-1-5-21-test\Software\Classes\*\shellex\ContextMenuHandlers\Foo";
+        const string disabledPath = @"HKEY_USERS\S-1-5-21-test\Software\Classes\*\shellex\-ContextMenuHandlers\Foo";
+
+        Assert.False(ContextMenuRegistryCatalog.IsDisabledContextMenuHandlersPath(activePath));
+        Assert.True(ContextMenuRegistryCatalog.IsDisabledContextMenuHandlersPath(disabledPath));
+        Assert.Equal(disabledPath, ContextMenuRegistryCatalog.GetSiblingContextMenuHandlersPath(activePath, enable: false));
+        Assert.Equal(activePath, ContextMenuRegistryCatalog.GetSiblingContextMenuHandlersPath(disabledPath, enable: true));
+
+        var active = new ContextMenuEntry
+        {
+            Id = @"*\shellex\ContextMenuHandlers|Foo",
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            IsEnabled = true
+        };
+        var disabled = active with { IsEnabled = false };
+
+        Assert.Equal(active.Id, disabled.Id);
+        Assert.True(active.IsEnabled);
+        Assert.False(disabled.IsEnabled);
+    }
+
+    [Fact]
+    public void ClassicShellExtensionsWithSameClsid_HaveIndependentStateControlDomains()
+    {
+        var file = new ContextMenuEntry
+        {
+            Id = @"*\shellex\ContextMenuHandlers|Foo",
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            HandlerClsid = "{11111111-1111-1111-1111-111111111111}"
+        };
+        var directory = file with { Id = @"Directory\shellex\ContextMenuHandlers|Foo" };
+
+        var linked = ContextMenuRegistryCatalog.GetStateLinkedEntries([file, directory], file);
+
+        Assert.Single(linked);
+        Assert.Equal(file.Id, linked[0].Id);
+    }
+
+    [Fact]
+    public void Windows11EntriesWithSameClsid_RetainGlobalBlockedControlDomain()
+    {
+        var first = new ContextMenuEntry
+        {
+            Id = "win11:first",
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            IsWindows11ContextMenu = true,
+            HandlerClsid = "{22222222-2222-2222-2222-222222222222}"
+        };
+        var second = first with { Id = "win11:second" };
+
+        var linked = ContextMenuRegistryCatalog.GetStateLinkedEntries([first, second], first);
+
+        Assert.Equal(2, linked.Count);
+        Assert.Contains(linked, item => item.Id == first.Id);
+        Assert.Contains(linked, item => item.Id == second.Id);
+    }
+
     // ---- helpers for building test fixtures ---------------------------------
 
     private static ContextMenuEntry BuildPresentEntry(

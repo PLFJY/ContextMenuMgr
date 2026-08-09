@@ -219,3 +219,18 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的代码 | `ContextMenuRegistryCatalog.cs`、`IconPreviewService.cs`、`Windows11ContextMenuCatalog.cs`、`ContextMenuDeepAnalysisService.cs`。 |
 | 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
 | 常见修复方向 | 把解析结果视为 best-effort；不要用显示名或图标路径作为唯一 identity；必要时用 Deep Analysis 辅助确认实际菜单文字。 |
+
+## 19. 传统 Shell Extension 开关影响了其它分类
+
+传统 Shell Extension 的普通开关只移动当前注册项：
+`ContextMenuHandlers\<name>` 与 `-ContextMenuHandlers\<name>` 之间移动。它不应写入
+`Shell Extensions\Blocked`，因为该列表按 CLSID 全局生效。排查时先检查
+`backend.log` 的 `ClassicShellExtensionMoveStarted` / `ClassicShellExtensionMoveSucceeded`，确认
+source 和 destination 均位于同一个 `HKLM\SOFTWARE\Classes` 或
+`HKEY_USERS\<frontend SID>\Software\Classes` 实例。若 active 和 disabled 键同时存在，应用会
+报告一致性问题并拒绝自动覆盖；请先安全地核对两个键的内容。
+
+全局 Blocked 值可能来自旧版应用、管理员或其它工具；它是独立的 CLSID 机制，普通经典
+ShellEx 开关不会自动删除它。如需有意更改该全局状态，请在“其他规则 / GUID 阻止”页面操作。
+Windows 11 packaged context-menu 项仍使用其既有的
+blocked-list 实现。

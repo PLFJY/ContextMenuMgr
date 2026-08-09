@@ -17,7 +17,6 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class ContextMenuRegistryCatalog
 {
-    private const string BlockedShellExtensionsPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     internal const string Windows11MonitoredRootPath = @"PackagedCom\Windows11ContextMenu";
     private const string RecycleBinPinToHomeId = "special:recyclebin:pintohome";
     private const string RecycleBinPinToHomeRegistryPath = @"HKEY_CLASSES_ROOT\Folder\shell\pintohome";
@@ -623,7 +622,7 @@ public sealed class ContextMenuRegistryCatalog
                     SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable);
                     break;
                 case ContextMenuEntryKind.ShellExtension:
-                    SetShellExtensionEnabled(item, enable);
+                    await SetShellExtensionEnabledAsync(item, enable, cancellationToken);
                     break;
                 default:
                     throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -643,11 +642,6 @@ public sealed class ContextMenuRegistryCatalog
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
                 state.DeletedAtUtc = null;
                 state.BackupFilePath = null;
-            }
-
-            if (item.EntryKind == ContextMenuEntryKind.ShellExtension)
-            {
-                UpdateLinkedShellExtensionPersistedStates(states, item.HandlerClsid, enable);
             }
 
             PruneTransientStates(states);
@@ -755,7 +749,7 @@ public sealed class ContextMenuRegistryCatalog
                         SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable: true);
                         break;
                     case ContextMenuEntryKind.ShellExtension:
-                        SetShellExtensionEnabled(item, enable: true);
+                        await SetShellExtensionEnabledAsync(item, enable: true, cancellationToken);
                         break;
                     default:
                         throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -823,7 +817,7 @@ public sealed class ContextMenuRegistryCatalog
             // The item was already disabled during quarantine. Ensure it stays disabled.
             if (item is not null && item.IsPresentInRegistry && item.IsEnabled)
             {
-                DisableEntryCore(item, userContext);
+                await DisableEntryCoreAsync(item, userContext, cancellationToken);
             }
 
             // Delete the obsolete old deletion backup.
@@ -1751,7 +1745,7 @@ public sealed class ContextMenuRegistryCatalog
             var isEnabled = entryKind switch
             {
                 ContextMenuEntryKind.ShellVerb => ShellVerbVisibility.IsEnabled(itemKey),
-                ContextMenuEntryKind.ShellExtension => !IsShellExtensionBlocked(handlerClsid),
+                ContextMenuEntryKind.ShellExtension => !IsDisabledContextMenuHandlersPath(effectiveRelativePath),
                 _ => true
             };
 
@@ -1984,7 +1978,7 @@ public sealed class ContextMenuRegistryCatalog
                 }
                 break;
             case ContextMenuEntryKind.ShellExtension:
-                SetShellExtensionEnabled(item, enable: false);
+                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken);
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -2021,7 +2015,7 @@ public sealed class ContextMenuRegistryCatalog
     /// This is the shared disable primitive used by reconciliation, quarantine,
     /// and reappeared-item quarantine.
     /// </summary>
-    private void DisableEntryCore(ContextMenuEntry item, BackendUserContext? userContext)
+    private async Task DisableEntryCoreAsync(ContextMenuEntry item, BackendUserContext? userContext, CancellationToken cancellationToken)
     {
         if (item.IsWindows11ContextMenu)
         {
@@ -2039,36 +2033,10 @@ public sealed class ContextMenuRegistryCatalog
                 SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable: false);
                 break;
             case ContextMenuEntryKind.ShellExtension:
-                SetShellExtensionEnabled(item, enable: false);
+                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken);
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
-        }
-    }
-
-    /// <summary>
-    /// Updates the ObservedEnabled field for all persisted ShellExtension states
-    /// that share the given handler CLSID, without touching DesiredEnabled or
-    /// approval flags. Used after reconciliation disables a ShellExtension via
-    /// the blocked list (which affects all projections of the same CLSID).
-    /// </summary>
-    private static void UpdateLinkedShellExtensionObservedEnabled(
-        IDictionary<string, PersistedContextMenuState> states,
-        string? handlerClsid,
-        bool observedEnabled)
-    {
-        if (string.IsNullOrWhiteSpace(handlerClsid))
-        {
-            return;
-        }
-
-        foreach (var state in states.Values.Where(state =>
-                     state.EntryKind == ContextMenuEntryKind.ShellExtension
-                     && !state.IsDeleted
-                     && string.Equals(state.HandlerClsid, handlerClsid, StringComparison.OrdinalIgnoreCase)))
-        {
-            state.ObservedEnabled = observedEnabled;
-            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }
     }
 
@@ -2087,8 +2055,6 @@ public sealed class ContextMenuRegistryCatalog
         var states = await _stateStore.LoadAsync(cancellationToken);
         var reconciledItemIds = new List<string>();
         var failedItemIds = new List<string>();
-        var processedClsids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
         foreach (var entry in snapshot.Where(static e => e.IsPresentInRegistry && !e.IsDeleted))
         {
             if (!states.TryGetValue(entry.Id, out var state))
@@ -2101,35 +2067,16 @@ public sealed class ContextMenuRegistryCatalog
                 continue;
             }
 
-            // For ShellExtensions, the blocked-list write affects all projections
-            // of the same CLSID. Avoid writing the same CLSID twice.
-            if (entry.EntryKind == ContextMenuEntryKind.ShellExtension
-                && !entry.IsWindows11ContextMenu
-                && !string.IsNullOrWhiteSpace(entry.HandlerClsid)
-                && !processedClsids.Add(entry.HandlerClsid))
-            {
-                // Already disabled via a prior projection. Just update state.
-                state.ObservedEnabled = false;
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-                reconciledItemIds.Add(entry.Id);
-                continue;
-            }
-
             try
             {
                 await _logger.LogAsync(
                     $"DesiredStateDriftDetected: ItemId={entry.Id}, DesiredEnabled=False, ObservedEnabled=True.",
                     cancellationToken);
 
-                DisableEntryCore(entry, userContext);
+                await DisableEntryCoreAsync(entry, userContext, cancellationToken);
 
                 state.ObservedEnabled = false;
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-
-                if (entry.EntryKind == ContextMenuEntryKind.ShellExtension && !entry.IsWindows11ContextMenu)
-                {
-                    UpdateLinkedShellExtensionObservedEnabled(states, entry.HandlerClsid, observedEnabled: false);
-                }
 
                 reconciledItemIds.Add(entry.Id);
 
@@ -2171,7 +2118,7 @@ public sealed class ContextMenuRegistryCatalog
         BackendUserContext? userContext = null)
     {
         // Step 1: disable the recreated item immediately.
-        DisableEntryCore(item, userContext);
+        await DisableEntryCoreAsync(item, userContext, cancellationToken);
 
         var states = await _stateStore.LoadAsync(cancellationToken);
         var state = GetOrCreateState(states, item);
@@ -2366,7 +2313,7 @@ public sealed class ContextMenuRegistryCatalog
                 var isEnabled = root.EntryKind switch
                 {
                     ContextMenuEntryKind.ShellVerb => ShellVerbVisibility.IsEnabled(itemKey),
-                    ContextMenuEntryKind.ShellExtension => !IsShellExtensionBlocked(handlerClsid),
+                    ContextMenuEntryKind.ShellExtension => !root.IsDisabledContainer,
                     _ => true
                 };
 
@@ -2476,7 +2423,9 @@ public sealed class ContextMenuRegistryCatalog
     }
 
     private static string? GetConsistencyIssue(ContextMenuEntry entry, PersistedContextMenuState? state)
-        => ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
+        => !string.IsNullOrWhiteSpace(entry.ConsistencyIssue)
+            ? entry.ConsistencyIssue
+            : ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
 
     private static ContextMenuChangeKind GetDetectedChangeKind(ContextMenuEntry entry, PersistedContextMenuState? state, bool hasBaseline)
         => ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
@@ -2686,46 +2635,26 @@ public sealed class ContextMenuRegistryCatalog
         return fallbackItem;
     }
 
-    private static IReadOnlyList<ContextMenuEntry> GetStateLinkedEntries(
+    internal static IReadOnlyList<ContextMenuEntry> GetStateLinkedEntries(
         IReadOnlyList<ContextMenuEntry> snapshot,
         ContextMenuEntry item)
     {
-        if (item.EntryKind != ContextMenuEntryKind.ShellExtension || string.IsNullOrWhiteSpace(item.HandlerClsid))
+        // A classic shell extension is controlled per registration. A shared CLSID
+        // is only a Windows global-block identity, never a reason to link classic
+        // category switches or persisted state. Packaged Windows 11 entries retain
+        // their existing global blocked-list control domain.
+        if (!item.IsWindows11ContextMenu || string.IsNullOrWhiteSpace(item.HandlerClsid))
         {
             return [item];
         }
 
         return snapshot
-            .Where(entry =>
-                entry.EntryKind == ContextMenuEntryKind.ShellExtension
-                && string.Equals(entry.HandlerClsid, item.HandlerClsid, StringComparison.OrdinalIgnoreCase))
+            .Where(entry => entry.IsWindows11ContextMenu
+                            && string.Equals(entry.HandlerClsid, item.HandlerClsid, StringComparison.OrdinalIgnoreCase))
             .Append(item)
             .GroupBy(static entry => entry.Id, StringComparer.OrdinalIgnoreCase)
             .Select(static group => group.First())
             .ToArray();
-    }
-
-    private static void UpdateLinkedShellExtensionPersistedStates(
-        IDictionary<string, PersistedContextMenuState> states,
-        string? handlerClsid,
-        bool enable)
-    {
-        if (string.IsNullOrWhiteSpace(handlerClsid))
-        {
-            return;
-        }
-
-        foreach (var state in states.Values.Where(state =>
-                     state.EntryKind == ContextMenuEntryKind.ShellExtension
-                     && !state.IsDeleted
-                     && string.Equals(state.HandlerClsid, handlerClsid, StringComparison.OrdinalIgnoreCase)))
-        {
-            state.DesiredEnabled = enable;
-            state.ObservedEnabled = enable;
-            state.IsPendingApproval = false;
-            state.SuppressNextDetection = false;
-            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        }
     }
 
     private static void PruneTransientStates(IDictionary<string, PersistedContextMenuState> states)
@@ -2765,17 +2694,6 @@ public sealed class ContextMenuRegistryCatalog
                && !state.SuppressNextDetection
                && state.DesiredEnabled is null
                && string.IsNullOrWhiteSpace(state.BackupFilePath);
-    }
-
-    private static bool IsShellExtensionBlocked(string? handlerClsid)
-    {
-        if (string.IsNullOrWhiteSpace(handlerClsid))
-        {
-            return false;
-        }
-
-        using var blockedKey = Registry.LocalMachine.OpenSubKey(BlockedShellExtensionsPath, writable: false);
-        return blockedKey?.GetValue(handlerClsid) is not null;
     }
 
     private static ContextMenuEntry? TryCreateRecycleBinPinToHomeEntry()
@@ -2947,24 +2865,178 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private static void SetShellExtensionEnabled(ContextMenuEntry item, bool enable)
+    private async Task SetShellExtensionEnabledAsync(ContextMenuEntry item, bool enable, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(item.HandlerClsid))
+        if (item.IsWindows11ContextMenu)
         {
-            throw new InvalidOperationException("Shell extension entries require a CLSID to be enabled or disabled.");
+            throw new InvalidOperationException("Windows 11 context menu entries must use the Windows 11 blocked-list path.");
         }
 
-        using var blockedKey = Registry.LocalMachine.CreateSubKey(BlockedShellExtensionsPath, writable: true)
-            ?? throw new InvalidOperationException($"Unable to open {BlockedShellExtensionsPath} for writing.");
+        var sourcePath = item.BackendRegistryPath;
+        var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
+        if (enable == !sourceIsDisabled)
+        {
+            return;
+        }
 
+        var destinationPath = GetSiblingContextMenuHandlersPath(sourcePath, enable);
+        await _logger.LogAsync(
+            $"ClassicShellExtensionMoveStarted: ItemId={item.Id}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, Source={sourcePath}, Destination={destinationPath}, Enable={enable}.",
+            cancellationToken);
+
+        MoveRegistryKeySafely(sourcePath, destinationPath);
+
+        await _logger.LogAsync(
+            $"ClassicShellExtensionMoveSucceeded: ItemId={item.Id}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, Source={sourcePath}, Destination={destinationPath}, Enabled={enable}.",
+            cancellationToken);
+    }
+
+    internal static string GetSiblingContextMenuHandlersPath(string sourcePath, bool enable)
+    {
+        var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
         if (enable)
         {
-            blockedKey.DeleteValue(item.HandlerClsid, throwOnMissingValue: false);
+            if (!sourceIsDisabled)
+            {
+                return sourcePath;
+            }
+
+            return sourcePath.Replace(@"\shellex\-ContextMenuHandlers\", @"\shellex\ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase);
         }
-        else
+
+        if (sourceIsDisabled)
         {
-            blockedKey.SetValue(item.HandlerClsid, item.DisplayName, RegistryValueKind.String);
+            return sourcePath;
         }
+
+        if (!sourcePath.Contains(@"\shellex\ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"'{sourcePath}' is not a classic ContextMenuHandlers registration path.");
+        }
+
+        return sourcePath.Replace(@"\shellex\ContextMenuHandlers\", @"\shellex\-ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsDisabledContextMenuHandlersPath(string path)
+        => path.Contains(@"\shellex\-ContextMenuHandlers\", StringComparison.OrdinalIgnoreCase);
+
+    private static void MoveRegistryKeySafely(string sourcePath, string destinationPath)
+    {
+        if (string.Equals(sourcePath, destinationPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        using var existingDestination = OpenRegistryKey(destinationPath, writable: false);
+        if (existingDestination is not null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot move shell-extension registration because the destination already exists. Source={sourcePath}; Destination={destinationPath}. Resolve the active/disabled registration conflict explicitly.");
+        }
+
+        RegistryKey? destination = null;
+        try
+        {
+            using (var source = OpenRegistryKey(sourcePath, writable: false)
+                   ?? throw new InvalidOperationException($"Source shell-extension registration was not found: {sourcePath}."))
+            {
+                destination = CreateRegistrySubKey(destinationPath, writable: true)
+                    ?? throw new InvalidOperationException($"Unable to create destination shell-extension registration: {destinationPath}.");
+                CopyRegistryKeyTree(source, destination);
+                VerifyRegistryKeyTree(source, destination);
+                destination.Dispose();
+                destination = null;
+            }
+
+            DeleteRegistryKeyTree(sourcePath);
+            using var sourceVerification = OpenRegistryKey(sourcePath, writable: false);
+            if (sourceVerification is not null)
+            {
+                throw new InvalidOperationException($"The source shell-extension registration still exists after move: {sourcePath}.");
+            }
+        }
+        catch
+        {
+            destination?.Dispose();
+            // Only remove a destination which was created during this failed move.
+            // An already-existing destination is rejected before this point.
+            using var sourceStillExists = OpenRegistryKey(sourcePath, writable: false);
+            if (sourceStillExists is not null)
+            {
+                DeleteRegistryKeyTree(destinationPath);
+            }
+
+            throw;
+        }
+    }
+
+    private static void CopyRegistryKeyTree(RegistryKey source, RegistryKey destination)
+    {
+        foreach (var valueName in source.GetValueNames())
+        {
+            // Registry values cannot retain a null payload; use the Windows-compatible
+            // empty string representation if a provider exposes one as null.
+            destination.SetValue(valueName, source.GetValue(valueName) ?? string.Empty, source.GetValueKind(valueName));
+        }
+
+        foreach (var subKeyName in source.GetSubKeyNames())
+        {
+            using var sourceChild = source.OpenSubKey(subKeyName, writable: false)
+                ?? throw new InvalidOperationException($"Unable to read source subkey '{subKeyName}'.");
+            using var destinationChild = destination.CreateSubKey(subKeyName, writable: true)
+                ?? throw new InvalidOperationException($"Unable to create destination subkey '{subKeyName}'.");
+            CopyRegistryKeyTree(sourceChild, destinationChild);
+        }
+    }
+
+    private static void VerifyRegistryKeyTree(RegistryKey source, RegistryKey destination)
+    {
+        var sourceValues = source.GetValueNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+        var destinationValues = destination.GetValueNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!sourceValues.SequenceEqual(destinationValues, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The destination shell-extension registration values do not match the source.");
+        }
+
+        foreach (var valueName in sourceValues)
+        {
+            if (source.GetValueKind(valueName) != destination.GetValueKind(valueName)
+                || !RegistryValueEquals(source.GetValue(valueName), destination.GetValue(valueName)))
+            {
+                throw new InvalidOperationException($"The destination value '{valueName}' does not match the source registration.");
+            }
+        }
+
+        var sourceSubKeys = source.GetSubKeyNames().OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        var destinationSubKeys = destination.GetSubKeyNames().OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!sourceSubKeys.SequenceEqual(destinationSubKeys, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The destination shell-extension registration subkeys do not match the source.");
+        }
+
+        foreach (var subKeyName in sourceSubKeys)
+        {
+            using var sourceChild = source.OpenSubKey(subKeyName, writable: false)
+                ?? throw new InvalidOperationException($"Unable to re-open source subkey '{subKeyName}'.");
+            using var destinationChild = destination.OpenSubKey(subKeyName, writable: false)
+                ?? throw new InvalidOperationException($"Unable to re-open destination subkey '{subKeyName}'.");
+            VerifyRegistryKeyTree(sourceChild, destinationChild);
+        }
+    }
+
+    private static bool RegistryValueEquals(object? left, object? right)
+    {
+        if (left is string[] leftArray && right is string[] rightArray)
+        {
+            return leftArray.SequenceEqual(rightArray, StringComparer.Ordinal);
+        }
+
+        if (left is byte[] leftBytes && right is byte[] rightBytes)
+        {
+            return leftBytes.SequenceEqual(rightBytes);
+        }
+
+        return Equals(left, right);
     }
 
     private static void DeleteRegistryKey(string registryPath)
@@ -5055,7 +5127,12 @@ public sealed class ContextMenuRegistryCatalog
             return candidate;
         }
 
-        return existingIsDisabledContainer ? candidate : existing;
+        var selected = existingIsDisabledContainer ? candidate : existing;
+        return selected with
+        {
+            HasConsistencyIssue = true,
+            ConsistencyIssue = "Both the active and disabled ContextMenuHandlers registrations exist for this logical item. Resolve the registry conflict before toggling it."
+        };
     }
 
     private static ContextMenuEntry? SelectPreferredDeleteCandidate(IEnumerable<ContextMenuEntry> candidates)
