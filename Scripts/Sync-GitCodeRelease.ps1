@@ -129,7 +129,9 @@ function Get-RetryAfterSeconds {
 function Test-GitCodeTransientStatus {
     param([int] $StatusCode)
 
-    return $StatusCode -in @(429, 500, 502, 503, 504)
+    # Status zero represents a transport exception (timeout, reset, or TLS
+    # failure) before an HTTP response was received.
+    return $StatusCode -in @(0, 429, 500, 502, 503, 504)
 }
 
 function Test-GitCodeRetryAllowed {
@@ -548,17 +550,6 @@ function Get-GitCodeUploadDescriptor {
     return ConvertTo-GitCodeUploadDescriptor -Response $response.Json
 }
 
-function Get-GitCodeAttachmentUploadTimeout {
-    param([Parameter(Mandatory)] [Int64] $FileLength)
-
-    # AtomGit's OBS endpoint is reached from a hosted runner in the US. Allow
-    # sufficient time for the self-contained packages, but keep every request
-    # bounded. The 90-minute cap also leaves room for a bounded retry.
-    $sizeInMiB = [Math]::Ceiling($FileLength / 1MB)
-    $minutes = [Math]::Max(30, 15 + $sizeInMiB)
-    return [TimeSpan]::FromMinutes([Math]::Min(90, $minutes))
-}
-
 function Invoke-GitCodeAttachmentUpload {
     param(
         [Parameter(Mandatory)] [object] $UploadDescriptor,
@@ -568,10 +559,13 @@ function Invoke-GitCodeAttachmentUpload {
     # The documented upload endpoint is an object-storage PUT. Send only the four
     # headers returned by GitCode; never forward the API bearer token or log the URL.
     $client = [System.Net.Http.HttpClient]::new()
-    # Release installers can take longer than HttpClient's default 100-second
-    # timeout to reach the OBS endpoint. Keep this bounded, while retaining a
-    # fresh client and a fresh signed URL for every retry attempt.
-    $client.Timeout = Get-GitCodeAttachmentUploadTimeout -FileLength (Get-Item -LiteralPath $FilePath).Length
+    # Bound a stalled transfer rather than its total duration. A large upload
+    # may be slow, but it must keep making progress. Each retry gets a fresh
+    # client and fresh signed URL from GitCode.
+    $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
+    $cancellation = [Threading.CancellationTokenSource]::new()
+    $stallTimeout = [TimeSpan]::FromMinutes(5)
+    $cancellation.CancelAfter($stallTimeout)
     $stream = $null
     $request = $null
     $response = $null
@@ -584,7 +578,19 @@ function Invoke-GitCodeAttachmentUpload {
         foreach ($headerName in @('x-obs-meta-project-id', 'x-obs-acl', 'x-obs-callback')) {
             $request.Headers.TryAddWithoutValidation($headerName, [string] $UploadDescriptor.Headers[$headerName]) | Out-Null
         }
-        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        $sendTask = $client.SendAsync($request, $cancellation.Token)
+        $lastBytes = [int64]0
+        while (-not $sendTask.IsCompleted) {
+            Start-Sleep -Seconds 15
+            $uploadedBytes = [int64]$stream.Position
+            if ($uploadedBytes -gt $lastBytes) {
+                $percent = [Math]::Round(($uploadedBytes / $stream.Length) * 100, 1)
+                Write-Host "GitCode attachment upload progress: $([Math]::Round($uploadedBytes / 1MB, 1)) / $([Math]::Round($stream.Length / 1MB, 1)) MiB ($percent%)"
+                $lastBytes = $uploadedBytes
+                $cancellation.CancelAfter($stallTimeout)
+            }
+        }
+        $response = $sendTask.GetAwaiter().GetResult()
         $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
         return [pscustomobject]@{
             StatusCode = [int] $response.StatusCode
@@ -593,10 +599,17 @@ function Invoke-GitCodeAttachmentUpload {
             Success = $response.IsSuccessStatusCode
         }
     }
+    catch [System.OperationCanceledException] {
+        return [pscustomobject]@{ StatusCode = 0; Headers = $null; Body = 'Object-storage upload stalled for five minutes or was canceled.'; Success = $false }
+    }
+    catch [System.Net.Http.HttpRequestException] {
+        return [pscustomobject]@{ StatusCode = 0; Headers = $null; Body = 'Object-storage transport failure before an HTTP response.'; Success = $false }
+    }
     finally {
         if ($null -ne $response) { $response.Dispose() }
         if ($null -ne $request) { $request.Dispose() }
         if ($null -ne $stream) { $stream.Dispose() }
+        $cancellation.Dispose()
         $client.Dispose()
     }
 }
@@ -667,6 +680,19 @@ function Sync-GitCodeReleaseAssets {
                     Write-GitCodeReleaseAttachmentSchema -Release $releaseAfterFirstUpload
                 }
                 break
+            }
+            if ($result.StatusCode -eq 0) {
+                # A client-side timeout does not prove OBS rejected the PUT.
+                # Check the Release before retrying so a callback-completed
+                # attachment is never duplicated.
+                $releaseAfterTransportFailure = Get-GitCodeRelease -ReleaseTag $ReleaseTag
+                $attachmentNames = @((ConvertTo-ReleaseArray $releaseAfterTransportFailure.assets) | ForEach-Object { [string] $_.name })
+                if ($attachmentNames -contains $fileName) {
+                    Write-Warning "GitCode attachment '$fileName' appeared after a transport failure; treating the upload as completed."
+                    $completed = $true
+                    $uploaded++
+                    break
+                }
             }
             if (Test-GitCodeRetryAllowed -StatusCode $result.StatusCode -Attempt $attempt -MaxAttempts 4) {
                 $delay = Get-RetryAfterSeconds -Headers $result.Headers

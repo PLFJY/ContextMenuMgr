@@ -96,9 +96,6 @@ foreach ($uploadPathCase in $uploadPathCases) {
     $expectedPath = "/repos/PLFJY/ContextMenuMgr/releases/v1.7.2/upload_url?file_name=$($uploadPathCase.Expected)"
     Assert-True ($actualPath -ceq $expectedPath) "Upload URL path must URI-encode '$($uploadPathCase.FileName)'."
 }
-Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 1MB).TotalMinutes -eq 30) 'Small uploads must retain the 30-minute bounded timeout.'
-Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 72MB).TotalMinutes -eq 87) 'Large uploads must receive a size-aware bounded timeout.'
-Assert-True ((Get-GitCodeAttachmentUploadTimeout -FileLength 500MB).TotalMinutes -eq 90) 'Upload timeout must remain bounded.'
 
 $expected = @((New-Asset 'installer x64.exe'), (New-Asset 'portable.zip'), (New-Asset '说明.txt'))
 $none = Get-GitCodeAssetPlan -ExpectedAssets $expected -ExistingAssets @()
@@ -112,6 +109,7 @@ Assert-True (-not (Test-GitCodeTransientStatus -StatusCode 401)) '401 must not r
 Assert-True (-not (Test-GitCodeTransientStatus -StatusCode 403)) '403 must not retry.'
 Assert-True (-not (Test-GitCodeTransientStatus -StatusCode 404)) '404 must not retry as a generic API failure.'
 Assert-True (-not (Test-GitCodeTransientStatus -StatusCode 409)) '409 must not retry as a generic API failure.'
+Assert-True (Test-GitCodeRetryAllowed -StatusCode 0 -Attempt 1 -MaxAttempts 4) 'Transport failures must use the bounded fresh-URL retry path.'
 Assert-True (Test-GitCodeRetryAllowed -StatusCode 429 -Attempt 1 -MaxAttempts 4) '429 must retry within the bound.'
 Assert-True (Test-GitCodeRetryAllowed -StatusCode 500 -Attempt 1 -MaxAttempts 4) '500 must retry within the bound.'
 Assert-True (Test-GitCodeRetryAllowed -StatusCode 503 -Attempt 1 -MaxAttempts 4) '503 must retry within the bound.'
