@@ -501,6 +501,29 @@ function ConvertTo-GitCodeUploadDescriptor {
     }
 }
 
+function Write-GitCodeUploadDescriptorSchema {
+    param([Parameter(Mandatory)] [object] $Response)
+
+    $responseProperties = @($Response.PSObject.Properties.Name) -join ', '
+    $headers = Get-JsonPropertyValue -Object $Response -Names @('headers')
+    $headerProperties = if ($null -eq $headers) { '' } else { @($headers.PSObject.Properties.Name) -join ', ' }
+    Write-Host "GitCode upload descriptor response properties: $responseProperties"
+    Write-Host "GitCode upload descriptor header names: $headerProperties"
+}
+
+function Write-GitCodeReleaseAttachmentSchema {
+    param([Parameter(Mandatory)] [object] $Release)
+
+    $releaseProperties = @($Release.PSObject.Properties.Name) -join ', '
+    Write-Host "GitCode Release response properties after upload: $releaseProperties"
+    foreach ($collectionName in @('assets', 'attach_files')) {
+        $collection = Get-JsonPropertyValue -Object $Release -Names @($collectionName)
+        if ($null -ne $collection) {
+            Write-Host "GitCode Release attachment collection '$collectionName' count: $(@(ConvertTo-ReleaseArray $collection).Count)"
+        }
+    }
+}
+
 function Get-GitCodeUploadDescriptorPath {
     param(
         [Parameter(Mandatory)] [string] $ReleaseTag,
@@ -521,6 +544,7 @@ function Get-GitCodeUploadDescriptor {
     Test-ReleaseAssetFilename -Name $FileName
     $path = Get-GitCodeUploadDescriptorPath -ReleaseTag $ReleaseTag -FileName $FileName
     $response = Invoke-GitCodeApi -Method GET -Path $path
+    Write-GitCodeUploadDescriptorSchema -Response $response.Json
     return ConvertTo-GitCodeUploadDescriptor -Response $response.Json
 }
 
@@ -620,6 +644,13 @@ function Sync-GitCodeReleaseAssets {
             if ($result.Success) {
                 $completed = $true
                 $uploaded++
+                if ($uploaded -eq 1) {
+                    $releaseAfterFirstUpload = Get-GitCodeRelease -ReleaseTag $ReleaseTag
+                    if ($null -eq $releaseAfterFirstUpload) {
+                        throw "GitCode Release '$ReleaseTag' could not be read after the first successful attachment upload."
+                    }
+                    Write-GitCodeReleaseAttachmentSchema -Release $releaseAfterFirstUpload
+                }
                 break
             }
             if (Test-GitCodeRetryAllowed -StatusCode $result.StatusCode -Attempt $attempt -MaxAttempts 4) {
