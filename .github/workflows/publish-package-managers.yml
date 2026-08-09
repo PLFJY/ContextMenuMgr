@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Published release tag to test, for example v1.7.2-Beta+abcdef0
+        description: Published release tag to test, for example v1.7.3-Beta+abcdef0
         required: true
         type: string
       dry_run:

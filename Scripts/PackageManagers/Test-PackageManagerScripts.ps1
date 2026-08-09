@@ -261,20 +261,20 @@ try {
     Invoke-GenerationCase `
         -Root $root `
         -Name 'stable' `
-        -Tag 'v1.7.2' `
+        -Tag 'v1.7.3' `
         -Prerelease $false `
         -PublishedAt '2026-07-04T13:58:22Z' `
-        -ExpectedPackageVersion '1.7.2' `
+        -ExpectedPackageVersion '1.7.3' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus' `
         -ExpectedScoopFile 'contextmenumgrplus.json'
 
     Invoke-GenerationCase `
         -Root $root `
         -Name 'beta' `
-        -Tag 'v1.7.2-Beta+abcdef0' `
+        -Tag 'v1.7.3-Beta+abcdef0' `
         -Prerelease $true `
         -PublishedAt '2026-07-04T13:58:22Z' `
-        -ExpectedPackageVersion '1.7.2-beta.20260704135822' `
+        -ExpectedPackageVersion '1.7.3-beta.20260704135822' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus.Beta' `
         -ExpectedScoopFile 'contextmenumgrplus-beta.json'
 

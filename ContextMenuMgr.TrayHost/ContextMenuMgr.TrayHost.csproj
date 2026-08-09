@@ -15,16 +15,16 @@
     <Description>Context Menu Manager Plus</Description>
     <FileDescription>Context Menu Manager Plus</FileDescription>
     <Company>PLFJY</Company>
-    <FileVersion>1.7.2.0</FileVersion>
+    <FileVersion>1.7.3.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.7.2</InformationalVersion>
+    <InformationalVersion>1.7.3</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>..\ContextMenuMgr.Frontend\Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
-    <FileVersion>1.7.2.0</FileVersion>
-    <InformationalVersion>1.7.2-Beta</InformationalVersion>
+    <FileVersion>1.7.3.0</FileVersion>
+    <InformationalVersion>1.7.3-Beta</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
