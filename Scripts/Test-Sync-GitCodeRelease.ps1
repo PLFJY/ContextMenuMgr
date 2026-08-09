@@ -84,6 +84,19 @@ Assert-True ($uploadDescriptor.Headers.Count -eq 4) 'Upload must forward only th
 Assert-True (-not $uploadDescriptor.Headers.Contains('Authorization')) 'Upload must never forward Authorization to object storage.'
 Assert-Throws { ConvertTo-GitCodeUploadDescriptor -Response ([pscustomobject]@{ url = 'https://example/upload'; headers = [pscustomobject]@{} }) } 'Missing required upload headers must fail.'
 
+$uploadPathCases = @(
+    @{ FileName = 'ContextMenuMgrPlus-1.7.2-x64-self-contained-Setup.exe'; Expected = 'ContextMenuMgrPlus-1.7.2-x64-self-contained-Setup.exe' },
+    @{ FileName = 'file with spaces.zip'; Expected = 'file%20with%20spaces.zip' },
+    @{ FileName = 'file+plus.zip'; Expected = 'file%2Bplus.zip' },
+    @{ FileName = 'file#hash.zip'; Expected = 'file%23hash.zip' },
+    @{ FileName = 'file&value.zip'; Expected = 'file%26value.zip' }
+)
+foreach ($uploadPathCase in $uploadPathCases) {
+    $actualPath = Get-GitCodeUploadDescriptorPath -ReleaseTag 'v1.7.2' -FileName $uploadPathCase.FileName
+    $expectedPath = "/repos/PLFJY/ContextMenuMgr/releases/v1.7.2/upload_url?file_name=$($uploadPathCase.Expected)"
+    Assert-True ($actualPath -ceq $expectedPath) "Upload URL path must URI-encode '$($uploadPathCase.FileName)'."
+}
+
 $expected = @((New-Asset 'installer x64.exe'), (New-Asset 'portable.zip'), (New-Asset '说明.txt'))
 $none = Get-GitCodeAssetPlan -ExpectedAssets $expected -ExistingAssets @()
 Assert-True ($none.Missing.Count -eq 3 -and $none.AlreadyPresent.Count -eq 0) 'Zero target assets must plan all uploads.'

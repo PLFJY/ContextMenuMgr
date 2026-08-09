@@ -501,11 +501,26 @@ function ConvertTo-GitCodeUploadDescriptor {
     }
 }
 
-function Get-GitCodeUploadDescriptor {
-    param([Parameter(Mandatory)] [string] $ReleaseTag)
+function Get-GitCodeUploadDescriptorPath {
+    param(
+        [Parameter(Mandatory)] [string] $ReleaseTag,
+        [Parameter(Mandatory)] [string] $FileName
+    )
 
     $encodedTag = ConvertTo-GitCodePathSegment -Value $ReleaseTag
-    $response = Invoke-GitCodeApi -Method GET -Path "/repos/$script:GitCodeOwner/$script:GitCodeRepository/releases/$encodedTag/upload_url"
+    $encodedFileName = ConvertTo-GitCodePathSegment -Value $FileName
+    return "/repos/$script:GitCodeOwner/$script:GitCodeRepository/releases/$encodedTag/upload_url?file_name=$encodedFileName"
+}
+
+function Get-GitCodeUploadDescriptor {
+    param(
+        [Parameter(Mandatory)] [string] $ReleaseTag,
+        [Parameter(Mandatory)] [string] $FileName
+    )
+
+    Test-ReleaseAssetFilename -Name $FileName
+    $path = Get-GitCodeUploadDescriptorPath -ReleaseTag $ReleaseTag -FileName $FileName
+    $response = Invoke-GitCodeApi -Method GET -Path $path
     return ConvertTo-GitCodeUploadDescriptor -Response $response.Json
 }
 
@@ -600,7 +615,7 @@ function Sync-GitCodeReleaseAssets {
         $completed = $false
         for ($attempt = 1; $attempt -le 4; $attempt++) {
             # Request a fresh URL for every attempt; this is safe for single-use URLs.
-            $uploadDescriptor = Get-GitCodeUploadDescriptor -ReleaseTag $ReleaseTag
+            $uploadDescriptor = Get-GitCodeUploadDescriptor -ReleaseTag $ReleaseTag -FileName $fileName
             $result = Invoke-GitCodeAttachmentUpload -UploadDescriptor $uploadDescriptor -FilePath $filePath
             if ($result.Success) {
                 $completed = $true
