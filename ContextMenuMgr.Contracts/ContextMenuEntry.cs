@@ -65,6 +65,17 @@ public sealed record ContextMenuEntry
     /// </summary>
     public string? HandlerClsid { get; init; }
 
+    /// <summary>True when the registration is backed by a persistent ContextMenuMgr ShellProxy.</summary>
+    public bool IsShellProxyWrapped { get; init; }
+
+    public string? ShellProxyClsid { get; init; }
+
+    public string? ShellProxyOriginalHandlerClsid { get; init; }
+
+    public string? ShellProxyMenuTitle { get; init; }
+
+    public ShellProxyHealth ShellProxyHealth { get; init; }
+
     /// <summary>
     /// Gets or sets the icon Path.
     /// </summary>

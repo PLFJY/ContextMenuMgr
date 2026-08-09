@@ -137,6 +137,12 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 ## 8. 状态库
 
+## Persistent Shell Extension Proxy wrapper
+
+Classic `ContextMenuHandlers` registrations can optionally point to a unique ContextMenuMgr proxy CLSID. The original COM CLSID is retained as metadata under `CLSID\{proxy}\ContextMenuMgrShellProxy`; the original handler COM registration is never changed. Metadata is authoritative and contains the target path, scope/view, original CLSID, title, and immutable proxy build id. It deliberately does not live in `context-menu-state.json`.
+
+Proxy binaries are deployed to `%ProgramData%\ContextMenuMgrShellProxy\bin\<build-id>\<arch>`, with SYSTEM and Administrators full control and Users read/execute. This location is outside the app/runtime data roots and is intentionally retained after uninstall. Unwrapping first restores the exact target registration and only then removes the proxy COM metadata/registration.
+
 `ContextMenuStateStore` 保存项目自己的状态，路径为 `RuntimePaths.StateDatabasePath`。它用于记录待审核、删除、备份、外部变化和一致性信息。
 
 状态库不是注册表本身。真实注册表可能被第三方安装器、系统更新或用户手工修改，短时间内会与状态库不一致。snapshot 构建会尽量合并并标记不一致，但不要在代码里假设状态库一定代表当前系统真实状态。

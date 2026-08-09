@@ -71,4 +71,6 @@ public sealed record PipeResponse
     public bool? Win11ModernContextMenuDisabled { get; init; }
 
     public OfficeSuiteCoexistenceStatus? OfficeSuiteCoexistence { get; init; }
+
+    public ShellProxyWrapperStatus? ShellProxyWrapper { get; init; }
 }

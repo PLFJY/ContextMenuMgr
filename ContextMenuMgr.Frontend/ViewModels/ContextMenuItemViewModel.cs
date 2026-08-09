@@ -193,6 +193,14 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         && ContextMenuDeepAnalysisCapability.CanDeepAnalyze(Entry)
         && !IsDeepAnalyzing;
 
+    public bool CanManageShellProxy => Entry.EntryKind == ContextMenuEntryKind.ShellExtension
+        && !Entry.IsWindows11ContextMenu && IsPresentInRegistry && !IsDeleted
+        && !Entry.IsProtectedSystemItem && !string.IsNullOrWhiteSpace(Entry.HandlerClsid);
+
+    public bool IsShellProxyWrapped => Entry.IsShellProxyWrapped;
+    public string ShellProxyMenuTitle => Entry.ShellProxyMenuTitle ?? string.Empty;
+    public string ShellProxyHealthText => Entry.ShellProxyHealth.ToString();
+
     public bool CanOpenFileTypeBatchManagement => !IsDeleted
         && IsPresentInRegistry
         && !string.IsNullOrWhiteSpace(Entry.RegistryPath)
@@ -532,6 +540,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string DeepAnalyzeMenuItemTooltip => _localization.Translate("DeepAnalyzeMenuItemTooltip");
 
+    public string ShellProxyWrapText => _localization.Translate("ShellProxyWrapText");
+    public string ShellProxyUpdateText => _localization.Translate("ShellProxyUpdateText");
+    public string ShellProxyRestoreText => _localization.Translate("ShellProxyRestoreText");
+
     public string ApprovalRemoveConfirmationText => _localization.Format("ApprovalRemovePrompt", DisplayName);
 
     public string PermanentDeleteConfirmationText => _localization.Format("PermanentDeletePrompt", DisplayName);
@@ -595,6 +607,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowInlineCommandText));
         OnPropertyChanged(nameof(InlineCommandText));
         OnPropertyChanged(nameof(CanDeepAnalyzeMenuItem));
+        OnPropertyChanged(nameof(CanManageShellProxy));
+        OnPropertyChanged(nameof(IsShellProxyWrapped));
+        OnPropertyChanged(nameof(ShellProxyMenuTitle));
+        OnPropertyChanged(nameof(ShellProxyHealthText));
         OnPropertyChanged(nameof(CanOpenFileTypeBatchManagement));
         OnPropertyChanged(nameof(IsProtectedFileTypeBatchDelete));
         OnPropertyChanged(nameof(CanDeleteInFileTypeBatch));
@@ -881,6 +897,46 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private Task OpenClsidLocationAsync() => _actionsService.OpenClsidLocationAsync(this);
+
+    [RelayCommand]
+    private async Task ConfigureShellProxyAsync()
+    {
+        if (!CanManageShellProxy) return;
+        var title = await TextInputDialog.ShowAsync(
+            _localization.Translate(IsShellProxyWrapped ? "ShellProxyUpdateText" : "ShellProxyWrapText"),
+            _localization.Translate("ItemTextLabel"),
+            IsShellProxyWrapped ? ShellProxyMenuTitle : DisplayName);
+        if (string.IsNullOrWhiteSpace(title)) return;
+        try
+        {
+            var status = IsShellProxyWrapped
+                ? await _actionsService.UpdateShellProxyWrapperAsync(this, title.Trim())
+                : await _actionsService.CreateShellProxyWrapperAsync(this, title.Trim());
+            if (status is not null)
+            {
+                Update(Entry with { IsShellProxyWrapped = status.IsWrapped, ShellProxyClsid = status.ProxyClsid, ShellProxyOriginalHandlerClsid = status.OriginalHandlerClsid, ShellProxyMenuTitle = status.MenuTitle, ShellProxyHealth = Enum.TryParse<ShellProxyHealth>(status.Health, out var health) ? health : ShellProxyHealth.Unknown, HandlerClsid = status.OriginalHandlerClsid ?? Entry.HandlerClsid });
+            }
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(ex.Message, _localization.Translate("ShellProxyWrapText"));
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreShellProxyAsync()
+    {
+        if (!IsShellProxyWrapped) return;
+        try
+        {
+            await _actionsService.RemoveShellProxyWrapperAsync(this);
+            Update(Entry with { IsShellProxyWrapped = false, ShellProxyClsid = null, ShellProxyOriginalHandlerClsid = null, ShellProxyMenuTitle = null, ShellProxyHealth = ShellProxyHealth.Unknown });
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(ex.Message, _localization.Translate("ShellProxyRestoreText"));
+        }
+    }
 
     [RelayCommand]
     private async Task DeepAnalyzeMenuItemAsync()

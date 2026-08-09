@@ -25,6 +25,11 @@
     <NativeProbeHostIntermediateRoot>$(NativeProbeHostOutputRoot)obj\</NativeProbeHostIntermediateRoot>
     <ProbeHostArchitectureVerifier>$(MSBuildThisFileDirectory)..\Scripts\Verify-ProbeHostArchitecture.ps1</ProbeHostArchitectureVerifier>
     <NativeProbeHostBuildScript>$(MSBuildThisFileDirectory)..\Scripts\Build-NativeProbeHostArtifacts.ps1</NativeProbeHostBuildScript>
+    <NativeShellProxyProject>$(MSBuildThisFileDirectory)..\ContextMenuMgr.ShellProxy\ContextMenuMgr.ShellProxy.vcxproj</NativeShellProxyProject>
+    <NativeShellProxyBuildScript>$(MSBuildThisFileDirectory)..\Scripts\Build-NativeShellProxyArtifacts.ps1</NativeShellProxyBuildScript>
+    <NativeShellProxyOutputRoot>$(MSBuildThisFileDirectory)..\artifacts\shellproxy-native\$(Configuration)\</NativeShellProxyOutputRoot>
+    <NativeShellProxyIntermediateRoot>$(NativeShellProxyOutputRoot)obj\</NativeShellProxyIntermediateRoot>
+    <SkipShellProxyArchitectureBuild Condition="'$(SkipShellProxyArchitectureBuild)' == ''">false</SkipShellProxyArchitectureBuild>
     <NlohmannJsonLicense>$(MSBuildThisFileDirectory)..\ContextMenuMgr.ProbeHost\third_party\nlohmann\nlohmann-json-LICENSE.MIT</NlohmannJsonLicense>
     <ForceRebuildNativeProbeHost Condition="'$(ForceRebuildNativeProbeHost)' == ''">false</ForceRebuildNativeProbeHost>
     <NativeProbeHostPlatforms Condition="'$(NativeProbeHostPlatforms)' == '' and '$(Configuration)' == 'Debug'">Win32,x64</NativeProbeHostPlatforms>
@@ -109,6 +114,17 @@
     <Copy SourceFiles="@(NativeProbeHostX64Artifact)" DestinationFolder="$(OutDir)ProbeHost\x64" SkipUnchangedFiles="true" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
     <Copy SourceFiles="@(NativeProbeHostArm64Artifact)" DestinationFolder="$(OutDir)ProbeHost\arm64" SkipUnchangedFiles="true" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
     <Copy SourceFiles="$(NlohmannJsonLicense)" DestinationFolder="$(OutDir)ThirdPartyNotices" SkipUnchangedFiles="true" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
+  </Target>
+
+  <Target Name="BuildNativeShellProxyArtifacts" AfterTargets="Build" BeforeTargets="CopyBackendArtifacts" Condition="'$(SkipShellProxyArchitectureBuild)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(NativeShellProxyBuildScript)&quot; -Project &quot;$(NativeShellProxyProject)&quot; -Configuration &quot;$(Configuration)&quot; -Platforms &quot;$(NativeProbeHostPlatforms)&quot; -OutputRoot &quot;$(NativeShellProxyOutputRoot).&quot; -IntermediateRoot &quot;$(NativeShellProxyIntermediateRoot).&quot;" />
+  </Target>
+
+  <Target Name="CopyNativeShellProxyArtifacts" AfterTargets="CopyBackendArtifacts" Condition="'$(SkipShellProxyArchitectureBuild)' != 'true'">
+    <MakeDir Directories="$(OutDir)ShellProxy\x86;$(OutDir)ShellProxy\x64;$(OutDir)ShellProxy\arm64" />
+    <Copy SourceFiles="$(NativeShellProxyOutputRoot)x86\ContextMenuMgr.ShellProxy.dll" DestinationFolder="$(OutDir)ShellProxy\x86" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(NativeShellProxyOutputRoot)x64\ContextMenuMgr.ShellProxy.dll" DestinationFolder="$(OutDir)ShellProxy\x64" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(NativeShellProxyOutputRoot)arm64\ContextMenuMgr.ShellProxy.dll" DestinationFolder="$(OutDir)ShellProxy\arm64" SkipUnchangedFiles="true" Condition="$(NativeProbeHostPlatforms.Contains('ARM64'))" />
   </Target>
 
   <Target Name="VerifyNativeProbeHostArtifacts" AfterTargets="CopyBackendArtifacts" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'">

@@ -1523,4 +1523,7 @@
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>受保护的文件类型 open/edit 项不能在这里删除，请改用关闭开关。</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>未找到相关文件类型菜单项。</value></data>
   <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>要删除 {0} 个相关菜单项吗？删除前会创建注册表备份。{1} 个受保护的 open/edit 项会被跳过。</value></data>
+  <data name="ShellProxyWrapText" xml:space="preserve"><value>将处理器菜单移入子菜单</value></data>
+  <data name="ShellProxyUpdateText" xml:space="preserve"><value>更新子菜单标题</value></data>
+  <data name="ShellProxyRestoreText" xml:space="preserve"><value>还原原始顶级菜单</value></data>
 </root>

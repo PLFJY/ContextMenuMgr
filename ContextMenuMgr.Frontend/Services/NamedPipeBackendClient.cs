@@ -715,6 +715,15 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.OfficeSuiteCoexistence;
     }
 
+    public async Task<ShellProxyWrapperStatus?> CreateShellProxyWrapperAsync(ContextMenuEntry item, string title, CancellationToken cancellationToken)
+        => (await SendRequestAsync(new PipeRequest { Command = PipeCommand.CreateShellProxyWrapper, ShellProxyWrapper = new ShellProxyWrapperRequest { Item = item, MenuTitle = title } }, cancellationToken)).ShellProxyWrapper;
+
+    public async Task RemoveShellProxyWrapperAsync(ContextMenuEntry item, CancellationToken cancellationToken)
+        => await SendRequestAsync(new PipeRequest { Command = PipeCommand.RemoveShellProxyWrapper, ShellProxyWrapper = new ShellProxyWrapperRequest { Item = item } }, cancellationToken);
+
+    public async Task<ShellProxyWrapperStatus?> UpdateShellProxyWrapperAsync(ContextMenuEntry item, string title, CancellationToken cancellationToken)
+        => (await SendRequestAsync(new PipeRequest { Command = PipeCommand.UpdateShellProxyWrapper, ShellProxyWrapper = new ShellProxyWrapperRequest { Item = item, MenuTitle = title } }, cancellationToken)).ShellProxyWrapper;
+
     /// <summary>
     /// Releases resources used by the current instance.
     /// </summary>

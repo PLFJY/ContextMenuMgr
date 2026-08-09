@@ -1523,4 +1523,7 @@ Continue anyway? (Not recommended)</value>
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>Protected file-type open/edit items cannot be deleted here. Disable them instead.</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>No related file-type entries were found.</value></data>
   <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>Delete {0} related entries? Registry backups will be created before deleting. {1} protected open/edit entries will be skipped.</value></data>
+  <data name="ShellProxyWrapText" xml:space="preserve"><value>Move handler menus into submenu</value></data>
+  <data name="ShellProxyUpdateText" xml:space="preserve"><value>Update submenu title</value></data>
+  <data name="ShellProxyRestoreText" xml:space="preserve"><value>Restore original top-level menu</value></data>
 </root>

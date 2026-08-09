@@ -111,6 +111,12 @@ If you cannot answer these questions, stop and read the relevant docs or inspect
 - Do not directly load third-party Shell Extension DLLs inside the Frontend or Backend Service.
 - ProbeHost must not write registry data, execute menu commands, or participate in normal scans.
 - Deep Analysis failures are often expected limitations and do not imply normal menu management is broken.
+
+### Persistent ShellProxy wrappers
+
+- The ShellProxy is an in-process Explorer DLL, not a service or ProbeHost feature. Do not make it depend on runtime JSON, an installed app path, or a helper executable.
+- Creation, update, unwrap, and reconciliation use Flow A. Preserve an explicit HKLM or `HKEY_USERS\<SID>` scope and registry view.
+- Persistent proxy files under `%ProgramData%\ContextMenuMgrShellProxy` intentionally survive uninstall and runtime-data cleanup. Only an explicit unwrap restores the top-level handler.
 - ProbeHost issues should not be fixed by changing ordinary menu enable/disable logic.
 
 ### Fault attribution

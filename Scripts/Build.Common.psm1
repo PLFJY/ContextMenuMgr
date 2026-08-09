@@ -594,6 +594,34 @@ function Invoke-NativeProbeHostBuild {
     Write-Host "  DetectedPEMachine=0x$($detectedMachine.ToString('X4'))"
 }
 
+function Invoke-NativeShellProxyBuild {
+    param(
+        [Parameter(Mandatory)] [string] $MSBuildPath,
+        [Parameter(Mandatory)] [string] $NativeShellProxyProject,
+        [Parameter(Mandatory)] [string] $Configuration,
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $OutputDirectory,
+        [Parameter(Mandatory)] [string] $IntermediateDirectory
+    )
+
+    $platform = Get-NativeProbeHostPlatform -Label $Label
+    $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
+    $resolvedIntermediateDirectory = [System.IO.Path]::GetFullPath($IntermediateDirectory)
+    New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $resolvedIntermediateDirectory -Force | Out-Null
+    Assert-NativeProbeHostToolchain -MSBuildPath $MSBuildPath -Label $Label -MSBuildPlatform $platform
+    Invoke-ExternalWithNormalizedEnvironment -FilePath $MSBuildPath -Arguments @(
+        $NativeShellProxyProject, "/nologo", "/m", "/t:Build",
+        "/p:Configuration=$Configuration", "/p:Platform=$platform",
+        "/p:OutDir=$(Add-TrailingDirectorySeparator -Path $resolvedOutputDirectory)",
+        "/p:IntDir=$(Add-TrailingDirectorySeparator -Path $resolvedIntermediateDirectory)"
+    ) -ErrorMessage "MSBuild failed for native ShellProxy ($Label)"
+    $targetDll = Join-Path $resolvedOutputDirectory "ContextMenuMgr.ShellProxy.dll"
+    $actual = Get-PeMachine -Path $targetDll
+    $expected = Get-NativeProbeHostExpectedMachine -Label $Label
+    if ($actual -ne $expected) { throw "ShellProxy DLL architecture mismatch. Label=$Label Expected=0x$($expected.ToString('X4')) Actual=0x$($actual.ToString('X4')) Path=$targetDll" }
+}
+
 function Get-InstallerArchitectureOptions {
     param([Parameter(Mandatory)] [string] $Platform)
 
@@ -806,6 +834,8 @@ function Publish-Application {
     Invoke-External -FilePath "dotnet" -Arguments $trayHostPublishArguments -ErrorMessage "dotnet publish failed for tray host ($platformLabel, $DistributionMode)"
 
     $msBuildPath = $null
+    $shellProxyProject = Join-Path (Split-Path -Parent (Split-Path -Parent $ProbeHostProject)) "ContextMenuMgr.ShellProxy\ContextMenuMgr.ShellProxy.vcxproj"
+    Ensure-FileExists -Path $shellProxyProject -Description "Native ShellProxy project"
     $probeHostLicense = Get-NlohmannJsonLicensePath -NativeProbeHostProject $ProbeHostProject
     Ensure-FileExists -Path $probeHostLicense -Description "nlohmann/json license notice"
     $probeHostLabels = @()
@@ -826,6 +856,16 @@ function Publish-Application {
             -OutputDirectory $probeHostOutput `
             -IntermediateDirectory $probeHostIntermediate
         Ensure-FileExists -Path (Join-Path $probeHostOutput "ContextMenuMgr.ProbeHost.exe") -Description "ProbeHost executable ($probeHostLabel)"
+    }
+
+    $shellProxyLabels = @($probeHostLabels)
+    if ($shellProxyLabels.Count -eq 0) { $shellProxyLabels = @("x86", "x64", "arm64") }
+    foreach ($shellProxyLabel in $shellProxyLabels) {
+        if ($null -eq $msBuildPath) { $msBuildPath = Resolve-MSBuildPath }
+        $shellProxyOutput = Join-Path $publishDir (Join-Path "ShellProxy" $shellProxyLabel)
+        $shellProxyIntermediate = Join-Path $taskArtifactsRoot (Join-Path "shellproxy-native-obj" $shellProxyLabel)
+        Invoke-NativeShellProxyBuild -MSBuildPath $msBuildPath -NativeShellProxyProject $shellProxyProject -Configuration $Configuration -Label $shellProxyLabel -OutputDirectory $shellProxyOutput -IntermediateDirectory $shellProxyIntermediate
+        Ensure-FileExists -Path (Join-Path $shellProxyOutput "ContextMenuMgr.ShellProxy.dll") -Description "ShellProxy DLL ($shellProxyLabel)"
     }
 
     if ($Platform -eq "anycpu" -and $probeHostLabels.Count -eq 0) {

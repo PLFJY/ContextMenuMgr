@@ -54,6 +54,16 @@ public static class RuntimePaths
     public static string GeneratedProgramsDirectory => Path.Combine(DataDirectory, "Programs");
 
     /// <summary>
+    /// Channel-neutral immutable proxy root. This intentionally does not derive from RootDirectory:
+    /// wrappers must survive application uninstall and normal runtime-data cleanup.
+    /// </summary>
+    public static string ShellProxyRootDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "ContextMenuMgrShellProxy");
+
+    public static string ShellProxyBinaryRootDirectory => Path.Combine(ShellProxyRootDirectory, "bin");
+
+    /// <summary>
     /// Gets the legacy Frontend Settings Path.
     /// </summary>
     public static string LegacyFrontendSettingsPath { get; } = Path.Combine(

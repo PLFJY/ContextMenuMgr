@@ -64,6 +64,13 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 | AutoStart / 托盘图标策略运行时读写 | `AutoStartService` |
 | Restart Explorer | `ExplorerRestartService.RestartExplorer` |
 | 运行时数据目录 ACL 修复 | `RuntimeDataAclRepairService` |
+| Persistent Shell Extension submenu wrapper | `ShellProxyManager` -> native `ContextMenuMgr.ShellProxy.dll` |
+
+### Persistent ShellProxy wrapper
+
+Classic Shell Extension submenu wrapping is a normal Flow A operation: the frontend sends a typed `CreateShellProxyWrapper`, `UpdateShellProxyWrapper`, `GetShellProxyWrapperStatus`, or `RemoveShellProxyWrapper` request to the Backend service. It is not a UAC-bootstrapper or ProbeHost operation. The Backend keeps machine registrations in HKLM and user registrations in `HKEY_USERS\<frontend SID>\Software\Classes`; it must never substitute the LocalSystem service HKCU.
+
+The resulting proxy is an in-process Explorer DLL. Explorer can run existing wrappers without Frontend, Backend, TrayHost, runtime state files, or the application installation directory. The service is needed only to create, manage, upgrade, and reconcile registrations.
 
 `NamedPipeBackendServer` 会在需要用户上下文时创建 `BackendUserContextResolver`。解析顺序是先从 pipe client 解析，失败时部分场景回退到交互式用户。`BackendUserContext` 包含 `Sid`、`UserName`、`ProfilePath`、`LocalAppDataPath`、`RoamingAppDataPath` 和可选 `SessionId`。
 

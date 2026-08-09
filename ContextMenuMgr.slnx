@@ -12,6 +12,7 @@
   <Project Path="ContextMenuMgr.Contracts/ContextMenuMgr.Contracts.csproj" />
   <Project Path="ContextMenuMgr.Frontend/ContextMenuMgr.Frontend.csproj" />
   <Project Path="ContextMenuMgr.ProbeHost/ContextMenuMgr.ProbeHost.vcxproj" Id="913b26a9-d5f4-4a96-a45d-f2bde873f4f4" />
+  <Project Path="ContextMenuMgr.ShellProxy/ContextMenuMgr.ShellProxy.vcxproj" Id="6e8a2e91-d2e0-48d4-94d4-24bd2d76a0f3" />
   <Project Path="ContextMenuMgr.Tests/ContextMenuMgr.Tests.csproj" />
   <Project Path="ContextMenuMgr.TrayHost/ContextMenuMgr.TrayHost.csproj" />
 </Solution>

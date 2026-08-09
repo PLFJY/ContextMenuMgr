@@ -10,6 +10,7 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class ContextMenuRegistryMonitor
 {
     private readonly ContextMenuRegistryCatalog _catalog;
+    private readonly ShellProxyManager _shellProxyManager;
     private readonly FileLogger _logger;
     private readonly BackendUserContextResolver _userContextResolver;
     private readonly TimeSpan _pollInterval;
@@ -21,11 +22,13 @@ public sealed class ContextMenuRegistryMonitor
     /// </summary>
     public ContextMenuRegistryMonitor(
         ContextMenuRegistryCatalog catalog,
+        ShellProxyManager shellProxyManager,
         FileLogger logger,
         BackendUserContextResolver userContextResolver,
         TimeSpan? pollInterval = null)
     {
         _catalog = catalog;
+        _shellProxyManager = shellProxyManager;
         _logger = logger;
         _userContextResolver = userContextResolver;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
@@ -186,6 +189,13 @@ public sealed class ContextMenuRegistryMonitor
         // disappearances that corrupt the persisted state baseline.
         var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
         var snapshot = await _catalog.GetSnapshotAsync(cancellationToken, userContext);
+
+        // Proxy corrections happen before desired-state reconciliation and before
+        // baseline classification, so our own writes cannot surface as Added/Reappeared.
+        if (await _shellProxyManager.ReconcileAsync(userContext, cancellationToken))
+        {
+            snapshot = await _catalog.GetSnapshotAsync(cancellationToken, userContext);
+        }
 
         var result = await _catalog.ReconcilePersistedDisabledItemsAsync(snapshot, cancellationToken);
 

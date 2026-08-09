@@ -323,7 +323,11 @@ public sealed class SpecialMenuService
                     RestoreSoftDeletedRegistryTree(item.RegistryPath, logger: _logger);
                     break;
                 case SpecialMenuKind.OpenWith:
-                    RestoreSoftDeletedRegistryTree(GetOpenWithItemAppPath(item), RequireUserContext(userContext), _logger);
+                    RestoreSoftDeletedRegistryTree(
+                        GetOpenWithItemAppPath(item),
+                        RequireUserContext(userContext),
+                        _logger,
+                        item.Metadata.GetValueOrDefault("DeletedPath"));
                     break;
                 case SpecialMenuKind.SendTo:
                     RestoreSoftDeletedFileSystemItem(item.Path, GetSendToPath(RequireUserContext(userContext)), item.Metadata.GetValueOrDefault("DeletedPath"), _logger);
@@ -379,7 +383,10 @@ public sealed class SpecialMenuService
                     DeleteRegistryTree(item.RegistryPath + DeletedSuffix, logger: _logger);
                     break;
                 case SpecialMenuKind.OpenWith:
-                    DeleteRegistryTree(GetOpenWithItemAppPath(item) + DeletedSuffix, RequireUserContext(userContext), _logger);
+                    DeleteRegistryTree(
+                        item.Metadata.GetValueOrDefault("DeletedPath") ?? GetOpenWithItemAppPath(item) + DeletedSuffix,
+                        RequireUserContext(userContext),
+                        _logger);
                     break;
                 case SpecialMenuKind.SendTo:
                 {
@@ -444,14 +451,23 @@ public sealed class SpecialMenuService
         }
     }
 
-    private static void RestoreSoftDeletedRegistryTree(string? path, BackendUserContext? context = null, FileLogger? logger = null)
+    private static void RestoreSoftDeletedRegistryTree(
+        string? path,
+        BackendUserContext? context = null,
+        FileLogger? logger = null,
+        string? deletedPathOverride = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
 
-        var deletedPath = path + DeletedSuffix;
+        var deletedPath = deletedPathOverride ?? path + DeletedSuffix;
+        if (!IsDeletedRegistryPathFor(path, deletedPath))
+        {
+            logger?.LogFireAndForget(RuntimeLogLevel.Warning, $"RestoreSoftDeletedRegistryTreeSkipped: Path={path}, DeletedPath={deletedPath}, Reason=InvalidDeletedPath, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
+            return;
+        }
         logger?.LogFireAndForget($"RestoreSoftDeletedRegistryTreeStart: Path={path}, DeletedPath={deletedPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
         using var sourceKey = OpenRegistryKey(deletedPath, writable: true, context);
         if (sourceKey is null)
@@ -2203,6 +2219,7 @@ public sealed class SpecialMenuService
                 continue;
             }
 
+            var originalAppName = StripDeletedSuffixes(appName, out var deletedSuffixCount);
             using var appKey = applicationsKey.OpenSubKey(appName, writable: false);
             using var shellKey = appKey?.OpenSubKey("shell", writable: false);
             if (appKey is null || shellKey is null)
@@ -2225,7 +2242,12 @@ public sealed class SpecialMenuService
                 continue;
             }
 
-            var appPath = $@"{displayRootPath}\{appName}";
+            // A soft-deleted Open With registration is deliberately retained under
+            // <application>.deleted. It must be projected as deleted, not accepted
+            // as a normal app name and soft-deleted again on the next UI action.
+            // Strip all historical suffixes so older repeated keys remain recoverable.
+            var appPath = $@"{displayRootPath}\{originalAppName}";
+            var deletedAppPath = $@"{displayRootPath}\{appName}";
             var verbPath = $@"{appPath}\shell\{verbName}";
             var commandPath = $@"{verbPath}\command";
             var displayName = ResolveOpenWithDisplayName(appKey, appName, targetPath);
@@ -2248,10 +2270,37 @@ public sealed class SpecialMenuService
                     ["AppRegistryPath"] = appPath,
                     ["VerbRegistryPath"] = verbPath,
                     ["VerbName"] = verbName,
-                    ["RegistryScope"] = scope
+                    ["RegistryScope"] = scope,
+                    ["IsDeleted"] = (deletedSuffixCount > 0).ToString(),
+                    ["DeletedPath"] = deletedSuffixCount > 0 ? deletedAppPath : string.Empty,
+                    ["DeletedAt"] = deletedSuffixCount > 0 ? "Unknown (legacy soft delete)" : string.Empty
                 }
             });
         }
+    }
+
+    private static string StripDeletedSuffixes(string appName, out int count)
+    {
+        count = 0;
+        var result = appName;
+        while (result.EndsWith(DeletedSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            result = result[..^DeletedSuffix.Length];
+            count++;
+        }
+
+        return result;
+    }
+
+    private static bool IsDeletedRegistryPathFor(string originalPath, string deletedPath)
+    {
+        var candidate = deletedPath;
+        while (candidate.EndsWith(DeletedSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            candidate = candidate[..^DeletedSuffix.Length];
+        }
+
+        return string.Equals(candidate, originalPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ChooseOpenWithVerb(RegistryKey shellKey)

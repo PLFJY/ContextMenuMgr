@@ -26,6 +26,15 @@ public sealed class ContextMenuItemActionsService
         _backendClient = backendClient;
     }
 
+    public async Task<ShellProxyWrapperStatus?> CreateShellProxyWrapperAsync(ContextMenuItemViewModel item, string title)
+        => await _backendClient.CreateShellProxyWrapperAsync(item.Entry, title, CancellationToken.None);
+
+    public Task RemoveShellProxyWrapperAsync(ContextMenuItemViewModel item)
+        => _backendClient.RemoveShellProxyWrapperAsync(item.Entry, CancellationToken.None);
+
+    public async Task<ShellProxyWrapperStatus?> UpdateShellProxyWrapperAsync(ContextMenuItemViewModel item, string title)
+        => await _backendClient.UpdateShellProxyWrapperAsync(item.Entry, title, CancellationToken.None);
+
     /// <summary>
     /// Opens web Search Async.
     /// </summary>

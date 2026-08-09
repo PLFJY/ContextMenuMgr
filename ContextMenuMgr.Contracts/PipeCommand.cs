@@ -54,5 +54,9 @@ public enum PipeCommand
     RepairRuntimeDataAcl,
     GetOfficeSuiteCoexistenceStatus,
     GetWpsOfficePendingApprovals,
-    SetDocumentIconProvider
+    SetDocumentIconProvider,
+    CreateShellProxyWrapper,
+    RemoveShellProxyWrapper,
+    GetShellProxyWrapperStatus,
+    UpdateShellProxyWrapper
 }

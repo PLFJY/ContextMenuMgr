@@ -181,4 +181,7 @@ public sealed record PipeRequest
     public RuntimeLogLevel? LogLevel { get; init; }
 
     public DocumentIconProvider? DocumentIconProvider { get; init; }
+
+    /// <summary>Typed request for persistent classic shell-extension submenu wrapping.</summary>
+    public ShellProxyWrapperRequest? ShellProxyWrapper { get; init; }
 }

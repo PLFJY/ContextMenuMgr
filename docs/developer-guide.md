@@ -333,6 +333,10 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 
 ## 15. 构建与发布
 
+## Persistent Shell Extension submenu wrapper
+
+The native `ContextMenuMgr.ShellProxy.dll` is a minimal in-process COM server implementing `IShellExtInit` and `IContextMenu3` (including IContextMenu/IContextMenu2). It creates the original handler by CLSID, forwards initialization, command IDs, invocation, command strings, and menu messages, and inserts the original handler output into one parent submenu. Do not add service IPC, executable activation, or state-database dependencies to this runtime path. Only the complete handler output is wrapped; arbitrary individual command reordering is unsupported.
+
 `build.ps1` 是总入口，会并行启动 `Scripts/Build-Target.ps1`，按平台和分发模式生成 installer 与 portable 包。版本来自前端 csproj 的 `InformationalVersion` / `FileVersion`；Debug 和 Beta 会追加 git short commit。
 
 `Scripts/Build.Common.psm1` 负责实际发布：
