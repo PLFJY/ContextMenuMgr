@@ -478,8 +478,36 @@
                                                     Opacity="0.65"
                                                     Text="{Binding Subtitle}"
                                                     TextWrapping="Wrap" />
+                                                <Border
+                                                    Margin="0,6,0,0"
+                                                    Padding="6,2"
+                                                    HorizontalAlignment="Left"
+                                                    Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                                    CornerRadius="4"
+                                                    ToolTip="{Binding ReadOnlyToolTip}"
+                                                    Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <ui:TextBlock
+                                                        FontSize="11"
+                                                        Opacity="0.82"
+                                                        Text="{Binding ReadOnlyLabel}" />
+                                                </Border>
                                             </StackPanel>
                                         </Grid>
+                                        <ui:TextBlock
+                                            Margin="0,7,0,0"
+                                            FontSize="11"
+                                            Opacity="0.65"
+                                            Text="{Binding ProviderSummary}"
+                                            TextWrapping="Wrap"
+                                            Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <ui:TextBlock
+                                            Margin="0,3,0,0"
+                                            FontFamily="Consolas"
+                                            FontSize="11"
+                                            Opacity="0.65"
+                                            Text="{Binding CreationSummary}"
+                                            TextWrapping="Wrap"
+                                            Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <ui:TextBlock
                                             Margin="0,8,0,0"
                                             Opacity="0.72"

@@ -1211,6 +1211,18 @@
   <data name="ShellNewPageDescription" xml:space="preserve">
     <value>通过后端服务管理 ShellNew 项、排序和可见性。</value>
   </data>
+  <data name="PackagedShellNewReadOnlyLabel" xml:space="preserve">
+    <value>应用提供 · 只读</value>
+  </data>
+  <data name="PackagedShellNewReadOnlyToolTip" xml:space="preserve">
+    <value>此新建项目由已安装应用包声明。Windows 没有提供可独立、安全修改它的公开开关，因此这里不会修改它。</value>
+  </data>
+  <data name="PackagedShellNewProviderSummary" xml:space="preserve">
+    <value>应用包：{0} · 应用：{1}</value>
+  </data>
+  <data name="PackagedShellNewCreationSummary" xml:space="preserve">
+    <value>创建模板：{0}</value>
+  </data>
   <data name="SendToPageTitle" xml:space="preserve">
     <value>发送到</value>
   </data>

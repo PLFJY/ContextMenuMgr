@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | 普通右键菜单 Bug | `developer-guide.md`、`registry-model.md`、`process-and-privilege-flows.md` | 是 `shell` verb 还是 `shellex` handler；状态来自注册表还是 `ContextMenuStateStore`；是否涉及 Registry Write Protection。 |
 | Win11 新菜单 Bug | `windows11-context-menu.md`、`process-and-privilege-flows.md` | blocked list 写到 HKLM 还是 `HKEY_USERS\<SID>`；snapshot 是否带 frontend userContext。 |
-| ShellNew / SendTo / WinX Bug | `special-menus.md`、`process-and-privilege-flows.md` | 是否需要 SID、ProfilePath、LocalAppData/RoamingAppData；不要走普通菜单 catalog。 |
+| ShellNew / SendTo / WinX Bug | `special-menus.md`、`process-and-privilege-flows.md` | 是否需要 SID、ProfilePath、LocalAppData/RoamingAppData；ShellNew 发现是否需要前端 SessionId 的 merged HKCR；不要走普通菜单 catalog。 |
 | 服务安装 / 开机启动 Bug | `process-and-privilege-flows.md`、`developer-guide.md`、`troubleshooting.md` | 是服务生命周期还是运行时操作；是否应走 UAC bootstrapper；是否需要 `--user-sid`。 |
 | TrayHost / 前端启动 Bug | `process-and-privilege-flows.md`、`developer-guide.md` | 是否是链路 C；SessionId、WTS token、用户桌面是否正确。 |
 | Restart Explorer Bug | `process-and-privilege-flows.md`、`troubleshooting.md` | 是否拿到前端用户 SessionId；是否只处理同 Session 的 `explorer.exe`。 |

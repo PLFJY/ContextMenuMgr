@@ -2,7 +2,9 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.17763.57</WindowsSdkPackageVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Configurations>Debug;Release;Beta</Configurations>
@@ -51,6 +53,10 @@
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.8" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.8" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.Windows.SDK.NET.Ref" />
   </ItemGroup>
 
   <ItemGroup>

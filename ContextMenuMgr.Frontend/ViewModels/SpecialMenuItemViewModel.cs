@@ -55,13 +55,31 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public string KeyName => Entry.KeyName;
 
-    public string Subtitle => Entry.GroupName is { Length: > 0 } groupName
+    public string Subtitle => IsReadOnlyPackagedShellNew
+        ? Entry.KeyName
+        : Entry.GroupName is { Length: > 0 } groupName
         ? _localization.Translate(groupName)
         : Entry.Path ?? Entry.RegistryPath ?? string.Empty;
 
     public string Detail => Entry.CommandText ?? Entry.TargetPath ?? Entry.Notes ?? string.Empty;
 
     public bool HasDetail => !string.IsNullOrWhiteSpace(Detail);
+
+    public bool IsReadOnlyPackagedShellNew =>
+        string.Equals(Entry.Metadata.GetValueOrDefault("ProviderType"), "PackagedShellNew", StringComparison.Ordinal);
+
+    public string ReadOnlyLabel => _localization.Translate("PackagedShellNewReadOnlyLabel");
+
+    public string ReadOnlyToolTip => _localization.Translate("PackagedShellNewReadOnlyToolTip");
+
+    public string ProviderSummary => _localization.Format(
+        "PackagedShellNewProviderSummary",
+        Entry.Metadata.GetValueOrDefault("PackageFamilyName") ?? string.Empty,
+        Entry.Metadata.GetValueOrDefault("ApplicationId") ?? string.Empty);
+
+    public string CreationSummary => _localization.Format(
+        "PackagedShellNewCreationSummary",
+        Entry.Metadata.GetValueOrDefault("ShellNewFileName") ?? string.Empty);
 
     public bool CanDelete => Entry.CanDelete && !IsBusy && !IsDeleted;
 
@@ -81,15 +99,15 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool CanMoveUp => CanMove && _canMoveUp;
 
-    public bool CanToggle => ShowToggle && !IsBusy && !IsDeleted;
+    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted;
 
-    public bool ShowDelete => Entry.CanDelete && !IsDeleted;
+    public bool ShowDelete => (Entry.CanDelete || IsReadOnlyPackagedShellNew) && !IsDeleted;
 
     public bool ShowUndoDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && IsDeleted;
 
     public bool ShowPermanentDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && IsDeleted;
 
-    public bool ShowEdit => Entry.CanEdit
+    public bool ShowEdit => (Entry.CanEdit || IsReadOnlyPackagedShellNew)
         && Entry.Metadata.GetValueOrDefault("EntryType") != "DefaultDropEffect"
         && Entry.Metadata.GetValueOrDefault("CanEditDetails") != "false"
         && !IsDeleted;
@@ -98,7 +116,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         && !IsDeleted
         && (_canMoveUp || _canMoveDown);
 
-    public bool ShowToggle => Entry.CanEdit
+    public bool ShowToggle => (Entry.CanEdit || IsReadOnlyPackagedShellNew)
         && Entry.Metadata.GetValueOrDefault("EntryType") is not ("DefaultDropEffect" or "Separator")
         && !IsDeleted;
 
@@ -179,6 +197,11 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(Detail));
         OnPropertyChanged(nameof(HasDetail));
+        OnPropertyChanged(nameof(IsReadOnlyPackagedShellNew));
+        OnPropertyChanged(nameof(ReadOnlyLabel));
+        OnPropertyChanged(nameof(ReadOnlyToolTip));
+        OnPropertyChanged(nameof(ProviderSummary));
+        OnPropertyChanged(nameof(CreationSummary));
         OnPropertyChanged(nameof(CanDelete));
         OnPropertyChanged(nameof(CanUndoDelete));
         OnPropertyChanged(nameof(CanPermanentlyDelete));
@@ -203,6 +226,10 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(ReadOnlyLabel));
+        OnPropertyChanged(nameof(ReadOnlyToolTip));
+        OnPropertyChanged(nameof(ProviderSummary));
+        OnPropertyChanged(nameof(CreationSummary));
         OnPropertyChanged(nameof(DeletedAtText));
     }
 

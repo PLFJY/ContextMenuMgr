@@ -54,6 +54,8 @@ git submodule update --init --recursive
 
 `ContextMenuMgr.Frontend.csproj` 在普通 framework-dependent build 中会负责准备运行所需辅助产物。Debug 本地开发默认只构建 `Win32,x64` ProbeHost，避免未安装 ARM64 C++ 工具链的 x64 开发机无法 `dotnet run`；Release / Beta 和发布构建仍默认构建 `Win32,x64,ARM64`。portable anycpu 发布的最终 ProbeHost 校验会沿用同一组标签：Debug 校验 x86 / x64，非 Debug 校验 x86 / x64 / arm64。
 
+Frontend、Backend 和 Tests 的 Windows TFM 以 `windows10.0.17763.0` 为共同基线。Backend 用 `Microsoft.Windows.SDK.NET.Ref` 的 Windows Runtime 投影调用 `PackageManager.FindPackagesForUser` 发现打包 ShellNew 声明；不要把它替换成直接引用 `.winmd` 的旧 `Microsoft.Windows.SDK.Contracts`，后者在 .NET 5+ 会触发 `NETSDK1130`。
+
 ```text
 Frontend build
 -> 使用 MSBuild 构建 native C++ ProbeHost（Debug 默认 Win32 / x64；Release / Beta 默认 Win32 / x64 / ARM64）

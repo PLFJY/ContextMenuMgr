@@ -106,7 +106,16 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的日志 | `backend.log` 中的 SID 和 `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew` 路径。 |
 | 常见修复方向 | 主程序只做 `ReadPermissions` / `ChangePermissions` simple unlock，不 take ownership、不替换 DACL。无法安全修改时应外部修复或用已知良好的工具切换；不要把它当 Registry Write Protection 的问题处理。 |
 
-## 8. ShellNew 排序失败
+## 8. Explorer 有 ShellNew 项但页面未枚举
+
+| 项目 | 内容 |
+| --- | --- |
+| 现象 | Explorer 的“新建”菜单存在某文件类型，但 ShellNew 页面没有对应项。 |
+| 优先查看的代码 | `SpecialMenuService.GetShellNewItems`、`FrontendUserClassesRoot`。 |
+| 优先查看的日志 | `backend.log` 中 `ShellNewMergedClassesOpenFailed`、`ShellNewDiscovery`、`ShellNewPhysicalSourceUnresolved`。 |
+| 常见修复方向 | 对同一前端 SID/SessionId 比较有效 HKCR 的扩展名→ProgID→ShellNew 链；服务不可用自己的 HKCR/HKCU 代替交互用户。写入仍必须确认日志中的物理 HKU/HKLM ShellNew 路径。 |
+
+## 9. ShellNew 排序失败
 
 | 项目 | 内容 |
 | --- | --- |

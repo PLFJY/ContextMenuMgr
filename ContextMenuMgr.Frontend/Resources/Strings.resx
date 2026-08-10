@@ -1211,6 +1211,18 @@ Continue anyway? (Not recommended)</value>
   <data name="ShellNewPageDescription" xml:space="preserve">
     <value>Manage ShellNew entries, ordering, and visibility through the backend service.</value>
   </data>
+  <data name="PackagedShellNewReadOnlyLabel" xml:space="preserve">
+    <value>App-provided · Read-only</value>
+  </data>
+  <data name="PackagedShellNewReadOnlyToolTip" xml:space="preserve">
+    <value>This New-menu item is declared by an installed app package. No documented isolated Windows switch is available, so it cannot be safely changed here.</value>
+  </data>
+  <data name="PackagedShellNewProviderSummary" xml:space="preserve">
+    <value>Package: {0} · App: {1}</value>
+  </data>
+  <data name="PackagedShellNewCreationSummary" xml:space="preserve">
+    <value>Template: {0}</value>
+  </data>
   <data name="SendToPageTitle" xml:space="preserve">
     <value>Send To</value>
   </data>
