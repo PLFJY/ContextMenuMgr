@@ -151,6 +151,10 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 状态库不是注册表本身。真实注册表可能被第三方安装器、系统更新或用户手工修改，短时间内会与状态库不一致。snapshot 构建会尽量合并并标记不一致，但不要在代码里假设状态库一定代表当前系统真实状态。
 
+状态库保存采用一个 current 加一个 last-known-good backup 的耐久性策略：先在与 `context-menu-state.json` 同目录创建唯一 `context-menu-state.json.tmp-<guid>`，以 write-through stream 完整序列化并 flush 到磁盘；关闭后使用与生产加载相同的 JSON envelope / legacy dictionary parser 重新读取和结构验证；只有验证成功，才以 `File.Replace` 安全替换 current，并由已验证的旧 current 更新 `context-menu-state.json.bak`。首次保存没有 current 时使用同目录 move。绝不直接截断 authoritative current，也绝不把未验证或损坏的 current 提升为 `.bak`。
+
+加载时 current 损坏（JSON/结构错误）会先保留原始字节到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，再验证 `.bak`。有效备份会恢复为新的 current 并保留 backup；两者都无效或缺失时返回空状态，让现有首次运行逻辑从当前注册表安全采纳 baseline，而不是把已有项标记为 `Added` 或 `Reappeared`。此恢复只处理元数据，不会直接启用、禁用、删除或恢复任何注册表项。访问被拒和普通 I/O 错误不会被当成 JSON 损坏；高于当前支持版本的 schema 也不会被隔离或重置。Portable foreign-host quarantine 保持独立，不能与文件损坏混淆。
+
 ## 9. 新增项检测与 Quarantine
 
 `ContextMenuRegistryMonitor` 定期重新取 snapshot，并与 baseline 比较。发现新增项或被外部重新启用的项后，`BackendRuntime` 会调用隔离逻辑，并通过 `BackendNotification` 通知 TrayHost 和前端审核页。

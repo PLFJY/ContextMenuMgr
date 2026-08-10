@@ -16,6 +16,11 @@ public sealed record BackendNotification
     public string Message { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets an optional frontend localization resource key for <see cref="Message"/>.
+    /// </summary>
+    public string? MessageResourceKey { get; init; }
+
+    /// <summary>
     /// Gets or sets the timestamp.
     /// </summary>
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;

@@ -16,6 +16,8 @@
 
 `RuntimePaths` 通过应用目录中的 `ContextMenuMgr.package.json` 明确识别包类型，缺失或无效时按 Installer 处理。Installer 根目录为 `%ProgramData%\ContextMenuMgr`；Portable 根目录为 `<应用目录>\Data`。`frontend-settings.json`、`context-menu-state.json`、`backend-protection-settings.json`、`DeletedBackups` 和 `Logs` 都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；排查历史安装时可以同时检查这些旧位置。
 
+`context-menu-state.json` 使用 `context-menu-state.json.bak` 保存一份最后已知正常状态。正常保存先写入同目录唯一 `.tmp-<guid>` 文件、flush/关闭并按生产格式重新验证，再替换 current；不要手工把临时文件当作 current。current JSON/结构损坏时，后端会将原始文件保存到 `Quarantine\corrupt-state-...`，验证 `.bak` 后自动恢复；没有有效 backup 时则从当前注册表重新采纳 baseline。恢复旧 backup 可能丢失非常新的本地状态更改，但不会直接修改注册表内容。
+
 Portable 包中 `frontend-settings.json` 的语言、主题、颜色等纯偏好可以跨设备保留，但 `context-menu-state.json` 和 `DeletedBackups` 属于设备/用户绑定的注册表运行时状态。后端用 Windows `MachineGuid` 和前端用户 SID 计算 SHA-256 指纹，只把指纹写入 JSON，不保存原始 MachineGuid 或 SID。复制 portable `Data` 到另一台 Windows 或另一个用户配置文件后，旧状态会被移动到 `Data\Quarantine\foreign-host-...`，后端从新的空本地主机状态开始运行。
 
 不要把另一个 Windows 安装或用户配置文件里的 `.reg` 删除备份导入当前系统。Portable 模式下恢复只接受当前 host-scoped `DeletedBackups` 目录里的备份；其它目录或旧指纹下的备份会被隔离或拒绝，并记录 `BackupRestoreBlockedForeignHost`。
@@ -65,6 +67,10 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的代码 | `ContextMenuWorkspaceService.cs`、`NamedPipeBackendClient.cs`、`NamedPipeBackendServer.cs`、`ContextMenuRegistryCatalog.cs`。 |
 | 优先查看的日志 | `frontend-crash.log`、`frontend-debug.log`、`backend.log`。 |
 | 常见修复方向 | 先确认 pipe response 的 `Success`、`ErrorCode` 和 payload；后端枚举异常应局部降级，不应让整个前端崩溃。 |
+
+### Ping 成功但传统菜单快照报 JSON 错误（Issue #91）
+
+如果 `Ping` 成功，但紧接着 `GetSnapshot` 或 `GetWpsOfficePendingApprovals` 出现 `JsonException`（例如 JSON object/array 未闭合），服务和 Named Pipe 仍然可用；不要立即安装、强力修复或重装服务。优先检查 `backend.log` 的 `ContextMenuStateCorruptionDetected`、`ContextMenuStateQuarantined`、`ContextMenuStateRecoveredFromBackup` 或 `ContextMenuStateResetAfterCorruption`。确认 `Quarantine\corrupt-state-...` 中保留了原始文件、current 是否已从 `.bak` 恢复，或是否已由当前注册表安全重建 baseline。普通 I/O/ACL 错误和未来 schema 不会被当作损坏 JSON 自动重置，应按运行时 ACL/兼容性问题排查。
 
 ## 4. TrayHost 不出现
 

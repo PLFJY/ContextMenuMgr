@@ -396,6 +396,9 @@
   <data name="BackendUnavailableStatus" xml:space="preserve">
     <value>Backend unavailable. Showing placeholder data. {0}</value>
   </data>
+  <data name="BackendDataLoadFailedStatus" xml:space="preserve">
+    <value>The backend service is running, but context-menu data could not be loaded. {0}</value>
+  </data>
   <data name="ItemUpdatedStatus" xml:space="preserve">
     <value>{0} updated at {1:T}.</value>
   </data>
@@ -1486,6 +1489,15 @@ Continue anyway? (Not recommended)</value>
   </data>
   <data name="MenuLoadServiceUnavailableText" xml:space="preserve">
     <value>The backend service is unavailable, so menu items could not be loaded.</value>
+  </data>
+  <data name="MenuLoadDataUnavailableText" xml:space="preserve">
+    <value>The backend service is running, but menu data could not be loaded. Please refresh or check diagnostics.</value>
+  </data>
+  <data name="ContextMenuStateRecoveredFromBackup" xml:space="preserve">
+    <value>The context-menu state database was damaged. ContextMenuMgr restored the last known-good backup automatically. Some very recent state changes may need to be checked.</value>
+  </data>
+  <data name="ContextMenuStateResetAfterCorruption" xml:space="preserve">
+    <value>The context-menu state database was damaged and no valid backup was available. The damaged file was preserved in Quarantine and ContextMenuMgr rebuilt its local state from the current registry.</value>
   </data>
   <data name="EmptyItemsText" xml:space="preserve">
     <value>Nothing here yet (；′⌒`)</value>

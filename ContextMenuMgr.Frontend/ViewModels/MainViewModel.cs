@@ -186,7 +186,10 @@ public partial class MainViewModel : ObservableObject
         {
             FrontendDebugLog.Error("MainViewModel", ex, $"RefreshAsync failed after {stopwatch.ElapsedMilliseconds} ms.");
             SeedDesignTimeData();
-            ConnectionStatus = _localization.Format("BackendUnavailableStatus", ex.Message);
+            ConnectionStatus = BackendOperationHealthClassifier.FromPingResult(await CanReachBackendAsync())
+                == BackendOperationHealth.OperationFailed
+                ? _localization.Format("BackendDataLoadFailedStatus", ex.Message)
+                : _localization.Format("BackendUnavailableStatus", ex.Message);
         }
     }
 

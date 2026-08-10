@@ -201,12 +201,25 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
         catch (Exception ex)
         {
-            UpdateServiceAttention(
-                _backendServiceManager.IsServiceInstalled()
-                    ? ServiceAttentionState.Unavailable
-                    : ServiceAttentionState.Missing);
-            ConnectionStatus = _localization.Format("BackendUnavailableStatus", ex.Message);
-            SetMenuLoadFailure(MenuLoadFailureState.ServiceUnavailable);
+            if (BackendOperationHealthClassifier.FromPingResult(await CanReachBackendAsync())
+                == BackendOperationHealth.OperationFailed)
+            {
+                // A successful ping is positive evidence that the service and pipe
+                // are alive. Do not send the user to service repair for one failed
+                // backend operation such as a snapshot/state-store error.
+                UpdateServiceAttention(ServiceAttentionState.None);
+                ConnectionStatus = _localization.Format("BackendDataLoadFailedStatus", ex.Message);
+                SetMenuLoadFailure(MenuLoadFailureState.DataUnavailable);
+            }
+            else
+            {
+                UpdateServiceAttention(
+                    _backendServiceManager.IsServiceInstalled()
+                        ? ServiceAttentionState.Unavailable
+                        : ServiceAttentionState.Missing);
+                ConnectionStatus = _localization.Format("BackendUnavailableStatus", ex.Message);
+                SetMenuLoadFailure(MenuLoadFailureState.ServiceUnavailable);
+            }
         }
         finally
         {
@@ -450,11 +463,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
-    public async Task RefreshWpsOfficeApprovalsAsync()
+    public async Task<bool> RefreshWpsOfficeApprovalsAsync()
     {
         if (!await _wpsOfficeApprovalRefreshLock.WaitAsync(TimeSpan.FromSeconds(1)))
         {
-            return;
+            return false;
         }
 
         try
@@ -463,6 +476,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             var snapshot = await _backendClient.GetWpsOfficePendingApprovalsAsync(cts.Token);
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(
                 () => ApplyWpsOfficeApprovalSnapshot(snapshot));
+            return true;
         }
         catch (Exception ex)
         {
@@ -471,6 +485,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 $"RefreshWpsOfficeApprovalsAsync failed: {ex.Message}");
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(
                 static () => { });
+            return false;
         }
         finally
         {
@@ -738,13 +753,16 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private async Task WpsOfficeApprovalRefreshLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        var retryDelay = TimeSpan.FromSeconds(5);
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await timer.WaitForNextTickAsync(cancellationToken);
-                await RefreshWpsOfficeApprovalsAsync();
+                await Task.Delay(retryDelay, cancellationToken);
+                var success = await RefreshWpsOfficeApprovalsAsync();
+                retryDelay = success
+                    ? TimeSpan.FromSeconds(5)
+                    : TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1235,6 +1253,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             MenuLoadFailureState.Cancelled => _localization.Translate("MenuLoadCancelledText"),
             MenuLoadFailureState.ServiceUnavailable => _localization.Translate("MenuLoadServiceUnavailableText"),
+            MenuLoadFailureState.DataUnavailable => _localization.Translate("MenuLoadDataUnavailableText"),
             _ => string.Empty
         };
     }
@@ -1251,7 +1270,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             if (notification.Kind == PipeNotificationKind.ServiceMessage
                 && !string.IsNullOrWhiteSpace(notification.Message))
             {
-                ServiceAttentionText = notification.Message;
+                ServiceAttentionText = string.IsNullOrWhiteSpace(notification.MessageResourceKey)
+                    ? notification.Message
+                    : _localization.Translate(notification.MessageResourceKey);
             }
 
             if (notification.Item is not null)
@@ -1312,6 +1333,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     {
         None,
         Cancelled,
-        ServiceUnavailable
+        ServiceUnavailable,
+        DataUnavailable
     }
 }

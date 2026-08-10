@@ -124,6 +124,20 @@ public sealed class BackendRuntime : IDisposable
                     Timestamp = DateTimeOffset.UtcNow
                 });
         };
+        stateStore.RecoveryOccurred += (_, recovery) =>
+        {
+            var resourceKey = recovery.Health == ContextMenuStateStoreHealth.RecoveredFromBackup
+                ? "ContextMenuStateRecoveredFromBackup"
+                : "ContextMenuStateResetAfterCorruption";
+            pipeServer.BroadcastNotification(
+                new BackendNotification
+                {
+                    Kind = PipeNotificationKind.ServiceMessage,
+                    Message = resourceKey,
+                    MessageResourceKey = resourceKey,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+        };
 
         BackendEmergencyLogger.Log("CreateDefault: creating FrontendAutostartLauncher.");
         var frontendAutostartLauncher = new FrontendAutostartLauncher(AppContext.BaseDirectory);

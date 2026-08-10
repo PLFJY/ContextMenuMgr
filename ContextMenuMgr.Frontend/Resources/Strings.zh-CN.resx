@@ -396,6 +396,9 @@
   <data name="BackendUnavailableStatus" xml:space="preserve">
     <value>后台不可用，当前显示占位数据。{0}</value>
   </data>
+  <data name="BackendDataLoadFailedStatus" xml:space="preserve">
+    <value>后端服务正在运行，但无法加载右键菜单数据。{0}</value>
+  </data>
   <data name="ItemUpdatedStatus" xml:space="preserve">
     <value>{0} 已在 {1:T} 更新。</value>
   </data>
@@ -1486,6 +1489,15 @@
   </data>
   <data name="MenuLoadServiceUnavailableText" xml:space="preserve">
     <value>后台服务不可用，无法加载菜单项。</value>
+  </data>
+  <data name="MenuLoadDataUnavailableText" xml:space="preserve">
+    <value>后端服务正在运行，但无法加载菜单数据。请刷新或查看诊断信息。</value>
+  </data>
+  <data name="ContextMenuStateRecoveredFromBackup" xml:space="preserve">
+    <value>右键菜单状态数据库已损坏。ContextMenuMgr 已自动恢复最后一份已知正常的备份；请检查最近的状态更改。</value>
+  </data>
+  <data name="ContextMenuStateResetAfterCorruption" xml:space="preserve">
+    <value>右键菜单状态数据库已损坏且没有可用备份。损坏文件已保留在 Quarantine，ContextMenuMgr 已根据当前注册表重建本地状态。</value>
   </data>
   <data name="EmptyItemsText" xml:space="preserve">
     <value>这里空空如也(；′⌒`)</value>

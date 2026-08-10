@@ -396,6 +396,9 @@
   <data name="BackendUnavailableStatus" xml:space="preserve">
     <value>後端無法使用，目前顯示預留位置資料。{0}</value>
   </data>
+  <data name="BackendDataLoadFailedStatus" xml:space="preserve">
+    <value>後端服務正在執行，但無法載入右鍵功能表資料。{0}</value>
+  </data>
   <data name="ItemUpdatedStatus" xml:space="preserve">
     <value>{0} 已於 {1:T} 更新。</value>
   </data>
@@ -1486,6 +1489,15 @@
   </data>
   <data name="MenuLoadServiceUnavailableText" xml:space="preserve">
     <value>後端服務無法使用，無法載入選單項目。</value>
+  </data>
+  <data name="MenuLoadDataUnavailableText" xml:space="preserve">
+    <value>後端服務正在執行，但無法載入選單資料。請重新整理或查看診斷資訊。</value>
+  </data>
+  <data name="ContextMenuStateRecoveredFromBackup" xml:space="preserve">
+    <value>右鍵功能表狀態資料庫已損毀。ContextMenuMgr 已自動還原最後一份已知正常的備份；請檢查最近的狀態變更。</value>
+  </data>
+  <data name="ContextMenuStateResetAfterCorruption" xml:space="preserve">
+    <value>右鍵功能表狀態資料庫已損毀且沒有可用備份。損毀檔案已保留在 Quarantine，ContextMenuMgr 已依目前登錄檔重建本機狀態。</value>
   </data>
   <data name="EmptyItemsText" xml:space="preserve">
     <value>這裡空空如也(；′⌒`)</value>

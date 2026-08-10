@@ -117,6 +117,8 @@ ShellVerb visibility mutation always verifies `ShellVerbVisibility.IsEnabled` on
 
 `ContextMenuStateStore` 保存后端状态，不只是缓存。它用于标记 pending approval、删除备份、删除时间、被抑制的检测等。`RegistryBackupService` 在删除前调用 `reg.exe export` 保存 `.reg`，恢复时调用 `reg.exe import`。
 
+StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 的首次 baseline adoption 从现有注册表建立状态，避免大量 `Added` / `Reappeared` 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
+
 外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。它会比较上一轮已知项和当前 snapshot，并对真正新增项或外部重新启用的项触发审核。该逻辑是 best-effort：Windows Shell 和第三方安装器的注册表写入可能有延迟，服务启动早于交互式用户 Session 时也可能缺少部分用户级项，所以代码在观察到交互式 Session 后会重建一次 baseline。
 
 传统菜单和 Win11 新菜单不是同一套模型。不要把 `PackagedCom` 项当作普通 `shell` / `shellex` 项处理。
@@ -308,6 +310,8 @@ ProbeHost 不写注册表、不执行菜单命令、不提权。不要在前端�
 ## 14. 主题、设置与本地化
 
 `RuntimePaths` 通过 `AppContext.BaseDirectory` 下的 `ContextMenuMgr.package.json` 显式识别包类型，不根据安装路径猜测。缺失或无效时默认为 Installer。Installer 根目录是 `%ProgramData%\ContextMenuMgr`；Portable 根目录是 `<应用目录>\Data`。`FrontendSettingsService`、日志、状态库、后端保护设置和删除备份都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；Portable 迁移不会移动或删除 ProgramData 数据，也不会覆盖已有 portable 数据。
+
+`ContextMenuWorkspaceService` treats service/pipe reachability and an individual backend operation as separate health signals. A successful `Ping` followed by a failed `GetSnapshot` shows a data-load error and must not start UAC service repair or recommend Install/Repair. StateStore automatic recovery emits one localized `ServiceMessage` through the existing notification connection; repeated WPS approval refresh failures back off from the normal five-second interval up to one minute and reset to the normal interval after success.
 
 Portable 包的运行时数据分为两类：纯 UI 偏好可以随包移动，但注册表运行时状态必须绑定当前 Windows 安装和前端用户。`ContextMenuStateStore` 使用 schemaVersion=2 envelope 保存 `hostIdentity`，其中只包含 `MachineGuid + frontend user SID` 的 SHA-256 指纹、短前缀、schema version 和创建时间，不保存原始 MachineGuid 或 SID。Portable 模式下如果 `context-menu-state.json` 的指纹与当前主机不匹配，后端不会加载旧状态，而是把旧文件移动到 `RuntimePaths.QuarantineDirectory` 下的 `foreign-host-...` 目录，并创建带当前指纹的新空状态库；legacy raw dictionary 只在能验证当前 host identity 时迁移一次。
 

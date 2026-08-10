@@ -28,7 +28,9 @@ public sealed class ToastNotificationViewModel
 
     public string Title => Notification.Item?.DisplayName ?? "Context menu update";
 
-    public string Message => Notification.Message;
+    public string Message => string.IsNullOrWhiteSpace(Notification.MessageResourceKey)
+        ? Notification.Message
+        : _localization.Translate(Notification.MessageResourceKey);
 
     public string RegistryPath => Notification.Item?.RegistryPath ?? _localization.Translate("NoRegistryPath");
 
