@@ -273,6 +273,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
                 return true;
             }
+
+            throw new InvalidOperationException("The backend completed the request without returning the updated menu item.");
         }
 
         catch (Exception ex)
@@ -284,7 +286,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 return false;
             }
 
-            ConnectionStatus = _localization.Format("ItemUpdateFailedStatus", item.DisplayName, ex.Message);
+            var message = _localization.Format("ItemUpdateFailedStatus", item.DisplayName, ex.Message);
+            ConnectionStatus = message;
+            await FrontendMessageBox.ShowErrorAsync(
+                message,
+                _localization.Translate("WindowTitle"));
         }
 
         return false;

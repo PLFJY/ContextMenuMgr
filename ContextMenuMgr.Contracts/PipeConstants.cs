@@ -15,4 +15,7 @@ public static class PipeConstants
 public static class PipeErrorCodes
 {
     public const string RegistryWriteProtectionEnabled = "REGISTRY_WRITE_PROTECTION_ENABLED";
+    public const string ProtectedRegistryMutationFailed = "PROTECTED_REGISTRY_MUTATION_FAILED";
+    public const string RegistrySecurityRestoreFailed = "REGISTRY_SECURITY_RESTORE_FAILED";
+    public const string RegistryMutationVerificationFailed = "REGISTRY_MUTATION_VERIFICATION_FAILED";
 }

@@ -617,6 +617,15 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"Menu item '{item.DisplayName}' uses a Shell Extension registration type without a verified enable/disable operation.", item);
         }
 
+        var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync(
+            "SetEnabled",
+            [item.BackendRegistryPath, item.RegistryPath, item.SourceRootPath],
+            cancellationToken);
+        if (preflight is not null)
+        {
+            return preflight with { Item = item };
+        }
+
         try
         {
             if (item.IsWindows11ContextMenu)
@@ -641,6 +650,15 @@ public sealed class ContextMenuRegistryCatalog
                     throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
             }
 
+            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+            if (refreshed is null || refreshed.IsEnabled != enable)
+            {
+                throw new ProtectedRegistryMutationException(
+                    PipeErrorCodes.RegistryMutationVerificationFailed,
+                    $"The registry change for '{item.DisplayName}' could not be verified after refresh.");
+            }
+
             var states = await _stateStore.LoadAsync(cancellationToken);
             var linkedEntries = GetStateLinkedEntries(snapshot, item);
             foreach (var linkedEntry in linkedEntries)
@@ -663,16 +681,22 @@ public sealed class ContextMenuRegistryCatalog
 
             await _logger.LogAsync($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
 
-            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? item with { IsEnabled = enable };
-
             return new PipeResponse
             {
                 Success = true,
                 Message = $"{(enable ? "Enabled" : "Disabled")} {item.DisplayName}.",
                 Item = refreshed
             };
+        }
+        catch (ProtectedRegistryMutationException ex)
+        {
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Protected registry mutation failed. ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, ErrorCode={ex.ErrorCode}, Exception={ex}", cancellationToken);
+            return CreateFailure(ex.Message, item, ex.ErrorCode);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry access denied. ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Exception={ex}", cancellationToken);
+            return CreateFailure("Windows denied access to the registry entry. No changes were applied.", item, PipeErrorCodes.ProtectedRegistryMutationFailed);
         }
         catch (Exception ex)
         {
@@ -2895,13 +2919,44 @@ public sealed class ContextMenuRegistryCatalog
         return string.IsNullOrWhiteSpace(updated) ? null : updated.Trim();
     }
 
-    private static void SetShellVerbEnabled(string registryPath, string displayRegistryPath, bool enable)
+    private void SetShellVerbEnabled(string registryPath, string displayRegistryPath, bool enable)
     {
-        using var menuKey = OpenRegistryKey(registryPath, writable: true)
-            ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
-
-        ShellVerbVisibility.SetEnabled(menuKey, displayRegistryPath, enable);
+        try
+        {
+            using var menuKey = OpenRegistryKey(registryPath, writable: true)
+                ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
+            ApplyAndVerifyShellVerbVisibility(menuKey, displayRegistryPath, enable);
+            return;
+        }
+        catch (Exception ex) when (IsRegistryAccessDenied(ex) && ProtectedRegistryMutation.IsEligibleMachineClassesPath(registryPath))
+        {
+            _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"ProtectedShellVerbFallbackStarted: BackendRegistryPath={registryPath}, Enable={enable}, InitialException={ex.GetType().Name}: {ex.Message}");
+            ProtectedRegistryMutation.Execute(
+                registryPath,
+                key => ShellVerbVisibility.SetEnabled(key, displayRegistryPath, enable),
+                key => VerifyShellVerbVisibility(key, enable));
+            _logger.LogFireAndForget($"ProtectedShellVerbFallbackSucceeded: BackendRegistryPath={registryPath}, Enable={enable}, SecurityDescriptorRestored=True.");
+        }
     }
+
+    private static void ApplyAndVerifyShellVerbVisibility(RegistryKey menuKey, string displayRegistryPath, bool enable)
+    {
+        ShellVerbVisibility.SetEnabled(menuKey, displayRegistryPath, enable);
+        VerifyShellVerbVisibility(menuKey, enable);
+    }
+
+    private static void VerifyShellVerbVisibility(RegistryKey menuKey, bool expectedEnabled)
+    {
+        if (ShellVerbVisibility.IsEnabled(menuKey) != expectedEnabled)
+        {
+            throw new ProtectedRegistryMutationException(
+                PipeErrorCodes.RegistryMutationVerificationFailed,
+                "The requested shell verb visibility change could not be verified.");
+        }
+    }
+
+    private static bool IsRegistryAccessDenied(Exception exception)
+        => exception is UnauthorizedAccessException or SecurityException;
 
     private static void SetShellVerbAttribute(string registryPath, ContextMenuShellAttribute attribute, bool enable)
     {
@@ -4442,13 +4497,14 @@ public sealed class ContextMenuRegistryCatalog
         return itemKey is not null && HasMultiItemSubCommands(itemKey);
     }
 
-    private static PipeResponse CreateFailure(string message, ContextMenuEntry? item = null)
+    private static PipeResponse CreateFailure(string message, ContextMenuEntry? item = null, string? errorCode = null)
     {
         return new PipeResponse
         {
             Success = false,
             Message = message,
-            Item = item
+            Item = item,
+            ErrorCode = errorCode
         };
     }
 

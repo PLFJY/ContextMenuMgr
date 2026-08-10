@@ -145,6 +145,12 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
 | 常见修复方向 | 提示用户到设置页解锁；应用自身操作如需临时解除保护，应走现有 best-effort unlock/relock 路径。不要和 ShellNew ACL Lock 混用。 |
 
+### Protected Windows ShellVerb access denied
+
+For a classic machine ShellVerb that immediately returns its switch to the old state, first inspect `backend.log` for the specific `SetEnabled` request, physical `BackendRegistryPath`, and exception/error code. A frontend rollback alone does not prove Windows restored a value. Confirm whether the item is the machine `HKLM\SOFTWARE\Classes` registration or a frontend-user `HKEY_USERS\<SID>\Software\Classes` registration.
+
+When a machine key denies the ordinary LocalSystem write, the backend records `ProtectedShellVerbFallbackStarted` and uses the controlled fallback documented in `registry-model.md`. It records either `ProtectedShellVerbFallbackSucceeded` or a structured protected-mutation/security-restoration error. User-hive keys do not use this fallback. ContextMenuMgr Registry Write Protection blocks the operation before this flow and must not be confused with Windows ACL/TrustedInstaller protection.
+
 ## 第三方软件 / 驱动安装异常的归因原则
 
 不要默认把第三方软件、驱动或安装器异常归因到本项目。先确认 Registry Write Protection 或 ShellNew ACL Lock 是否开启，再找对应时间点的 `backend.log` / `frontend-debug.log`，并确认目标注册表路径是否属于本项目保护范围。没有 Access Denied、UnauthorizedAccessException、项目日志或注册表路径证据时，不要下结论。必要时可以关闭相关保护或停止服务做 A/B 验证，详细流程见 [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)。

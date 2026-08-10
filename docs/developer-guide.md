@@ -113,6 +113,8 @@ ContextMenuRegistryMonitor 轮询快照
 
 普通 legacy `shell` verb 的命令文本编辑通过 `PipeCommand.SetCommandText` 进入 `ContextMenuRegistryCatalog.ApplyCommandTextAsync`，写 `<verb>\command` 的默认 `REG_SZ`。后端只为没有 `SubCommands` / `ExtendedSubCommandsKey`、没有 `DelegateExecute`、没有 `DropTarget\CLSID`、没有 `ExplorerCommandHandler` 的传统 ShellVerb 设置 `CanEditCommandText=true`；Shell Extension、Windows 11 packaged context menu 和多命令父级不走这条编辑路径。
 
+ShellVerb visibility mutation always verifies `ShellVerbVisibility.IsEnabled` on the same physical key, then refreshes the authoritative catalog entry before persisting desired/observed state. For a protected machine `HKLM\SOFTWARE\Classes` verb, `ContextMenuRegistryCatalog` first attempts the ordinary write. Only an ACL access-denied failure can invoke `ProtectedRegistryMutation`; it temporarily enables `SeTakeOwnershipPrivilege` and `SeRestorePrivilege`, grants LocalSystem `SetValue` only, verifies the mutation, then restores and verifies the original owner/DACL descriptor. It never applies to `HKEY_USERS\<SID>\Software\Classes`, never bypasses Registry Write Protection, and never uses BluePointLilac's unconditional ownership takeover.
+
 `ContextMenuStateStore` 保存后端状态，不只是缓存。它用于标记 pending approval、删除备份、删除时间、被抑制的检测等。`RegistryBackupService` 在删除前调用 `reg.exe export` 保存 `.reg`，恢复时调用 `reg.exe import`。
 
 外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。它会比较上一轮已知项和当前 snapshot，并对真正新增项或外部重新启用的项触发审核。该逻辑是 best-effort：Windows Shell 和第三方安装器的注册表写入可能有延迟，服务启动早于交互式用户 Session 时也可能缺少部分用户级项，所以代码在观察到交互式 Session 后会重建一次 baseline。

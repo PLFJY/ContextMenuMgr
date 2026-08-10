@@ -88,6 +88,8 @@
 | 新构建产物 | `build.ps1`、`Scripts/Build.Common.psm1`、`Build-Target.ps1` | 手工复制发布文件 | 构建产物要保持 CI、installer、portable 一致。 |
 | 新 UI 设置项 | 前端设置服务，必要时通过 Backend Pipe 同步后端 | 绕过设置服务或直接写高权限注册表 | 设置要有本地持久化、服务同步和错误处理。 |
 
+受保护 Windows ShellVerb 的正常开关仍属于链路 A。先验证 `BackendRegistryPath` 的物理来源；对 `HKLM\SOFTWARE\Classes` 普通写入发生 Access Denied 时，才可使用保持/恢复安全描述符的窄 fallback。不得对 HKU 用户项、普通读取或每次 open 执行 take ownership；不得绕过 Registry Write Protection preflight。
+
 ## 6. Bug 排查模板
 
 ```markdown

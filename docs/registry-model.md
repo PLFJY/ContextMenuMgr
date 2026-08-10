@@ -112,6 +112,14 @@ Recycle Bin 页面额外投影一个虚拟传统项 `special:recyclebin:pintohom
 
 普通 ShellVerb 的命令文本编辑不解析命令行、不拆分程序和参数、也不重写引号；`SetCommandText` 只把用户输入的字符串原样写到 `<verb>\command` 的默认 `REG_SZ`。后端会先检查 `CanEditCommandText` 和当前注册表形态，并经过 Registry Write Protection preflight；不支持 Shell Extension、Windows 11 packaged context menu、`SubCommands` / `ExtendedSubCommandsKey` 父级、`DelegateExecute`、`DropTarget\CLSID` 或 `ExplorerCommandHandler` 项。
 
+### Protected machine ShellVerb mutations
+
+Ordinary ShellVerb visibility changes first open the entry for a normal write and then read the same key back through `ShellVerbVisibility.IsEnabled`. If Windows denies that normal operation on an actual `HKLM\SOFTWARE\Classes\...` entry, the backend may use a narrowly scoped protected-mutation fallback. It never runs for `HKEY_USERS\<SID>\Software\Classes` entries, which retain their frontend-user provenance.
+
+The fallback captures the original owner/group/DACL descriptor, temporarily enables only `SeTakeOwnershipPrivilege` and `SeRestorePrivilege`, grants LocalSystem only `SetValue`, performs and verifies the requested visibility write, then restores and byte-verifies the exact original owner/DACL descriptor (including inheritance and ACE ordering). It does not permanently take ownership, grant Administrators or SYSTEM FullControl, or delete/replace a Windows ShellVerb key. A restore failure is reported as a failed operation and logged prominently.
+
+This Windows ACL path is distinct from ContextMenuMgr Registry Write Protection. The latter is checked before all normal menu mutations; when it is enabled, the protected-key fallback is not attempted.
+
 传统分类页支持通过前端的 `CreateSceneMenuItem` 入口创建自定义 classic 菜单项。分类页把当前 `ContextMenuCategory` 映射为 `ContextMenuSceneKind.CustomRegistryPath` 和对应的 HKCR scene root（例如 `HKCR\*\shell`、`HKCR\Directory\shell`、`HKCR\Drive\shell`），再通过 Backend Pipe 交给 `FileTypeSceneMenuService.CreateSceneMenuItemAsync` 写入 `shell\<verb>\command`。首版只创建普通 shell verb 命令：前端负责生成带引号的命令行并追加 `%1` 或 `%V` 选中对象占位符，后端负责 Registry Write Protection preflight、创建不覆盖已有项的唯一 key、通知 Shell 关联变更，并在状态库中抑制本次新建项检测，避免把用户主动创建的项标为待审核。本入口不创建 ShellEx handler、不复制 CommandStore 引用，也不创建子菜单。
 
 文件类型页的 Custom Extension 场景不是只扫描扩展名本身。后端会用前端用户上下文解析该扩展名直接关联的 class roots，并只枚举实际存在 `shell`、`shellex\ContextMenuHandlers` 或 `shellex\-ContextMenuHandlers` 的候选 root。候选来源包括 `SystemFileAssociations.<ext>`、直接 `.<ext>` key、用户与机器级扩展名默认 ProgID、用户与机器级 `OpenWithProgids`、以及当前用户 `FileExts\<ext>\UserChoice\ProgId` / `FileExts\<ext>\OpenWithProgids`。用户级读取必须走 `HKEY_USERS\<sid>`，不能用服务进程的 `HKCU` 或 `HKCR` 合并视图推断当前用户。
