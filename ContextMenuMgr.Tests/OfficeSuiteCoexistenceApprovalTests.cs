@@ -25,4 +25,26 @@ public sealed class OfficeSuiteCoexistenceApprovalTests
 
         Assert.True(requiresApproval);
     }
+
+    [Fact]
+    public void RegularMenuBaseline_DoesNotCountAsWpsOfficeBaseline()
+    {
+        var states = new[]
+        {
+            new PersistedContextMenuState { SourceRootPath = @"*\shell" }
+        };
+
+        Assert.False(ContextMenuRegistryCatalog.HasWpsOfficeSyntheticBaseline(states));
+    }
+
+    [Fact]
+    public void ExistingWpsOfficeFinding_CountsAsWpsOfficeBaseline()
+    {
+        var states = new[]
+        {
+            new PersistedContextMenuState { SourceRootPath = "special:wps-office-coexistence" }
+        };
+
+        Assert.True(ContextMenuRegistryCatalog.HasWpsOfficeSyntheticBaseline(states));
+    }
 }

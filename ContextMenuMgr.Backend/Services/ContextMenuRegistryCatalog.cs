@@ -326,6 +326,11 @@ public sealed class ContextMenuRegistryCatalog
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
         var hasBaseline = states.Count > 0;
+        // WPS/Office findings use a separate synthetic source and are fetched
+        // after the regular menu snapshot. A regular snapshot may already have
+        // populated the state store on first run, so it must not make existing
+        // WPS associations look like newly detected changes.
+        var hasWpsOfficeBaseline = HasWpsOfficeSyntheticBaseline(states.Values);
         var actualEntries = new Dictionary<string, ContextMenuEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in actualEntriesSource)
         {
@@ -390,7 +395,7 @@ public sealed class ContextMenuRegistryCatalog
                 // association, or icon finding is incorrectly reintroduced into
                 // Pending Approvals solely because its acknowledgement was reset.
                 state.IsPendingApproval = OfficeSuiteCoexistenceDetector
-                    .ShouldMarkNewFindingPendingApproval(hasBaseline);
+                    .ShouldMarkNewFindingPendingApproval(hasWpsOfficeBaseline);
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
                 states[entry.Id] = state;
                 dirty = true;
@@ -5276,6 +5281,9 @@ public sealed class ContextMenuRegistryCatalog
     private static bool IsWpsOfficeSyntheticId(string? itemId)
         => !string.IsNullOrWhiteSpace(itemId)
            && itemId.StartsWith("special:wps-", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool HasWpsOfficeSyntheticBaseline(IEnumerable<PersistedContextMenuState> states)
+        => states.Any(static state => IsWpsOfficeSyntheticSource(state.SourceRootPath));
 
     private static bool IsWpsOfficeSyntheticSource(string? sourceRootPath)
         => string.Equals(sourceRootPath, "special:wps-office-coexistence", StringComparison.OrdinalIgnoreCase);
