@@ -15,12 +15,14 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 /// </summary>
 public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisposable
 {
+    private const int RebuildDebounceMilliseconds = 120;
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
     private readonly FrontendSettingsService _settingsService;
+    private CancellationTokenSource? _rebuildCts;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Windows11ContextMenuPageViewModel"/> class.
@@ -247,7 +249,35 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     private void OnItemsChanged(object? sender, EventArgs e)
     {
-        RebuildItems(_service.CurrentItems);
+        // Debounce rebuilds: the service can raise ItemsChanged repeatedly while
+        // scanning, and rebuilding rebuilds every grouped item view model.
+        _rebuildCts?.Cancel();
+        _rebuildCts?.Dispose();
+        var cts = _rebuildCts = new CancellationTokenSource();
+        _ = DebouncedRebuildItemsAsync(cts);
+    }
+
+    private async Task DebouncedRebuildItemsAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(RebuildDebounceMilliseconds, cts.Token);
+            if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts))
+            {
+                return;
+            }
+
+            RebuildItems(_service.CurrentItems);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Warning(
+                nameof(Windows11ContextMenuPageViewModel),
+                $"RebuildItems failed: {ex}");
+        }
     }
 
     private void RebuildItems(IReadOnlyList<Windows11ContextMenuItemDefinition> items)
@@ -308,6 +338,9 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     /// </summary>
     public void Dispose()
     {
+        _rebuildCts?.Cancel();
+        _rebuildCts?.Dispose();
+        _rebuildCts = null;
         _localization.LanguageChanged -= OnLanguageChanged;
         _service.ItemsChanged -= OnItemsChanged;
         _placeholderDebug.PropertyChanged -= OnPlaceholderDebugPropertyChanged;

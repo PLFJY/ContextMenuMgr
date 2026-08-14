@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Media;
@@ -13,6 +14,7 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 /// </summary>
 public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisposable
 {
+    private static readonly ConcurrentDictionary<string, ImageSource?> LogoCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService? _settingsService;
@@ -35,7 +37,18 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         _localization = localization;
         _settingsService = settingsService;
 
-        _logoTask = Windows11ContextMenuService.LoadLogo(_primaryDefinition.Package, CancellationToken.None);
+        _logoTask = LoadLogoAsync(_primaryDefinition.Package);
+        // Loading the logo off the UI thread and notifying on completion avoids
+        // blocking the first paint while every grouped item reads its logo file.
+        _ = _logoTask.ContinueWith(
+            _ =>
+            {
+                OnPropertyChanged(nameof(LogoSource));
+                OnPropertyChanged(nameof(HasLogo));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.FromCurrentSynchronizationContext());
         RefreshState(definitions.All(static definition => definition.IsEnabled));
         UserNote = _settingsService?.GetContextMenuItemNote(Id) ?? string.Empty;
 
@@ -55,6 +68,27 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     }
 
     private readonly Task<ImageSource?> _logoTask;
+
+    private static Task<ImageSource?> LoadLogoAsync(Windows11PackageInfo package)
+    {
+        var logoPath = package.LogoPath;
+        if (string.IsNullOrWhiteSpace(logoPath) || !File.Exists(logoPath))
+        {
+            return Task.FromResult<ImageSource?>(null);
+        }
+
+        if (LogoCache.TryGetValue(logoPath, out var cached))
+        {
+            return Task.FromResult(cached);
+        }
+
+        return Task.Run(() => Windows11ContextMenuService.LoadLogo(package, CancellationToken.None))
+            .ContinueWith(
+                task => LogoCache[logoPath] = task.Result,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+    }
 
     /// <summary>
     /// Gets the grouped source definitions.

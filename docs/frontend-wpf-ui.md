@@ -201,6 +201,10 @@ SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`�
 - 所有重建触发点（集合变化、条目属性变化、搜索、语言切换）走 ~120ms 防抖；新调度会停止旧追加定时器并重新开始；
 - `IsLoading` 只在重建入口同步置位并在首屏填充后同步复位，不会出现"一直加载"；`IsEmpty` 在 `IsLoading` 期间不显示空占位。
 
+Win11 菜单页（`Windows11ContextMenuItemViewModel`）的卡顿来自**分组项构造时同步读盘**：`Windows11ContextMenuService.LoadLogo` 是 async 方法但方法体在首个 `await` 前同步执行 `FileStream` + `BitmapImage` 解码，且无缓存，`RebuildItems` 一次性构造全部分组项时所有 Logo 都在 UI 线程串行读盘。修复：
+- Logo 改为后台加载（`Task.Run` + 静态 `ConcurrentDictionary` 按 LogoPath 缓存），`LogoSource` 任务未完成返回 null、完成后 `OnPropertyChanged` 刷新，占位图标与真图标正常切换；
+- `RebuildItems` 的触发源 `ItemsChanged` 事件走 ~120ms 防抖，避免扫描期间反复全量重建分组项（`Dispose` + 清空 + 重建）造成卡顿与 `CollectionChanged(Reset)` 引起的滚动跳动。
+
 ### 7.1 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
 
 绑定到 `ListCollectionView`（`ItemsView`）的 ListBox 在运行时调用 `ItemsView.Refresh()`（例如传统菜单页开关菜单项、Win11 页 `RebuildItems`）会触发 `CollectionChanged(Reset)`，导致 ListBox 重新生成所有 item 容器。容器重新生成期间，WPF 框架的焦点恢复 / 选中项恢复逻辑会引发 `FrameworkElement.RequestBringIntoView` 路由事件。此时 ListBox 内部 ScrollViewer 因容器尚未完成布局无法正确处理该事件，事件会继续**冒泡**到外层 `ModernScrollViewer`，外层滚动到让 ListBox 顶部可见——表现为页头标题与筛选框被滚出视野、列表顶部对齐窗口顶部。
