@@ -345,6 +345,12 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 
 SpecialMenu 行内操作的结构性可见性不能依赖临时 `IsBusy` 状态。例如可移动项目在 Busy 时仍显示 Move Up/Down 按钮，只通过 `CanMoveUp` / `CanMoveDown` 禁用它们；只有项目不支持移动、已删除或不存在可用方向时才折叠按钮。这样右侧 `Auto` 宽度操作区在异步操作期间保持稳定，不会发生横向跳动。
 
+一致性问题提示（“当前注册表状态与软件记录不一致”）的 ❌ 忽略按钮绑定 `DismissDetectedChangeCommand` / `DismissConsistencyIssueCommand`。忽略动作分为两层：
+- 尽力调用后端 `AcknowledgeItemState`（只对齐持久化的 desired/observed 状态），
+- **无论后端确认成功与否都执行本地忽略**（`IsConsistencyIssueDismissed` / `IsDetectedChangeDismissed`）。
+
+不能只在后端确认成功时才本地忽略：注册表冲突类一致性问题（如 active/disabled 注册并存、CLSID 位于 legacy 全局 Blocked 列表）来自真实注册表状态，`Acknowledge` 无法消除，重新快照仍带回 `HasConsistencyIssue=true`。若成功路径跳过本地忽略，用户点 ❌ 后提示立刻恢复，永远无法关掉。本地忽略通过 `ApplyEntry` 的签名机制（`HasConsistencyIssue|ConsistencyIssue` 签名不变时保持 dismissed）在后续快照刷新中持续生效，只有问题签名变化才重新提示。
+
 ## 13. InfoBar、错误提示与用户友好失败
 
 `MainWindow.xaml` 中的 `RootInfoBar` 由 `InfoBarService` 管理。它适合展示全局、非阻塞、用户可读的状态，例如服务状态提醒、需要重启 Explorer、更新提示或某些操作失败的简短说明。

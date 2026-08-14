@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
@@ -1032,15 +1032,14 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task DismissDetectedChangeAsync()
     {
-        if (_acknowledgeItemStateAsync is not null)
-        {
-            var success = await _acknowledgeItemStateAsync(this);
-            if (success)
-            {
-                return;
-            }
-        }
+        await TryAcknowledgeItemStateAsync();
 
+        // Acknowledge only reconciles the persisted desired/observed state. It
+        // does not clear registry-conflict style consistency issues (e.g. both
+        // active and disabled registrations exist, or the handler is on the
+        // legacy global block list), because the registry itself is unchanged.
+        // Always dismiss locally so the user can actually ignore the banner;
+        // ApplyEntry keeps the dismissal while the issue signature is unchanged.
         IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
     }
@@ -1048,17 +1047,29 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task DismissConsistencyIssueAsync()
     {
-        if (_acknowledgeItemStateAsync is not null)
-        {
-            var success = await _acknowledgeItemStateAsync(this);
-            if (success)
-            {
-                return;
-            }
-        }
-
+        await TryAcknowledgeItemStateAsync();
         IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
+    }
+
+    private async Task<bool> TryAcknowledgeItemStateAsync()
+    {
+        if (_acknowledgeItemStateAsync is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await _acknowledgeItemStateAsync(this);
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Warning(
+                nameof(ContextMenuItemViewModel),
+                $"AcknowledgeItemState failed for {Id}: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
