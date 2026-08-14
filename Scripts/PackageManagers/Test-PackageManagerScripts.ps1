@@ -276,10 +276,10 @@ try {
     Invoke-GenerationCase `
         -Root $root `
         -Name 'stable' `
-        -Tag 'v1.7.3' `
+        -Tag 'v1.7.4' `
         -Prerelease $false `
         -PublishedAt '2026-07-04T13:58:22Z' `
-        -ExpectedPackageVersion '1.7.3' `
+        -ExpectedPackageVersion '1.7.4' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus' `
         -ExpectedScoopFile 'contextmenumgrplus.json' `
         -ExpectedChannel 'stable'
@@ -287,15 +287,15 @@ try {
     Invoke-GenerationCase `
         -Root $root `
         -Name 'beta' `
-        -Tag 'v1.7.3-Beta+abcdef0' `
+        -Tag 'v1.7.4-Beta+abcdef0' `
         -Prerelease $true `
         -PublishedAt '2026-07-04T13:58:22Z' `
-        -ExpectedPackageVersion '1.7.3-beta.20260704135822' `
+        -ExpectedPackageVersion '1.7.4-beta.20260704135822' `
         -ExpectedWingetId 'PLFJY.ContextMenuMgrPlus.Beta' `
         -ExpectedScoopFile 'contextmenumgrplus-beta.json' `
         -ExpectedChannel 'beta'
 
-    # A newer-base Beta prerelease (e.g. after a 1.7.3 stable release) must
+    # A newer-base Beta prerelease (e.g. after a 1.7.4 stable release) must
     # still resolve to the Beta channel with a publish-stamped version.
     Invoke-GenerationCase `
         -Root $root `
@@ -317,11 +317,11 @@ try {
     $gateMetadata = Join-Path $gateRoot 'release-metadata.json'
     Write-Json -Path $gateEvent -Value ([ordered] @{
         release = [ordered] @{
-            tag_name = 'v1.7.3'
-            name = 'v1.7.3'
+            tag_name = 'v1.7.4'
+            name = 'v1.7.4'
             prerelease = $false
             published_at = '2026-07-04T13:58:22Z'
-            html_url = 'https://github.com/PLFJY/ContextMenuMgr/releases/tag/v1.7.3'
+            html_url = 'https://github.com/PLFJY/ContextMenuMgr/releases/tag/v1.7.4'
         }
     })
 

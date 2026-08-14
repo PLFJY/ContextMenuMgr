@@ -124,7 +124,7 @@ Beta 发布前会在 `manual-release.yml` workflow 的 `resolve-metadata` job �
 3. 比较 Beta Release 的基础版本号与最新 Stable 版本号。
 4. 如果 Beta 基础版本号 ≤ Stable 版本号，**workflow 直接报错，阻止构建**。
 
-原因是：Beta 渠道只发布 GitHub Pre-release，且不追随 Stable Release。一旦存在版本号为 `1.7.3` 的 Stable Release，随后若发布同基础版本的 Beta Release，其包版本会变为 `1.7.3-beta.20260704135822`，在 SemVer 中低于 `1.7.3`。门禁确保 Beta Release 的基础版本必须严格高于当前最新的 Stable 版本，使 Beta release line 始终领先于最新 Stable 版本。例如 Stable `1.8.0` 发布后，`1.8.0-beta...` 会被门禁拒绝，下一个 Beta 应使用 `1.8.1-beta...` 或 `1.9.0-beta...`。
+原因是：Beta 渠道只发布 GitHub Pre-release，且不追随 Stable Release。一旦存在版本号为 `1.7.4` 的 Stable Release，随后若发布同基础版本的 Beta Release，其包版本会变为 `1.7.4-beta.20260704135822`，在 SemVer 中低于 `1.7.4`。门禁确保 Beta Release 的基础版本必须严格高于当前最新的 Stable 版本，使 Beta release line 始终领先于最新 Stable 版本。例如 Stable `1.8.0` 发布后，`1.8.0-beta...` 会被门禁拒绝，下一个 Beta 应使用 `1.8.1-beta...` 或 `1.9.0-beta...`。
 
 ## 3. 版本规则
 

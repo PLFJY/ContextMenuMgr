@@ -14,15 +14,15 @@
     <Title>Context Menu Manager Plus Service</Title>
     <Description>Elevated backend service for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.7.3.0</FileVersion>
+    <FileVersion>1.7.4.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.7.3</InformationalVersion>
+    <InformationalVersion>1.7.4</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
-    <FileVersion>1.7.3.0</FileVersion>
-    <InformationalVersion>1.7.3-Beta</InformationalVersion>
+    <FileVersion>1.7.4.0</FileVersion>
+    <InformationalVersion>1.7.4-Beta</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

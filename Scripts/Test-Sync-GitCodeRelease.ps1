@@ -34,7 +34,7 @@ Write-Output '保留 backticks, "quotes", and Unicode'
 ```
 '@
 
-Assert-True (Test-GitCodeTagInput -Value 'v1.7.3') 'Valid tag should be accepted.'
+Assert-True (Test-GitCodeTagInput -Value 'v1.7.4') 'Valid tag should be accepted.'
 Assert-Throws { Test-GitCodeTagInput -Value '' } 'Empty tag must be rejected.'
 Assert-Throws { Test-GitCodeTagInput -Value "v1`n7" } 'Multiline tag must be rejected.'
 Assert-True (@(ConvertTo-ReleaseArray $null).Count -eq 0) 'Null must normalize to zero assets.'
@@ -42,10 +42,10 @@ Assert-True (@(ConvertTo-ReleaseArray (New-Asset 'one.exe')).Count -eq 1) 'Scala
 Assert-True (@(ConvertTo-ReleaseArray @((New-Asset 'one.exe'), (New-Asset 'two.zip'))).Count -eq 2) 'Array must preserve multiple assets.'
 
 $sourceRelease = [pscustomobject]@{
-    tag_name = 'v1.7.3'
+    tag_name = 'v1.7.4'
     target_commitish = '0123456789abcdef'
     prerelease = $false
-    name = 'Context Menu Manager Plus 1.7.3'
+    name = 'Context Menu Manager Plus 1.7.4'
     body = $markdown
     assets = @()
 }
@@ -120,9 +120,9 @@ Assert-Throws { Assert-GitCodeUploadSucceeded -Succeeded $false -FileName 'bad.e
 
 $sourceRelease.prerelease = $false
 $sourceRelease.assets = $expected
-$matchingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = $expected }
+$matchingTarget = [pscustomobject]@{ tag_name = 'v1.7.4'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = $expected }
 Assert-True ((Assert-GitCodeReleaseParity -GitHubRelease $sourceRelease -GitCodeRelease $matchingTarget) -eq 3) 'Matching release must verify every expected asset.'
-$missingTarget = [pscustomobject]@{ tag_name = 'v1.7.3'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = @((New-Asset 'portable.zip')) }
+$missingTarget = [pscustomobject]@{ tag_name = 'v1.7.4'; target_commitish = '0123456789abcdef'; name = $sourceRelease.name; body = $markdown; prerelease = $false; release_status = 'latest'; assets = @((New-Asset 'portable.zip')) }
 Assert-Throws { Assert-GitCodeReleaseParity -GitHubRelease $sourceRelease -GitCodeRelease $missingTarget } 'Final verification must fail for a missing asset.'
 Assert-Throws { Test-ReleaseAssetFilename -Name 'folder/file.exe' } 'Nested filenames must not escape the download directory.'
 
