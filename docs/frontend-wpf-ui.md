@@ -194,6 +194,13 @@ OtherRules 和 FileTypes 页面自身声明 `ModernScroll.Ownership="Self"`，�
 
 SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`，再请求后端快照。`CommandStore` 等结果较多的快照仅在首次加载时分批加入绑定集合，并异步提取图标；后续刷新必须原地差量更新，不能清空集合后重新添加。`CommandStore` 不启用定时全量刷新，依赖用户手动刷新和后端通知更新，避免持续重建列表造成滚动和布局卡顿。
 
+按应用管理页（`ApplicationGroupsPageView`）**不要通过 `Ownership="Self"` 换虚拟化**：虚拟化 ListBox 会丢失 `ModernFrame.ContentScrollHost`（`ModernScrollViewer`）的平滑滚动动画，且分页/懒加载若使用 `Dispatcher.Yield(Background)` 会在渲染期间被饿死，导致列表一直"加载中"并卡顿。该页的"延迟异步加载 + 非完整加载"采用：
+- 页面继续挂在 `ContentScrollHost` 下，保留外层平滑滚动；
+- 首次重建同步渲染前 `InitialVisibleGroupCount`（40）组，页面立即可交互；
+- 剩余组由 `DispatcherTimer`（`DispatcherPriority.Normal`，避免 Background 饿死）每 60ms 追加 12 组，直到全部渲染完成；
+- 所有重建触发点（集合变化、条目属性变化、搜索、语言切换）走 ~120ms 防抖；新调度会停止旧追加定时器并重新开始；
+- `IsLoading` 只在重建入口同步置位并在首屏填充后同步复位，不会出现"一直加载"；`IsEmpty` 在 `IsLoading` 期间不显示空占位。
+
 ### 7.1 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
 
 绑定到 `ListCollectionView`（`ItemsView`）的 ListBox 在运行时调用 `ItemsView.Refresh()`（例如传统菜单页开关菜单项、Win11 页 `RebuildItems`）会触发 `CollectionChanged(Reset)`，导致 ListBox 重新生成所有 item 容器。容器重新生成期间，WPF 框架的焦点恢复 / 选中项恢复逻辑会引发 `FrameworkElement.RequestBringIntoView` 路由事件。此时 ListBox 内部 ScrollViewer 因容器尚未完成布局无法正确处理该事件，事件会继续**冒泡**到外层 `ModernScrollViewer`，外层滚动到让 ListBox 顶部可见——表现为页头标题与筛选框被滚出视野、列表顶部对齐窗口顶部。
