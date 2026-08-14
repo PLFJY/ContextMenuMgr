@@ -119,7 +119,7 @@ ShellVerb visibility mutation always verifies `ShellVerbVisibility.IsEnabled` on
 
 StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 的首次 baseline adoption 从现有注册表建立状态，避免大量 `Added` / `Reappeared` 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
 
-外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。它会比较上一轮已知项和当前 snapshot，并对真正新增项或外部重新启用的项触发审核。该逻辑是 best-effort：Windows Shell 和第三方安装器的注册表写入可能有延迟，服务启动早于交互式用户 Session 时也可能缺少部分用户级项，所以代码在观察到交互式 Session 后会重建一次 baseline。
+外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。它会比较上一轮已知项和当前 snapshot，并对真正新增项或外部重新启用的项触发审核。该逻辑是 best-effort：Windows Shell 和第三方安装器的注册表写入可能有延迟，服务启动早于交互式用户 Session 时也可能缺少部分用户级项，所以代码在观察到交互式 Session 后会重建一次 baseline。重建前会调用 `GetPersistedActiveStateCountAsync()` 对比持久化活跃状态数量，若当前 snapshot 明显偏小（< 80%），说明用户 hive 尚未完全加载，延后重建，避免把一直存在的项误判为新安装项。
 
 传统菜单和 Win11 新菜单不是同一套模型。不要把 `PackagedCom` 项当作普通 `shell` / `shellex` 项处理。
 

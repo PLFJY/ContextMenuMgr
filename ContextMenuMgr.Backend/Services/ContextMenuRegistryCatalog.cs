@@ -115,6 +115,20 @@ public sealed class ContextMenuRegistryCatalog
             cancellationToken);
     }
 
+    /// <summary>
+    /// Returns the number of persisted, non-deleted states that would normally be
+    /// enumerated by <see cref="GetSnapshotAsync"/>. The monitor uses this as the
+    /// expected baseline size to decide whether an interactive-session snapshot is
+    /// complete before rebuilding its runtime baseline.
+    /// </summary>
+    public async Task<int> GetPersistedActiveStateCountAsync(CancellationToken cancellationToken = default)
+    {
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        return states.Values.Count(static state =>
+            !state.IsDeleted
+            && (MonitoredStableRootPaths.Contains(state.SourceRootPath) || state.IsWindows11ContextMenu));
+    }
+
     public async Task<IReadOnlyList<ContextMenuEntry>> GetWpsOfficePendingApprovalsAsync(
         CancellationToken cancellationToken = default,
         BackendUserContext? userContext = null)
@@ -684,13 +698,20 @@ public sealed class ContextMenuRegistryCatalog
             await _stateStore.SaveAsync(states, cancellationToken);
             ShellChangeNotifier.NotifyAssociationsChanged();
 
+            // Re-fetch the item after the approval state was persisted. The
+            // earlier `refreshed` snapshot was captured before IsPendingApproval
+            // was cleared, so returning it would keep the approval card visible
+            // and force the user to click Allow/Deny a second time.
+            var finalItem = (await GetSnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+
             await _logger.LogAsync($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
 
             return new PipeResponse
             {
                 Success = true,
                 Message = $"{(enable ? "Enabled" : "Disabled")} {item.DisplayName}.",
-                Item = refreshed
+                Item = finalItem ?? refreshed
             };
         }
         catch (ProtectedRegistryMutationException ex)

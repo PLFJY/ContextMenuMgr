@@ -234,7 +234,11 @@ reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledI
 3. 如果有变更，重新加载 snapshot；
 4. 从 post-reconciliation snapshot 建立 knownItems。
 
-**交互式 session baseline 重建**：同上流程。
+**交互式 session baseline 重建**：同上流程，但重建前先校验快照完整性。
+
+交互式 session 事件（登录/解锁/连接）可能在用户 hive 仍在加载时到达，此时 snapshot 明显小于持久化的活跃状态数。若此时直接重建 baseline，几秒后完整枚举会把一直存在的 per-user 项（HKCU/HKU handler、packaged COM）误判为 `Added`，导致启动时大量虚假隔离与 `ItemDetected` 通知。
+
+因此重建前调用 `ContextMenuRegistryCatalog.GetPersistedActiveStateCountAsync()` 取得持久化活跃状态数量，当 `VisibleCount < max(1, PersistedActiveCount * 0.8)` 时延后重建并等待下一轮轮询，直到快照接近完整才采纳为新 baseline。
 
 **正常运行时轮询**：
 1. 读取当前 snapshot；
@@ -287,6 +291,8 @@ reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledI
 不通过设置 `BackupFilePath=null` 静默丢弃备份文件。
 
 普通 Added 项的审核行为保持不变。
+
+`ApplyDesiredStateAsync` 返回的 `Item` 必须在决策持久化之后重新获取：持久化前的 snapshot 中该条目的 `IsPendingApproval` 仍为 `true`，若直接返回，前端 `UpsertItem` 局部更新不会隐藏审核卡片，用户需要第二次点击 Allow/Deny 才能生效。因此方法在 `SaveAsync` 之后按 `itemId` 重新抓取 `finalItem` 作为返回值。
 
 ### 10.11 显式禁用状态在 key 缺失期间保留
 

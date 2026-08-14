@@ -98,6 +98,23 @@ public sealed class ContextMenuRegistryMonitor
                     // Reconciliation was already performed inside
                     // ReconcileAndRefreshSnapshotAsync, so explicit disabled-state
                     // drift has been corrected before we accept this baseline.
+                    //
+                    // The interactive session event can arrive while the user hive is
+                    // still loading. If the current snapshot is far smaller than the
+                    // persisted baseline, defer the rebuild; otherwise the next poll
+                    // would classify the still-invisible per-user entries as Added and
+                    // spam quarantine/ItemDetected notifications on every startup.
+                    var persistedActiveCount = await _catalog.GetPersistedActiveStateCountAsync(cancellationToken);
+                    if (persistedActiveCount > 0
+                        && currentSnapshot.Count < Math.Max(1, (int)(persistedActiveCount * 0.8)))
+                    {
+                        await _logger.LogAsync(
+                            $"Interactive-session baseline deferred: VisibleCount={currentSnapshot.Count}, " +
+                            $"PersistedActiveCount={persistedActiveCount}. The interactive user hive may not be fully loaded yet.",
+                            cancellationToken);
+                        continue;
+                    }
+
                     knownItems = currentSnapshot.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
                     // Consume SuppressNextDetection flags for items present in the
