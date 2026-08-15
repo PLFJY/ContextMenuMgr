@@ -455,30 +455,39 @@ public partial class ApplicationGroupViewModel : ObservableObject
     public string Identity { get; }
     public IReadOnlyList<ContextMenuItemViewModel> Items { get; }
     public string CountText => _localization.Format("ApplicationGroupCountFormat", Items.Count);
-    public string DisableAllText => _localization.Translate(IsDisabling ? "ApplicationGroupDisabling" : "ApplicationGroupDisableAll");
+    public string DisableAllText => _localization.Translate(
+        IsDisabling ? "ApplicationGroupDisabling"
+        : ShowEnableAll ? "ApplicationGroupEnableAll"
+        : "ApplicationGroupDisableAll");
     public bool CanDisableAll => !IsDisabling && Items.Any(static item => item.IsEnabled && item.CanToggle);
+    public bool CanEnableAll => !IsDisabling && Items.Any(static item => !item.IsEnabled && item.CanToggle);
+    public bool ShowEnableAll => CanEnableAll && !CanDisableAll;
+    public bool CanToggleAll => CanDisableAll || CanEnableAll;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisableAllText))]
     [NotifyPropertyChangedFor(nameof(CanDisableAll))]
+    [NotifyPropertyChangedFor(nameof(CanEnableAll))]
+    [NotifyPropertyChangedFor(nameof(ShowEnableAll))]
+    [NotifyPropertyChangedFor(nameof(CanToggleAll))]
     public partial bool IsDisabling { get; private set; }
 
-    [RelayCommand(CanExecute = nameof(CanDisableAll))]
+    [RelayCommand(CanExecute = nameof(CanToggleAll))]
     private async Task DisableAllAsync()
     {
+        var enable = !CanDisableAll;
         IsDisabling = true;
         DisableAllCommand.NotifyCanExecuteChanged();
         try
         {
-            foreach (var item in Items.Where(static item => item.IsEnabled && item.CanToggle).ToArray())
+            foreach (var item in Items.Where(item => item.CanToggle && item.IsEnabled != enable).ToArray())
             {
-                await _workspace.SetEnabledAsync(item, false);
+                await _workspace.SetEnabledAsync(item, enable);
             }
         }
         finally
         {
             IsDisabling = false;
-            OnPropertyChanged(nameof(CanDisableAll));
             DisableAllCommand.NotifyCanExecuteChanged();
         }
     }

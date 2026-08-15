@@ -1538,6 +1538,7 @@ Continue anyway? (Not recommended)</value>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} entries</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>Disable all</value></data>
   <data name="ApplicationGroupDisabling" xml:space="preserve"><value>Disabling…</value></data>
+  <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>Enable all</value></data>
   <data name="Back" xml:space="preserve"><value>Back</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>Loading…</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>Batch manage</value></data>

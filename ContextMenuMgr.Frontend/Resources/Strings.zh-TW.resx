@@ -1538,6 +1538,7 @@
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} 個項目</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>全部停用</value></data>
   <data name="ApplicationGroupDisabling" xml:space="preserve"><value>正在停用…</value></data>
+  <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>全部啟用</value></data>
   <data name="Back" xml:space="preserve"><value>返回</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>正在載入…</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>批次管理</value></data>
