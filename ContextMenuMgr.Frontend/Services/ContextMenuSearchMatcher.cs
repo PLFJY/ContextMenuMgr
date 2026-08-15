@@ -181,7 +181,40 @@ public static class ContextMenuSearchMatcher
         }
 
         var tokens = Tokenize(trimmedQuery);
-        return tokens.Count > 0 && tokens.All(token => AnyFieldContains(fields, token));
+        if (tokens.Count == 0)
+        {
+            return false;
+        }
+
+        // Normalize every field and token exactly once instead of re-scanning
+        // punctuation on every field/token combination. This matters on the
+        // app-groups page, which matches every sub-item on every keystroke.
+        var normalizedFields = new string[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+        {
+            normalizedFields[i] = NormalizePunctuation(fields[i] ?? string.Empty);
+        }
+
+        foreach (var token in tokens)
+        {
+            var normalizedToken = NormalizePunctuation(token);
+            var matched = false;
+            for (var i = 0; i < fields.Length; i++)
+            {
+                if (Contains(fields[i], normalizedFields[i], token, normalizedToken))
+                {
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryScore(
@@ -235,9 +268,17 @@ public static class ContextMenuSearchMatcher
             .ToList();
     }
 
-    private static bool AnyFieldContains(IEnumerable<string?> fields, string token)
+    private static bool AnyFieldContains(IReadOnlyList<string?> fields, string token)
     {
-        return fields.Any(field => Contains(field, token));
+        for (var i = 0; i < fields.Count; i++)
+        {
+            if (Contains(fields[i], token))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool Contains(string? field, string token)
@@ -249,6 +290,21 @@ public static class ContextMenuSearchMatcher
 
         return field.Contains(token, StringComparison.OrdinalIgnoreCase)
                || NormalizePunctuation(field).Contains(NormalizePunctuation(token), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool Contains(
+        string? field,
+        string normalizedField,
+        string token,
+        string normalizedToken)
+    {
+        if (string.IsNullOrWhiteSpace(field))
+        {
+            return false;
+        }
+
+        return field.Contains(token, StringComparison.OrdinalIgnoreCase)
+               || normalizedField.Contains(normalizedToken, StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ScoreField(string? value, string query, int exact, int startsWith, int contains)

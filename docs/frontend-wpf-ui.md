@@ -177,7 +177,7 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 需要在导航后定位共享外层滚动区域的页面应实现 `INavigationScrollTarget`。内容真正呈现后，`ModernFrame` 先 reset 外层 `ContentScrollHost`，再把该 `ScrollViewer` 传给当前内容或其可视树中的定位目标。定位回调执行完毕后才触发 `ModernFrame.NavigationCompleted`，`ModernNavigationView` 会转发该事件；需要等待页面就位的功能应订阅事件，不要使用固定 `Task.Delay`。`MainWindow` 不再查找 WPF-UI `NavigationViewContentPresenter`。
 
-`ApplicationGroupsPage` 不再使用导航后滚动定位。分类页跳转到按应用管理页面时，页面通过 `GlobalSearchNavigationFilterService` 携带的 item id 进入精确筛选模式，只显示目标项所属分组和目标项本身。这样避免首次进入时全量渲染后再调用 `UpdateLayout` / 查找可视树。
+`ApplicationGroupsPage` 不再使用导航后滚动定位。分类页跳转到按应用管理页面时，页面通过 `GlobalSearchNavigationFilterService` 携带的 item id 进入精确筛选模式，显示目标项所属分组（同一应用在其它场景下注册的全部菜单项）。这样避免首次进入时全量渲染后再调用 `UpdateLayout` / 查找可视树。
 
 边界规则：
 
@@ -199,6 +199,8 @@ SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`�
 - 首次重建同步渲染前 `InitialVisibleGroupCount`（40）组，页面立即可交互；
 - 剩余组由 `DispatcherTimer`（`DispatcherPriority.Normal`，避免 Background 饿死）每 60ms 追加 12 组，直到全部渲染完成；
 - 所有重建触发点（集合变化、条目属性变化、搜索、语言切换）走 ~120ms 防抖；新调度会停止旧追加定时器并重新开始；
+- 分组计算（`GroupBy` + 搜索匹配）在 UI 线程快照 `Items` 和搜索文本后交给 `Task.Run` 在后台执行，UI 线程只负责首屏渲染与定时追加，避免搜索框每次输入都在 UI 线程同步全量重建造成输入阻塞；
+- 搜索时组内子项同步过滤：只保留匹配的子项卡片（空搜索显示整组），避免每次按键把整个应用组的全部子项重新渲染一遍；子项匹配走 `ContextMenuSearchMatcher.MatchesFields`，字段与 token 的标点规范化各只计算一次；
 - `IsLoading` 只在重建入口同步置位并在首屏填充后同步复位，不会出现"一直加载"；`IsEmpty` 在 `IsLoading` 期间不显示空占位。
 
 Win11 菜单页（`Windows11ContextMenuItemViewModel`）的卡顿来自**分组项构造时同步读盘**：`Windows11ContextMenuService.LoadLogo` 是 async 方法但方法体在首个 `await` 前同步执行 `FileStream` + `BitmapImage` 解码，且无缓存，`RebuildItems` 一次性构造全部分组项时所有 Logo 都在 UI 线程串行读盘。修复：

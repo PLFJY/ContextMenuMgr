@@ -107,7 +107,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
                 return;
             }
 
-            RebuildGroupsAsync(cts);
+            await RebuildGroupsAsync(cts);
         }
         catch (OperationCanceledException)
         {
@@ -118,7 +118,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         }
     }
 
-    private void RebuildGroupsAsync(CancellationTokenSource cts)
+    private async Task RebuildGroupsAsync(CancellationTokenSource cts)
     {
         // Navigation-focus mode targets a single group; rebuild it synchronously.
         if (IsNavigationFilterActive
@@ -129,7 +129,14 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
             return;
         }
 
-        var groups = ComputeGroups();
+        // Snapshot the workspace and query on the UI thread, then compute the
+        // grouped result off the UI thread so typing in the search box never
+        // blocks input handling. Items are only read off-thread; UI updates
+        // below always run on the UI thread.
+        var items = _workspace.Items.ToArray();
+        var searchText = SearchText;
+        var groups = await Task.Run(() => ComputeGroups(items, searchText), cts.Token);
+
         if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts))
         {
             return;
@@ -201,10 +208,16 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
         if (targetItem is not null)
         {
+            var groupItems = _workspace.Items
+                .Where(item => !item.IsWindows11ContextMenu
+                    && IsClassicCategory(item.Category)
+                    && string.Equals(GetGroupIdentity(item), NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
             Groups.Clear();
             Groups.Add(new ApplicationGroupViewModel(
                 NavigationFocusGroupIdentity,
-                [targetItem],
+                groupItems,
                 _workspace,
                 _localization));
             OnPropertyChanged(nameof(IsEmpty));
@@ -220,18 +233,46 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         ScheduleRebuildGroups();
     }
 
-    private ApplicationGroupViewModel[] ComputeGroups()
+    private ApplicationGroupViewModel[] ComputeGroups(IReadOnlyList<ContextMenuItemViewModel> items, string searchText)
     {
-        return _workspace.Items
+        return items
             .Where(static item => !item.IsWindows11ContextMenu && IsClassicCategory(item.Category))
             .GroupBy(GetGroupIdentity, StringComparer.OrdinalIgnoreCase)
-            .Where(group => MatchesGroup(group, SearchText))
-            .OrderBy(static group => group.Key, StringComparer.CurrentCultureIgnoreCase)
-            .Select(group => new ApplicationGroupViewModel(group.Key, group.ToArray(), _workspace, _localization))
+            .Select(group => new
+            {
+                Identity = group.Key,
+                // While typing, only matched sub-items are kept so the rendered
+                // card count stays small and typing never stalls on full-list
+                // layout. An empty query keeps the whole group, as before.
+                MatchedItems = group.Where(item => MatchesItem(group.Key, item, searchText)).ToArray()
+            })
+            .Where(static group => group.MatchedItems.Length > 0)
+            .OrderBy(static group => group.Identity, StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => new ApplicationGroupViewModel(group.Identity, group.MatchedItems, _workspace, _localization))
             .ToArray();
     }
 
     private string GetGroupIdentity(ContextMenuItemViewModel item) => _identityService.GetIdentity(item).Identity;
+
+    private static bool MatchesItem(string identity, ContextMenuItemViewModel item, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        return ContextMenuSearchMatcher.MatchesFields(
+            query,
+            identity,
+            item.DisplayName,
+            item.CategoryName,
+            item.StateLabel,
+            item.RegistryPath,
+            item.UserNote,
+            item.Entry.FilePath,
+            item.Entry.HandlerClsid,
+            item.Entry.CommandText);
+    }
 
     private static bool IsClassicCategory(ContextMenuMgr.Contracts.ContextMenuCategory category) => category is
         ContextMenuMgr.Contracts.ContextMenuCategory.File
@@ -244,24 +285,6 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         or ContextMenuMgr.Contracts.ContextMenuCategory.Library
         or ContextMenuMgr.Contracts.ContextMenuCategory.Computer
         or ContextMenuMgr.Contracts.ContextMenuCategory.RecycleBin;
-
-    private bool MatchesGroup(IEnumerable<ContextMenuItemViewModel> group, string query)
-    {
-        var items = group.ToArray();
-        var fields = new List<string?> { _identityService.GetIdentity(items[0]).Identity };
-        fields.AddRange(items.SelectMany(item => new[]
-        {
-            item.DisplayName,
-            item.CategoryName,
-            item.StateLabel,
-            item.RegistryPath,
-            item.UserNote,
-            item.Entry.FilePath,
-            item.Entry.HandlerClsid,
-            item.Entry.CommandText
-        }));
-        return ContextMenuSearchMatcher.MatchesFields(query, fields.ToArray());
-    }
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
