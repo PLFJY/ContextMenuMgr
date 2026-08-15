@@ -339,7 +339,14 @@ public sealed class ContextMenuRegistryCatalog
         CancellationToken cancellationToken)
     {
         var states = await _stateStore.LoadAsync(cancellationToken);
-        var hasBaseline = states.Count > 0;
+        // A snapshot only has an established baseline when the state store already
+        // contains states relevant to this snapshot kind. The regular menu and
+        // WPS/Office synthetic sources share one state store but are fetched via
+        // separate snapshot calls, so a global "any state exists" check would let
+        // one kind (for example a WPS approval refresh running right after a state
+        // reset) make the other kind's first snapshot look like mass external
+        // additions instead of adopting them as the initial baseline.
+        var hasBaseline = states.Values.Any(includePersistedState);
         // WPS/Office findings use a separate synthetic source and are fetched
         // after the regular menu snapshot. A regular snapshot may already have
         // populated the state store on first run, so it must not make existing

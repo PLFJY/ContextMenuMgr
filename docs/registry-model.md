@@ -205,6 +205,8 @@ Quarantine 是后端状态，不只是 UI 徽标。首次 baseline 要谨慎处�
 
 当状态库为空（首次运行）时，当前机器状态被采纳为初始 baseline。不会隔离或高亮每个已存在的菜单项。`ClassifyItemMonitorAction` 在 `hasBaseline=false` 且 `state=null` 时返回 `None`。
 
+常规菜单与 WPS/Office 合成条目共享同一个状态库，但通过不同的 snapshot 调用分别获取。因此 `BuildSnapshotAsync` 的 `hasBaseline` 按当前 snapshot 类型判定（`states.Values.Any(includePersistedState)`），而不是简单地用 `states.Count > 0`。否则在重置状态库后，若 WPS 审核刷新先于常规菜单 snapshot 执行，WPS 合成状态会让常规菜单的首次 snapshot 误以为 baseline 已存在，从而把所有既有常规菜单项错误标记为 `Added`（外部新增）。
+
 ### 10.5 其他必须保持的行为
 
 - 已知元数据变更（command、显示文本、icon、CLSID、模块路径、属性等）保持 `Modified`/高亮，不自动回滚或隔离。
