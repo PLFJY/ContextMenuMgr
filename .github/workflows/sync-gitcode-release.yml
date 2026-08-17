@@ -1,9 +1,6 @@
 name: Sync Release to GitCode
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       tag:
