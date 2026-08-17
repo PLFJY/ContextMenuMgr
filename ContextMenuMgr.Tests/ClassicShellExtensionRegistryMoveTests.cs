@@ -85,6 +85,192 @@ public sealed class ClassicShellExtensionRegistryMoveTests
     }
 
     [Fact]
+    public void MoveRegistryKeySafely_ReconcilesEquivalentDuplicateRegistration_KeepsDisabledDestination()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+
+        // The disabled destination already exists because ContextMenuMgr
+        // disabled the registration earlier; a third-party update then
+        // recreated the active copy with identical content (issue #98).
+        fixture.CreateHandler("*", "Foo", handlerClsid, includeNestedValues: true);
+        fixture.CreateHandler("*", "Foo", handlerClsid, disabled: true, includeNestedValues: true);
+
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(
+            fixture.GetActiveAbsolutePath("*", "Foo"),
+            fixture.GetDisabledAbsolutePath("*", "Foo"));
+
+        // Only the redundant active source is removed; the existing disabled
+        // destination is preserved with all values and nested subkeys intact.
+        Assert.Null(fixture.Open("*", "ContextMenuHandlers\\Foo"));
+        using (var disabled = fixture.Open("*", "-ContextMenuHandlers\\Foo"))
+        {
+            Assert.NotNull(disabled);
+            Assert.Equal(handlerClsid, disabled!.GetValue(null));
+            Assert.Equal(RegistryValueKind.String, disabled.GetValueKind(null));
+            Assert.Equal(42, disabled.GetValue("Dword"));
+            Assert.Equal(RegistryValueKind.DWord, disabled.GetValueKind("Dword"));
+            Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<byte[]>(disabled.GetValue("Binary")));
+            Assert.Equal(RegistryValueKind.Binary, disabled.GetValueKind("Binary"));
+            Assert.Equal(new[] { "one", "two" }, Assert.IsType<string[]>(disabled.GetValue("MultiString")));
+            Assert.Equal(RegistryValueKind.MultiString, disabled.GetValueKind("MultiString"));
+            using var nested = disabled.OpenSubKey("Nested\\Deep");
+            Assert.NotNull(nested);
+            Assert.Equal("nested-value", nested!.GetValue("Value"));
+        }
+    }
+
+    [Fact]
+    public void MoveRegistryKeySafely_SameClsidDifferentContent_IsRejectedAsConflict()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+
+        // Same CLSID but different registry trees: the active copy carries
+        // additional metadata that the disabled copy does not have. A same-CLsid
+        // result alone must not be treated as equivalence.
+        fixture.CreateHandler("*", "Foo", handlerClsid, includeNestedValues: true);
+        fixture.CreateHandler("*", "Foo", handlerClsid, disabled: true);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => ContextMenuRegistryCatalog.MoveRegistryKeySafely(
+            fixture.GetActiveAbsolutePath("*", "Foo"),
+            fixture.GetDisabledAbsolutePath("*", "Foo")));
+
+        Assert.Contains("destination already exists", exception.Message, StringComparison.OrdinalIgnoreCase);
+        using var active = fixture.Open("*", "ContextMenuHandlers\\Foo");
+        using var disabled = fixture.Open("*", "-ContextMenuHandlers\\Foo");
+        Assert.NotNull(active);
+        Assert.NotNull(disabled);
+        Assert.Equal(handlerClsid, active!.GetValue(null));
+        Assert.Equal(handlerClsid, disabled!.GetValue(null));
+        Assert.Equal(42, active.GetValue("Dword"));
+        Assert.Null(disabled.GetValue("Dword"));
+    }
+
+    [Fact]
+    public void MoveRegistryKeySafely_RepeatedReconciliation_IsIdempotent()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+
+        fixture.CreateHandler("*", "Foo", handlerClsid, includeNestedValues: true);
+        fixture.CreateHandler("*", "Foo", handlerClsid, disabled: true, includeNestedValues: true);
+
+        // First reconciliation removes the redundant active copy.
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(
+            fixture.GetActiveAbsolutePath("*", "Foo"),
+            fixture.GetDisabledAbsolutePath("*", "Foo"));
+        Assert.Null(fixture.Open("*", "ContextMenuHandlers\\Foo"));
+        Assert.NotNull(fixture.Open("*", "-ContextMenuHandlers\\Foo"));
+
+        // A third-party update recreates the active copy again; repeating the
+        // same desired disabled operation must reconcile again without error
+        // and without corrupting the preserved disabled destination.
+        fixture.CreateHandler("*", "Foo", handlerClsid, includeNestedValues: true);
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(
+            fixture.GetActiveAbsolutePath("*", "Foo"),
+            fixture.GetDisabledAbsolutePath("*", "Foo"));
+
+        Assert.Null(fixture.Open("*", "ContextMenuHandlers\\Foo"));
+        using (var disabled = fixture.Open("*", "-ContextMenuHandlers\\Foo"))
+        {
+            Assert.NotNull(disabled);
+            Assert.Equal(handlerClsid, disabled!.GetValue(null));
+            Assert.Equal(42, disabled.GetValue("Dword"));
+        }
+    }
+
+    [Fact]
+    public void MoveRegistryKeySafely_EnableDirection_RemovesRedundantDisabledCopy()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+
+        // The active registration exists and an equivalent disabled copy is
+        // left over; enabling the item must remove only the redundant disabled
+        // copy and preserve the active registration.
+        fixture.CreateHandler("*", "Foo", handlerClsid, includeNestedValues: true);
+        fixture.CreateHandler("*", "Foo", handlerClsid, disabled: true, includeNestedValues: true);
+
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(
+            fixture.GetDisabledAbsolutePath("*", "Foo"),
+            fixture.GetActiveAbsolutePath("*", "Foo"));
+
+        Assert.Null(fixture.Open("*", "-ContextMenuHandlers\\Foo"));
+        using (var active = fixture.Open("*", "ContextMenuHandlers\\Foo"))
+        {
+            Assert.NotNull(active);
+            Assert.Equal(handlerClsid, active!.GetValue(null));
+            Assert.Equal(42, active.GetValue("Dword"));
+            using var nested = active.OpenSubKey("Nested\\Deep");
+            Assert.NotNull(nested);
+            Assert.Equal("nested-value", nested!.GetValue("Value"));
+        }
+    }
+
+
+    [Fact]
+    public void ResolvePhysicalShellExtensionEntries_ReturnsAllPhysicalCopiesSharingTheLogicalId()
+    {
+        const string id = @"*\shellex\ContextMenuHandlers|AABdzCtx";
+        var item = new ContextMenuEntry
+        {
+            Id = id,
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            RegistryPath = @"*\shellex\ContextMenuHandlers\AABdzCtx",
+            BackendRegistryPath = @"HKEY_USERS\S-1-5-21-test\Software\Classes\*\shellex\ContextMenuHandlers\AABdzCtx",
+            CanToggle = true
+        };
+
+        ContextMenuEntry Shell(string backendPath, string? entryId = null, ContextMenuEntryKind kind = ContextMenuEntryKind.ShellExtension)
+            => new()
+            {
+                Id = entryId ?? id,
+                EntryKind = kind,
+                RegistryPath = @"*\shellex\ContextMenuHandlers\AABdzCtx",
+                BackendRegistryPath = backendPath,
+                CanToggle = true
+            };
+
+        var candidates = new[]
+        {
+            Shell(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\AABdzCtx"),                              // HKLM active
+            Shell(@"HKEY_USERS\S-1-5-21-a\Software\Classes\*\shellex\ContextMenuHandlers\AABdzCtx"),                        // HKU active
+            Shell(@"HKEY_USERS\S-1-5-21-a\Software\Classes\*\shellex\-ContextMenuHandlers\AABdzCtx"),                      // HKU disabled mirror
+            Shell(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\SomeOtherHandler", @"*\shellex\ContextMenuHandlers|SomeOtherHandler"), // different key
+            Shell(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shell\SomeVerb", kind: ContextMenuEntryKind.ShellVerb)             // different entry kind
+        };
+
+        var resolved = ContextMenuRegistryCatalog.ResolvePhysicalShellExtensionEntries(item, candidates);
+
+        Assert.Equal(3, resolved.Count);
+        Assert.All(resolved, entry => Assert.Equal(ContextMenuEntryKind.ShellExtension, entry.EntryKind));
+        Assert.All(resolved, entry => Assert.Equal(id, entry.Id));
+        Assert.Contains(resolved, entry => entry.BackendRegistryPath.Contains(@"\ContextMenuHandlers\AABdzCtx", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(resolved, entry => entry.BackendRegistryPath.Contains(@"\-ContextMenuHandlers\AABdzCtx", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ResolvePhysicalShellExtensionEntries_FallsBackToSingleItem_WhenNoPhysicalCandidateMatches()
+    {
+        var item = new ContextMenuEntry
+        {
+            Id = @"SomeApp.File\shellex\ContextMenuHandlers|Foo",
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            RegistryPath = @"SomeApp.File\shellex\ContextMenuHandlers\Foo",
+            BackendRegistryPath = @"HKEY_USERS\S-1-5-21-test\Software\Classes\SomeApp.File\shellex\ContextMenuHandlers\Foo",
+            CanToggle = true
+        };
+
+        var resolved = ContextMenuRegistryCatalog.ResolvePhysicalShellExtensionEntries(
+            item,
+            Array.Empty<ContextMenuEntry>());
+
+        var single = Assert.Single(resolved);
+        Assert.Same(item, single);
+    }
+
+    [Fact]
     public void UnsupportedPropertySheetHandler_IsReadOnlyAndExcludedFromDisabledStateReconciliation()
     {
         var entry = new ContextMenuEntry

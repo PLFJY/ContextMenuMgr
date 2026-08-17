@@ -680,6 +680,10 @@ public sealed class ContextMenuRegistryCatalog
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
             if (refreshed is null || refreshed.IsEnabled != enable)
             {
+                await _logger.LogAsync(
+                    RuntimeLogLevel.Warning,
+                    $"SetEnabledVerificationFailed: ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, RefreshedBackendRegistryPath={refreshed?.BackendRegistryPath ?? "<none>"}, RefreshedIsEnabled={refreshed?.IsEnabled}, RefreshedHasConsistencyIssue={refreshed?.HasConsistencyIssue}, ErrorCode={PipeErrorCodes.RegistryMutationVerificationFailed}.",
+                    cancellationToken);
                 throw new ProtectedRegistryMutationException(
                     PipeErrorCodes.RegistryMutationVerificationFailed,
                     $"The registry change for '{item.DisplayName}' could not be verified after refresh.");
@@ -723,12 +727,12 @@ public sealed class ContextMenuRegistryCatalog
         }
         catch (ProtectedRegistryMutationException ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Protected registry mutation failed. ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, ErrorCode={ex.ErrorCode}, Exception={ex}", cancellationToken);
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Protected registry mutation failed. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, ErrorCode={ex.ErrorCode}, Exception={ex}", cancellationToken);
             return CreateFailure(ex.Message, item, ex.ErrorCode);
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry access denied. ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Exception={ex}", cancellationToken);
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry access denied. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Exception={ex}", cancellationToken);
             return CreateFailure("Windows denied access to the registry entry. No changes were applied.", item, PipeErrorCodes.ProtectedRegistryMutationFailed);
         }
         catch (Exception ex)
@@ -2160,7 +2164,7 @@ public sealed class ContextMenuRegistryCatalog
             {
                 await _logger.LogAsync(
                     RuntimeLogLevel.Warning,
-                    $"DesiredStateReconciliationFailed: ItemId={entry.Id}, Exception={ex.Message}.",
+                    $"DesiredStateReconciliationFailed: ItemId={entry.Id}, EntryKind={entry.EntryKind}, HandlerClsid={entry.HandlerClsid ?? "<none>"}, RequestedEnabled=False, RegistryPath={entry.RegistryPath}, BackendRegistryPath={entry.BackendRegistryPath}, Exception={ex.Message}.",
                     cancellationToken);
                 failedItemIds.Add(entry.Id);
             }
@@ -3029,6 +3033,46 @@ public sealed class ContextMenuRegistryCatalog
                 $"'{item.RegistryPath}' is not a classic ContextMenuHandlers registration and has no verified per-registration toggle operation.");
         }
 
+        // A classic Shell Extension logical item can be backed by several
+        // physical registrations that share the same stable Id (for example a
+        // machine-level HKLM copy and a per-user HKEY_USERS copy). Moving only
+        // the snapshot's preferred physical registration would leave the other
+        // copies active and make the logical item appear unchanged after the
+        // post-mutation refresh (REGISTRY_MUTATION_VERIFICATION_FAILED), so
+        // every physical copy that shares the Id is moved together.
+        var physicalEntries = ResolvePhysicalShellExtensionEntries(item, EnumerateEntries(MonitoredRoots));
+
+        foreach (var physical in physicalEntries)
+        {
+            await MoveShellExtensionRegistrationAsync(physical, enable, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Resolves every physical registration that must be toggled for a logical
+    /// classic Shell Extension item. A single logical Id can be backed by
+    /// several physical registrations (machine-level HKLM and per-user
+    /// HKEY_USERS copies, plus the active and disabled mirror containers), and
+    /// all of them must move together or the item would still appear enabled
+    /// after the mutation. When no candidate matches (scene / fallback items
+    /// that are not re-enumerable through the standard monitored roots), the
+    /// caller's entry is returned unchanged to preserve single-registration
+    /// behavior.
+    /// </summary>
+    internal static IReadOnlyList<ContextMenuEntry> ResolvePhysicalShellExtensionEntries(
+        ContextMenuEntry item,
+        IEnumerable<ContextMenuEntry> physicalCandidates)
+    {
+        var matches = physicalCandidates
+            .Where(entry => entry.EntryKind == ContextMenuEntryKind.ShellExtension
+                            && string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return matches.Length == 0 ? [item] : matches;
+    }
+
+    private async Task MoveShellExtensionRegistrationAsync(ContextMenuEntry item, bool enable, CancellationToken cancellationToken)
+    {
         var sourcePath = item.BackendRegistryPath;
         var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
         if (enable == !sourceIsDisabled)
@@ -3037,14 +3081,33 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         var destinationPath = GetSiblingContextMenuHandlersPath(sourcePath, enable);
+
+        string? ReadPhysicalClsid(string path)
+        {
+            using var key = OpenRegistryKey(path, writable: false);
+            var rawDefault = key?.GetValue(null)?.ToString();
+            return string.IsNullOrWhiteSpace(rawDefault)
+                ? null
+                : ResolveShellExtensionHandlerClsid(Path.GetFileName(path), rawDefault);
+        }
+
+        var sourceExistedBefore = OpenRegistryKey(sourcePath, writable: false) is not null;
+        var destinationExistedBefore = OpenRegistryKey(destinationPath, writable: false) is not null;
+        var sourceClsid = ReadPhysicalClsid(sourcePath);
+        var destinationClsid = ReadPhysicalClsid(destinationPath);
+
         await _logger.LogAsync(
-            $"ClassicShellExtensionMoveStarted: ItemId={item.Id}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, Source={sourcePath}, Destination={destinationPath}, Enable={enable}.",
+            $"ClassicShellExtensionMoveStarted: ItemId={item.Id}, Category={item.Category}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Source={sourcePath}, Destination={destinationPath}, SourceExistedBefore={sourceExistedBefore}, DestinationExistedBefore={destinationExistedBefore}, SourceClsid={sourceClsid ?? "<none>"}, DestinationClsid={destinationClsid ?? "<none>"}.",
             cancellationToken);
 
         MoveRegistryKeySafely(sourcePath, destinationPath);
 
+        var sourceExistedAfter = OpenRegistryKey(sourcePath, writable: false) is not null;
+        var destinationExistedAfter = OpenRegistryKey(destinationPath, writable: false) is not null;
+        var finalClsid = ReadPhysicalClsid(destinationPath);
+
         await _logger.LogAsync(
-            $"ClassicShellExtensionMoveSucceeded: ItemId={item.Id}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, Source={sourcePath}, Destination={destinationPath}, Enabled={enable}.",
+            $"ClassicShellExtensionMoveSucceeded: ItemId={item.Id}, Category={item.Category}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Source={sourcePath}, Destination={destinationPath}, SourceExistedBefore={sourceExistedBefore}, DestinationExistedBefore={destinationExistedBefore}, SourceExistedAfter={sourceExistedAfter}, DestinationExistedAfter={destinationExistedAfter}, DestinationClsid={finalClsid ?? "<none>"}.",
             cancellationToken);
     }
 
@@ -3091,8 +3154,48 @@ public sealed class ContextMenuRegistryCatalog
         using var existingDestination = OpenRegistryKey(destinationPath, writable: false);
         if (existingDestination is not null)
         {
+            // The destination already exists. Two situations are possible:
+            // 1. A duplicate/recreated copy of an already-disabled registration
+            //    whose registry tree is equivalent to the source. This happens
+            //    when a third-party application recreates the active copy while
+            //    ContextMenuMgr keeps the disabled copy. The requested state can
+            //    be reconciled by removing only the redundant source.
+            // 2. A genuinely conflicting registration (different CLSID or
+            //    different registry tree). Both registrations must be preserved
+            //    and the operation must fail safely.
+            using var source = OpenRegistryKey(sourcePath, writable: false)
+                ?? throw new InvalidOperationException($"Source shell-extension registration was not found: {sourcePath}.");
+
+            if (RegistryKeyTreesEquivalent(source, existingDestination))
+            {
+                var destinationDefaultValue = existingDestination.GetValue(null)?.ToString();
+
+                // Remove only the redundant source. The existing destination is
+                // never deleted or overwritten by this path.
+                DeleteRegistryKeyTree(sourcePath);
+                using var sourceVerification = OpenRegistryKey(sourcePath, writable: false);
+                if (sourceVerification is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"The redundant source shell-extension registration still exists after reconciliation: {sourcePath}.");
+                }
+
+                using var destinationVerification = OpenRegistryKey(destinationPath, writable: false);
+                if (destinationVerification is null
+                    || !string.Equals(
+                        destinationVerification.GetValue(null)?.ToString(),
+                        destinationDefaultValue,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"The existing destination shell-extension registration was lost or changed during reconciliation: {destinationPath}.");
+                }
+
+                return;
+            }
+
             throw new InvalidOperationException(
-                $"Cannot move shell-extension registration because the destination already exists. Source={sourcePath}; Destination={destinationPath}. Resolve the active/disabled registration conflict explicitly.");
+                $"Cannot move shell-extension registration because the destination already exists and is not equivalent to the source. Source={sourcePath}; Destination={destinationPath}. Resolve the active/disabled registration conflict explicitly.");
         }
 
         RegistryKey? destination = null;
@@ -3183,6 +3286,54 @@ public sealed class ContextMenuRegistryCatalog
                 ?? throw new InvalidOperationException($"Unable to re-open destination subkey '{subKeyName}'.");
             VerifyRegistryKeyTree(sourceChild, destinationChild);
         }
+    }
+
+    /// <summary>
+    /// Determines whether two registry key trees represent the same registration.
+    /// The comparison is conservative: every value (including the default value
+    /// which carries the Handler CLSID), its <see cref="RegistryValueKind"/>, its
+    /// payload (strings, binary and multi-string values), and every nested subkey
+    /// must match. Any difference makes the registrations non-equivalent so the
+    /// caller can treat the situation as a conflict instead of destroying data.
+    /// Security descriptors are intentionally not compared: the disabled mirror
+    /// may legitimately inherit different container ACLs than the recreated copy.
+    /// </summary>
+    private static bool RegistryKeyTreesEquivalent(RegistryKey left, RegistryKey right)
+    {
+        var leftValues = left.GetValueNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+        var rightValues = right.GetValueNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!leftValues.SequenceEqual(rightValues, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (var valueName in leftValues)
+        {
+            if (left.GetValueKind(valueName) != right.GetValueKind(valueName)
+                || !RegistryValueEquals(left.GetValue(valueName), right.GetValue(valueName)))
+            {
+                return false;
+            }
+        }
+
+        var leftSubKeys = left.GetSubKeyNames().OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        var rightSubKeys = right.GetSubKeyNames().OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!leftSubKeys.SequenceEqual(rightSubKeys, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (var subKeyName in leftSubKeys)
+        {
+            using var leftChild = left.OpenSubKey(subKeyName, writable: false);
+            using var rightChild = right.OpenSubKey(subKeyName, writable: false);
+            if (leftChild is null || rightChild is null || !RegistryKeyTreesEquivalent(leftChild, rightChild))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool RegistryValueEquals(object? left, object? right)

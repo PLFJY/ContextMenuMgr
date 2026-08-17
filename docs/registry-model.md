@@ -319,10 +319,41 @@ reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledI
 本实现不复制源键的显式安全描述符。
 
 `Shell Extensions\Blocked` 是按 CLSID 生效的独立全局机制，不能作为经典 ShellEx
-普通注册项开关的状态来源。普通传统开关不会写入或删除该列表。若同一逻辑注册项的 active
-与 disabled 物理键同时存在，目录将显示一致性问题且拒绝覆盖式切换。
-需要管理全局 CLSID 阻止项时，使用“其他规则 / GUID 阻止”页面；该页面的操作影响所有使用
-该 CLSID 的注册项。
+普通注册项开关的状态来源。普通传统开关不会写入或删除该列表。需要管理全局 CLSID 阻止项时，
+使用“其他规则 / GUID 阻止”页面；该页面的操作影响所有使用该 CLSID 的注册项。
+
+#### active / disabled 物理键同时存在时的策略（Issue #98）
+
+同一逻辑注册项的 active 与 disabled 物理键同时存在时，目录会显示一致性问题；
+`MoveRegistryKeySafely` 不再一律拒绝，而是先做保守的树等价比较
+（默认值 / Handler CLSID、全部命名值及其 `RegistryValueKind`、字符串 / 二进制 / 多字符串载荷、
+嵌套子键逐层比较；不比较安全描述符，因为 disabled mirror 可能合法继承与重建副本不同的容器 ACL）：
+
+- **等价（重复重建）**：disabled 键已存在且与重建的 active 键内容完全等价，说明第三方应用
+  重新创建了 active 副本。此时只删除冗余的 active 源键，保留已存在的 disabled 目标键，
+  并验证源键已消失、目标键仍在且默认值未变后才报告成功。重复 reconcile 是幂等的。
+- **不等价（真实冲突）**：CLSID 不同或注册表树内容不同，无法证明是同一注册项时，
+  保留两侧并安全失败（“destination already exists and is not equivalent to the source”），
+  不做任何破坏性覆盖或删除。
+
+启用方向同样适用：active 键已存在且与残留的 disabled 副本等价时，只删除冗余的 disabled 副本。
+
+#### 跨 hive 的 ItemId 歧义与多物理副本切换
+
+当前 `Id` 为 `{StableRelativePath}|{keyName}`，不包含 hive / SID。因此同一逻辑路径下的
+`HKLM\SOFTWARE\Classes` 与 `HKEY_USERS\<SID>\Software\Classes` 物理注册项共享同一个 `Id`。
+枚举顺序为 HKLM 优先、随后按 SID 排序的 HKU；快照按 `Id` 去重时后枚举者胜出。
+若同一逻辑项存在多个物理副本（例如 Bandizip 的 `AABdzCtx` 同时注册在 HKLM 与 HKU 的
+`*\shellex\ContextMenuHandlers`），只移动快照选中的那个副本会让其它副本仍处于启用态，
+写后按 `Id` 刷新校验会解析到另一个仍启用的副本，从而产生
+`REGISTRY_MUTATION_VERIFICATION_FAILED`（真实用户日志已确认：写入目标是 HKU 副本，
+刷新解析到的是 HKLM 副本）。
+
+因此普通开关会把同一 `Id` 下的**所有**物理副本（跨 hive、跨 active/disabled mirror）一起移动：
+`ResolvePhysicalShellExtensionEntries` 从标准监控根重新枚举出所有共享该 `Id` 的
+ShellExtension 物理项，逐一对每个副本执行已验证的容器移动；若枚举不到任何副本
+（scene / fallback 项不在标准监控根内），则回退为只移动调用方传入的单个注册项，
+保持原有单注册项行为。这样逻辑项在所有 hive 中都达到请求状态，刷新校验才能通过。
 
 `RecycleBin\...\shellex\PropertySheetHandlers` 仍会被枚举以保留可见性和删除/恢复信息，
 但它不是参考实现已验证的 `ContextMenuHandlers` 容器类型。它的 `CanToggle=false`：前端不显示普通

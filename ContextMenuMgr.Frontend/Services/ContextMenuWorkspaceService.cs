@@ -292,7 +292,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
         catch (Exception ex)
         {
-            FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, $"SetEnabledAsync failed for {item.Id}.");
+            FrontendDebugLog.Error(
+                "ContextMenuWorkspaceService",
+                ex,
+                $"SetEnabledAsync failed for {item.Id}. BackendRegistryPath={item.Entry?.BackendRegistryPath ?? "<none>"}, HandlerClsid={item.Entry?.HandlerClsid ?? "<none>"}.");
             if (RegistryProtectionDialog.IsRegistryProtectionError(ex))
             {
                 await RegistryProtectionDialog.ShowAsync(_localization);
