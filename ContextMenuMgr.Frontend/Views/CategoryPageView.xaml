@@ -179,8 +179,10 @@
                                                     </ui:TextBlock>
                                                 </Border>
                                                 <Border
+                                                    Height="23"
                                                     Margin="6,0,0,0"
                                                     Padding="8,2"
+                                                    VerticalAlignment="Center"
                                                     Background="{DynamicResource AccentFillColorDefaultBrush}"
                                                     CornerRadius="4"
                                                     Visibility="{Binding IsPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -191,8 +193,10 @@
                                                         Text="{Binding PendingApprovalBadgeText}" />
                                                 </Border>
                                                 <Border
+                                                    Height="23"
                                                     Margin="6,0,0,0"
                                                     Padding="8,2"
+                                                    VerticalAlignment="Center"
                                                     Background="{DynamicResource AccentFillColorSecondaryBrush}"
                                                     CornerRadius="4"
                                                     Visibility="{Binding HasDetectedChange, Converter={StaticResource BooleanToVisibilityConverter}}">

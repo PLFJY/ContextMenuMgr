@@ -304,6 +304,10 @@ Color="{DynamicResource TextOnAccentFillColorPrimary}"
 
 状态标签建议使用 `Border + TextBlock`，并显式绑定动态资源。启用 / 禁用状态可以明确绑定不同 brush。不要硬编码黑白，也不要依赖父级 Foreground 继承。
 
+同一菜单项上的多个状态标签（启用状态、待审核、检测到变更等）必须使用相同的外形：`Height` 固定为同一值（如 23）并配合 `VerticalAlignment="Center"`，文字也垂直居中。不能有的标签固定高度、有的标签不设高度：标签所在的 `WrapPanel` 行高由行内最高元素决定，若同一行还放有更高的控件（例如“深度分析”按钮），不设固定高度的标签会被 `WrapPanel` 拉伸到行高，导致“外部新增 / 待审核”标签比“已启用”标签高出一截。
+
+状态标签的文字颜色同样要按状态显式区分并跟随 WPF-UI 主题资源：启用态（accent 背景）文字用 `TextOnAccentFillColorPrimaryBrush`，禁用态（中性背景）文字用 `TextFillColorSecondaryBrush`（与正常管理页一致）。这样浅色模式下启用态为白字、禁用态为灰字，深色模式下两者随主题资源自动反色。不要把文字颜色写死，也不要依赖父级 `Foreground` 继承（accent 背景上会变成黑字看不清）。
+
 ## 11. 图标
 
 本项目有两类图标：

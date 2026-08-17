@@ -82,7 +82,18 @@
                                                                             </Style.Triggers>
                                                                         </Style>
                                                                     </Border.Style>
-                                                                    <ui:TextBlock VerticalAlignment="Center" FontSize="11" Text="{Binding StateLabel}" />
+                                                                    <ui:TextBlock VerticalAlignment="Center" FontSize="11" Text="{Binding StateLabel}">
+                                                                        <ui:TextBlock.Style>
+                                                                            <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </ui:TextBlock.Style>
+                                                                    </ui:TextBlock>
                                                                 </Border>
                                                                 <ui:Button Margin="10,0,0,0" Appearance="Secondary" Command="{Binding DeepAnalyzeMenuItemCommand}" Content="{Binding DeepAnalyzeMenuItemText}" ToolTip="{Binding DeepAnalyzeMenuItemTooltip}" Visibility="{Binding CanDeepAnalyzeMenuItem, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                             </WrapPanel>

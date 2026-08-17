@@ -178,35 +178,43 @@
                                                     FontWeight="SemiBold"
                                                     Text="{Binding DisplayName}" />
                                                 <Border
+                                                    Height="23"
                                                     Margin="8,0,0,0"
                                                     Padding="8,2"
+                                                    VerticalAlignment="Center"
                                                     Background="{DynamicResource AccentFillColorSecondaryBrush}"
                                                     CornerRadius="4">
                                                     <ui:TextBlock
+                                                        VerticalAlignment="Center"
                                                         FontSize="11"
                                                         Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
                                                         Text="{Binding StateLabel}" />
                                                 </Border>
                                                 <Border
+                                                    Height="23"
                                                     Margin="6,0,0,0"
                                                     Padding="8,2"
+                                                    VerticalAlignment="Center"
                                                     Background="{DynamicResource AccentFillColorDefaultBrush}"
                                                     CornerRadius="4"
                                                     Visibility="{Binding IsPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <ui:TextBlock
+                                                        VerticalAlignment="Center"
                                                         FontSize="11"
                                                         Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
                                                         Text="{Binding PendingApprovalBadgeText}" />
                                                 </Border>
                                                 <Border
+                                                    Height="23"
                                                     Margin="6,0,0,0"
                                                     Padding="8,2"
+                                                    VerticalAlignment="Center"
                                                     Background="{DynamicResource AccentFillColorSecondaryBrush}"
                                                     CornerRadius="4"
                                                     Visibility="{Binding HasDetectedChange, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <ui:TextBlock
-                                                        FontSize="11"
                                                         VerticalAlignment="Center"
+                                                        FontSize="11"
                                                         Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
                                                         Text="{Binding DetectedChangeBadgeText}" />
                                                 </Border>
