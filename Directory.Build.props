@@ -1,0 +1,28 @@
+<Project>
+
+  <!--
+    集中管理所有 .NET 项目的版本号。
+
+    升级版本号时，只需修改下面的 AppVersion 即可，所有项目（Frontend / Backend / TrayHost）
+    的 FileVersion、InformationalVersion 会自动同步。Beta 配置会自动追加 -Beta 后缀，Debug/Release 不追加。
+
+    注意：
+    - 此文件由 Microsoft.NET.Sdk 自动 import，无需在每个 csproj 中显式引用。
+    - Tests / Contracts 项目设置了 GenerateAssemblyInfo=false，版本号不会影响它们的输出。
+    - C++ 项目（ProbeHost.vcxproj）不 import 此文件，但它的版本号由 Inno Setup
+      在打包时从 publish 出来的 exe 自动读取，无需在此同步。
+  -->
+  <PropertyGroup>
+    <AppVersion>1.7.4</AppVersion>
+
+    <FileVersion>$(AppVersion).0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <InformationalVersion>$(AppVersion)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
+    <InformationalVersion>$(AppVersion)-Beta</InformationalVersion>
+  </PropertyGroup>
+
+</Project>

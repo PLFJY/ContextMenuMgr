@@ -14,11 +14,7 @@
     <Title>Context Menu Manager Plus</Title>
     <Description>Windows context menu manager frontend for Context Menu Manager Plus.</Description>
     <Company>PLFJY</Company>
-    <FileVersion>1.7.4.0</FileVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <InformationalVersion>1.7.4</InformationalVersion>
     <BackendTargetFramework>net10.0-windows10.0.17763.0</BackendTargetFramework>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <BackendOutputDir>$(MSBuildThisFileDirectory)..\artifacts\backend\$(Configuration)\$(BackendTargetFramework)\</BackendOutputDir>
     <NativeProbeHostProject>$(MSBuildThisFileDirectory)..\ContextMenuMgr.ProbeHost\ContextMenuMgr.ProbeHost.vcxproj</NativeProbeHostProject>
     <NativeProbeHostOutputRoot>$(MSBuildThisFileDirectory)..\artifacts\probehost-native\$(Configuration)\</NativeProbeHostOutputRoot>
@@ -31,11 +27,6 @@
     <NativeProbeHostPlatforms Condition="'$(NativeProbeHostPlatforms)' == ''">Win32,x64,ARM64</NativeProbeHostPlatforms>
     <NativeProbeHostVerificationLabels Condition="'$(NativeProbeHostVerificationLabels)' == '' and '$(NativeProbeHostPlatforms)' == 'Win32,x64'">x86 x64</NativeProbeHostVerificationLabels>
     <NativeProbeHostVerificationLabels Condition="'$(NativeProbeHostVerificationLabels)' == ''">x86 x64 arm64</NativeProbeHostVerificationLabels>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)' == 'Beta'">
-    <FileVersion>1.7.4.0</FileVersion>
-    <InformationalVersion>1.7.4-Beta</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
