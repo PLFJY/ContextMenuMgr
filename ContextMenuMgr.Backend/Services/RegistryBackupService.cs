@@ -135,6 +135,17 @@ public sealed class RegistryBackupService
         _logger?.LogFireAndForget($"RegistryBackupDelete: BackupFilePath={backupFilePath}, ExistsBefore={existsBefore}, Result={(existsBefore ? "Deleted" : "Skipped")}.");
     }
 
+    public void ClearCurrentHostBackups()
+    {
+        Directory.CreateDirectory(_backupDirectory);
+        foreach (var path in Directory.EnumerateFiles(_backupDirectory, "*", SearchOption.TopDirectoryOnly))
+        {
+            File.Delete(path);
+        }
+
+        _logger?.LogFireAndForget($"RegistryBackupDirectoryCleared: Directory={_backupDirectory}.");
+    }
+
     private string ResolveBackupDirectory()
     {
         if (RuntimePaths.PackageKind != RuntimePackageKind.Portable)

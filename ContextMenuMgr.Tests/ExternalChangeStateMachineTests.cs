@@ -224,16 +224,14 @@ public sealed class ExternalChangeStateMachineTests
         Assert.Equal(ContextMenuChangeKind.Added, changeKind);
     }
 
-    // ---- Scenario 4: runtime previously deleted Reappeared ----------------
+    // ---- Scenario 4: deleted recovery identity is not monitored -----------
 
     /// <summary>
-    /// Scenario 4: At runtime, when a previously deleted item reappears, it
-    /// must be quarantined via the dedicated Reappeared path. The classifier
-    /// must signal QuarantineReappeared (not QuarantineAdded) so the runtime
-    /// can preserve deletion provenance.
+    /// Deleted state is recovery-only. A live key with the same Id follows the
+    /// ordinary runtime Added path.
     /// </summary>
     [Fact]
-    public void Runtime_PreviouslyDeletedReappeared_QuarantinedAsReappeared()
+    public void Runtime_DeletedRecoveryIdAppears_TreatedAsAdded()
     {
         var entry = BuildPresentEntry(isEnabled: true);
         var state = BuildState(
@@ -249,27 +247,22 @@ public sealed class ExternalChangeStateMachineTests
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
             entry, state, hasBaseline, isBaselineEstablishment);
 
-        Assert.Equal(ItemMonitorAction.QuarantineReappeared, action);
+        Assert.Equal(ItemMonitorAction.QuarantineAdded, action);
 
         var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Reappeared, changeKind);
+        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
 
-        // Consistency issue must be present so the frontend can warn the user
-        // that a deleted item has come back.
-        var consistency = ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
-        Assert.NotNull(consistency);
-        Assert.Contains("reappeared", consistency!, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
-    // ---- Scenario 5: startup/offline previously deleted Reappeared ---------
+    // ---- Scenario 5: offline deleted recovery identity is Added ------------
 
     /// <summary>
-    /// Scenario 5: When the monitor was not running and a previously deleted
-    /// item reappeared, it must be exposed as a Reappeared highlight and
-    /// consistency warning only. No quarantine, no approval notification.
+    /// The same recovery-only identity is an ordinary offline Added item and is
+    /// not quarantined during startup baseline establishment.
     /// </summary>
     [Fact]
-    public void Startup_PreviouslyDeletedReappeared_HighlightOnly_NoQuarantine()
+    public void Startup_DeletedRecoveryIdAppears_AddedHighlightOnly()
     {
         var entry = BuildPresentEntry(isEnabled: true);
         var state = BuildState(
@@ -284,13 +277,12 @@ public sealed class ExternalChangeStateMachineTests
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
             entry, state, hasBaseline, isBaselineEstablishment);
 
-        Assert.Equal(ItemMonitorAction.OfflineReappearedHighlight, action);
+        Assert.Equal(ItemMonitorAction.OfflineAddedHighlight, action);
 
         var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Reappeared, changeKind);
+        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
 
-        // The consistency warning must remain visible.
-        Assert.NotNull(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
+        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
     // ---- Scenario 6: runtime DesiredEnabled=false and actual enabled ------
@@ -327,16 +319,15 @@ public sealed class ExternalChangeStateMachineTests
         Assert.False(state.IsPendingApproval);
     }
 
-    // ---- Scenario 7: startup DesiredEnabled=false and actual enabled ------
+    // ---- Scenario 7: offline and runtime disabled-to-enabled boundaries ---
 
     /// <summary>
-    /// Scenario 7: At startup, when a previously explicitly disabled item is
-    /// found to be enabled (because a third-party app recreated it before the
-    /// service started), it must be automatically re-disabled before the
-    /// baseline is accepted. No pending approval, no approval notification.
+    /// At startup, a disabled-to-enabled change happened while monitoring was
+    /// stopped and must therefore remain Modified. The same physical state is
+    /// silently corrected only when observed as a runtime transition.
     /// </summary>
     [Fact]
-    public void Startup_DesiredDisabled_ActualEnabled_AutoReconciledBeforeBaseline()
+    public void DesiredDisabled_ActualEnabled_UsesOfflineOrRuntimeRule()
     {
         var entry = BuildPresentEntry(isEnabled: true);
         var state = BuildState(
@@ -348,45 +339,31 @@ public sealed class ExternalChangeStateMachineTests
         const bool hasBaseline = true;
         const bool isBaselineEstablishment = true;
 
-        // Reconciliation takes priority over baseline-establishment semantics.
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
             entry, state, hasBaseline, isBaselineEstablishment);
 
-        Assert.Equal(ItemMonitorAction.ReconcileDisabledState, action);
+        Assert.Equal(ItemMonitorAction.MetadataModifiedHighlight, action);
 
-        // Same behavior in runtime context (verified for symmetry).
         var runtimeAction = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
             entry, state, hasBaseline, isBaselineEstablishment: false);
         Assert.Equal(ItemMonitorAction.ReconcileDisabledState, runtimeAction);
     }
 
-    // ---- Scenario 8: explicit-disabled state survives key absence ---------
+    // ---- Scenario 8: missing active state leaves the baseline -------------
 
     /// <summary>
-    /// Scenario 8: When an explicit disabled policy (DesiredEnabled=false,
-    /// not deleted) is temporarily absent from the registry (e.g. a
-    /// third-party app deleted the key and will recreate it later), the
-    /// persisted state must NOT be pruned by missing-state cleanup. When the
-    /// key is recreated, the item must be automatically disabled.
+    /// A real registry deletion ends the monitored identity even when the item
+    /// used to be disabled. A later recreation is handled as a new item.
     /// </summary>
     [Fact]
-    public void ExplicitDisabledState_SurvivesKeyAbsence_NotPruned()
+    public void ExplicitDisabledState_WhenMissing_IsRemovedFromBaseline()
     {
         var state = BuildState(
             isDeleted: false,
             desiredEnabled: false,
             observedEnabled: false);
 
-        // The missing-state pruning guard must keep this state alive.
-        Assert.True(ContextMenuChangeClassifier.ShouldPreserveExplicitDisabledState(state));
-
-        // When the item reappears as enabled, reconciliation kicks in.
-        var recreatedEntry = BuildPresentEntry(isEnabled: true);
-        Assert.True(ContextMenuChangeClassifier.ShouldReconcileDisabledState(recreatedEntry, state));
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            recreatedEntry, state, hasBaseline: true, isBaselineEstablishment: false);
-        Assert.Equal(ItemMonitorAction.ReconcileDisabledState, action);
+        Assert.True(ContextMenuChangeClassifier.ShouldRemoveMissingState(state));
     }
 
     /// <summary>
@@ -402,7 +379,7 @@ public sealed class ExternalChangeStateMachineTests
             desiredEnabled: null,
             observedEnabled: true);
 
-        Assert.False(ContextMenuChangeClassifier.ShouldPreserveExplicitDisabledState(neutralState));
+        Assert.True(ContextMenuChangeClassifier.ShouldRemoveMissingState(neutralState));
     }
 
     /// <summary>
@@ -418,7 +395,7 @@ public sealed class ExternalChangeStateMachineTests
             desiredEnabled: false,
             observedEnabled: false);
 
-        Assert.False(ContextMenuChangeClassifier.ShouldPreserveExplicitDisabledState(deletedState));
+        Assert.False(ContextMenuChangeClassifier.ShouldRemoveMissingState(deletedState));
     }
 
     // ---- Scenario 9: DesiredEnabled=true and actual disabled --------------
@@ -445,15 +422,11 @@ public sealed class ExternalChangeStateMachineTests
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
             entry, state, hasBaseline: true, isBaselineEstablishment: false);
 
-        // The enabled-state drift is observed, so it falls through to
-        // MetadataModifiedHighlight (a visible consistency warning, but no
-        // automatic action and no quarantine).
+        // The enabled-state drift is observed as an external modification, but
+        // it is not duplicated as a generic consistency warning.
         Assert.Equal(ItemMonitorAction.MetadataModifiedHighlight, action);
 
-        // A consistency issue should be visible so the user can decide.
-        var consistency = ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
-        Assert.NotNull(consistency);
-        Assert.Contains("enabled", consistency!, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
     // ---- Scenario 10: known metadata-only modification --------------------
@@ -530,20 +503,17 @@ public sealed class ExternalChangeStateMachineTests
         // Must NOT be converted into a pending approval.
         Assert.False(state.IsPendingApproval);
 
-        // Consistency warning remains visible because DesiredEnabled != actual.
-        var consistency = ContextMenuChangeClassifier.GetConsistencyIssue(entry, state);
-        Assert.NotNull(consistency);
-        Assert.Contains("disabled", consistency!, StringComparison.OrdinalIgnoreCase);
+        // Reconciliation is retried by later snapshots; this is not represented
+        // as an unrelated generic consistency warning.
+        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
-    // ---- Scenario 12: Reappeared approval decisions (state-level checks) --
+    // ---- Legacy serialized-state compatibility ---------------------------
 
     /// <summary>
-    /// Scenario 12 (state-level): Verifies that the PendingApprovalChangeKind
-    /// field correctly tracks the origin of a pending approval and that the
-    /// auto-clearing logic maintains consistency between IsPendingApproval
-    /// and PendingApprovalChangeKind. This is the state-machine foundation
-    /// for the Allow/Deny/Remove approval decisions handled by the catalog.
+    /// Verifies that an old state file containing the retired Reappeared value
+    /// still preserves the PendingApprovalChangeKind/IsPendingApproval invariant.
+    /// The active catalog no longer creates this value.
     /// </summary>
     [Fact]
     public void PendingApprovalChangeKind_TracksReappearedOrigin_AutoClearsOnApprovalCleared()
@@ -554,8 +524,8 @@ public sealed class ExternalChangeStateMachineTests
         Assert.False(state.IsPendingApproval);
         Assert.Null(state.PendingApprovalChangeKind);
 
-        // Simulate the catalog's QuarantineReappearedItemAsync: it sets
-        // PendingApprovalChangeKind = Reappeared while preserving IsDeleted.
+        // Simulate deserializing the value from a state file created by an
+        // older release.
         state.PendingApprovalChangeKind = ContextMenuChangeKind.Reappeared;
 
         // Auto-flip: setting a non-null change kind must flip IsPendingApproval
@@ -563,10 +533,8 @@ public sealed class ExternalChangeStateMachineTests
         Assert.True(state.IsPendingApproval);
         Assert.Equal(ContextMenuChangeKind.Reappeared, state.PendingApprovalChangeKind);
 
-        // Simulate the user resolving the approval (Allow/Deny/Remove all
-        // clear the pending state). Setting IsPendingApproval=false must
-        // automatically clear PendingApprovalChangeKind so no stale origin
-        // leaks into later decisions.
+        // Clearing pending state must also clear the legacy origin so it does
+        // not leak into later decisions.
         state.IsPendingApproval = false;
         Assert.False(state.IsPendingApproval);
         Assert.Null(state.PendingApprovalChangeKind);
@@ -684,10 +652,10 @@ public sealed class ExternalChangeStateMachineTests
     /// are covered by dedicated tests above.
     /// </summary>
     [Theory]
-    [InlineData(true, false, false, true, false, ItemMonitorAction.QuarantineReappeared)]
-    [InlineData(true, false, false, true, true, ItemMonitorAction.OfflineReappearedHighlight)]
+    [InlineData(true, false, false, true, false, ItemMonitorAction.QuarantineAdded)]
+    [InlineData(true, false, false, true, true, ItemMonitorAction.OfflineAddedHighlight)]
     [InlineData(false, true, false, true, false, ItemMonitorAction.ReconcileDisabledState)]
-    [InlineData(false, true, false, true, true, ItemMonitorAction.ReconcileDisabledState)]
+    [InlineData(false, true, false, true, true, ItemMonitorAction.MetadataModifiedHighlight)]
     public void ClassificationMatrix_FullCoverage(
         bool stateIsDeleted,
         bool stateDesiredDisabled,
@@ -712,13 +680,10 @@ public sealed class ExternalChangeStateMachineTests
     }
 
     /// <summary>
-    /// Verifies that GetDetectedChangeKind returns Reappeared (not Added or
-    /// Modified) for a previously deleted item, regardless of whether the
-    /// monitor has a baseline. This is the identity rule: a deleted-then-
-    /// recreated item is always Reappeared, never Added.
+    /// Deleted recovery state does not preserve monitoring identity.
     /// </summary>
     [Fact]
-    public void GetDetectedChangeKind_DeletedStateAlwaysReappeared()
+    public void GetDetectedChangeKind_DeletedStateFollowsOrdinaryBaselineRule()
     {
         var entry = BuildPresentEntry(isEnabled: true);
         var state = BuildState(
@@ -728,25 +693,23 @@ public sealed class ExternalChangeStateMachineTests
             deletedAtUtc: DateTimeOffset.UtcNow.AddDays(-1));
 
         var withBaseline = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline: true);
-        Assert.Equal(ContextMenuChangeKind.Reappeared, withBaseline);
+        Assert.Equal(ContextMenuChangeKind.Added, withBaseline);
 
         var withoutBaseline = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline: false);
-        Assert.Equal(ContextMenuChangeKind.Reappeared, withoutBaseline);
+        Assert.Equal(ContextMenuChangeKind.None, withoutBaseline);
     }
 
     /// <summary>
-    /// Verifies that ShouldPreserveExplicitDisabledState returns true only
-    /// for the exact combination of !IsDeleted && DesiredEnabled==false.
-    /// All other combinations must return false so ordinary pruning
-    /// behavior applies.
+    /// All active identities are removed after confirmed registry deletion;
+    /// recovery-only deleted records remain available for Undo Delete.
     /// </summary>
     [Theory]
-    [InlineData(false, false, true)]   // not deleted, desired=false -> preserve
-    [InlineData(false, true, false)]   // not deleted, desired=true  -> do NOT preserve
-    [InlineData(false, null, false)]   // not deleted, desired=null  -> do NOT preserve
-    [InlineData(true, false, false)]   // deleted, desired=false     -> do NOT preserve
-    [InlineData(true, null, false)]    // deleted, desired=null      -> do NOT preserve
-    public void ShouldPreserveExplicitDisabledState_Matrix(
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, null, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, null, false)]
+    public void ShouldRemoveMissingState_Matrix(
         bool isDeleted, bool? desiredEnabled, bool expected)
     {
         var state = BuildState(
@@ -754,13 +717,13 @@ public sealed class ExternalChangeStateMachineTests
             desiredEnabled: desiredEnabled,
             observedEnabled: !desiredEnabled ?? true);
 
-        Assert.Equal(expected, ContextMenuChangeClassifier.ShouldPreserveExplicitDisabledState(state));
+        Assert.Equal(expected, ContextMenuChangeClassifier.ShouldRemoveMissingState(state));
     }
 }
 
 /// <summary>
-/// Tests for the PersistedContextMenuState JSON-migration and field-consistency
-/// behavior that underpins the Reappeared approval flow.
+/// Tests for PersistedContextMenuState JSON migration and field consistency,
+/// including compatibility with retired values written by older releases.
 /// </summary>
 public sealed class PersistedContextMenuStateTests
 {
@@ -884,12 +847,11 @@ public sealed class PersistedContextMenuStateTests
     }
 
     /// <summary>
-    /// ToDeletedEntry must preserve the IsPendingApproval flag so a deleted
-    /// item that is also pending approval (Reappeared scenario) keeps its
-    /// pending state visible to the frontend.
+    /// A deleted record is recovery metadata only and must never remain in the
+    /// pending-approval workflow, including when loaded from an old state file.
     /// </summary>
     [Fact]
-    public void ToDeletedEntry_PreservesIsPendingApproval()
+    public void ToDeletedEntry_ClearsLegacyPendingApproval()
     {
         var state = new PersistedContextMenuState
         {
@@ -904,7 +866,7 @@ public sealed class PersistedContextMenuStateTests
         var entry = state.ToDeletedEntry();
 
         Assert.True(entry.IsDeleted);
-        Assert.True(entry.IsPendingApproval);
+        Assert.False(entry.IsPendingApproval);
         Assert.True(entry.HasBackup);
         Assert.NotNull(entry.DeletedAtUtc);
     }

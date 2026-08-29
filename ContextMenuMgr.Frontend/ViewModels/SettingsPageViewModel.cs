@@ -635,10 +635,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     {
         try
         {
-            TryDeleteFile(RuntimePaths.StateDatabasePath);
-            TryDeleteFile(RuntimePaths.BackendProtectionSettingsPath);
-            TryDeleteDirectory(RuntimePaths.DeletedBackupsDirectory);
-            Directory.CreateDirectory(RuntimePaths.DeletedBackupsDirectory);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await _workspace.ResetStateDatabaseAsync(cts.Token);
 
             await FrontendMessageBox.ShowInfoAsync(
                 _localization.Translate("MaintenanceResetStateSucceeded"),

@@ -55,11 +55,10 @@ public sealed class ContextMenuRegistryMonitor
 
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
     {
-        // Startup baseline: reconcile explicit disabled-state drift before
-        // establishing the known-items baseline. This ensures third-party
-        // applications that re-created their shell keys before the service
-        // started are automatically re-disabled without user approval.
-        var initialSnapshot = await ReconcileAndRefreshSnapshotAsync(cancellationToken);
+        // Startup is an offline comparison boundary. Do not silently reconcile
+        // disabled-to-enabled drift here: rule 5 requires both switch directions
+        // to remain visible as Modified until the user handles them.
+        var initialSnapshot = await ReadSnapshotAsync(cancellationToken);
         var knownItems = initialSnapshot
             .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
             .ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
@@ -80,7 +79,7 @@ public sealed class ContextMenuRegistryMonitor
                 await _logger.LogAsync($"RegistryMonitorDebounceWait: DelayMs={_pollInterval.TotalMilliseconds}.", cancellationToken);
                 await Task.Delay(_pollInterval, cancellationToken);
 
-                var currentSnapshot = (await ReconcileAndRefreshSnapshotAsync(cancellationToken))
+                var currentSnapshot = (await ReadSnapshotAsync(cancellationToken))
                     .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                     .ToList();
 
@@ -94,10 +93,6 @@ public sealed class ContextMenuRegistryMonitor
                     // baseline instead of generating "new item" events. Many per-user
                     // HKCU/HKU handlers and packaged COM registrations only become
                     // visible once the interactive shell is fully online.
-                    //
-                    // Reconciliation was already performed inside
-                    // ReconcileAndRefreshSnapshotAsync, so explicit disabled-state
-                    // drift has been corrected before we accept this baseline.
                     //
                     // The interactive session event can arrive while the user hive is
                     // still loading. If the current snapshot is far smaller than the
@@ -124,7 +119,6 @@ public sealed class ContextMenuRegistryMonitor
                         await _catalog.TryConsumeSuppressedDetectionAsync(item.Id, cancellationToken);
                     }
 
-                    _catalog.MarkInteractiveSessionSnapshotSettled();
                     _interactiveBaselineResetRequested = false;
                     await _logger.LogAsync(
                         $"Interactive-session snapshot settled. Rebuilt monitor baseline with {knownItems.Count} visible items.",
@@ -132,7 +126,39 @@ public sealed class ContextMenuRegistryMonitor
                     continue;
                 }
 
-                // Detect new and reappeared items.
+                // Rule 3 applies only to a transition observed while this monitor
+                // is running. An item that was already enabled in the startup or
+                // post-session baseline is offline drift and remains Modified.
+                var runtimeReenabledItems = currentSnapshot
+                    .Where(item => knownItems.TryGetValue(item.Id, out var previous)
+                                   && !previous.IsEnabled
+                                   && item.IsEnabled)
+                    .ToArray();
+                IReadOnlySet<string> failedReconciliationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (runtimeReenabledItems.Length > 0)
+                {
+                    var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
+                    var reconciliation = await _catalog.ReconcilePersistedDisabledItemsAsync(
+                        runtimeReenabledItems,
+                        cancellationToken,
+                        userContext);
+
+                    if (reconciliation.HasChanges)
+                    {
+                        await _logger.LogAsync(
+                            $"RuntimeDisabledStateReconciliation: Reconciled={reconciliation.ReconciledItemIds.Count}, " +
+                            $"Failed={reconciliation.FailedItemIds.Count}, ReloadingSnapshot=True.",
+                            cancellationToken);
+                        currentSnapshot = (await ReadSnapshotAsync(cancellationToken))
+                            .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
+                            .ToList();
+                    }
+
+                    failedReconciliationIds = reconciliation.FailedItemIds
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                }
+
+                // Detect new runtime items.
                 foreach (var item in currentSnapshot.Where(item => !knownItems.ContainsKey(item.Id)))
                 {
                     if (await _catalog.TryConsumeSuppressedDetectionAsync(item.Id, cancellationToken))
@@ -142,13 +168,11 @@ public sealed class ContextMenuRegistryMonitor
                         continue;
                     }
 
-                    // Only trigger ItemDetected for genuinely new (Added) or
-                    // previously-deleted-then-recreated (Reappeared) items.
-                    // Modified items and items appearing under additional roots
-                    // after the baseline are silently absorbed.
+                    // Only genuinely new runtime items enter approval. Modified
+                    // items remain visible as external changes, while deleted
+                    // identities have already been removed from the baseline.
                     if (item.CanToggle
-                        && item.DetectedChangeKind is (ContextMenuChangeKind.Added
-                            or ContextMenuChangeKind.Reappeared))
+                        && item.DetectedChangeKind == ContextMenuChangeKind.Added)
                     {
                         await _logger.LogAsync(
                             $"RegistryMonitorChangeDetected: Kind={item.DetectedChangeKind}, ItemId={item.Id}, " +
@@ -166,6 +190,14 @@ public sealed class ContextMenuRegistryMonitor
                 // new external change on the next poll.
                 foreach (var item in currentSnapshot)
                 {
+                    // Keep the preceding disabled observation after a failed
+                    // corrective write so the same runtime transition is retried
+                    // on the next poll.
+                    if (failedReconciliationIds.Contains(item.Id))
+                    {
+                        continue;
+                    }
+
                     knownItems[item.Id] = item;
                 }
 
@@ -189,12 +221,12 @@ public sealed class ContextMenuRegistryMonitor
     }
 
     /// <summary>
-    /// Reads a snapshot, reconciles explicit disabled-state drift, and reloads
-    /// the snapshot once if reconciliation changed anything. This ensures the
-    /// monitor always classifies changes against the post-reconciliation state
-    /// rather than detecting its own corrective writes as external changes.
+    /// Reads the current snapshot in the interactive user's registry context.
+    /// Runtime transition reconciliation is deliberately performed by the
+    /// monitor only after this snapshot has been compared with its in-memory
+    /// baseline.
     /// </summary>
-    private async Task<IReadOnlyList<ContextMenuEntry>> ReconcileAndRefreshSnapshotAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ContextMenuEntry>> ReadSnapshotAsync(CancellationToken cancellationToken)
     {
         // The monitor runs independently of frontend pipe connections. Without an
         // explicit user context, Windows 11 packaged COM entries and per-user
@@ -203,19 +235,6 @@ public sealed class ContextMenuRegistryMonitor
         // UAC elevation, fast-user switch). This causes mass false-negative
         // disappearances that corrupt the persisted state baseline.
         var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
-        var snapshot = await _catalog.GetSnapshotAsync(cancellationToken, userContext);
-
-        var result = await _catalog.ReconcilePersistedDisabledItemsAsync(snapshot, cancellationToken);
-
-        if (result.HasChanges)
-        {
-            await _logger.LogAsync(
-                $"DesiredStateReconciliationPass: Reconciled={result.ReconciledItemIds.Count}, " +
-                $"Failed={result.FailedItemIds.Count}, ReloadingSnapshot=True.",
-                cancellationToken);
-            snapshot = await _catalog.GetSnapshotAsync(cancellationToken, userContext);
-        }
-
-        return snapshot;
+        return await _catalog.GetSnapshotAsync(cancellationToken, userContext);
     }
 }

@@ -402,6 +402,12 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    public async Task ResetStateDatabaseAsync(CancellationToken cancellationToken)
+    {
+        await _backendClient.ResetStateDatabaseAsync(cancellationToken);
+        await RefreshAsync();
+    }
+
     /// <summary>
     /// Applies decision Async.
     /// </summary>
@@ -1089,13 +1095,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
         else
         {
-        foreach (var item in snapshot.Where(static item => item.IsPendingApproval))
-        {
-            if (_seenPendingApprovalIds.Add(item.Id))
+            foreach (var item in snapshot.Where(static item => item.IsPendingApproval))
             {
-                PendingApprovalDetected?.Invoke(this, item);
+                if (_seenPendingApprovalIds.Add(item.Id))
+                {
+                    PendingApprovalDetected?.Invoke(this, item);
+                }
             }
-        }
         }
 
         foreach (var item in snapshot.Where(static item => item.DetectedChangeKind != ContextMenuChangeKind.None))

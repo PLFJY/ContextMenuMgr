@@ -18,6 +18,10 @@
 
 `context-menu-state.json` 使用 `context-menu-state.json.bak` 保存一份最后已知正常状态。正常保存先写入同目录唯一 `.tmp-<guid>` 文件、flush/关闭并按生产格式重新验证，再替换 current；不要手工把临时文件当作 current。current JSON/结构损坏时，后端会将原始文件保存到 `Quarantine\corrupt-state-...`，验证 `.bak` 后自动恢复；没有有效 backup 时则从当前注册表重新采纳 baseline。恢复旧 backup 可能丢失非常新的本地状态更改，但不会直接修改注册表内容。
 
+状态库缺失或在设置页重置后，第一次带交互用户上下文的常规快照必须写入 `internal:baseline:regular:v1`，WPS/Office 刷新必须写入 `internal:baseline:wps-office:v1`。此轮所有现存项都应为已确认状态：没有待审核、没有 `Added` / `Modified`，也没有普通开关差异导致的“当前注册表状态与软件记录不一致”。如果全新安装仍出现这些状态，优先检查 `backend.log` 中 baseline marker 保存前后是否出现无 SID 快照、并发状态保存失败或 Win11/WPS 枚举异常。
+
+传统 Shell Extension 的 active 与 `-ContextMenuHandlers` 双键并存时，后端按 key 最后写入时间保留较新一侧并删除较旧一侧。排查自动修复时查看 `ClassicShellExtensionDuplicateAutoRepaired` / `ClassicShellExtensionDuplicateAutoRepairFailed`；该情况不应再显示泛化的状态库不一致提示。
+
 Portable 包中 `frontend-settings.json` 的语言、主题、颜色等纯偏好可以跨设备保留，但 `context-menu-state.json` 和 `DeletedBackups` 属于设备/用户绑定的注册表运行时状态。后端用 Windows `MachineGuid` 和前端用户 SID 计算 SHA-256 指纹，只把指纹写入 JSON，不保存原始 MachineGuid 或 SID。复制 portable `Data` 到另一台 Windows 或另一个用户配置文件后，旧状态会被移动到 `Data\Quarantine\foreign-host-...`，后端从新的空本地主机状态开始运行。
 
 不要把另一个 Windows 安装或用户配置文件里的 `.reg` 删除备份导入当前系统。Portable 模式下恢复只接受当前 host-scoped `DeletedBackups` 目录里的备份；其它目录或旧指纹下的备份会被隔离或拒绝，并记录 `BackupRestoreBlockedForeignHost`。

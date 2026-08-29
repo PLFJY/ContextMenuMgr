@@ -145,238 +145,110 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 恢复用户级或 HKCR overlay 相关菜单项时，后端必须带 frontend user context 重读快照，不能用服务进程的 HKCU 或无用户上下文的全局快照判断恢复结果。
 
-## 8. 状态库
+## 8. 状态库与显式 baseline
 
-`ContextMenuStateStore` 保存项目自己的状态，路径为 `RuntimePaths.StateDatabasePath`。它用于记录待审核、删除、备份、外部变化和一致性信息。
+`ContextMenuStateStore` 保存项目自己的状态，路径为 `RuntimePaths.StateDatabasePath`。它不是注册表副本，而是“上一次已确认状态 + 用户开关意图 + 待审核状态 + 删除恢复记录”。
 
-状态库不是注册表本身。真实注册表可能被第三方安装器、系统更新或用户手工修改，短时间内会与状态库不一致。snapshot 构建会尽量合并并标记不一致，但不要在代码里假设状态库一定代表当前系统真实状态。
+状态库保存继续采用 current + last-known-good backup：先写入同目录唯一临时文件，flush 并用生产解析器验证，然后原子替换 current，并把已验证的旧 current 保存为 `.bak`。损坏恢复、portable host identity 隔离规则保持不变。
 
-状态库保存采用一个 current 加一个 last-known-good backup 的耐久性策略：先在与 `context-menu-state.json` 同目录创建唯一 `context-menu-state.json.tmp-<guid>`，以 write-through stream 完整序列化并 flush 到磁盘；关闭后使用与生产加载相同的 JSON envelope / legacy dictionary parser 重新读取和结构验证；只有验证成功，才以 `File.Replace` 安全替换 current，并由已验证的旧 current 更新 `context-menu-state.json.bak`。首次保存没有 current 时使用同目录 move。绝不直接截断 authoritative current，也绝不把未验证或损坏的 current 提升为 `.bak`。
+常规菜单与 WPS/Office 合成项共享 JSON 文件，但各自使用独立的显式 baseline 标记：
 
-加载时 current 损坏（JSON/结构错误）会先保留原始字节到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，再验证 `.bak`。有效备份会恢复为新的 current 并保留 backup；两者都无效或缺失时返回空状态，让现有首次运行逻辑从当前注册表安全采纳 baseline，而不是把已有项标记为 `Added` 或 `Reappeared`。此恢复只处理元数据，不会直接启用、禁用、删除或恢复任何注册表项。访问被拒和普通 I/O 错误不会被当成 JSON 损坏；高于当前支持版本的 schema 也不会被隔离或重置。Portable foreign-host quarantine 保持独立，不能与文件损坏混淆。
+- `internal:baseline:regular:v1`
+- `internal:baseline:wps-office:v1`
 
-## 9. 新增项检测与 Quarantine
+不能再用“状态库中存在任意记录”推断某一数据源已经建立 baseline。即使首次扫描结果为零项，也必须写入对应标记；否则未来第一个真实新增会被误当成首次采纳。
 
-`ContextMenuRegistryMonitor` 定期重新取 snapshot，并与 baseline 比较。发现新增项或被外部重新启用的项后，`BackendRuntime` 会调用隔离逻辑，并通过 `BackendNotification` 通知 TrayHost 和前端审核页。
+只有能够解析到交互式用户上下文的完整快照才允许创建首次 baseline。无 SID 的服务早期快照可以用于显示和诊断，但不得提交不完整 baseline。常规快照、WPS 快照、监控 reconciliation 和用户操作通过同一个持久状态操作门串行执行，避免多个“Load -> Merge -> Save”流程互相覆盖。
+
+首次采纳的每个实际项同时保存：
+
+- `ObservedEnabled = 当前注册表开关状态`
+- `DesiredEnabled = 当前注册表开关状态`
+- `IsPendingApproval = false`
+- 当前显示名、命令、图标、CLSID、路径和属性元数据
+
+因此首次运行时，原本已经关闭的菜单也会形成 `DesiredEnabled=false` 策略；监控运行期间若相邻稳定快照观察到它被第三方重新打开，后端可以静默关回去。启动首轮已经存在的差异属于离线修改，不走这条纠偏路径。
+
+## 9. 六条外部变化核心规则
+
+下表是拦截、状态库和 UI 提示的唯一行为矩阵。后续改动不得引入与此表冲突的 Reappeared 或泛化 consistency 分支。
+
+| 编号 | 场景 | 后端行为 | 前端状态 |
+| --- | --- | --- | --- |
+| 1 | 软件运行期间出现未知菜单项 | 立即禁用并写入状态库，进入待审核 | `Added` + `IsPendingApproval=true` |
+| 2 | 软件运行期间，已知项从开变关 | 不自动重新打开，保留旧 baseline 供用户确认 | `Modified`，不再叠加“状态不一致” |
+| 3 | 软件运行期间，相邻稳定快照观察到已知项从关变开 | 静默重新关闭，继续保留 `DesiredEnabled=false` | 纠偏后无待审核、无外部修改、无 generic consistency |
+| 4 | 软件停止后出现未知菜单项，重启时发现 | 不隔离、不自动禁用，等待用户确认当前变化 | `Added`，不进入待审核 |
+| 5 | 软件停止后已知项开关改变，重启时发现 | 无论开变关还是关变开都保留当前注册表状态，等待用户确认 | `Modified`，不待审核 |
+| 6 | 实际注册表项已删除 | 完整快照连续确认缺失后，从活动 baseline 移除 | 不显示 Removed、不参与以后比对 |
+
+“连续确认缺失”当前为两次具有交互用户上下文的持久快照，用于避开注册表枚举瞬态。上下文不完整的服务快照不得清理状态。
+
+应用主动执行 Delete 时产生的 `.reg` 备份属于恢复记录，不属于活动监控 baseline。它可以暂时保留以支持 Undo Delete，但不参与新增、修改或重新出现分类。若相同注册表 key 再次真实出现，旧恢复记录和旧备份会被清理，该 key 按普通未知 `Added` 处理，不再使用 `Reappeared` 状态机。
+
+## 10. 实现时序
+
+### 10.1 状态库缺失或被重置
 
 ```text
-Monitor baseline
--> 周期性 snapshot
--> ReconcileAndRefreshSnapshotAsync (先校正显式禁用策略漂移)
--> 对比新增 / 修改 / 删除
--> 按 DetectedChangeKind 分流:
-     Added      -> QuarantineNewItemAsync
-     Reappeared -> QuarantineReappearedItemAsync
--> PipeNotificationKind.ItemDetected
--> TrayHost 通知 / 前端审核页
+解析 frontend userContext
+-> 枚举常规注册表 + Win11 项
+-> 当前状态全部写入 regular baseline（包括已关闭项）
+-> 写 regular baseline marker
+-> 枚举 WPS/Office 合成项
+-> 当前 WPS 状态全部写入 baseline，全部已确认
+-> 写 WPS baseline marker（即使当前为零项）
+-> 返回无 Added / Modified / Pending / generic inconsistency 的快照
 ```
 
-Quarantine 是后端状态，不只是 UI 徽标。首次 baseline 要谨慎处理，尤其是服务启动、用户登录、Session connect 后，避免把已有菜单全部当成新增项。
+首次 baseline 不能经过普通“未知项”运行时隔离路径。WPS 的默认打开方式、图标覆盖和 ShellNew 注入只要在重置时已经存在，都作为当前事实采纳，不进入待审核，也不暴露外部变化徽标。
 
-`BackendRuntime.HandleNewItemDetectedAsync` 不再假设所有检测到的项都是全新项。它根据 `DetectedChangeKind` 选择隔离路径：`Added` 走 `QuarantineNewItemAsync`，`Reappeared` 走 `QuarantineReappearedItemAsync`。不通过 `DisplayName` 分类，只使用稳定 `Id`、注册表路径、key name、source root 和 CLSID 身份规则。
+### 10.2 运行时轮询
 
-## 10. 外部变化状态机 (Issue #11)
+```text
+读取持久状态
+-> 获取带交互用户上下文的实际快照
+-> 与 monitor 上一个稳定内存快照比较
+-> 仅对本轮确认的“上一轮关、本轮开”执行 DesiredEnabled=false reconciliation
+-> 如有写入，只重新枚举一次
+-> 比较稳定 Id 和元数据
+-> 未知 Added：隔离并待审核
+-> 已知 Modified：只高亮
+-> 连续缺失：移除活动 baseline
+-> 用 post-reconciliation 快照更新 monitor knownItems
+```
 
-### 10.1 设计目标
+监控循环独立于前端 Pipe 连接运行。普通开关、Win11 blocked list 和用户级 Classes 必须继续使用 frontend/interactive SID，不能使用服务进程 HKCU。
 
-第三方应用（例如 Tailscale）可能在 ContextMenuMgr 后端服务启动前、启动期间或运行期间删除并重建自己的右键菜单注册表项。如果项目只靠 visibility 值（`HideBasedOnVelocityId`、`ProgrammaticAccessOnly`、`LegacyDisable`）禁用 ShellVerb，当第三方删除整个 key 时这些值会消失，key 被重建后菜单项会重新启用。
+### 10.3 启动/离线比对
 
-解决方案不是启动延迟、服务依赖、注册表 ACL workaround 或更快的轮询。解决方案是**保留并执行用户的显式禁用意图**。
+监控启动时首先取得原始实际快照并建立内存 `knownItems`，不得先执行 disabled-state reconciliation。已有 baseline 下的未知项保留 `Added` 标记，但启动阶段不会触发 `ItemDetected`，因此不会隔离或进入待审核。元数据和开关状态无论往哪个方向变化都按 `Modified` 显示。只有后续两个相邻稳定运行时快照观察到关变开，才进入规则 3 的静默纠偏。
 
-核心分类逻辑位于 `ContextMenuChangeClassifier`，这是一个不接触注册表的纯确定性 helper，可在单元测试中直接测试。
+交互式 session 登录、解锁或连接时，monitor 仍会重建内存 baseline。若可见项数量明显低于持久活动状态数量，则延后重建，避免用户 hive 尚未加载时制造运行时新增通知。
 
-### 10.2 运行时矩阵（监控运行期间）
+### 10.4 一致性状态
 
-| 场景 | 条件 | 行为 |
-| --- | --- | --- |
-| 显式禁用项被外部重新启用 | `state` 存在；`IsDeleted=false`；`DesiredEnabled=false`；实际项已启用 | 自动重新禁用；不标记待审核；不发送审核通知；保留 `DesiredEnabled=false`；记录日志 |
-| 之前删除的项重新出现 | `state.IsDeleted=true`；运行时检测到相同稳定标识的注册表项 | 立即禁用/隔离；`IsPendingApproval=true`；发送正常审核通知；保留删除备份和 `DeletedAtUtc`；`DetectedChangeKind=Reappeared` |
-| 完全未知的项被创建 | 无 `state`；运行时出现 | 立即禁用/隔离；`IsPendingApproval=true`；发送正常审核通知；`DetectedChangeKind=Added` |
+开关差异必须落入规则 2、3 或 5，因此 `GetConsistencyIssue` 不再为 `DesiredEnabled != actual` 生成 generic consistency。用户确认 `Modified` 后，`AcknowledgeItemState` 用当前实际值更新 `DesiredEnabled`、`ObservedEnabled` 和元数据。
 
-### 10.3 启动/离线矩阵（监控未运行期间）
+generic consistency 只保留无法自动归一化的真实注册表结构冲突，以及经典 handler 同时命中旧版全局 Blocked 等诊断。它不能用于表达普通开关变化；active/disabled 双键并存已属于自动修复流程，不能再显示这条泛化提示。
 
-| 场景 | 条件 | 行为 |
-| --- | --- | --- |
-| 显式禁用项被重新启用或重建 | 同上运行时条件 | 在启动 reconciliation 期间自动禁用；不询问用户；不标记待审核；在 reconciliation 完成后才建立监控 baseline |
-| 之前删除的项重新出现 | 同上运行时条件 | **不**自动隔离；暴露 `DetectedChangeKind=Reappeared`；显示一致性警告/高亮；让用户决定 |
-| 完全未知的项出现 | 同上运行时条件 | **不**自动隔离；暴露 `DetectedChangeKind=Added`；显示为离线外部修改；让用户决定 |
+### 10.5 传统 Shell Extension 物理状态
 
-### 10.4 首次运行例外
+传统 Shell Extension 的普通开关以注册项为单位：启用位置是 `<root>\shellex\ContextMenuHandlers\<name>`，禁用位置是 `<root>\shellex\-ContextMenuHandlers\<name>`。两者使用同一个稳定 Id。
 
-当状态库为空（首次运行）时，当前机器状态被采纳为初始 baseline。不会隔离或高亮每个已存在的菜单项。`ClassifyItemMonitorAction` 在 `hasBaseline=false` 且 `state=null` 时返回 `None`。
+若同一稳定 Id 的 active/disabled 物理键同时存在，持久快照必须读取两侧 key 的注册表最后写入时间，以较新一侧作为当前事实并自动删除较旧一侧；不能把双键本身显示成“当前注册表状态与软件记录不一致”。若最后写入时间相同或无法完整读取，优先采用状态库 `DesiredEnabled` 对应的一侧；没有状态记录时采用 active。自动删除失败时记录 `ClassicShellExtensionDuplicateAutoRepairFailed` 并在后续快照重试，但前端仍按选中的较新一侧计算实际开关状态。归一化后的状态若与既有 baseline 不同，继续按运行时/离线六条规则进入静默纠偏或 `Modified`，不能伪造为无变化。
 
-常规菜单与 WPS/Office 合成条目共享同一个状态库，但通过不同的 snapshot 调用分别获取。因此 `BuildSnapshotAsync` 的 `hasBaseline` 按当前 snapshot 类型判定（`states.Values.Any(includePersistedState)`），而不是简单地用 `states.Count > 0`。否则在重置状态库后，若 WPS 审核刷新先于常规菜单 snapshot 执行，WPS 合成状态会让常规菜单的首次 snapshot 误以为 baseline 已存在，从而把所有既有常规菜单项错误标记为 `Added`（外部新增）。
+同一稳定 Id 在 HKLM 与 `HKEY_USERS\<SID>` 存在多个物理副本时，普通开关必须把所有副本一起移动并验证。经典普通开关不得写入全局 `Shell Extensions\Blocked`；该列表由“其他规则 / GUID 阻止”单独管理。
 
-### 10.5 其他必须保持的行为
+`PropertySheetHandlers` 仍是只读注册类型，`CanToggle=false`，不参与自动隔离或开关 reconciliation。
 
-- 已知元数据变更（command、显示文本、icon、CLSID、模块路径、属性等）保持 `Modified`/高亮，不自动回滚或隔离。
-- 普通已知项的外部删除保持静默。
-- **不**自动执行 `DesiredEnabled=true`。只有显式禁用策略（`DesiredEnabled=false`）被持续执行。
-- 如果 reconciliation 写入因访问被拒、注册表消失、不支持的项类型或其他瞬态竞争而失败：记录失败日志；保持 persisted desired state 不变；不假装 `ObservedEnabled` 变为 false；保持一致性问题可见；在后续轮询中自然重试；不将失败转换为待审核。
+### 10.6 竞争与失败
 
-### 10.6 Reconciliation 架构
-
-`ContextMenuRegistryCatalog.ReconcilePersistedDisabledItemsAsync` 是内部 catalog 操作，对每个实际项：
-
-1. 加载其 persisted state；
-2. 要求 `state.IsDeleted=false`、`state.DesiredEnabled=false`、实际项 `IsEnabled=true`；
-3. 通过现有 per-entry-kind 实现禁用（ShellVerb → `ShellVerbVisibility`；ShellExtension → 现有 blocking/mirror 逻辑；Win11 → `Windows11ContextMenuCatalog`）；
-4. 保留 `DesiredEnabled=false`；
-5. 仅在注册表写入成功后设置 `ObservedEnabled=false`；
-6. 保持 `IsPendingApproval=false`；
-7. 仅在至少一个写入成功时调用 `ShellChangeNotifier`。
-
-reconciliation 返回 `DisabledStateReconciliationResult(HasChanges, ReconciledItemIds, FailedItemIds)`，让监控知道是否需要刷新 snapshot。
-
-### 10.7 监控中的 Reconciliation 时序
-
-**启动 baseline 建立**：
-1. 读取 snapshot；
-2. reconcile 显式禁用状态漂移；
-3. 如果有变更，重新加载 snapshot；
-4. 从 post-reconciliation snapshot 建立 knownItems。
-
-**交互式 session baseline 重建**：同上流程，但重建前先校验快照完整性。
-
-交互式 session 事件（登录/解锁/连接）可能在用户 hive 仍在加载时到达，此时 snapshot 明显小于持久化的活跃状态数。若此时直接重建 baseline，几秒后完整枚举会把一直存在的 per-user 项（HKCU/HKU handler、packaged COM）误判为 `Added`，导致启动时大量虚假隔离与 `ItemDetected` 通知。
-
-因此重建前调用 `ContextMenuRegistryCatalog.GetPersistedActiveStateCountAsync()` 取得持久化活跃状态数量，当 `VisibleCount < max(1, PersistedActiveCount * 0.8)` 时延后重建并等待下一轮轮询，直到快照接近完整才采纳为新 baseline。
-
-**正常运行时轮询**：
-1. 读取当前 snapshot；
-2. reconcile 每个显式禁用漂移；
-3. 如果 reconciliation 改变了任何内容，只重新加载一次 snapshot；
-4. 然后分类运行时 Added/Reappeared；
-5. 从 post-write 状态更新 knownItems，避免 ContextMenuMgr 把自己的纠正写入检测为新外部变化。
-
-不单独为每个 item 重新加载整个 snapshot。
-
-监控循环独立于前端 pipe 连接运行。`ReconcileAndRefreshSnapshotAsync` 在每次轮询时通过 `BackendUserContextResolver.TryResolveInteractiveUserFallback()` 解析当前交互式用户上下文，并传递给 `GetSnapshotAsync`。这确保 Win11 packaged COM 项和 `HKEY_USERS\<sid>` 下的 per-user 项在用户会话暂时不可用（屏幕锁定、UAC 提升、快速用户切换）时仍能被正确枚举。如果解析失败（无活跃用户会话），回退到无 userContext 的全局枚举行为。
-
-### 10.8 大规模缺失保护
-
-`BuildSnapshotAsync` 在清理缺失状态之前会计算"可被 prune 的缺失项"占"活跃状态总数"的比例。当缺失比例超过 25% 时，跳过 `ConsecutiveMissingSnapshots` 累加并重置已有计数。
-
-这是防御性措施：当大量活跃 baseline state 同时从快照中消失时，通常是枚举不完整（用户会话未就绪、per-user hive 未加载、Win11 packaged COM 查询失败）而非真实批量外部删除。如果在这种情况下继续累加 `ConsecutiveMissingSnapshots` 并清理状态库，下一次重启时这些项重新出现会被误判为 `Added`，导致大量虚假"外部新增"通知。
-
-真实的外部批量删除（如一次性卸载多个第三方软件）不会触发此保护，因为：
-- 单个软件卸载通常只影响少量项，不会超过 25% 阈值；
-- 即使超过阈值，保护只是延迟清理，不影响 `DetectedChangeKind=Removed` 的暴露。
-
-### 10.9 Reappeared 隔离路径
-
-`QuarantineReappearedItemAsync` 不复用 `QuarantineNewItemAsync`。后者会清除 `IsDeleted`、`DeletedAtUtc`、`BackupFilePath`，这会破坏删除来源和现有恢复备份。
-
-专用 Reappeared 路径：
-- 禁用实际重建的项；
-- 设置 `IsPendingApproval=true`；
-- 设置 `PendingApprovalChangeKind=Reappeared`；
-- **保留** persisted `IsDeleted=true`（审核未解决期间）；
-- **保留** `BackupFilePath`；
-- **保留** `DeletedAtUtc`；
-- 写入成功后设置 `ObservedEnabled=false`；
-- 向前端暴露实际存在的注册表项；
-- 暴露 `DetectedChangeKind=Reappeared`。
-
-`PendingApprovalChangeKind` 是新增的可空枚举字段。旧 state 文件没有此字段时安全反序列化为 `null`。`IsPendingApproval` 设为 `false` 时自动清除此字段；设置非 null `PendingApprovalChangeKind` 时自动将 `IsPendingApproval` 翻转为 `true`。
-
-### 10.10 Reappeared 审核决策
-
-对于源自之前删除项的 pending approval（`PendingApprovalChangeKind=Reappeared`）：
-
-| 决策 | 行为 |
-| --- | --- |
-| Allow | 启用并接受重建项；清除 `IsDeleted`；清除 `IsPendingApproval`；在清除 `BackupFilePath` 前删除旧备份文件；持久化 `DesiredEnabled=true` 和实际观察状态 |
-| Deny | 保持重建项禁用；转换为普通显式禁用项；`IsDeleted=false`；`IsPendingApproval=false`；`DesiredEnabled=false`；`ObservedEnabled=false`；删除旧删除备份并清除 `DeletedAtUtc`/`BackupFilePath` |
-| Remove | 删除当前重建的注册表项；最终状态 `IsDeleted=true`、`IsPendingApproval=false`；在删除前创建当前重建注册表项的有效备份；仅在成功后替换旧备份；删除被取代的旧备份文件不泄漏孤立文件；保留新的删除时间戳和当前元数据 |
-
-不通过设置 `BackupFilePath=null` 静默丢弃备份文件。
-
-普通 Added 项的审核行为保持不变。
-
-`ApplyDesiredStateAsync` 返回的 `Item` 必须在决策持久化之后重新获取：持久化前的 snapshot 中该条目的 `IsPendingApproval` 仍为 `true`，若直接返回，前端 `UpsertItem` 局部更新不会隐藏审核卡片，用户需要第二次点击 Allow/Deny 才能生效。因此方法在 `SaveAsync` 之后按 `itemId` 重新抓取 `finalItem` 作为返回值。
-
-### 10.11 显式禁用状态在 key 缺失期间保留
-
-当 `state.IsDeleted=false` 且 `state.DesiredEnabled=false` 时，即使注册表 key 暂时缺失，也保留该 state。这是为执行 "delete key → wait → recreate key" 流程的第三方应用准备的。
-
-`ShouldPreserveExplicitDisabledState` 返回 `true` 时，`BuildSnapshotAsync` 的 missing-state pruning 跳过该项，不重置 `ConsecutiveMissingSnapshots`。普通中性 baseline state 可继续使用现有 missing-state pruning 行为。
-
-不因注册表 key 缺失就重置 `DesiredEnabled=false`。
-
-### 10.12 传统 Shell Extension 的注册项状态
-
-传统 Shell Extension 的普通开关以单个注册项为单位，而不是以 CLSID 为单位：
-
-- 启用：`<root>\shellex\ContextMenuHandlers\<name>`；
-- 禁用：`<root>\shellex\-ContextMenuHandlers\<name>`。
-
-两个物理根使用同一个稳定逻辑根，因此移动前后 `Id` 保持为
-`<root>\shellex\ContextMenuHandlers|<name>`。移动根据条目的
-`BackendRegistryPath` 派生同一 hive 内的兄弟路径；机器级条目保持在
-`HKLM\SOFTWARE\Classes`，用户级条目保持在 `HKEY_USERS\<SID>\Software\Classes`。
-复制完成并递归验证值类型、值和子键后才删除源键。新键继承目标容器的 ACL；
-本实现不复制源键的显式安全描述符。
-
-`Shell Extensions\Blocked` 是按 CLSID 生效的独立全局机制，不能作为经典 ShellEx
-普通注册项开关的状态来源。普通传统开关不会写入或删除该列表。需要管理全局 CLSID 阻止项时，
-使用“其他规则 / GUID 阻止”页面；该页面的操作影响所有使用该 CLSID 的注册项。
-
-#### active / disabled 物理键同时存在时的策略（Issue #98）
-
-同一逻辑注册项的 active 与 disabled 物理键同时存在时，目录会显示一致性问题；
-`MoveRegistryKeySafely` 不再一律拒绝，而是先做保守的树等价比较
-（默认值 / Handler CLSID、全部命名值及其 `RegistryValueKind`、字符串 / 二进制 / 多字符串载荷、
-嵌套子键逐层比较；不比较安全描述符，因为 disabled mirror 可能合法继承与重建副本不同的容器 ACL）：
-
-- **等价（重复重建）**：disabled 键已存在且与重建的 active 键内容完全等价，说明第三方应用
-  重新创建了 active 副本。此时只删除冗余的 active 源键，保留已存在的 disabled 目标键，
-  并验证源键已消失、目标键仍在且默认值未变后才报告成功。重复 reconcile 是幂等的。
-- **不等价（真实冲突）**：CLSID 不同或注册表树内容不同，无法证明是同一注册项时，
-  保留两侧并安全失败（“destination already exists and is not equivalent to the source”），
-  不做任何破坏性覆盖或删除。
-
-启用方向同样适用：active 键已存在且与残留的 disabled 副本等价时，只删除冗余的 disabled 副本。
-
-#### 跨 hive 的 ItemId 歧义与多物理副本切换
-
-当前 `Id` 为 `{StableRelativePath}|{keyName}`，不包含 hive / SID。因此同一逻辑路径下的
-`HKLM\SOFTWARE\Classes` 与 `HKEY_USERS\<SID>\Software\Classes` 物理注册项共享同一个 `Id`。
-枚举顺序为 HKLM 优先、随后按 SID 排序的 HKU；快照按 `Id` 去重时后枚举者胜出。
-若同一逻辑项存在多个物理副本（例如 Bandizip 的 `AABdzCtx` 同时注册在 HKLM 与 HKU 的
-`*\shellex\ContextMenuHandlers`），只移动快照选中的那个副本会让其它副本仍处于启用态，
-写后按 `Id` 刷新校验会解析到另一个仍启用的副本，从而产生
-`REGISTRY_MUTATION_VERIFICATION_FAILED`（真实用户日志已确认：写入目标是 HKU 副本，
-刷新解析到的是 HKLM 副本）。
-
-因此普通开关会把同一 `Id` 下的**所有**物理副本（跨 hive、跨 active/disabled mirror）一起移动：
-`ResolvePhysicalShellExtensionEntries` 从标准监控根重新枚举出所有共享该 `Id` 的
-ShellExtension 物理项，逐一对每个副本执行已验证的容器移动；若枚举不到任何副本
-（scene / fallback 项不在标准监控根内），则回退为只移动调用方传入的单个注册项，
-保持原有单注册项行为。这样逻辑项在所有 hive 中都达到请求状态，刷新校验才能通过。
-
-`RecycleBin\...\shellex\PropertySheetHandlers` 仍会被枚举以保留可见性和删除/恢复信息，
-但它不是参考实现已验证的 `ContextMenuHandlers` 容器类型。它的 `CanToggle=false`：前端不显示普通
-开关，后端拒绝 `SetEnabled`，监控也不会对它执行自动隔离或 disabled-state reconciliation。不能把
-`PropertySheetHandlers` 套用到 `-ContextMenuHandlers`；若将来支持它，必须先有独立且经验证的注册表策略。
-
-升级兼容：1.7.2 曾把经典 Shell Extension 的 CLSID 写入机器级
-`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked`。当前版本发现一个**启用中**的
-经典注册项仍命中该列表时，会显示一致性警告并引导至“其他规则 / GUID 阻止”。应用绝不自动删除该值，
-因为它可能由管理员、Autoruns 或其它软件创建；用户必须在该页面明确决定是否移除全局阻止。
-
-Windows 注册表继承仍可能使 `AllFilesystemObjects` 中的另一个已启用注册项出现在
-File/Folder 场景；应用保证的是注册项独立控制，而不是绕过 Explorer 的继承规则。
-
-### 10.13 竞争处理
-
-- key 在 snapshot 枚举和禁用写入之间消失：reconciliation 写入失败，记录日志，后续轮询自然重试；
-- 第三方程序在 reconciliation 后立即重建 key：下一轮 polling 会再次 reconcile；
-- reconciliation 只移动发生 drift 的单个 ShellExtension 注册项；相同 CLSID 的其它分类 state 不会被更新；
-- 交互式 session baseline 重建与正常 poll 并发：monitor 串行处理；
-- ContextMenuMgr 自己的纠正写入在下一 snapshot 可见：monitor 从 post-reconciliation snapshot 更新 knownItems；
-- `SuppressNextDetection` 不永久隐藏真正的后续重建：monitor 在 baseline 建立时消费该标志；
-- 同一逻辑项只有一个 quarantine/reconciliation 操作并发运行：使用现有 `_quarantineInProgress` 机制。
+- 所有会读写 `ContextMenuStateStore` 的常规快照、WPS 快照、审核、删除/恢复和 reconciliation 必须通过 catalog 的持久状态操作门串行化。
+- reconciliation 写入失败时保留 `DesiredEnabled=false`，记录结构化日志并在后续快照重试；不得伪造 `ObservedEnabled=false`，也不得转成待审核。
+- ContextMenuMgr 自己的写入必须从 post-write 快照更新 baseline，不能被下一轮识别为外部变化。
+- `SuppressNextDetection` 只能抑制一次由应用自身恢复/创建导致的检测，建立 monitor baseline 时必须消费。
+- WPS/Office 是否已有 baseline 只看 WPS marker 或旧版 WPS state，不能被常规菜单 state 影响。
 
 ## 11. 常见坑
 

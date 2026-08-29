@@ -715,6 +715,16 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.OfficeSuiteCoexistence;
     }
 
+    public async Task ResetStateDatabaseAsync(CancellationToken cancellationToken)
+    {
+        await SendRequestAsync(
+            new PipeRequest
+            {
+                Command = PipeCommand.ResetStateDatabase
+            },
+            cancellationToken);
+    }
+
     /// <summary>
     /// Releases resources used by the current instance.
     /// </summary>

@@ -113,6 +113,46 @@ public sealed class ContextMenuStateStore
         }
     }
 
+    /// <summary>
+    /// Removes the authoritative state, last-known-good backup, and stale
+    /// temporary generations while holding the same gate used by load/save.
+    /// The next complete user-context snapshot will create fresh baselines.
+    /// </summary>
+    public async Task ResetAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            TryDeleteStateFile(_storagePath);
+            TryDeleteStateFile(_backupPath);
+
+            var directory = Path.GetDirectoryName(_storagePath);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                var searchPattern = Path.GetFileName(_storagePath) + ".tmp-*";
+                foreach (var path in Directory.EnumerateFiles(directory, searchPattern))
+                {
+                    TryDeleteStateFile(path);
+                }
+            }
+
+            Health = ContextMenuStateStoreHealth.Healthy;
+            _logger?.LogFireAndForget($"ContextMenuStateStoreReset: Path={_storagePath}, BackupPath={_backupPath}.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static void TryDeleteStateFile(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
     private async Task<Dictionary<string, PersistedContextMenuState>> RecoverCorruptedCurrentAsync(
         Exception currentException,
         CancellationToken cancellationToken)

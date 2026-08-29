@@ -115,6 +115,21 @@ public sealed class ContextMenuStateStoreTests
     }
 
     [Fact]
+    public async Task ResetAsync_RemovesCurrentAndBackup_ThenLoadsEmpty()
+    {
+        using var fixture = new StateStoreFixture();
+        var store = fixture.CreateStore();
+        await store.SaveAsync(CreateStates("first", isDeleted: false), CancellationToken.None);
+        await store.SaveAsync(CreateStates("second", isDeleted: false), CancellationToken.None);
+
+        await store.ResetAsync(CancellationToken.None);
+
+        Assert.False(File.Exists(fixture.StatePath));
+        Assert.False(File.Exists(fixture.BackupPath));
+        Assert.Empty(await store.LoadAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task LoadAsync_LegacyDictionary_RemainsSupported()
     {
         using var fixture = new StateStoreFixture();

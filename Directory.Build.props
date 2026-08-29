@@ -13,7 +13,7 @@
       在打包时从 publish 出来的 exe 自动读取，无需在此同步。
   -->
   <PropertyGroup>
-    <AppVersion>1.7.4</AppVersion>
+    <AppVersion>1.7.5</AppVersion>
 
     <FileVersion>$(AppVersion).0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>

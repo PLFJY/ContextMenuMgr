@@ -14,6 +14,42 @@ namespace ContextMenuMgr.Tests;
 public sealed class ClassicShellExtensionRegistryMoveTests
 {
     [Fact]
+    public void DuplicateContainerSelection_UsesNewestWriteTime_ThenDesiredStateAsTieBreaker()
+    {
+        var older = new DateTimeOffset(2026, 8, 29, 10, 0, 0, TimeSpan.Zero);
+        var newer = older.AddSeconds(1);
+
+        Assert.True(ContextMenuRegistryCatalog.SelectEnabledSideForDuplicate(
+            newestActiveWriteUtc: newer,
+            newestDisabledWriteUtc: older,
+            desiredEnabled: false));
+        Assert.False(ContextMenuRegistryCatalog.SelectEnabledSideForDuplicate(
+            newestActiveWriteUtc: older,
+            newestDisabledWriteUtc: newer,
+            desiredEnabled: true));
+        Assert.False(ContextMenuRegistryCatalog.SelectEnabledSideForDuplicate(
+            newestActiveWriteUtc: newer,
+            newestDisabledWriteUtc: newer,
+            desiredEnabled: false));
+        Assert.True(ContextMenuRegistryCatalog.SelectEnabledSideForDuplicate(
+            newestActiveWriteUtc: null,
+            newestDisabledWriteUtc: null,
+            desiredEnabled: null));
+    }
+
+    [Fact]
+    public void RegistryWriteTime_CanBeReadForControlledHandlerKey()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        fixture.CreateHandler("*", "Timestamp", "{11111111-1111-1111-1111-111111111111}");
+
+        Assert.True(ContextMenuRegistryCatalog.TryGetRegistryWriteTimeUtc(
+            fixture.GetActiveAbsolutePath("*", "Timestamp"),
+            out var writeUtc));
+        Assert.InRange(writeUtc, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
+    }
+
+    [Fact]
     public void MoveRegistryKeySafely_PreservesNestedValues_AndOnlyMovesTheSelectedSameClsidRegistration()
     {
         using var fixture = RegistryMoveFixture.Create();

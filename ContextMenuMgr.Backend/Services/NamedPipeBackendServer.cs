@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -378,6 +378,8 @@ public sealed class NamedPipeBackendServer
                     await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.PurgeDeletedItem when request.ItemId is not null
                 => await _catalog.PurgeDeletedItemAsync(request.ItemId, cancellationToken),
+            PipeCommand.ResetStateDatabase
+                => await _catalog.ResetStateDatabaseAsync(cancellationToken),
             PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
                 => new PipeResponse
                 {

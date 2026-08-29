@@ -83,4 +83,22 @@ public sealed class BackendProtectionSettingsStore
             _gate.Release();
         }
     }
+
+    public async Task ResetAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (File.Exists(_storagePath))
+            {
+                File.Delete(_storagePath);
+            }
+
+            _logger?.LogFireAndForget($"BackendProtectionSettingsStoreReset: Path={_storagePath}.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 }

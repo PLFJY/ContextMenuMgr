@@ -105,6 +105,17 @@ If you cannot answer these questions, stop and read the relevant docs or inspect
 - Win11 snapshot and block/unblock operations must preserve the correct user context.
 - If a Win11 item appears enabled again after refresh, first verify whether the snapshot used the correct `HKEY_USERS\<SID>` blocked list.
 
+### State database and external-change rules
+
+- An absent or reset state database must adopt the current regular-menu, Win11, and WPS/Office state without pending approvals, external-change badges, or saved-state mismatch warnings.
+- Regular menus and WPS/Office use separate explicit baseline markers. Never infer one source's baseline from unrelated state records, and never commit a first baseline from a snapshot without an interactive user context.
+- During runtime, an unknown item is disabled and sent to approval; a known enabled item that becomes disabled is `Modified`; a known disabled item observed changing to enabled between settled monitor snapshots is silently disabled again.
+- At startup with an existing baseline, an offline unknown item is `Added` without quarantine, and either direction of a known item's switch-state change is `Modified`; startup/offline disabled-to-enabled drift must not be silently reconciled.
+- A confirmed missing registry item must be removed from the active monitoring baseline regardless of its previous desired state. Delete/Undo backup metadata is recovery-only and must not participate in Added/Modified identity comparisons.
+- Ordinary enabled-state differences are classified changes or reconciliation work, not generic consistency issues. Generic consistency is reserved for actual registry-structure conflicts.
+- If active and disabled `ContextMenuHandlers` keys coexist for one stable Id, compare their registry last-write timestamps, keep the newer side, and remove the older side automatically. Timestamp ties fall back to persisted desired state, then active. Do not surface this repair as a generic consistency warning; log failures and retry.
+- State-store read/merge/write sequences from snapshots, WPS refresh, approvals, deletion/restore, and reconciliation must remain serialized so concurrent flows cannot overwrite each other's state.
+
 ### ProbeHost / Deep Analysis
 
 - ProbeHost is not an elevation path. It is an isolation path.

@@ -39,7 +39,7 @@ ContextMenuMgr 是一个以“审核优先、用户控制”为核心的 Windows
 | BackendRuntime | `BackendRuntime.cs` | 组合后端服务、启动 pipe/monitor、隔离新增项、确保 TrayHost | 新增项隔离和通知去重要保持稳定逻辑 key。 |
 | NamedPipeBackendServer | `NamedPipeBackendServer.cs` | pipe ACL、请求分发、用户上下文解析、通知广播 | userContext 解析路径不能随意复用到无关功能。 |
 | ContextMenuRegistryCatalog | `ContextMenuRegistryCatalog.cs` | 传统菜单枚举、开关、审核、删除备份、Registry Write Protection | 传统菜单和 Win11 新菜单不是同一模型。 |
-| ContextMenuRegistryMonitor | `ContextMenuRegistryMonitor.cs` | 轮询快照、发现新增/被外部重新启用的项 | 登录后首个交互式快照用于重建 baseline，避免误报。 |
+| ContextMenuRegistryMonitor | `ContextMenuRegistryMonitor.cs` | 轮询快照、发现运行时新增项、维护内存 baseline | 只有相邻运行时快照确认的关变开才交给 catalog 静默纠正；启动/登录后的首个稳定快照只做离线 baseline。 |
 | ContextMenuStateStore | `ContextMenuStateStore.cs` | `RuntimePaths.StateDatabasePath` 状态库 | 审核状态不是纯 UI 状态。 |
 | SpecialMenuService | `SpecialMenuService.cs` | ShellNew、SendTo、WinX、OpenWith、DragDrop、CommandStore、GuidBlock、IE MenuExt | ShellNew/SendTo/WinX/OpenWith 必须带正确用户上下文。 |
 | Windows11ContextMenuCatalog | `Windows11ContextMenuCatalog.cs` | PackagedCom 和 AppxManifest 枚举、按 blocked list 判断启用状态 | 没有用户 SID 会跳过 Win11 snapshot。 |
@@ -91,7 +91,7 @@ SCM 启动 ContextMenuManagerPlus.Service.exe --service
 
 ```text
 ContextMenuRegistryMonitor 轮询快照
-  -> 发现新增或外部重新启用
+  -> 确认 regular baseline 已存在并发现运行时 Added
   -> BackendRuntime.HandleNewItemDetectedAsync
   -> ContextMenuRegistryCatalog.QuarantineNewItemAsync
   -> BackendNotification(ItemDetected)
@@ -115,11 +115,13 @@ ContextMenuRegistryMonitor 轮询快照
 
 ShellVerb visibility mutation always verifies `ShellVerbVisibility.IsEnabled` on the same physical key, then refreshes the authoritative catalog entry before persisting desired/observed state. For a protected machine `HKLM\SOFTWARE\Classes` verb, `ContextMenuRegistryCatalog` first attempts the ordinary write. Only an ACL access-denied failure can invoke `ProtectedRegistryMutation`; it temporarily enables `SeTakeOwnershipPrivilege` and `SeRestorePrivilege`, grants LocalSystem `SetValue` only, verifies the mutation, then restores and verifies the original owner/DACL descriptor. It never applies to `HKEY_USERS\<SID>\Software\Classes`, never bypasses Registry Write Protection, and never uses BluePointLilac's unconditional ownership takeover.
 
-`ContextMenuStateStore` 保存后端状态，不只是缓存。它用于标记 pending approval、删除备份、删除时间、被抑制的检测等。`RegistryBackupService` 在删除前调用 `reg.exe export` 保存 `.reg`，恢复时调用 `reg.exe import`。
+`ContextMenuStateStore` 保存后端状态，不只是缓存。它用于保存已确认开关状态、pending approval、删除恢复记录和被抑制的检测等。常规菜单与 WPS/Office 分别用 `internal:baseline:regular:v1`、`internal:baseline:wps-office:v1` 标记 baseline 已完整建立；不能再用“存在任意 state”代替某一数据源的 baseline。`RegistryBackupService` 在删除前调用 `reg.exe export` 保存 `.reg`，恢复时调用 `reg.exe import`。
 
-StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 的首次 baseline adoption 从现有注册表建立状态，避免大量 `Added` / `Reappeared` 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
+设置页的“重置状态数据库”必须通过链路 A 的 `PipeCommand.ResetStateDatabase` 执行，不能由前端直接删除 `%ProgramData%` 或 portable `Data` 中的文件。后端在持久状态操作门和各 store 自身 gate 内删除 current、`.bak`、临时 generations、backend protection settings 与当前 host 删除备份，然后由同一次前端刷新依次重建 regular 和 WPS baseline。
 
-外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。它会比较上一轮已知项和当前 snapshot，并对真正新增项或外部重新启用的项触发审核。该逻辑是 best-effort：Windows Shell 和第三方安装器的注册表写入可能有延迟，服务启动早于交互式用户 Session 时也可能缺少部分用户级项，所以代码在观察到交互式 Session 后会重建一次 baseline。重建前会调用 `GetPersistedActiveStateCountAsync()` 对比持久化活跃状态数量，若当前 snapshot 明显偏小（< 80%），说明用户 hive 尚未完全加载，延后重建，避免把一直存在的项误判为新安装项。
+StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 使用交互用户上下文从当前注册表重建常规与 WPS baseline，避免任何 `Added` / `Modified` / pending 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
+
+外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。状态库相关快照和用户操作通过 catalog 的持久状态操作门串行，避免 monitor、前端刷新和 WPS 刷新互相覆盖。服务启动早于交互式 Session 时，无用户上下文的快照不得提交首次 baseline；观察到 Session 后重建内存 baseline 前，仍用持久活跃数量的 80% 阈值防止用户 hive 尚未完全加载时制造运行时新增通知。
 
 传统菜单和 Win11 新菜单不是同一套模型。不要把 `PackagedCom` 项当作普通 `shell` / `shellex` 项处理。
 
@@ -141,11 +143,13 @@ StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 curren
 
 ## 6. 新菜单项检测与审核
 
+核心规则固定为：空库/重置先无提示采纳当前常规菜单与 WPS 状态；运行时未知项隔离并待审核；已知项开变关标为 `Modified`；只有相邻运行时快照确认的已知项关变开才静默关回；离线未知项重启后只标 `Added`、不待审核；离线开关变化无论方向均标 `Modified`；完整快照连续确认实际项缺失后从活动 baseline 移除。开关差异不得再同时显示 generic consistency，详细矩阵见 `docs/registry-model.md`。
+
 新增项审核不是单纯 UI 状态。流程是：
 
 ```text
 Monitor 发现新增项
-  -> Catalog 判断 DetectedChangeKind
+  -> Catalog 确认 regular baseline 已建立并判断为 Added
   -> QuarantineNewItemAsync 立即禁用/隔离
   -> StateStore 标记 IsPendingApproval
   -> BackendNotification.ItemDetected
@@ -401,4 +405,4 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 | 深入分析失败 | `ContextMenuDeepAnalysisService.cs`、`ContextMenuMgr.ProbeHost/src` | `frontend-debug.log` 的 ProbeHost diagnostics | 把 COM 探测失败当成菜单管理失败。 |
 | 全局搜索搜得到但不跳转 | `ShellViewModel.cs`、`GlobalSearchNavigationFilterService.cs`、目标页面 ViewModel | `frontend-debug.log` 中 `GlobalSearchOpenResult`、`GlobalSearchFilterRequested` | 只导航，没消费 pending filter 或 target page type 不匹配。 |
 | 主题启动时不生效 | `FrontendThemeService.cs`、`SettingsPageViewModel.cs` | `frontend-debug.log` 中 `ThemeStartupInitialize` | 设置服务没加载、System watcher 状态和显式主题混用。 |
-| 传统 Shell Extension 开关影响其它分类 | `ContextMenuRegistryCatalog.cs`、`ContextMenuStateStore.cs` | `backend.log` 中 `ClassicShellExtensionMove*` | 误把注册项状态当作 CLSID 全局 Blocked 状态；确认 active/disabled sibling container 和 frontend SID hive。 |
+| 传统 Shell Extension 开关影响其它分类 | `ContextMenuRegistryCatalog.cs`、`ContextMenuStateStore.cs` | `backend.log` 中 `ClassicShellExtensionMove*`、`ClassicShellExtensionDuplicateAutoRepair*` | 误把注册项状态当作 CLSID 全局 Blocked 状态；确认 active/disabled sibling container、key 最后写入时间和 frontend SID hive。 |

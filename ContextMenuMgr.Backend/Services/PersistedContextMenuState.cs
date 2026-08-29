@@ -162,10 +162,10 @@ public sealed class PersistedContextMenuState
 
     /// <summary>
     /// Gets or sets the change kind that originated the current pending approval.
-    /// Non-null only while <see cref="IsPendingApproval"/> is true. Allowed values
-    /// are <see cref="ContextMenuChangeKind.Added"/> and
-    /// <see cref="ContextMenuChangeKind.Reappeared"/>. Old state files without
-    /// this field deserialize safely to <c>null</c>.
+    /// Active code writes <see cref="ContextMenuChangeKind.Added"/> only.
+    /// <see cref="ContextMenuChangeKind.Reappeared"/> remains readable solely for
+    /// compatibility with old state files. Files without this field deserialize
+    /// safely to <c>null</c>.
     /// </summary>
     public ContextMenuChangeKind? PendingApprovalChangeKind
     {
@@ -242,7 +242,8 @@ public sealed class PersistedContextMenuState
             IsEnabled = DesiredEnabled ?? true,
             Notes = Notes,
             IsDeleted = true,
-            IsPendingApproval = IsPendingApproval,
+            // Deleted records are recovery metadata, not monitored entries.
+            IsPendingApproval = false,
             HasBackup = !string.IsNullOrWhiteSpace(BackupFilePath),
             DeletedAtUtc = DeletedAtUtc,
             DetectedChangeKind = ContextMenuChangeKind.None,
@@ -283,7 +284,11 @@ public sealed class PersistedContextMenuState
             ShowAsDisabledIfHidden = entry.ShowAsDisabledIfHidden,
             Notes = entry.Notes,
             ObservedEnabled = entry.IsEnabled,
-            DesiredEnabled = null,
+            // Every adopted item records the registry state that formed the
+            // baseline. An enabled baseline may later be reported as externally
+            // disabled, while a disabled baseline is continuously enforced if a
+            // third party enables it again.
+            DesiredEnabled = entry.IsEnabled,
             IsDeleted = entry.IsDeleted,
             IsPendingApproval = entry.IsPendingApproval,
             PendingApprovalChangeKind = null,

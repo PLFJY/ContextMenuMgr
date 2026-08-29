@@ -12,8 +12,8 @@ public enum ItemMonitorAction
 
     /// <summary>
     /// The item drifts away from an explicit disabled policy. Automatically
-    /// re-disable it without user approval or notification. Applies to both
-    /// startup and runtime contexts.
+    /// re-disable it without user approval or notification. The monitor invokes
+    /// this only for a transition observed between settled runtime snapshots.
     /// </summary>
     ReconcileDisabledState,
 
@@ -24,23 +24,10 @@ public enum ItemMonitorAction
     QuarantineAdded,
 
     /// <summary>
-    /// Runtime only: a previously deleted item reappeared. Quarantine it while
-    /// preserving deletion provenance, and ask the user for a decision.
-    /// </summary>
-    QuarantineReappeared,
-
-    /// <summary>
     /// Startup/offline only: an unknown item appeared while the monitor was not
     /// running. Expose it as an Added highlight but do not quarantine or notify.
     /// </summary>
     OfflineAddedHighlight,
-
-    /// <summary>
-    /// Startup/offline only: a previously deleted item reappeared while the
-    /// monitor was not running. Expose the Reappeared consistency warning but
-    /// do not quarantine or notify.
-    /// </summary>
-    OfflineReappearedHighlight,
 
     /// <summary>
     /// A known item changed metadata only. Keep the Modified highlight; do not
@@ -72,7 +59,10 @@ internal static class ContextMenuChangeClassifier
 
         if (state.IsDeleted)
         {
-            return ContextMenuChangeKind.Reappeared;
+            // Deleted states are recovery-only and do not retain monitoring
+            // identity. A live key with the same Id follows the ordinary Added
+            // rule once the catalog discards the stale recovery record.
+            return hasBaseline ? ContextMenuChangeKind.Added : ContextMenuChangeKind.None;
         }
 
         return HasObservedChange(entry, state)
@@ -109,25 +99,24 @@ internal static class ContextMenuChangeClassifier
 
         if (state.IsDeleted)
         {
-            return "This item was deleted through the app, but it has reappeared in the registry.";
+            return null;
         }
 
-        if (state.DesiredEnabled is { } desiredEnabled && entry.IsEnabled != desiredEnabled)
-        {
-            return $"Saved state expects this item to be {(desiredEnabled ? "enabled" : "disabled")}, but the registry currently reports {(entry.IsEnabled ? "enabled" : "disabled")}.";
-        }
-
+        // An enabled-state difference is a classified external modification,
+        // not an unclassified consistency error. Desired=false/actual=true is
+        // reconciled by the backend; desired=true/actual=false remains a
+        // dismissible Modified change until the user adopts the registry state.
         return null;
     }
 
     /// <summary>
-    /// Returns true when the persisted state represents an explicit disabled policy
-    /// that must survive temporary registry key absence. Such states are never pruned
-    /// by missing-state cleanup so a later third-party recreation can be reconciled.
+    /// Returns true when a missing state belongs to an active monitoring baseline
+    /// and must be removed after the snapshot is confirmed stable. Desired state
+    /// does not keep a registry identity alive after its key has been deleted.
     /// </summary>
-    public static bool ShouldPreserveExplicitDisabledState(PersistedContextMenuState state)
+    public static bool ShouldRemoveMissingState(PersistedContextMenuState state)
     {
-        return !state.IsDeleted && state.DesiredEnabled == false;
+        return !state.IsDeleted;
     }
 
     /// <summary>
@@ -191,7 +180,7 @@ internal static class ContextMenuChangeClassifier
     /// State-machine matrix:
     /// - ShouldReconcileDisabledState -> ReconcileDisabledState (auto re-disable, no approval)
     /// - Already pending approval -> None (don't re-quarantine)
-    /// - state.IsDeleted -> QuarantineReappeared (runtime) / OfflineReappearedHighlight (startup)
+    /// - state.IsDeleted -> treat as unknown Added; deleted state is recovery-only
     /// - state is null + hasBaseline -> QuarantineAdded (runtime) / OfflineAddedHighlight (startup)
     /// - state is null + !hasBaseline -> None (first run, adopt as baseline)
     /// - HasObservedChange -> MetadataModifiedHighlight
@@ -202,8 +191,8 @@ internal static class ContextMenuChangeClassifier
     /// <param name="hasBaseline">True when the monitor has an established known-items baseline.</param>
     /// <param name="isBaselineEstablishment">
     /// True when the monitor is establishing a startup or interactive-session baseline
-    /// (was not running when the change happened). In this context, Added and Reappeared
-    /// items are highlighted but not quarantined or notified.
+    /// (was not running when the change happened). In this context, newly added items are
+    /// highlighted but not quarantined or notified.
     /// </param>
     public static ItemMonitorAction ClassifyItemMonitorAction(
         ContextMenuEntry entry,
@@ -211,9 +200,10 @@ internal static class ContextMenuChangeClassifier
         bool hasBaseline,
         bool isBaselineEstablishment)
     {
-        // Explicit disabled-state drift: auto re-disable without approval.
-        // This applies to both startup and runtime contexts.
-        if (ShouldReconcileDisabledState(entry, state))
+        // Only a transition observed between settled runtime snapshots is
+        // eligible for silent correction. Startup/offline drift remains a
+        // Modified change for user review.
+        if (!isBaselineEstablishment && ShouldReconcileDisabledState(entry, state))
         {
             return ItemMonitorAction.ReconcileDisabledState;
         }
@@ -224,12 +214,14 @@ internal static class ContextMenuChangeClassifier
             return ItemMonitorAction.None;
         }
 
-        // Previously deleted item reappeared.
+        // Deleted recovery metadata is excluded from monitoring identity.
         if (state is not null && state.IsDeleted)
         {
-            return isBaselineEstablishment
-                ? ItemMonitorAction.OfflineReappearedHighlight
-                : ItemMonitorAction.QuarantineReappeared;
+            return !hasBaseline
+                ? ItemMonitorAction.None
+                : isBaselineEstablishment
+                    ? ItemMonitorAction.OfflineAddedHighlight
+                    : ItemMonitorAction.QuarantineAdded;
         }
 
         // Completely unknown item.

@@ -24,6 +24,7 @@ public enum PipeCommand
     DeleteItem,
     UndoDelete,
     PurgeDeletedItem,
+    ResetStateDatabase,
     GetSpecialMenuSnapshot,
     SetSpecialMenuItemEnabled,
     CreateSpecialMenuItem,

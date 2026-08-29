@@ -79,6 +79,8 @@ public interface IBackendClient : IAsyncDisposable
 
     Task PurgeDeletedItemAsync(string itemId, CancellationToken cancellationToken);
 
+    Task ResetStateDatabaseAsync(CancellationToken cancellationToken);
+
     Task<IReadOnlyList<SpecialMenuEntry>> GetSpecialMenuSnapshotAsync(
         SpecialMenuKind kind,
         CancellationToken cancellationToken);

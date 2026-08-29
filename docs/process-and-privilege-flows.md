@@ -57,6 +57,7 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 | 文件类型相关项批量管理查询 | `FindRelatedFileTypeMenuItems` -> `ContextMenuRegistryCatalog.FindRelatedFileTypeMenuItemsAsync` |
 | 审核新增项 | `HandleApplyDecisionAsync` -> `ApplyDecisionAsync` |
 | 删除/恢复/清理备份 | `DeleteItemAsync`、`UndoDeleteAsync`、`PurgeDeletedItemAsync` |
+| 重置状态库 | `PipeCommand.ResetStateDatabase` -> 后端串行删除 current / `.bak` / 当前 host 删除备份；下一次带 frontend userContext 的常规与 WPS 快照重建 baseline |
 | Registry Write Protection | `GetRegistryProtectionSettingAsync`、`SetRegistryProtectionSettingAsync` |
 | SpecialMenu | `SpecialMenuService` |
 | Win11 blocked list | `Windows11BlocksService` 和 `Windows11ContextMenuCatalog` |
@@ -180,7 +181,7 @@ ProbeHost 的边界：
 | Win11 全局恢复经典菜单设置 | 链路 A | 是 | 否 | 写 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32`，不得写服务 `HKCU` 或 HKLM；生效需要重启 Explorer 或重新登录。 |
 | Win11 snapshot | 链路 A | 是 | 否 | `Windows11ContextMenuCatalog.EnumerateEntriesAsync` 没有 SID 会跳过。 |
 | ShellNew 枚举 | 链路 A | 是 | 是 | 通过前端 SessionId 的 WTS 用户 token 调用 `RegOpenUserClassesRoot` 读取前端用户的合并 HKCR；同时用 `PackageManager.FindPackagesForUser(sid)` 只读扫描包清单中的 ShellNew FileType 声明；ShellNew order key 仍显式读取 `HKEY_USERS\<sid>`。 |
-| WPS / Microsoft Office 共存保护 | 链路 A | 是 | 否 | 只在 WPS Office 和 Microsoft Office 同时存在时启用；读取 `HKEY_USERS\<sid>\Software\Classes`、ShellNew order key 和 HKLM Office baseline，通过待审核专用管道生成 WPS 关联 / 图标 / ShellNew 注入项，不进入普通文件 / ShellNew / OpenWith 页面。 |
+| WPS / Microsoft Office 共存保护 | 链路 A | 是 | 否 | 只在 WPS Office 和 Microsoft Office 同时存在时启用；读取 `HKEY_USERS\<sid>\Software\Classes`、ShellNew order key 和 HKLM Office baseline，通过专用管道生成 WPS 关联 / 图标 / ShellNew 注入项。空库/重置时先无提示采纳并写独立 WPS baseline marker；已有 marker 后的新发现才进入待审核。 |
 | 文档图标来源切换 | 链路 A | 是 | 否 | `PipeCommand.SetDocumentIconProvider` 只写当前前端用户 `HKEY_USERS\<sid>\Software\Classes\<ProgID>\DefaultIcon`，不写 HKLM，不修改 UserChoice Hash。 |
 | ShellNew 排序 | 链路 A | 是 | 否 | 写 Explorer ShellNew order key，可能需要临时 unlock/relock ACL。 |
 | ShellNew ACL lock/unlock | 链路 A | 是 | 否 | 只锁 ShellNew order key，不等于 Registry Write Protection。 |

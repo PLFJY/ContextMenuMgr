@@ -528,7 +528,6 @@ public sealed class BackendRuntime : IDisposable
     /// </summary>
     public void NotifyInteractiveSessionAvailable(int sessionId)
     {
-        _monitor.Catalog.MarkInteractiveSessionObserved();
         _monitor.NotifyInteractiveSessionObserved();
 
         if (!_ensureTrayHostOnStartup)
@@ -559,22 +558,10 @@ public sealed class BackendRuntime : IDisposable
     {
         try
         {
-            // Select the quarantine path based on the detected change kind.
-            // Reappeared items (previously deleted, then recreated) use a
-            // dedicated path that preserves deletion provenance.
-            ContextMenuEntry quarantinedItem;
-            string notificationMessage;
-
-            if (item.DetectedChangeKind == ContextMenuChangeKind.Reappeared)
-            {
-                quarantinedItem = await _monitor.Catalog.QuarantineReappearedItemAsync(item, CancellationToken.None);
-                notificationMessage = $"A previously deleted context menu item has reappeared and was blocked pending approval: {quarantinedItem.DisplayName}";
-            }
-            else
-            {
-                quarantinedItem = await _monitor.Catalog.QuarantineNewItemAsync(item, CancellationToken.None);
-                notificationMessage = $"A new context menu item was blocked pending approval: {quarantinedItem.DisplayName}";
-            }
+            // Deleted recovery records are excluded from monitoring identity.
+            // Every unknown live key therefore follows the same Added rule.
+            var quarantinedItem = await _monitor.Catalog.QuarantineNewItemAsync(item, CancellationToken.None);
+            var notificationMessage = $"A new context menu item was blocked pending approval: {quarantinedItem.DisplayName}";
 
             // Notify the tray/frontends once per logical item so the
             // same menu item appearing under multiple categories does not spam
