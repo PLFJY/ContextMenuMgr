@@ -1272,7 +1272,20 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await _backendClient.SetShellNewOrderLockAsync(newValue, Guid.NewGuid(), cts.Token);
+            // An automatic refresh may already be reading the pre-operation ACL state.
+            // Do not reuse that stale in-flight task as the post-operation refresh.
+            await WaitForCurrentRefreshAsync();
             await RefreshAsync();
+
+            _suppressShellNewLockSync = true;
+            try
+            {
+                IsShellNewOrderLocked = newValue;
+            }
+            finally
+            {
+                _suppressShellNewLockSync = false;
+            }
         }
         catch (Exception ex)
         {
@@ -1287,6 +1300,20 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
 
             StatusText = ex.Message;
+        }
+    }
+
+    private async Task WaitForCurrentRefreshAsync()
+    {
+        Task? refreshTask;
+        lock (_refreshSync)
+        {
+            refreshTask = _refreshTask is { IsCompleted: false } task ? task : null;
+        }
+
+        if (refreshTask is not null)
+        {
+            await refreshTask;
         }
     }
 
