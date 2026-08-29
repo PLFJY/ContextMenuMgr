@@ -14,7 +14,7 @@
   -->
   <PropertyGroup>
     <AppVersion>1.7.5</AppVersion>
-
+    <CetCompat>false</CetCompat>
     <FileVersion>$(AppVersion).0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <InformationalVersion>$(AppVersion)</InformationalVersion>
