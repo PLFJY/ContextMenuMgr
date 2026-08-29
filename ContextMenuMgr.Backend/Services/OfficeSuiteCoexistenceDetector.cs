@@ -240,7 +240,7 @@ public sealed class OfficeSuiteCoexistenceDetector
         {
             var registryPath = $@"HKEY_USERS\{context.Sid}\{UserClassesPath}";
             yield return CreateSyntheticEntry(
-                id: "special:wps-office-icon:document-icons",
+                id: ContextMenuRegistryCatalog.WpsOfficeDocumentIconSyntheticId,
                 keyName: "Document icons",
                 displayName: "WPS changed document icons",
                 registryPath: registryPath,

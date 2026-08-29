@@ -20,6 +20,7 @@ public sealed class ContextMenuRegistryCatalog
     internal const string Windows11MonitoredRootPath = @"PackagedCom\Windows11ContextMenu";
     internal const string RegularBaselineMarkerId = "internal:baseline:regular:v1";
     internal const string WpsOfficeBaselineMarkerId = "internal:baseline:wps-office:v1";
+    internal const string WpsOfficeDocumentIconSyntheticId = "special:wps-office-icon:document-icons";
     private const string BaselineMarkerSourceRootPath = "internal:baseline";
     private const string RecycleBinPinToHomeId = "special:recyclebin:pintohome";
     private const string RecycleBinPinToHomeRegistryPath = @"HKEY_CLASSES_ROOT\Folder\shell\pintohome";
@@ -2159,8 +2160,53 @@ public sealed class ContextMenuRegistryCatalog
     public OfficeSuiteCoexistenceStatus GetOfficeSuiteCoexistenceStatus(BackendUserContext? userContext)
         => _officeCoexistenceDetector.Detect(userContext);
 
-    public PipeResponse SetDocumentIconProvider(BackendUserContext userContext, DocumentIconProvider provider)
-        => _officeCoexistenceDetector.SetDocumentIconProvider(userContext, provider);
+    public async Task<PipeResponse> SetDocumentIconProviderAsync(
+        BackendUserContext userContext,
+        DocumentIconProvider provider,
+        CancellationToken cancellationToken)
+    {
+        return await RunPersistentStateOperationAsync(async () =>
+        {
+            var response = _officeCoexistenceDetector.SetDocumentIconProvider(userContext, provider);
+            if (!response.Success)
+            {
+                return response;
+            }
+
+            await RecordUserSelectedDocumentIconProviderCoreAsync(userContext, cancellationToken);
+            return response;
+        }, cancellationToken);
+    }
+
+    internal Task RecordUserSelectedDocumentIconProviderAsync(BackendUserContext userContext, CancellationToken cancellationToken)
+        => RunPersistentStateOperationAsync(
+            async () =>
+            {
+                await RecordUserSelectedDocumentIconProviderCoreAsync(userContext, cancellationToken);
+                return true;
+            },
+            cancellationToken);
+
+    private async Task RecordUserSelectedDocumentIconProviderCoreAsync(BackendUserContext userContext, CancellationToken cancellationToken)
+    {
+        var item = new ContextMenuEntry
+        {
+            Id = WpsOfficeDocumentIconSyntheticId,
+            KeyName = "Document icons",
+            DisplayName = "WPS changed document icons",
+            RegistryPath = $@"HKEY_USERS\{userContext.Sid}\Software\Classes",
+            BackendRegistryPath = $@"HKEY_USERS\{userContext.Sid}\Software\Classes",
+            SourceRootPath = "special:wps-office-coexistence",
+            IsEnabled = true,
+            IsPresentInRegistry = true,
+            DetectedChangeKind = ContextMenuChangeKind.WpsOfficeIconHijack
+        };
+
+        await AcknowledgeWpsOfficeSyntheticStateAsync(item.Id, item, cancellationToken);
+        await _logger.LogAsync(
+            $"WpsDocumentIconProviderUserSelectionAcknowledged: Sid={userContext.Sid}, ItemId={item.Id}. The document icon provider was changed through the frontend, so its WPS icon finding will not enter pending approval.",
+            cancellationToken);
+    }
 
     private IEnumerable<ContextMenuEntry> EnumerateEntries(IEnumerable<RegistryRootDescriptor> roots, BackendUserContext? userContext = null)
     {

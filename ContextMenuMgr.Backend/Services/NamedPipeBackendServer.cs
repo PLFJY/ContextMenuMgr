@@ -555,7 +555,7 @@ public sealed class NamedPipeBackendServer
             };
         }
 
-        return _catalog.SetDocumentIconProvider(userContext, provider);
+        return await _catalog.SetDocumentIconProviderAsync(userContext, provider, cancellationToken);
     }
 
     private async Task<PipeResponse> HandleSetEnhanceMenuItemEnabledAsync(
