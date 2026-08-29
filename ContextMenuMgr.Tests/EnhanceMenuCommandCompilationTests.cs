@@ -47,6 +47,7 @@ public sealed class EnhanceMenuCommandCompilationTests
     {
         var command = CompileCommand("HKEY_CLASSES_ROOT\\CLSID\\{645FF040-5081-101B-9F08-00AA002F954E}", "CleanThumbCache");
 
+        Assert.DoesNotContain("Start-Process powershell.exe -Verb RunAs", command, StringComparison.Ordinal);
         Assert.Contains("$env:USERPROFILE", command, StringComparison.Ordinal);
         Assert.DoesNotContain("systemprofile", command, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Stop-Process -Name explorer -Force -ErrorAction Stop", command, StringComparison.Ordinal);
@@ -63,10 +64,11 @@ public sealed class EnhanceMenuCommandCompilationTests
         }
 
         Assert.DoesNotContain("iconcache_*.db", command, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("'IconStreams'', ''PastIconsStream'", command, StringComparison.Ordinal);
+        Assert.Contains("'IconStreams', 'PastIconsStream'", command, StringComparison.Ordinal);
         Assert.Contains("Remove-ItemProperty -LiteralPath $trayNotify -Name $name -ErrorAction Stop", command, StringComparison.Ordinal);
         Assert.Contains("try {", command, StringComparison.Ordinal);
-        Assert.Contains("finally { Start-Process -FilePath ''C:\\Windows\\explorer.exe'' }", command, StringComparison.Ordinal);
+        Assert.Contains("AutoRestartShell", command, StringComparison.Ordinal);
+        Assert.Contains("finally { if ($autoRestartShell -eq 0) { Start-Process -FilePath 'C:\\Windows\\explorer.exe' } }", command, StringComparison.Ordinal);
         Assert.True(command.IndexOf("try {", StringComparison.Ordinal) < command.IndexOf("Stop-Process", StringComparison.Ordinal));
         Assert.True(command.IndexOf("Remove-ItemProperty", StringComparison.Ordinal) < command.IndexOf("finally", StringComparison.Ordinal));
     }

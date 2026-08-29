@@ -3845,13 +3845,19 @@ public sealed class ContextMenuRegistryCatalog
         {
             var script = GetDirectElementText(powerShellScriptElement).Trim();
             var runtimeArgument = powerShellScriptElement.Attribute("Argument")?.Value?.Trim();
-            var elevatedCommand = BuildElevatedPowerShellCommand(script, runtimeArgument);
+            var elevate = !bool.TryParse(powerShellScriptElement.Attribute("Elevate")?.Value, out var configuredElevation)
+                          || configuredElevation;
+            var powerShellCommand = elevate
+                ? BuildElevatedPowerShellCommand(script, runtimeArgument)
+                : BuildPowerShellCommand(
+                    runtimeArgument is null ? script : $"& {{ param($p); {script} }}",
+                    string.IsNullOrWhiteSpace(runtimeArgument) ? [] : new[] { runtimeArgument });
             return new EnhanceCommandCompilationResult(
-                elevatedCommand,
+                powerShellCommand,
                 "powershell.exe",
                 shellExecuteElement is not null,
                 shellExecuteElement?.Attribute("Verb")?.Value?.Trim() ?? string.Empty,
-                "ElevatedPowerShellBlock",
+                elevate ? "ElevatedPowerShellBlock" : "PowerShellBlock",
                 false,
                 string.Empty);
         }
