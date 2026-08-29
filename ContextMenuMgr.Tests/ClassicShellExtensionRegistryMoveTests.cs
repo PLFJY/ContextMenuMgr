@@ -307,6 +307,122 @@ public sealed class ClassicShellExtensionRegistryMoveTests
     }
 
     [Fact]
+    public void SceneShellExtensionPhysicalResolution_IncludesBothActiveAndDisabledMirrorRoots()
+    {
+        var roots = ContextMenuRegistryCatalog.GetPhysicalSourceRootPaths(
+            @"SystemFileAssociations\Video\shellex\ContextMenuHandlers",
+            ContextMenuEntryKind.ShellExtension);
+
+        Assert.Equal(2, roots.Count);
+        Assert.Contains(@"SystemFileAssociations\Video\shellex\ContextMenuHandlers", roots);
+        Assert.Contains(@"SystemFileAssociations\Video\shellex\-ContextMenuHandlers", roots);
+    }
+
+    [Fact]
+    public void SceneOnlyShellExtension_WhenRegularSnapshotMisses_UsesVerifiedDisabledPhysicalEntry()
+    {
+        const string itemId = @"SystemFileAssociations\Video\shellex\ContextMenuHandlers|SceneHandler";
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+        var activePath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\SystemFileAssociations\Video\shellex\ContextMenuHandlers\SceneHandler";
+        var disabledPath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\SystemFileAssociations\Video\shellex\-ContextMenuHandlers\SceneHandler";
+        var item = CreateSceneShellExtensionEntry(itemId, activePath, handlerClsid, enabled: true);
+        var disabledPhysicalEntry = CreateSceneShellExtensionEntry(itemId, disabledPath, handlerClsid, enabled: false);
+
+        var result = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            item,
+            [disabledPhysicalEntry],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+
+        Assert.True(result.IsVerified);
+        Assert.True(result.UsedPhysicalSourceFallback);
+        Assert.Equal(itemId, result.Entry!.Id);
+        Assert.False(result.Entry.IsEnabled);
+        Assert.Equal(disabledPath, result.Entry.BackendRegistryPath);
+        Assert.Empty(result.ActivePaths);
+        Assert.Equal(disabledPath, Assert.Single(result.DisabledPaths));
+    }
+
+    [Fact]
+    public void SceneShellExtension_RoundTripsBetweenMirrorsWithStableLogicalId()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string classRoot = @"SystemFileAssociations\Video";
+        const string keyName = "SceneHandler";
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+        const string itemId = @"SystemFileAssociations\Video\shellex\ContextMenuHandlers|SceneHandler";
+        fixture.CreateHandler(classRoot, keyName, handlerClsid, includeNestedValues: true);
+
+        var activePath = fixture.GetActiveAbsolutePath(classRoot, keyName);
+        var disabledPath = fixture.GetDisabledAbsolutePath(classRoot, keyName);
+        var activeItem = CreateSceneShellExtensionEntry(itemId, activePath, handlerClsid, enabled: true);
+
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(activePath, disabledPath);
+        Assert.Null(fixture.Open(classRoot, $@"ContextMenuHandlers\{keyName}"));
+        Assert.NotNull(fixture.Open(classRoot, $@"-ContextMenuHandlers\{keyName}"));
+        var disabledResult = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            activeItem,
+            [CreateSceneShellExtensionEntry(itemId, disabledPath, handlerClsid, enabled: false)],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+        Assert.True(disabledResult.IsVerified);
+        Assert.Equal(itemId, disabledResult.Entry!.Id);
+
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(disabledPath, activePath);
+        Assert.NotNull(fixture.Open(classRoot, $@"ContextMenuHandlers\{keyName}"));
+        Assert.Null(fixture.Open(classRoot, $@"-ContextMenuHandlers\{keyName}"));
+        var enabledResult = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            disabledResult.Entry,
+            [CreateSceneShellExtensionEntry(itemId, activePath, handlerClsid, enabled: true)],
+            refreshedLogicalEntry: null,
+            requestedEnabled: true);
+        Assert.True(enabledResult.IsVerified);
+        Assert.Equal(itemId, enabledResult.Entry!.Id);
+        Assert.True(enabledResult.Entry.IsEnabled);
+
+        ContextMenuRegistryCatalog.MoveRegistryKeySafely(activePath, disabledPath);
+        Assert.Null(fixture.Open(classRoot, $@"ContextMenuHandlers\{keyName}"));
+        Assert.NotNull(fixture.Open(classRoot, $@"-ContextMenuHandlers\{keyName}"));
+        var finalDisabledResult = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            enabledResult.Entry,
+            [CreateSceneShellExtensionEntry(itemId, disabledPath, handlerClsid, enabled: false)],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+        Assert.True(finalDisabledResult.IsVerified);
+        Assert.Equal(itemId, finalDisabledResult.Entry!.Id);
+        Assert.False(finalDisabledResult.Entry.IsEnabled);
+    }
+
+    [Fact]
+    public void SceneShellExtension_HandlerMismatchOrAdditionalActiveCopy_FailsVerification()
+    {
+        const string itemId = @"SystemFileAssociations\Video\shellex\ContextMenuHandlers|SceneHandler";
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+        var activePath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\SystemFileAssociations\Video\shellex\ContextMenuHandlers\SceneHandler";
+        var disabledPath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\SystemFileAssociations\Video\shellex\-ContextMenuHandlers\SceneHandler";
+        var item = CreateSceneShellExtensionEntry(itemId, activePath, handlerClsid, enabled: true);
+
+        var mismatch = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            item,
+            [CreateSceneShellExtensionEntry(itemId, disabledPath, "{22222222-2222-2222-2222-222222222222}", enabled: false)],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+        Assert.False(mismatch.IsVerified);
+        Assert.Equal(disabledPath, Assert.Single(mismatch.HandlerMismatchedPaths));
+
+        var duplicateActive = ContextMenuRegistryCatalog.ReconcileShellExtensionMutation(
+            item,
+            [
+                CreateSceneShellExtensionEntry(itemId, disabledPath, handlerClsid, enabled: false),
+                CreateSceneShellExtensionEntry(itemId, activePath, handlerClsid, enabled: true)
+            ],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+        Assert.False(duplicateActive.IsVerified);
+        Assert.Equal(activePath, Assert.Single(duplicateActive.MismatchedPhysicalPaths));
+    }
+
+    [Fact]
     public void UnsupportedPropertySheetHandler_IsReadOnlyAndExcludedFromDisabledStateReconciliation()
     {
         var entry = new ContextMenuEntry
@@ -344,6 +460,29 @@ public sealed class ClassicShellExtensionRegistryMoveTests
             activeClassicEntry with { IsWindows11ContextMenu = true },
             hasLegacyGlobalShellExtensionBlock: true));
     }
+
+    private static ContextMenuEntry CreateSceneShellExtensionEntry(
+        string itemId,
+        string backendRegistryPath,
+        string handlerClsid,
+        bool enabled)
+        => new()
+        {
+            Id = itemId,
+            Category = ContextMenuCategory.File,
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            KeyName = "SceneHandler",
+            DisplayName = "Scene handler",
+            RegistryPath = backendRegistryPath
+                .Replace(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace(@"HKEY_USERS\S-1-5-21-test\Software\Classes\", string.Empty, StringComparison.OrdinalIgnoreCase),
+            BackendRegistryPath = backendRegistryPath,
+            SourceRootPath = @"SystemFileAssociations\Video\shellex\ContextMenuHandlers",
+            HandlerClsid = handlerClsid,
+            IsEnabled = enabled,
+            IsPresentInRegistry = true,
+            CanToggle = true
+        };
 
     private sealed class RegistryMoveFixture : IDisposable
     {

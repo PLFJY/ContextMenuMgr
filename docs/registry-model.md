@@ -238,6 +238,8 @@ generic consistency 只保留无法自动归一化的真实注册表结构冲突
 
 传统 Shell Extension 的普通开关以注册项为单位：启用位置是 `<root>\shellex\ContextMenuHandlers\<name>`，禁用位置是 `<root>\shellex\-ContextMenuHandlers\<name>`。两者使用同一个稳定 Id。
 
+File Types / scene（包括 `SystemFileAssociations`）根不必属于常规 `MonitoredRoots`。当这类 Shell Extension 由 `SetEnabled` 操作时，后端会按稳定 Id 在 active 与 disabled mirror 容器、HKLM 与当前前端用户 `HKEY_USERS\<sid>` Classes 中重新解析物理注册，再进行移动和验证；常规 snapshot 未包含该项时，返回已验证的物理项而不是把 scene snapshot miss 当作“未找到”。前端 payload 仅提供请求身份与 Handler CLSID，后端必须重开物理 key 并确认 CLSID 一致。
+
 若同一稳定 Id 的 active/disabled 物理键同时存在，持久快照必须读取两侧 key 的注册表最后写入时间，以较新一侧作为当前事实并自动删除较旧一侧；不能把双键本身显示成“当前注册表状态与软件记录不一致”。若最后写入时间相同或无法完整读取，优先采用状态库 `DesiredEnabled` 对应的一侧；没有状态记录时采用 active。自动删除失败时记录 `ClassicShellExtensionDuplicateAutoRepairFailed` 并在后续快照重试，但前端仍按选中的较新一侧计算实际开关状态。归一化后的状态若与既有 baseline 不同，继续按运行时/离线六条规则进入静默纠偏或 `Modified`，不能伪造为无变化。
 
 同一稳定 Id 在 HKLM 与 `HKEY_USERS\<SID>` 存在多个物理副本时，普通开关必须把所有副本一起移动并验证。经典普通开关不得写入全局 `Shell Extensions\Blocked`；该列表由“其他规则 / GUID 阻止”单独管理。

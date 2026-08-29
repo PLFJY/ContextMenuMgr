@@ -642,11 +642,44 @@ public sealed class ContextMenuRegistryCatalog
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
-            item = TryUseSceneFallbackItem(itemId, fallbackItem);
+            var validatedFallback = TryUseSceneFallbackItem(itemId, fallbackItem);
+            var physicalCandidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
+            var resolvedCandidates = physicalCandidates;
+            var expectedHandlerClsid = fallbackItem?.EntryKind == ContextMenuEntryKind.ShellExtension
+                ? fallbackItem.HandlerClsid
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(expectedHandlerClsid))
+            {
+                resolvedCandidates = physicalCandidates
+                    .Where(candidate => candidate.EntryKind != ContextMenuEntryKind.ShellExtension
+                                        || string.Equals(candidate.HandlerClsid, expectedHandlerClsid, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+
+                if (physicalCandidates.Count > 0 && resolvedCandidates.Count == 0)
+                {
+                    await _logger.LogAsync(
+                        RuntimeLogLevel.Warning,
+                        $"SceneItemPhysicalResolutionFailed: ItemId={itemId}, RequestedEnabled={enable}, RegularSnapshotMiss=True, FallbackSupplied=True, FallbackValidated={validatedFallback is not null}, FallbackBackendRegistryPath={fallbackItem?.BackendRegistryPath ?? "<none>"}, ExpectedHandlerClsid={expectedHandlerClsid}, PhysicalCandidateCount={physicalCandidates.Count}, PhysicalHandlerClsids={string.Join(";", physicalCandidates.Select(static candidate => candidate.HandlerClsid ?? "<none>"))}, Reason=HandlerClsidMismatch.",
+                        cancellationToken);
+                    return CreateFailure(
+                        $"The physical Shell Extension registration for '{itemId}' no longer matches the requested handler identity.",
+                        fallbackItem);
+                }
+            }
+
+            item = SelectPreferredDeleteCandidate(resolvedCandidates) ?? validatedFallback;
+            await _logger.LogAsync(
+                $"SceneItemPhysicalResolution: ItemId={itemId}, RequestedEnabled={enable}, RegularSnapshotMiss=True, FallbackSupplied={fallbackItem is not null}, FallbackValidated={validatedFallback is not null}, FallbackBackendRegistryPath={fallbackItem?.BackendRegistryPath ?? "<none>"}, PhysicalCandidateCount={physicalCandidates.Count}, ResolvedCandidateCount={resolvedCandidates.Count}, ResolvedBackendRegistryPath={item?.BackendRegistryPath ?? "<none>"}, ResolvedHandlerClsid={item?.HandlerClsid ?? "<none>"}.",
+                cancellationToken);
         }
 
         if (item is null)
         {
+            await _logger.LogAsync(
+                RuntimeLogLevel.Warning,
+                $"SceneItemPhysicalResolutionFailed: ItemId={itemId}, RequestedEnabled={enable}, RegularSnapshotMiss=True, FallbackSupplied={fallbackItem is not null}, FallbackBackendRegistryPath={fallbackItem?.BackendRegistryPath ?? "<none>"}, PhysicalCandidateCount=0, Reason=NoValidatedFallbackOrPhysicalCandidate.",
+                cancellationToken);
             return CreateFailure($"Menu item '{itemId}' was not found.");
         }
 
@@ -687,7 +720,7 @@ public sealed class ContextMenuRegistryCatalog
                         SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable);
                         break;
                     case ContextMenuEntryKind.ShellExtension:
-                        await SetShellExtensionEnabledAsync(item, enable, cancellationToken);
+                        await SetShellExtensionEnabledAsync(item, enable, cancellationToken, userContext);
                         break;
                     default:
                         throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -707,6 +740,7 @@ public sealed class ContextMenuRegistryCatalog
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
             var refreshed = refreshedLogical;
             ShellVerbMutationReconciliation? shellVerbReconciliation = null;
+            ShellExtensionMutationReconciliation? shellExtensionReconciliation = null;
             if (item.EntryKind == ContextMenuEntryKind.ShellVerb && !item.IsWindows11ContextMenu)
             {
                 shellVerbReconciliation = ReconcileShellVerbMutation(
@@ -716,14 +750,25 @@ public sealed class ContextMenuRegistryCatalog
                     enable);
                 refreshed = shellVerbReconciliation.Entry;
             }
+            else if (item.EntryKind == ContextMenuEntryKind.ShellExtension && !item.IsWindows11ContextMenu)
+            {
+                physicalCandidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
+                shellExtensionReconciliation = ReconcileShellExtensionMutation(
+                    item,
+                    physicalCandidates,
+                    refreshedLogical,
+                    enable);
+                refreshed = shellExtensionReconciliation.Entry;
+            }
 
             if (shellVerbReconciliation is { IsVerified: false }
+                || shellExtensionReconciliation is { IsVerified: false }
                 || refreshed is null
                 || refreshed.IsEnabled != enable)
             {
                 await _logger.LogAsync(
                     RuntimeLogLevel.Warning,
-                    $"SetEnabledVerificationFailed: ItemId={item.Id}, EntryKind={item.EntryKind}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, SourceRootPath={item.SourceRootPath}, KeyName={item.KeyName}, PhysicalCandidateCount={shellVerbReconciliation?.MatchingPhysicalCandidateCount}, PhysicalTargetExists={shellVerbReconciliation?.TargetPathExists}, PhysicalMismatchedPaths={shellVerbReconciliation?.MismatchedPhysicalPathsText ?? "<none>"}, RefreshedItemId={refreshedLogical?.Id ?? "<none>"}, RefreshedBackendRegistryPath={refreshedLogical?.BackendRegistryPath ?? "<none>"}, RefreshedIsEnabled={refreshedLogical?.IsEnabled}, RefreshedHasConsistencyIssue={refreshedLogical?.HasConsistencyIssue}, LogicalCandidateCount={shellVerbReconciliation?.MatchingLogicalCandidateCount}, DesiredEnabled={shellVerbReconciliation?.DesiredEnabled}, ObservedEnabled={shellVerbReconciliation?.ObservedEnabled}, ReconciliationFailure={shellVerbReconciliation?.FailureReason ?? "<none>"}, ErrorCode={PipeErrorCodes.RegistryMutationVerificationFailed}.",
+                    $"SetEnabledVerificationFailed: ItemId={item.Id}, EntryKind={item.EntryKind}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, SourceRootPath={item.SourceRootPath}, KeyName={item.KeyName}, PhysicalCandidateCount={shellVerbReconciliation?.MatchingPhysicalCandidateCount ?? shellExtensionReconciliation?.MatchingPhysicalCandidateCount}, PhysicalTargetExists={shellVerbReconciliation?.TargetPathExists ?? shellExtensionReconciliation?.TargetPathExists}, PhysicalMismatchedPaths={shellVerbReconciliation?.MismatchedPhysicalPathsText ?? shellExtensionReconciliation?.MismatchedPhysicalPathsText ?? "<none>"}, ActivePaths={shellExtensionReconciliation?.ActivePathsText ?? "<none>"}, DisabledPaths={shellExtensionReconciliation?.DisabledPathsText ?? "<none>"}, HandlerMismatchedPaths={shellExtensionReconciliation?.HandlerMismatchedPathsText ?? "<none>"}, RefreshedItemId={refreshedLogical?.Id ?? "<none>"}, RefreshedBackendRegistryPath={refreshedLogical?.BackendRegistryPath ?? "<none>"}, RefreshedIsEnabled={refreshedLogical?.IsEnabled}, RefreshedHasConsistencyIssue={refreshedLogical?.HasConsistencyIssue}, LogicalCandidateCount={shellVerbReconciliation?.MatchingLogicalCandidateCount ?? shellExtensionReconciliation?.MatchingLogicalCandidateCount}, DesiredEnabled={shellVerbReconciliation?.DesiredEnabled ?? shellExtensionReconciliation?.DesiredEnabled}, ObservedEnabled={shellVerbReconciliation?.ObservedEnabled ?? shellExtensionReconciliation?.ObservedEnabled}, ReconciliationFailure={shellVerbReconciliation?.FailureReason ?? shellExtensionReconciliation?.FailureReason ?? "<none>"}, ErrorCode={PipeErrorCodes.RegistryMutationVerificationFailed}.",
                     cancellationToken);
                 throw new ProtectedRegistryMutationException(
                     PipeErrorCodes.RegistryMutationVerificationFailed,
@@ -737,8 +782,19 @@ public sealed class ContextMenuRegistryCatalog
                     cancellationToken);
             }
 
+            if (shellExtensionReconciliation is { UsedPhysicalSourceFallback: true })
+            {
+                await _logger.LogAsync(
+                    $"SetEnabledLogicalReconciliationUsedPhysicalSource: ItemId={item.Id}, EntryKind={item.EntryKind}, Category={item.Category}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, SourceRootPath={item.SourceRootPath}, KeyName={item.KeyName}, HandlerClsid={item.HandlerClsid ?? "<none>"}, PhysicalCandidateCount={shellExtensionReconciliation.MatchingPhysicalCandidateCount}, ActivePaths={shellExtensionReconciliation.ActivePathsText}, DisabledPaths={shellExtensionReconciliation.DisabledPathsText}, LogicalCandidateCount={shellExtensionReconciliation.MatchingLogicalCandidateCount}, DesiredEnabled={shellExtensionReconciliation.DesiredEnabled}, ObservedEnabled={shellExtensionReconciliation.ObservedEnabled}.",
+                    cancellationToken);
+            }
+
             var states = await _stateStore.LoadAsync(cancellationToken);
-            var linkedEntries = GetStateLinkedEntries(snapshot, item);
+            // For scene-only classic handlers the global snapshot intentionally has
+            // no entry. Persist the verified physical projection so a later scene
+            // operation retains the mirror path that actually exists.
+            var stateEntry = shellExtensionReconciliation?.Entry ?? item;
+            var linkedEntries = GetStateLinkedEntries(snapshot, stateEntry);
             foreach (var linkedEntry in linkedEntries)
             {
                 // One user gesture may affect several projected entries, so we keep
@@ -1601,7 +1657,7 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private async Task<IReadOnlyList<ContextMenuEntry>> FindEntriesByIdAsync(
+    internal async Task<IReadOnlyList<ContextMenuEntry>> FindEntriesByIdAsync(
         string itemId,
         CancellationToken cancellationToken,
         BackendUserContext? userContext = null)
@@ -1615,6 +1671,11 @@ public sealed class ContextMenuRegistryCatalog
         var stableRelativePath = itemId[..separatorIndex];
         var keyName = itemId[(separatorIndex + 1)..];
         var candidates = new List<ContextMenuEntry>();
+        var category = DetermineCategoryFromPath(stableRelativePath);
+        var entryKind = stableRelativePath.Contains(@"\shellex\", StringComparison.OrdinalIgnoreCase)
+            ? ContextMenuEntryKind.ShellExtension
+            : ContextMenuEntryKind.ShellVerb;
+        var physicalRootPaths = GetPhysicalSourceRootPaths(stableRelativePath, entryKind);
 
         var scope = userContext is null
             ? RegistryRootInstanceScope.AllKnownInstances
@@ -1622,94 +1683,93 @@ public sealed class ContextMenuRegistryCatalog
 
         foreach (var instance in EnumerateRootInstances(scope, userContext))
         {
-            using var baseKey = instance.OpenBaseKey(stableRelativePath);
-            if (baseKey is null)
+            foreach (var physicalRootPath in physicalRootPaths)
             {
-                continue;
+                using var baseKey = instance.OpenBaseKey(physicalRootPath);
+                if (baseKey is null)
+                {
+                    continue;
+                }
+
+                using var itemKey = baseKey.OpenSubKey(keyName, writable: false);
+                if (itemKey is null)
+                {
+                    continue;
+                }
+
+                var defaultValue = itemKey.GetValue(null)?.ToString();
+                var handlerClsid = entryKind == ContextMenuEntryKind.ShellExtension
+                    ? ResolveShellExtensionHandlerClsid(keyName, defaultValue)
+                    : null;
+                var displayName = ResolveDisplayName(
+                    new RegistryRootDescriptor(category, stableRelativePath, entryKind),
+                    itemKey,
+                    keyName,
+                    defaultValue,
+                    handlerClsid);
+                var editableText = entryKind == ContextMenuEntryKind.ShellVerb
+                    ? ResolveEditableText(itemKey, defaultValue)
+                    : null;
+                using var commandKey = entryKind == ContextMenuEntryKind.ShellVerb
+                    ? itemKey.OpenSubKey("command", writable: false)
+                    : null;
+                var commandText = commandKey?.GetValue(null)?.ToString();
+                var canEditCommandText = entryKind == ContextMenuEntryKind.ShellVerb
+                    && CanEditCommandText(itemKey, commandKey);
+
+                var (iconPath, iconIndex) = entryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
+                    _ => (null, 0)
+                };
+
+                var filePath = entryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
+                    _ => null
+                };
+
+                iconPath = GuidMetadataCatalog.NormalizeCandidatePath(iconPath, filePath);
+
+                var effectiveRelativePath = $@"{physicalRootPath}\{keyName}";
+                var isEnabled = entryKind switch
+                {
+                    ContextMenuEntryKind.ShellVerb => ShellVerbVisibility.IsEnabled(itemKey),
+                    ContextMenuEntryKind.ShellExtension => !IsDisabledContextMenuHandlersPath(effectiveRelativePath),
+                    _ => true
+                };
+
+                candidates.Add(new ContextMenuEntry
+                {
+                    Id = itemId,
+                    Category = category,
+                    EntryKind = entryKind,
+                    KeyName = keyName,
+                    DisplayName = displayName,
+                    EditableText = editableText,
+                    RegistryPath = effectiveRelativePath,
+                    BackendRegistryPath = instance.ComposeAbsolutePath(effectiveRelativePath),
+                    SourceRootPath = stableRelativePath,
+                    CommandText = commandText,
+                    CanEditCommandText = canEditCommandText,
+                    CanToggle = entryKind != ContextMenuEntryKind.ShellExtension
+                        || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
+                    HandlerClsid = handlerClsid,
+                    IconPath = iconPath,
+                    IconIndex = iconIndex,
+                    FilePath = filePath,
+                    OnlyWithShift = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("Extended") is not null,
+                    OnlyInExplorer = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("OnlyInBrowserWindow") is not null,
+                    NoWorkingDirectory = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NoWorkingDirectory") is not null,
+                    NeverDefault = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NeverDefault") is not null,
+                    ShowAsDisabledIfHidden = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("ShowAsDisabledIfHidden") is not null,
+                    IsEnabled = isEnabled,
+                    IsPresentInRegistry = true,
+                    Notes = BuildNotes(entryKind, commandText, handlerClsid)
+                });
             }
-
-            using var itemKey = baseKey.OpenSubKey(keyName, writable: false);
-            if (itemKey is null)
-            {
-                continue;
-            }
-
-            var category = DetermineCategoryFromPath(stableRelativePath);
-            var entryKind = stableRelativePath.Contains(@"\shellex\", StringComparison.OrdinalIgnoreCase)
-                ? ContextMenuEntryKind.ShellExtension
-                : ContextMenuEntryKind.ShellVerb;
-            var defaultValue = itemKey.GetValue(null)?.ToString();
-            var handlerClsid = entryKind == ContextMenuEntryKind.ShellExtension
-                ? ResolveShellExtensionHandlerClsid(keyName, defaultValue)
-                : null;
-            var displayName = ResolveDisplayName(
-                new RegistryRootDescriptor(category, stableRelativePath, entryKind),
-                itemKey,
-                keyName,
-                defaultValue,
-                handlerClsid);
-            var editableText = entryKind == ContextMenuEntryKind.ShellVerb
-                ? ResolveEditableText(itemKey, defaultValue)
-                : null;
-            using var commandKey = entryKind == ContextMenuEntryKind.ShellVerb
-                ? itemKey.OpenSubKey("command", writable: false)
-                : null;
-            var commandText = commandKey?.GetValue(null)?.ToString();
-            var canEditCommandText = entryKind == ContextMenuEntryKind.ShellVerb
-                && CanEditCommandText(itemKey, commandKey);
-
-            var (iconPath, iconIndex) = entryKind switch
-            {
-                ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
-                ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
-                _ => (null, 0)
-            };
-
-            var filePath = entryKind switch
-            {
-                ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
-                ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
-                _ => null
-            };
-
-            iconPath = GuidMetadataCatalog.NormalizeCandidatePath(iconPath, filePath);
-
-            var effectiveRelativePath = $@"{stableRelativePath}\{keyName}";
-            var isEnabled = entryKind switch
-            {
-                ContextMenuEntryKind.ShellVerb => ShellVerbVisibility.IsEnabled(itemKey),
-                ContextMenuEntryKind.ShellExtension => !IsDisabledContextMenuHandlersPath(effectiveRelativePath),
-                _ => true
-            };
-
-            candidates.Add(new ContextMenuEntry
-            {
-                Id = itemId,
-                Category = category,
-                EntryKind = entryKind,
-                KeyName = keyName,
-                DisplayName = displayName,
-                EditableText = editableText,
-                RegistryPath = effectiveRelativePath,
-                BackendRegistryPath = instance.ComposeAbsolutePath(effectiveRelativePath),
-                SourceRootPath = stableRelativePath,
-                CommandText = commandText,
-                CanEditCommandText = canEditCommandText,
-                CanToggle = entryKind != ContextMenuEntryKind.ShellExtension
-                    || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
-                HandlerClsid = handlerClsid,
-                IconPath = iconPath,
-                IconIndex = iconIndex,
-                FilePath = filePath,
-                OnlyWithShift = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("Extended") is not null,
-                OnlyInExplorer = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("OnlyInBrowserWindow") is not null,
-                NoWorkingDirectory = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NoWorkingDirectory") is not null,
-                NeverDefault = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("NeverDefault") is not null,
-                ShowAsDisabledIfHidden = entryKind == ContextMenuEntryKind.ShellVerb && itemKey.GetValue("ShowAsDisabledIfHidden") is not null,
-                IsEnabled = isEnabled,
-                IsPresentInRegistry = true,
-                Notes = BuildNotes(entryKind, commandText, handlerClsid)
-            });
         }
 
         await Task.CompletedTask;
@@ -1722,6 +1782,29 @@ public sealed class ContextMenuRegistryCatalog
         BackendUserContext? userContext = null)
         => SelectPreferredDeleteCandidate(
             await FindEntriesByIdAsync(itemId, cancellationToken, userContext));
+
+    internal static IReadOnlyList<string> GetPhysicalSourceRootPaths(
+        string stableRelativePath,
+        ContextMenuEntryKind entryKind)
+    {
+        if (entryKind != ContextMenuEntryKind.ShellExtension)
+        {
+            return [stableRelativePath];
+        }
+
+        var activeRootPath = stableRelativePath.Replace(
+            @"\shellex\-ContextMenuHandlers",
+            @"\shellex\ContextMenuHandlers",
+            StringComparison.OrdinalIgnoreCase);
+        var disabledRootPath = activeRootPath.Replace(
+            @"\shellex\ContextMenuHandlers",
+            @"\shellex\-ContextMenuHandlers",
+            StringComparison.OrdinalIgnoreCase);
+
+        return string.Equals(activeRootPath, disabledRootPath, StringComparison.OrdinalIgnoreCase)
+            ? [stableRelativePath]
+            : [activeRootPath, disabledRootPath];
+    }
 
     internal static ShellVerbMutationReconciliation ReconcileShellVerbMutation(
         ContextMenuEntry item,
@@ -1765,6 +1848,71 @@ public sealed class ContextMenuRegistryCatalog
             failureReason);
     }
 
+    internal static ShellExtensionMutationReconciliation ReconcileShellExtensionMutation(
+        ContextMenuEntry item,
+        IReadOnlyList<ContextMenuEntry> physicalCandidates,
+        ContextMenuEntry? refreshedLogicalEntry,
+        bool requestedEnabled)
+    {
+        var matchingPhysicalCandidates = physicalCandidates
+            .Where(candidate => candidate.EntryKind == ContextMenuEntryKind.ShellExtension
+                                && string.Equals(candidate.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var expectedTargetPath = GetSiblingContextMenuHandlersPath(item.BackendRegistryPath, requestedEnabled);
+        var targetPathExists = matchingPhysicalCandidates.Any(candidate =>
+            string.Equals(candidate.BackendRegistryPath, expectedTargetPath, StringComparison.OrdinalIgnoreCase));
+        var mismatchedPhysicalPaths = matchingPhysicalCandidates
+            .Where(candidate => candidate.IsEnabled != requestedEnabled)
+            .Select(static candidate => candidate.BackendRegistryPath)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        string[] handlerMismatchedPaths = string.IsNullOrWhiteSpace(item.HandlerClsid)
+            ? []
+            : matchingPhysicalCandidates
+                .Where(candidate => !string.Equals(candidate.HandlerClsid, item.HandlerClsid, StringComparison.OrdinalIgnoreCase))
+                .Select(static candidate => candidate.BackendRegistryPath)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        var activePaths = matchingPhysicalCandidates
+            .Where(static candidate => candidate.IsEnabled)
+            .Select(static candidate => candidate.BackendRegistryPath)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var disabledPaths = matchingPhysicalCandidates
+            .Where(static candidate => !candidate.IsEnabled)
+            .Select(static candidate => candidate.BackendRegistryPath)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var logicalMatchesRequest = refreshedLogicalEntry is null || refreshedLogicalEntry.IsEnabled == requestedEnabled;
+        var failureReason = matchingPhysicalCandidates.Length == 0
+            ? "No physical Shell Extension candidate was found after mutation."
+            : !targetPathExists
+                ? "The expected active or disabled Shell Extension destination does not exist after mutation."
+                : mismatchedPhysicalPaths.Length > 0
+                    ? "One or more physical Shell Extension candidates do not match the requested state."
+                    : handlerMismatchedPaths.Length > 0
+                        ? "One or more physical Shell Extension candidates no longer match the requested handler identity."
+                        : !logicalMatchesRequest
+                            ? "The refreshed logical candidate does not match the requested state."
+                            : null;
+        var physicalEntry = SelectPreferredDeleteCandidate(matchingPhysicalCandidates);
+        var entry = refreshedLogicalEntry ?? physicalEntry;
+
+        return new ShellExtensionMutationReconciliation(
+            entry,
+            matchingPhysicalCandidates.Length,
+            refreshedLogicalEntry is null ? 0 : 1,
+            targetPathExists,
+            mismatchedPhysicalPaths,
+            handlerMismatchedPaths,
+            activePaths,
+            disabledPaths,
+            requestedEnabled,
+            physicalEntry?.IsEnabled,
+            refreshedLogicalEntry is null && physicalEntry is not null,
+            failureReason);
+    }
+
     internal sealed record ShellVerbMutationReconciliation(
         ContextMenuEntry? Entry,
         int MatchingPhysicalCandidateCount,
@@ -1781,6 +1929,34 @@ public sealed class ContextMenuRegistryCatalog
         public string MismatchedPhysicalPathsText => MismatchedPhysicalPaths.Count == 0
             ? "<none>"
             : string.Join(";", MismatchedPhysicalPaths);
+    }
+
+    internal sealed record ShellExtensionMutationReconciliation(
+        ContextMenuEntry? Entry,
+        int MatchingPhysicalCandidateCount,
+        int MatchingLogicalCandidateCount,
+        bool TargetPathExists,
+        IReadOnlyList<string> MismatchedPhysicalPaths,
+        IReadOnlyList<string> HandlerMismatchedPaths,
+        IReadOnlyList<string> ActivePaths,
+        IReadOnlyList<string> DisabledPaths,
+        bool DesiredEnabled,
+        bool? ObservedEnabled,
+        bool UsedPhysicalSourceFallback,
+        string? FailureReason)
+    {
+        public bool IsVerified => FailureReason is null && Entry is not null;
+
+        public string MismatchedPhysicalPathsText => FormatPaths(MismatchedPhysicalPaths);
+
+        public string HandlerMismatchedPathsText => FormatPaths(HandlerMismatchedPaths);
+
+        public string ActivePathsText => FormatPaths(ActivePaths);
+
+        public string DisabledPathsText => FormatPaths(DisabledPaths);
+
+        private static string FormatPaths(IReadOnlyList<string> paths)
+            => paths.Count == 0 ? "<none>" : string.Join(";", paths);
     }
 
     private async Task<PipeResponse> RemoveMissingItemStateAsync(ContextMenuEntry item, CancellationToken cancellationToken)
@@ -2024,7 +2200,7 @@ public sealed class ContextMenuRegistryCatalog
                 }
                 break;
             case ContextMenuEntryKind.ShellExtension:
-                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken);
+                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken, userContext);
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -2079,7 +2255,7 @@ public sealed class ContextMenuRegistryCatalog
                 SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable: false);
                 break;
             case ContextMenuEntryKind.ShellExtension:
-                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken);
+                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken, userContext);
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -3002,7 +3178,11 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private async Task SetShellExtensionEnabledAsync(ContextMenuEntry item, bool enable, CancellationToken cancellationToken)
+    private async Task SetShellExtensionEnabledAsync(
+        ContextMenuEntry item,
+        bool enable,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
         if (item.IsWindows11ContextMenu)
         {
@@ -3015,14 +3195,28 @@ public sealed class ContextMenuRegistryCatalog
                 $"'{item.RegistryPath}' is not a classic ContextMenuHandlers registration and has no verified per-registration toggle operation.");
         }
 
-        // A classic Shell Extension logical item can be backed by several
-        // physical registrations that share the same stable Id (for example a
-        // machine-level HKLM copy and a per-user HKEY_USERS copy). Moving only
-        // the snapshot's preferred physical registration would leave the other
-        // copies active and make the logical item appear unchanged after the
-        // post-mutation refresh (REGISTRY_MUTATION_VERIFICATION_FAILED), so
-        // every physical copy that shares the Id is moved together.
-        var physicalEntries = ResolvePhysicalShellExtensionEntries(item, EnumerateEntries(MonitoredRoots));
+        // Re-resolve both active and disabled mirror containers from the stable
+        // Id. Scene roots (for example SystemFileAssociations) intentionally do
+        // not belong to MonitoredRoots, so enumerating only the global catalog
+        // would silently reduce this to an unverified frontend fallback path.
+        var physicalCandidates = await FindEntriesByIdAsync(item.Id, cancellationToken, userContext);
+        if (physicalCandidates.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"The physical Shell Extension registration for '{item.Id}' could not be re-resolved.");
+        }
+
+        var physicalEntries = ResolvePhysicalShellExtensionEntries(item, physicalCandidates);
+
+        if (!string.IsNullOrWhiteSpace(item.HandlerClsid)
+            && physicalEntries.Any(entry => !string.Equals(
+                entry.HandlerClsid,
+                item.HandlerClsid,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"The physical Shell Extension registration for '{item.Id}' no longer matches handler '{item.HandlerClsid}'.");
+        }
 
         foreach (var physical in physicalEntries)
         {
@@ -5020,7 +5214,10 @@ public sealed class ContextMenuRegistryCatalog
             yield break;
         }
 
-        foreach (var root in CreateShellSceneRoots(ContextMenuCategory.File, $@"SystemFileAssociations\{scopeValue.Trim()}"))
+        foreach (var root in CreateShellSceneRoots(
+                     ContextMenuCategory.File,
+                     $@"SystemFileAssociations\{scopeValue.Trim()}",
+                     RegistryRootInstanceScope.MachineAndFrontendUser))
         {
             yield return root;
         }
