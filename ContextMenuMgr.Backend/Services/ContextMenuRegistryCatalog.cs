@@ -693,17 +693,48 @@ public sealed class ContextMenuRegistryCatalog
                         throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
                 }
 
-            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
+            IReadOnlyList<ContextMenuEntry> physicalCandidates = [];
+            if (item.EntryKind == ContextMenuEntryKind.ShellVerb && !item.IsWindows11ContextMenu)
+            {
+                // A File Types or scene item can live outside MonitoredRoots. Re-open
+                // the exact stable source before asking the normal catalog to project
+                // it, because the normal snapshot intentionally does not enumerate
+                // every ProgID root in Software\Classes.
+                physicalCandidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
+            }
+
+            var refreshedLogical = (await GetSnapshotAsync(cancellationToken, userContext))
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
-            if (refreshed is null || refreshed.IsEnabled != enable)
+            var refreshed = refreshedLogical;
+            ShellVerbMutationReconciliation? shellVerbReconciliation = null;
+            if (item.EntryKind == ContextMenuEntryKind.ShellVerb && !item.IsWindows11ContextMenu)
+            {
+                shellVerbReconciliation = ReconcileShellVerbMutation(
+                    item,
+                    physicalCandidates,
+                    refreshedLogical,
+                    enable);
+                refreshed = shellVerbReconciliation.Entry;
+            }
+
+            if (shellVerbReconciliation is { IsVerified: false }
+                || refreshed is null
+                || refreshed.IsEnabled != enable)
             {
                 await _logger.LogAsync(
                     RuntimeLogLevel.Warning,
-                    $"SetEnabledVerificationFailed: ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, RefreshedBackendRegistryPath={refreshed?.BackendRegistryPath ?? "<none>"}, RefreshedIsEnabled={refreshed?.IsEnabled}, RefreshedHasConsistencyIssue={refreshed?.HasConsistencyIssue}, ErrorCode={PipeErrorCodes.RegistryMutationVerificationFailed}.",
+                    $"SetEnabledVerificationFailed: ItemId={item.Id}, EntryKind={item.EntryKind}, Category={item.Category}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, SourceRootPath={item.SourceRootPath}, KeyName={item.KeyName}, PhysicalCandidateCount={shellVerbReconciliation?.MatchingPhysicalCandidateCount}, PhysicalTargetExists={shellVerbReconciliation?.TargetPathExists}, PhysicalMismatchedPaths={shellVerbReconciliation?.MismatchedPhysicalPathsText ?? "<none>"}, RefreshedItemId={refreshedLogical?.Id ?? "<none>"}, RefreshedBackendRegistryPath={refreshedLogical?.BackendRegistryPath ?? "<none>"}, RefreshedIsEnabled={refreshedLogical?.IsEnabled}, RefreshedHasConsistencyIssue={refreshedLogical?.HasConsistencyIssue}, LogicalCandidateCount={shellVerbReconciliation?.MatchingLogicalCandidateCount}, DesiredEnabled={shellVerbReconciliation?.DesiredEnabled}, ObservedEnabled={shellVerbReconciliation?.ObservedEnabled}, ReconciliationFailure={shellVerbReconciliation?.FailureReason ?? "<none>"}, ErrorCode={PipeErrorCodes.RegistryMutationVerificationFailed}.",
                     cancellationToken);
                 throw new ProtectedRegistryMutationException(
                     PipeErrorCodes.RegistryMutationVerificationFailed,
                     $"The registry change for '{item.DisplayName}' could not be verified after refresh.");
+            }
+
+            if (shellVerbReconciliation is { UsedPhysicalSourceFallback: true })
+            {
+                await _logger.LogAsync(
+                    $"SetEnabledLogicalReconciliationUsedPhysicalSource: ItemId={item.Id}, EntryKind={item.EntryKind}, Category={item.Category}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, SourceRootPath={item.SourceRootPath}, KeyName={item.KeyName}, PhysicalCandidateCount={shellVerbReconciliation.MatchingPhysicalCandidateCount}, LogicalCandidateCount={shellVerbReconciliation.MatchingLogicalCandidateCount}, DesiredEnabled={shellVerbReconciliation.DesiredEnabled}, ObservedEnabled={shellVerbReconciliation.ObservedEnabled}.",
+                    cancellationToken);
             }
 
             var states = await _stateStore.LoadAsync(cancellationToken);
@@ -1570,7 +1601,7 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private async Task<ContextMenuEntry?> TryFindEntryByIdAsync(
+    private async Task<IReadOnlyList<ContextMenuEntry>> FindEntriesByIdAsync(
         string itemId,
         CancellationToken cancellationToken,
         BackendUserContext? userContext = null)
@@ -1578,7 +1609,7 @@ public sealed class ContextMenuRegistryCatalog
         var separatorIndex = itemId.LastIndexOf('|');
         if (separatorIndex < 0)
         {
-            return null;
+            return [];
         }
 
         var stableRelativePath = itemId[..separatorIndex];
@@ -1682,7 +1713,74 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         await Task.CompletedTask;
-        return SelectPreferredDeleteCandidate(candidates);
+        return candidates;
+    }
+
+    private async Task<ContextMenuEntry?> TryFindEntryByIdAsync(
+        string itemId,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext = null)
+        => SelectPreferredDeleteCandidate(
+            await FindEntriesByIdAsync(itemId, cancellationToken, userContext));
+
+    internal static ShellVerbMutationReconciliation ReconcileShellVerbMutation(
+        ContextMenuEntry item,
+        IReadOnlyList<ContextMenuEntry> physicalCandidates,
+        ContextMenuEntry? refreshedLogicalEntry,
+        bool requestedEnabled)
+    {
+        var matchingPhysicalCandidates = physicalCandidates
+            .Where(candidate => candidate.EntryKind == ContextMenuEntryKind.ShellVerb
+                                && string.Equals(candidate.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var targetPathExists = matchingPhysicalCandidates.Any(candidate =>
+            string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
+        var mismatchedPhysicalPaths = matchingPhysicalCandidates
+            .Where(candidate => candidate.IsEnabled != requestedEnabled)
+            .Select(static candidate => candidate.BackendRegistryPath)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var logicalMatchesRequest = refreshedLogicalEntry is null || refreshedLogicalEntry.IsEnabled == requestedEnabled;
+        var failureReason = matchingPhysicalCandidates.Length == 0
+            ? "No physical shell-verb candidate was found after mutation."
+            : !targetPathExists
+                ? "The physical shell-verb path targeted by the mutation no longer exists."
+                : mismatchedPhysicalPaths.Length > 0
+                    ? "One or more physical shell-verb candidates do not match the requested visibility state."
+                    : !logicalMatchesRequest
+                        ? "The refreshed logical candidate does not match the requested visibility state."
+                        : null;
+        var physicalEntry = SelectPreferredDeleteCandidate(matchingPhysicalCandidates);
+        var entry = refreshedLogicalEntry ?? physicalEntry;
+
+        return new ShellVerbMutationReconciliation(
+            entry,
+            matchingPhysicalCandidates.Length,
+            refreshedLogicalEntry is null ? 0 : 1,
+            targetPathExists,
+            mismatchedPhysicalPaths,
+            requestedEnabled,
+            physicalEntry?.IsEnabled,
+            refreshedLogicalEntry is null && physicalEntry is not null,
+            failureReason);
+    }
+
+    internal sealed record ShellVerbMutationReconciliation(
+        ContextMenuEntry? Entry,
+        int MatchingPhysicalCandidateCount,
+        int MatchingLogicalCandidateCount,
+        bool TargetPathExists,
+        IReadOnlyList<string> MismatchedPhysicalPaths,
+        bool DesiredEnabled,
+        bool? ObservedEnabled,
+        bool UsedPhysicalSourceFallback,
+        string? FailureReason)
+    {
+        public bool IsVerified => FailureReason is null && Entry is not null;
+
+        public string MismatchedPhysicalPathsText => MismatchedPhysicalPaths.Count == 0
+            ? "<none>"
+            : string.Join(";", MismatchedPhysicalPaths);
     }
 
     private async Task<PipeResponse> RemoveMissingItemStateAsync(ContextMenuEntry item, CancellationToken cancellationToken)

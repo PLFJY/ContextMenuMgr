@@ -108,6 +108,8 @@
 
 不要承诺所有菜单项都能用同一种方式开关。某些项由第三方安装器、系统策略或 COM handler 自身逻辑控制，项目只能 best-effort 地修改注册表状态并记录结果。
 
+ShellVerb 开关有两层验证。首先在刚写入的物理 key 上用 `ShellVerbVisibility.IsEnabled` read-back 验证；随后按稳定 `Id` 重读同一 Classes source root 的所有物理候选。File Types / scene 的 ProgID root 不一定属于常规 `MonitoredRoots`，因此常规 snapshot 未返回该项时，会以这个已验证的物理候选作为操作结果，而不会把“常规目录未扫描此 ProgID”误报为注册表写入失败。反之，目标物理 key 缺失，或任一同 Id 物理候选仍不符合请求状态，操作仍失败；不会以缺失 logical snapshot 伪造成功。
+
 Recycle Bin 页面额外投影一个虚拟传统项 `special:recyclebin:pintohome`，用于控制系统的“Pin to Quick access” verb。它的真实注册表位置是 `HKCR\Folder\shell\pintohome`，但只在 Recycle Bin 分类显示。启用状态不使用普通 shell verb 隐藏值，而是检查 `AppliesTo` 是否包含 `System.ParsingName:<>"::{645FF040-5081-101B-9F08-00AA002F954E}"`；禁用时只追加这个 Recycle Bin 排除条件，启用时只移除这个排除条件并保留其它 `AppliesTo` 子句。如果 `pintohome` key 不存在，快照不显示该虚拟项。
 
 普通 ShellVerb 的命令文本编辑不解析命令行、不拆分程序和参数、也不重写引号；`SetCommandText` 只把用户输入的字符串原样写到 `<verb>\command` 的默认 `REG_SZ`。后端会先检查 `CanEditCommandText` 和当前注册表形态，并经过 Registry Write Protection preflight；不支持 Shell Extension、Windows 11 packaged context menu、`SubCommands` / `ExtendedSubCommandsKey` 父级、`DelegateExecute`、`DropTarget\CLSID` 或 `ExplorerCommandHandler` 项。
