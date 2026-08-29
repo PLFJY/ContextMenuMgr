@@ -310,6 +310,8 @@ Color="{DynamicResource TextOnAccentFillColorPrimary}"
 
 ## 11. 图标
 
+按应用管理页、传统分类页和复用 `SceneBrowserView` 的 Legacy 页面，对可管理菜单项均在既有 ToggleSwitch 左边显示一个无文字的 `Apps24` WPF-UI 按钮。该按钮对注册表级联 Shell Verb（`CanManageSubMenuItems`）打开按需子菜单窗口；对 CLSID 命中 `DetailedEditDic.xml` 白名单的动态 Shell Extension（例如 7-Zip、Bandizip）打开独立的应用设置窗口。后者只改字典中明确列出的软件配置项，不把任意 COM 动态子项伪装成可控制的注册表子项。Tooltip 使用 `ManageSubMenuItems` 本地化资源，任何一种入口都不能把子项平铺进主列表。
+
 本项目有两类图标：
 
 | 图标类型 | 来源 | 用途 |

@@ -1541,6 +1541,7 @@ Continue anyway? (Not recommended)</value>
   <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>Enable all</value></data>
   <data name="Back" xml:space="preserve"><value>Back</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>Loading…</value></data>
+  <data name="ManageSubMenuItems" xml:space="preserve"><value>Manage submenu items</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>Batch manage</value></data>
   <data name="FileTypeBatchTitle" xml:space="preserve"><value>Related items for {0}</value></data>
   <data name="FileTypeBatchCommandIdentity" xml:space="preserve"><value>Command executable: {0}</value></data>

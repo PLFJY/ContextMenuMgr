@@ -65,6 +65,9 @@ public sealed record ContextMenuEntry
     /// </summary>
     public bool CanToggle { get; init; } = true;
 
+    /// <summary>Gets whether this classic shell verb has registry-defined children which can be managed on demand.</summary>
+    public bool CanManageSubMenuItems { get; init; }
+
     /// <summary>
     /// Gets or sets the handler Clsid.
     /// </summary>

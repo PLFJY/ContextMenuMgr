@@ -356,6 +356,10 @@ public sealed class NamedPipeBackendServer
                 => await _catalog.ApplyDisplayTextAsync(request.ItemId, request.TextValue, cancellationToken),
             PipeCommand.SetCommandText when request.ItemId is not null && request.TextValue is not null
                 => await _catalog.ApplyCommandTextAsync(request.ItemId, request.TextValue, cancellationToken),
+            PipeCommand.GetShellSubMenuItems when request.ParentItemId is not null
+                => await _catalog.GetShellSubMenuItemsAsync(request.ParentItemId, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
+            PipeCommand.SetShellSubMenuItemEnabled when request.ParentItemId is not null && request.SubMenuItemId is not null && request.Enable is not null
+                => await _catalog.SetShellSubMenuItemEnabledAsync(request.ParentItemId, request.SubMenuItemId, request.Enable.Value, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.GetRegistryProtectionSetting
                 => await _catalog.GetRegistryProtectionSettingAsync(cancellationToken),
             PipeCommand.SetRegistryProtectionSetting when request.Enable is not null

@@ -102,6 +102,7 @@
 | 类型 | 当前实现倾向 |
 | --- | --- |
 | `shell` verb | 普通开关通过 `ShellVerbVisibility` 统一判断和写入，综合处理 `HideBasedOnVelocityId`、`ProgrammaticAccessOnly`、`LegacyDisable` 和相关 `CommandFlags`，避免只依赖 `LegacyDisable`。 |
+| 级联 `shell` verb 子项 | 顶层快照只标记 `CanManageSubMenuItems`，不递归展开。按需读取 `SubCommands`、`ExtendedSubCommandsKey` 或父级 `shell`。`SubCommands` 禁用仅从该父级列表移除引用并保存恢复顺序，绝不全局修改共享 CommandStore 命令；其余物理 ShellVerb 子项复用可见性模型。 |
 | `shellex` handler | 可能在 `ContextMenuHandlers` 与 disabled mirror 路径之间移动。 |
 | disabled mirror path | 用 `-ContextMenuHandlers` 识别被移出的 handler。 |
 | Windows 自带标记 | `Extended`、`NoWorkingDirectory`、`NeverDefault` 等属于属性，不等于禁用状态。 |

@@ -8,6 +8,12 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class PersistedContextMenuState
 {
     /// <summary>
+    /// Per-parent disabled CommandStore references. The physical CommandStore
+    /// command is intentionally not changed: the parent SubCommands value is
+    /// the control domain.
+    /// </summary>
+    public List<PersistedShellSubMenuReferenceState> DisabledSubMenuReferences { get; set; } = [];
+    /// <summary>
     /// Gets or sets the id.
     /// </summary>
     public string Id { get; set; } = string.Empty;

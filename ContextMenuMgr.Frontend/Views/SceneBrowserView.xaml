@@ -327,14 +327,10 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <ui:ToggleSwitch
-                                        MinWidth="72"
-                                        Margin="0,0,0,8"
-                                        VerticalAlignment="Center"
-                                        Content="{Binding ToggleLabel}"
-                                        IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        IsEnabled="{Binding CanToggle}"
-                                        Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <StackPanel Margin="0,0,0,8" Orientation="Horizontal">
+                                        <ui:Button Width="36" Height="36" Margin="0,0,8,0" Appearance="Secondary" Command="{Binding ManageSubMenuItemsCommand}" ToolTip="{Binding ManageSubMenuItemsToolTip}" Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" Icon="{ui:SymbolIcon Symbol=Apps24}" />
+                                        <ui:ToggleSwitch MinWidth="72" VerticalAlignment="Center" Content="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanToggle}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
                                     <StackPanel Visibility="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <ui:Button
                                         MinWidth="88"

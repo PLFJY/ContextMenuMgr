@@ -16,6 +16,7 @@ public partial class DetailedEditGroupViewModel : ObservableObject
         DetailedEditRuleService ruleService,
         LocalizationService localization)
     {
+        _definition = definition;
         Title = definition.Title;
         RegistryPath = definition.RegistryPath;
         FilePath = definition.FilePath;
@@ -30,6 +31,8 @@ public partial class DetailedEditGroupViewModel : ObservableObject
     /// Gets the title.
     /// </summary>
     public string Title { get; }
+
+    public string? HandlerClsid => _definition.HandlerClsid;
 
     /// <summary>
     /// Gets the registry Path.
@@ -55,4 +58,6 @@ public partial class DetailedEditGroupViewModel : ObservableObject
     /// Gets the rules.
     /// </summary>
     public IReadOnlyList<DetailedEditRuleViewModel> Rules { get; }
+
+    private readonly DetailedEditGroupDefinition _definition;
 }

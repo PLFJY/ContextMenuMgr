@@ -107,7 +107,10 @@
                                                     <ui:TextBlock Margin="0,8,0,0" Opacity="0.78" Text="{Binding Notes}" TextWrapping="Wrap" Visibility="{Binding ShowNotes, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="1" Margin="12,0,0,0" HorizontalAlignment="Right">
-                                                    <ui:ToggleSwitch MinWidth="72" Margin="0,0,0,8" Content="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanToggle}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <StackPanel Margin="0,0,0,8" Orientation="Horizontal">
+                                                        <ui:Button Width="32" Height="32" Margin="0,0,8,0" Appearance="Secondary" Command="{Binding ManageSubMenuItemsCommand}" ToolTip="{Binding ManageSubMenuItemsToolTip}" Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" Icon="{ui:SymbolIcon Symbol=Apps24}" />
+                                                        <ui:ToggleSwitch MinWidth="72" Content="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanToggle}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    </StackPanel>
                                                     <ui:DropDownButton MinWidth="88" Appearance="Secondary" Content="{Binding MoreActionsText}" Icon="{ui:SymbolIcon Symbol=MoreHorizontal24}" Visibility="{Binding HasActionFlyout, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                         <ui:DropDownButton.Flyout>
                                                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">

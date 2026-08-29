@@ -25,6 +25,12 @@ public sealed record PipeRequest
     /// </summary>
     public ContextMenuEntry? Item { get; init; }
 
+    /// <summary>Trusted top-level parent identity used by shell submenu operations.</summary>
+    public string? ParentItemId { get; init; }
+
+    /// <summary>Stable child identity used by shell submenu operations.</summary>
+    public string? SubMenuItemId { get; init; }
+
     /// <summary>
     /// Gets or sets the shell Attribute.
     /// </summary>

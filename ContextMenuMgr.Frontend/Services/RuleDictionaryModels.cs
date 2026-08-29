@@ -73,6 +73,7 @@ public sealed record DetailedEditRuleDefinition(
 /// </summary>
 public sealed record DetailedEditGroupDefinition(
     string Title,
+    string? HandlerClsid,
     string? RegistryPath,
     string? FilePath,
     bool IsIniGroup,

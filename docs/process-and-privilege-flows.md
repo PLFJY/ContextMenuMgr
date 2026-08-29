@@ -176,6 +176,7 @@ ProbeHost 的边界：
 | 文件类型相关菜单批量管理 | 链路 A | 是 | 否 | `FindRelatedFileTypeMenuItems` 只在 File Types 隐藏批量管理视图打开/刷新时扫描 HKLM 与前端用户 `Software\Classes`，不参与服务启动扫描或普通 baseline。后续开关/删除/撤销复用普通 `SetEnabled` / `DeleteItem` / `UndoDelete`，scene-only 项通过请求中的 `ContextMenuEntry` fallback 定位；已删除备份项会合并回批量结果供撤销，文件类型核心 `open` / `edit` verb 不允许删除。 |
 | 编辑菜单显示名 | 链路 A | 可能需要 | 否 | `SetDisplayText`，受 Registry Write Protection preflight 影响。 |
 | 编辑传统 ShellVerb 命令文本 | 链路 A | 可能需要 | 否 | `SetCommandText` -> `ApplyCommandTextAsync`，只允许普通 legacy ShellVerb 写 `<verb>\command` 默认值，不处理 Shell Extension、Win11、SubCommands、DelegateExecute、DropTarget 或 ExplorerCommandHandler。 |
+| 管理经典级联 Shell Verb 子菜单 | 链路 A | 可能需要 | 否 | `GetShellSubMenuItems` 按需读取 `SubCommands`、`ExtendedSubCommandsKey` 或父级 `shell`；`SetShellSubMenuItemEnabled` 由后端重新解析稳定 parent/child identity。`SubCommands` 仅改父级引用并持久化被移除引用的顺序，不修改共享 CommandStore 项。 |
 | Registry Write Protection 设置 | 链路 A | 否 | 否 | 作用于受监控传统菜单根的 ACL。 |
 | Win11 新菜单项禁用/恢复 | 链路 A | 是 | 否 | user blocked list 必须带 `BackendUserContext`，机器级另有 HKLM blocked list。 |
 | Win11 全局恢复经典菜单设置 | 链路 A | 是 | 否 | 写 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32`，不得写服务 `HKCU` 或 HKLM；生效需要重启 Explorer 或重新登录。 |

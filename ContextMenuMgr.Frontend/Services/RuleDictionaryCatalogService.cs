@@ -153,6 +153,7 @@ public sealed class RuleDictionaryCatalogService
 
             result.Add(new DetailedEditGroupDefinition(
                 title,
+                groupElement.Element("Guid")?.Value.Trim(),
                 groupPath,
                 filePath,
                 isIniGroup,

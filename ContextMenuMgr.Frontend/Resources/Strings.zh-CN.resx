@@ -1541,6 +1541,7 @@
   <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>全部启用</value></data>
   <data name="Back" xml:space="preserve"><value>返回</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>正在加载…</value></data>
+  <data name="ManageSubMenuItems" xml:space="preserve"><value>管理子菜单</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>批量管理</value></data>
   <data name="FileTypeBatchTitle" xml:space="preserve"><value>{0} 的相关项</value></data>
   <data name="FileTypeBatchCommandIdentity" xml:space="preserve"><value>命令程序：{0}</value></data>

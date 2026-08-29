@@ -163,4 +163,8 @@ public interface IBackendClient : IAsyncDisposable
         DocumentIconProvider provider,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<ShellSubMenuItem>> GetShellSubMenuItemsAsync(string parentItemId, CancellationToken cancellationToken);
+
+    Task<ShellSubMenuItem?> SetShellSubMenuItemEnabledAsync(string parentItemId, string childItemId, bool enable, CancellationToken cancellationToken);
+
 }

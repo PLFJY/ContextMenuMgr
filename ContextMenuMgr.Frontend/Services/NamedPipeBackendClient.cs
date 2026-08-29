@@ -264,6 +264,18 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    public async Task<IReadOnlyList<ShellSubMenuItem>> GetShellSubMenuItemsAsync(string parentItemId, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.GetShellSubMenuItems, ParentItemId = parentItemId }, cancellationToken);
+        return response.ShellSubMenuItems;
+    }
+
+    public async Task<ShellSubMenuItem?> SetShellSubMenuItemEnabledAsync(string parentItemId, string childItemId, bool enable, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.SetShellSubMenuItemEnabled, ParentItemId = parentItemId, SubMenuItemId = childItemId, Enable = enable }, cancellationToken);
+        return response.ShellSubMenuItem;
+    }
+
     /// <summary>
     /// Gets registry Protection Setting Async.
     /// </summary>

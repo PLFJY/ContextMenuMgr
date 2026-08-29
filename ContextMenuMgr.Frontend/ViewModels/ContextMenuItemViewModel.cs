@@ -17,6 +17,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private readonly ContextMenuItemActionsService _actionsService;
     private readonly ContextMenuDeepAnalysisService? _deepAnalysisService;
     private readonly FrontendSettingsService? _settingsService;
+    private readonly ShellSubMenuDialogService? _shellSubMenuDialogService;
+    private readonly DetailedEditMenuDialogService? _detailedEditMenuDialogService;
+    private bool _hasCuratedMenuManagement;
     private readonly Func<ContextMenuItemViewModel, bool, Task<bool>>? _setEnabledAsync;
     private readonly Func<ContextMenuItemViewModel, ContextMenuShellAttribute, bool, Task<bool>>? _setShellAttributeAsync;
     private readonly Func<ContextMenuItemViewModel, string, Task<bool>>? _setDisplayTextAsync;
@@ -42,13 +45,17 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         Func<ContextMenuItemViewModel, Task<bool>>? acknowledgeItemStateAsync = null,
         Func<ContextMenuItemViewModel, string, Task<bool>>? setCommandTextAsync = null,
         ContextMenuDeepAnalysisService? deepAnalysisService = null,
-        FrontendSettingsService? settingsService = null)
+        FrontendSettingsService? settingsService = null,
+        ShellSubMenuDialogService? shellSubMenuDialogService = null,
+        DetailedEditMenuDialogService? detailedEditMenuDialogService = null)
     {
         _iconPreviewService = iconPreviewService;
         _localization = localization;
         _actionsService = actionsService;
         _settingsService = settingsService;
         _deepAnalysisService = deepAnalysisService;
+        _shellSubMenuDialogService = shellSubMenuDialogService;
+        _detailedEditMenuDialogService = detailedEditMenuDialogService;
         _setEnabledAsync = setEnabledAsync;
         _setShellAttributeAsync = setShellAttributeAsync;
         _setDisplayTextAsync = setDisplayTextAsync;
@@ -436,6 +443,14 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool ShowToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry;
 
+    public bool CanManageSubMenuItems => (Entry.CanManageSubMenuItems || _hasCuratedMenuManagement) && !IsDeleted && IsPresentInRegistry && !IsSubMenuLoading;
+
+    public string ManageSubMenuItemsToolTip => _localization.Translate("ManageSubMenuItems");
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanManageSubMenuItems))]
+    public partial bool IsSubMenuLoading { get; private set; }
+
     public bool CanPrimaryAction => IsDeleted || IsPresentInRegistry;
 
     public bool CanPermanentlyDelete => IsDeleted && HasBackup;
@@ -623,6 +638,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSearchOnline));
         OnPropertyChanged(nameof(CanToggle));
         OnPropertyChanged(nameof(ShowToggle));
+        OnPropertyChanged(nameof(CanManageSubMenuItems));
     }
 
     private void ApplyEntry(ContextMenuEntry entry)
@@ -672,6 +688,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             NoWorkingDirectory = entry.NoWorkingDirectory;
             NeverDefault = entry.NeverDefault;
             ShowAsDisabledIfHidden = entry.ShowAsDisabledIfHidden;
+            _hasCuratedMenuManagement = _detailedEditMenuDialogService?.CanManage(entry) == true;
         }
         finally
         {
@@ -899,6 +916,21 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private Task ExportRegistryAsync() => _actionsService.ExportRegistryAsync(this);
 
     [RelayCommand]
+    private async Task ManageSubMenuItemsAsync()
+    {
+        if (!CanManageSubMenuItems) return;
+        IsSubMenuLoading = true;
+        try
+        {
+            if (Entry.CanManageSubMenuItems && _shellSubMenuDialogService is not null)
+                await _shellSubMenuDialogService.ShowAsync(Entry);
+            else if (_detailedEditMenuDialogService is not null)
+                await _detailedEditMenuDialogService.ShowAsync(Entry);
+        }
+        finally { IsSubMenuLoading = false; }
+    }
+
+    [RelayCommand]
     private Task OpenClsidLocationAsync() => _actionsService.OpenClsidLocationAsync(this);
 
     [RelayCommand]
@@ -968,6 +1000,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CategoryName));
         OnPropertyChanged(nameof(StateLabel));
         OnPropertyChanged(nameof(ToggleLabel));
+        OnPropertyChanged(nameof(ManageSubMenuItemsToolTip));
         OnPropertyChanged(nameof(PendingApprovalBadgeText));
         OnPropertyChanged(nameof(CanReviewApproval));
         OnPropertyChanged(nameof(CanToggle));

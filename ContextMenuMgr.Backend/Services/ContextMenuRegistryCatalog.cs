@@ -473,6 +473,8 @@ public sealed class ContextMenuRegistryCatalog
                 : GetDetectedChangeDetails(entry, state, changeKind);
             var merged = entry with
             {
+                CanManageSubMenuItems = entry.CanManageSubMenuItems
+                    || state?.DisabledSubMenuReferences.Count > 0,
                 IsPendingApproval = state?.IsPendingApproval ?? false,
                 HasBackup = !string.IsNullOrWhiteSpace(state?.BackupFilePath),
                 DeletedAtUtc = state?.DeletedAtUtc,
@@ -1756,6 +1758,7 @@ public sealed class ContextMenuRegistryCatalog
                     CanEditCommandText = canEditCommandText,
                     CanToggle = entryKind != ContextMenuEntryKind.ShellExtension
                         || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
+                    CanManageSubMenuItems = entryKind == ContextMenuEntryKind.ShellVerb && HasManageableSubMenuItems(itemKey, instance.ComposeAbsolutePath(effectiveRelativePath)),
                     HandlerClsid = handlerClsid,
                     IconPath = iconPath,
                     IconIndex = iconIndex,
@@ -2566,6 +2569,7 @@ public sealed class ContextMenuRegistryCatalog
                     CanEditCommandText = canEditCommandText,
                     CanToggle = root.EntryKind != ContextMenuEntryKind.ShellExtension
                         || SupportsClassicShellExtensionContainerToggle(effectiveRelativePath),
+                    CanManageSubMenuItems = root.EntryKind == ContextMenuEntryKind.ShellVerb && HasManageableSubMenuItems(itemKey, instance.ComposeAbsolutePath(effectiveRelativePath)),
                     HandlerClsid = handlerClsid,
                     IconPath = iconPath,
                     IconIndex = iconIndex,
@@ -3112,6 +3116,186 @@ public sealed class ContextMenuRegistryCatalog
             RegexOptions.IgnoreCase);
 
         return string.IsNullOrWhiteSpace(updated) ? null : updated.Trim();
+    }
+
+    /// <summary>Loads registry-defined children for one verified cascading ShellVerb. This is deliberately on-demand.</summary>
+    public Task<PipeResponse> GetShellSubMenuItemsAsync(string parentItemId, CancellationToken cancellationToken, BackendUserContext? userContext)
+        => RunPersistentStateOperationAsync(async () =>
+        {
+            var parent = (await GetSnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(item => string.Equals(item.Id, parentItemId, StringComparison.OrdinalIgnoreCase));
+            if (parent is null || !parent.CanManageSubMenuItems)
+            {
+                return CreateFailure("The cascading menu registration is no longer available.");
+            }
+
+            using var parentKey = OpenRegistryKey(parent.BackendRegistryPath, writable: false);
+            if (parentKey is null)
+            {
+                return CreateFailure("The cascading menu registry key no longer exists.", parent);
+            }
+
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            states.TryGetValue(parent.Id, out var state);
+            var items = EnumerateShellSubMenuItems(parent, parentKey, state).ToArray();
+            return new PipeResponse { Success = true, Message = "Shell submenu loaded.", ShellSubMenuItems = items };
+        }, cancellationToken);
+
+    /// <summary>Applies a child toggle after re-resolving the parent and child from trusted identities.</summary>
+    public Task<PipeResponse> SetShellSubMenuItemEnabledAsync(string parentItemId, string childId, bool enable, CancellationToken cancellationToken, BackendUserContext? userContext)
+        => RunPersistentStateOperationAsync(async () =>
+        {
+            var parent = (await GetSnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(item => string.Equals(item.Id, parentItemId, StringComparison.OrdinalIgnoreCase));
+            if (parent is null || !parent.CanManageSubMenuItems)
+            {
+                return CreateFailure("The cascading menu registration is no longer available.");
+            }
+
+            using var parentKey = OpenRegistryKey(parent.BackendRegistryPath, writable: false);
+            if (parentKey is null)
+            {
+                return CreateFailure("The cascading menu registry key no longer exists.", parent);
+            }
+
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            states.TryGetValue(parent.Id, out var state);
+            var child = EnumerateShellSubMenuItems(parent, parentKey, state)
+                .FirstOrDefault(item => string.Equals(item.Id, childId, StringComparison.Ordinal));
+            if (child is null || child.IsSeparator || !child.CanToggle)
+            {
+                return CreateFailure("The requested submenu item is not safely manageable.", parent);
+            }
+
+            var correlationId = Guid.NewGuid();
+            if (child.SourceKind == ShellSubMenuSourceKind.SubCommands)
+            {
+                var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync("SetShellSubMenuItemEnabled", [parent.BackendRegistryPath], cancellationToken);
+                if (preflight is not null) return preflight;
+                using var writableParent = OpenRegistryKey(parent.BackendRegistryPath, writable: true)
+                    ?? throw new InvalidOperationException("The cascading menu registry key no longer exists.");
+                var before = writableParent.GetValue("SubCommands")?.ToString() ?? string.Empty;
+                var reference = child.ReferenceName!;
+                state ??= GetOrCreateState(states, parent);
+                var after = UpdateSubCommandsReference(before, reference, enable, state.DisabledSubMenuReferences);
+                writableParent.SetValue("SubCommands", after, RegistryValueKind.String);
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                await _stateStore.SaveAsync(states, cancellationToken);
+                ShellChangeNotifier.NotifyAssociationsChanged();
+                await _logger.LogAsync($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind=SubCommands, ChildId={child.Id}, ReferenceName={reference}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, SubCommandsBefore={before}, SubCommandsAfter={after}, Result=Success.", cancellationToken);
+            }
+            else
+            {
+                var target = ResolveSubMenuShellPath(parent, parentKey, child.SourceKind);
+                var keyName = child.KeyName;
+                var childPath = $@"{target.BackendPath}\{keyName}";
+                var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync("SetShellSubMenuItemEnabled", [childPath], cancellationToken);
+                if (preflight is not null) return preflight;
+                SetShellVerbEnabled(childPath, $@"{target.DisplayPath}\{keyName}", enable);
+                ShellChangeNotifier.NotifyAssociationsChanged();
+                await _logger.LogAsync($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind={child.SourceKind}, ChildId={child.Id}, ChildRegistryPath={childPath}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, Result=Success.", cancellationToken);
+            }
+
+            using var refreshedParent = OpenRegistryKey(parent.BackendRegistryPath, writable: false);
+            var refreshed = refreshedParent is null ? null : EnumerateShellSubMenuItems(parent, refreshedParent, state).FirstOrDefault(x => x.Id == childId);
+            return new PipeResponse { Success = true, Message = "Shell submenu item updated.", ShellSubMenuItem = refreshed ?? child with { IsEnabled = enable } };
+        }, cancellationToken);
+
+    private IEnumerable<ShellSubMenuItem> EnumerateShellSubMenuItems(ContextMenuEntry parent, RegistryKey parentKey, PersistedContextMenuState? state)
+    {
+        var subCommands = parentKey.GetValue("SubCommands")?.ToString();
+        if (subCommands is not null && (!string.IsNullOrWhiteSpace(subCommands) || state?.DisabledSubMenuReferences.Count > 0))
+        {
+            var index = 0;
+            foreach (var token in ParseSubCommands(subCommands))
+            {
+                if (token == "|")
+                {
+                    yield return new ShellSubMenuItem { Id = $"{parent.Id}|subcommands|separator|{index++}", ParentId = parent.Id, DisplayName = "|", KeyName = "|", IsSeparator = true, SourceKind = ShellSubMenuSourceKind.SubCommands };
+                    continue;
+                }
+                yield return CreateCommandStoreSubMenuItem(parent, token, enabled: true, index++);
+            }
+            foreach (var disabled in state?.DisabledSubMenuReferences ?? [])
+                if (!ParseSubCommands(subCommands).Contains(disabled.ReferenceName, StringComparer.OrdinalIgnoreCase))
+                    yield return CreateCommandStoreSubMenuItem(parent, disabled.ReferenceName, enabled: false, disabled.OriginalIndex);
+            yield break;
+        }
+
+        var source = !string.IsNullOrWhiteSpace(parentKey.GetValue("ExtendedSubCommandsKey")?.ToString())
+            ? ShellSubMenuSourceKind.ExtendedSubCommandsKey : ShellSubMenuSourceKind.ParentShell;
+        var shell = ResolveSubMenuShellPath(parent, parentKey, source);
+        using var shellKey = OpenRegistryKey(shell.BackendPath, writable: false);
+        if (shellKey is null) yield break;
+        var index2 = 0;
+        foreach (var keyName in shellKey.GetSubKeyNames())
+        {
+            using var childKey = shellKey.OpenSubKey(keyName, writable: false);
+            if (childKey is null) continue;
+            var flags = Convert.ToInt32(childKey.GetValue("CommandFlags", 0), CultureInfo.InvariantCulture);
+            var separator = flags % 16 >= 8;
+            var command = childKey.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString();
+            var (icon, iconIndex) = ShellMetadataResolver.ResolveVerbIcon(childKey, command);
+            yield return new ShellSubMenuItem
+            {
+                Id = $"{parent.Id}|{source}|{keyName}", ParentId = parent.Id, DisplayName = separator ? "|" : ShellMetadataResolver.ResolveVerbDisplayName(childKey, keyName), KeyName = keyName,
+                CommandText = command, IconPath = icon, IconIndex = iconIndex, IsEnabled = !separator && ShellVerbVisibility.IsEnabled(childKey), CanToggle = !separator,
+                IsSeparator = separator, IsShared = source == ShellSubMenuSourceKind.ExtendedSubCommandsKey, SourceKind = source
+            };
+            index2++;
+        }
+    }
+
+    private static ShellSubMenuItem CreateCommandStoreSubMenuItem(ContextMenuEntry parent, string reference, bool enabled, int index)
+    {
+        using var key = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\{reference}", writable: false);
+        var command = key?.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString();
+        var (icon, iconIndex) = key is null ? (null, 0) : ShellMetadataResolver.ResolveVerbIcon(key, command);
+        return new ShellSubMenuItem { Id = $"{parent.Id}|subcommands|{reference}|{index}", ParentId = parent.Id, DisplayName = key is null ? reference : ShellMetadataResolver.ResolveVerbDisplayName(key, reference), KeyName = reference, ReferenceName = reference, CommandText = command, IconPath = icon, IconIndex = iconIndex, IsEnabled = enabled, CanToggle = key is not null, IsShared = true, SourceKind = ShellSubMenuSourceKind.SubCommands };
+    }
+
+    private static IEnumerable<string> ParseSubCommands(string value) => value.Split(';', StringSplitOptions.TrimEntries).Where(static value => !string.IsNullOrEmpty(value));
+
+    internal static string UpdateSubCommandsReference(string currentValue, string reference, bool enable, List<PersistedShellSubMenuReferenceState> disabled)
+    {
+        var tokens = ParseSubCommands(currentValue).ToList();
+        if (enable)
+        {
+            var persisted = disabled.FirstOrDefault(x => string.Equals(x.ReferenceName, reference, StringComparison.OrdinalIgnoreCase));
+            if (!tokens.Contains(reference, StringComparer.OrdinalIgnoreCase))
+            {
+                tokens.Insert(Math.Clamp(persisted?.OriginalIndex ?? tokens.Count, 0, tokens.Count), reference);
+            }
+            disabled.RemoveAll(x => string.Equals(x.ReferenceName, reference, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            var index = tokens.FindIndex(x => string.Equals(x, reference, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                var persisted = disabled.FirstOrDefault(x => string.Equals(x.ReferenceName, reference, StringComparison.OrdinalIgnoreCase));
+                if (persisted is null)
+                    disabled.Add(new PersistedShellSubMenuReferenceState { ReferenceName = reference, OriginalIndex = index });
+                else
+                    persisted.OriginalIndex = index;
+                tokens.RemoveAll(x => string.Equals(x, reference, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        return string.Join(";", tokens);
+    }
+
+    private static (string BackendPath, string DisplayPath) ResolveSubMenuShellPath(ContextMenuEntry parent, RegistryKey parentKey, ShellSubMenuSourceKind source)
+    {
+        if (source == ShellSubMenuSourceKind.ParentShell) return ($@"{parent.BackendRegistryPath}\shell", $@"{parent.RegistryPath}\shell");
+        var target = parentKey.GetValue("ExtendedSubCommandsKey")?.ToString()?.Trim().Trim('\\')
+            ?? throw new InvalidOperationException("ExtendedSubCommandsKey is missing.");
+        if (parent.BackendRegistryPath.StartsWith("HKEY_USERS\\", StringComparison.OrdinalIgnoreCase))
+        {
+            var sid = parent.BackendRegistryPath.Split('\\')[1];
+            var user = $@"HKEY_USERS\{sid}\Software\Classes\{target}\shell";
+            if (OpenRegistryKey(user, writable: false) is not null) return (user, $@"{target}\shell");
+        }
+        return ($@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\{target}\shell", $@"{target}\shell");
     }
 
     private void SetShellVerbEnabled(string registryPath, string displayRegistryPath, bool enable)
@@ -4826,6 +5010,36 @@ public sealed class ContextMenuRegistryCatalog
 
         var extendedSubCommandsKey = itemKey.GetValue("ExtendedSubCommandsKey")?.ToString();
         return !string.IsNullOrWhiteSpace(extendedSubCommandsKey);
+    }
+
+    internal static bool HasManageableSubMenuItems(RegistryKey itemKey, string parentBackendPath)
+    {
+        var subCommands = itemKey.GetValue("SubCommands")?.ToString();
+        if (!string.IsNullOrWhiteSpace(subCommands))
+        {
+            foreach (var name in ParseSubCommands(subCommands).Where(static name => name != "|"))
+            {
+                using var command = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\{name}", writable: false);
+                if (command is not null) return true;
+            }
+            return false;
+        }
+
+        var extended = itemKey.GetValue("ExtendedSubCommandsKey")?.ToString()?.Trim().Trim('\\');
+        if (!string.IsNullOrWhiteSpace(extended))
+        {
+            if (parentBackendPath.StartsWith("HKEY_USERS\\", StringComparison.OrdinalIgnoreCase))
+            {
+                var sid = parentBackendPath.Split('\\')[1];
+                using var userShell = OpenRegistryKey($@"HKEY_USERS\{sid}\Software\Classes\{extended}\shell", writable: false);
+                if (userShell?.SubKeyCount > 0) return true;
+            }
+            using var machineShell = OpenRegistryKey($@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\{extended}\shell", writable: false);
+            return machineShell?.SubKeyCount > 0;
+        }
+
+        using var shellKey = itemKey.OpenSubKey("shell", writable: false);
+        return shellKey?.SubKeyCount > 0;
     }
 
     private static bool CanEditCommandText(RegistryKey itemKey, RegistryKey? commandKey)

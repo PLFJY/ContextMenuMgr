@@ -16,6 +16,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly IBackendServiceManager _backendServiceManager;
     private readonly ContextMenuItemActionsService _itemActionsService;
     private readonly ContextMenuDeepAnalysisService _deepAnalysisService;
+    private readonly ShellSubMenuDialogService _shellSubMenuDialogService;
+    private readonly DetailedEditMenuDialogService _detailedEditMenuDialogService;
     private readonly IconPreviewService _iconPreviewService;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
@@ -44,6 +46,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         IBackendServiceManager backendServiceManager,
         ContextMenuItemActionsService itemActionsService,
         ContextMenuDeepAnalysisService deepAnalysisService,
+        ShellSubMenuDialogService shellSubMenuDialogService,
+        DetailedEditMenuDialogService detailedEditMenuDialogService,
         IconPreviewService iconPreviewService,
         LocalizationService localization,
         FrontendSettingsService settingsService,
@@ -54,6 +58,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _backendServiceManager = backendServiceManager;
         _itemActionsService = itemActionsService;
         _deepAnalysisService = deepAnalysisService;
+        _shellSubMenuDialogService = shellSubMenuDialogService;
+        _detailedEditMenuDialogService = detailedEditMenuDialogService;
         _iconPreviewService = iconPreviewService;
         _localization = localization;
         _settingsService = settingsService;
@@ -1178,7 +1184,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private ContextMenuItemViewModel CreateItemViewModel(ContextMenuEntry entry)
     {
-        return new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync, SetCommandTextAsync, _deepAnalysisService, _settingsService);
+        return new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync, SetCommandTextAsync, _deepAnalysisService, _settingsService, _shellSubMenuDialogService, _detailedEditMenuDialogService);
     }
 
     private void RemoveItem(string itemId)
