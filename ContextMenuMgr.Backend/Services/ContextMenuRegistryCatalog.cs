@@ -3932,6 +3932,9 @@ public sealed class ContextMenuRegistryCatalog
             wrapperReason);
     }
 
+    internal static string CompileEnhanceCommandForValidation(XElement commandElement, string cultureName)
+        => CompileEnhanceCommandValue(commandElement, cultureName).Command;
+
     internal static int ValidateEnhanceMenuDictionary(string dictionaryPath, string? cultureName, TextWriter writer)
     {
         var normalizedCulture = NormalizeEnhanceCultureName(cultureName);
@@ -4380,9 +4383,9 @@ public sealed class ContextMenuRegistryCatalog
 
         var outerScript = "& { "
                           + BuildPowerShellParamList(runtimeArguments)
-                          + "Start-Process powershell.exe -Verb RunAs -ArgumentList ("
+                          + "$process = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList ("
                           + innerCommandLineExpression
-                          + ") }";
+                          + "); exit $process.ExitCode }";
         return BuildPowerShellCommand(outerScript, runtimeArguments);
     }
 
