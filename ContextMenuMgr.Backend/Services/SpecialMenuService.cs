@@ -1338,26 +1338,62 @@ public sealed class SpecialMenuService
         return item;
     }
 
-    private SpecialMenuEntry SetShellNewEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext context)
+    internal SpecialMenuEntry SetShellNewEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext context)
     {
-        var source = item.RegistryPath ?? DecodeId(item.Id);
-        var target = item.Metadata.TryGetValue("DisabledRegistryPath", out var disabledPath)
-            ? disabledPath
-            : source.Replace(enabled ? @"\-ShellNew" : @"\ShellNew", enabled ? @"\ShellNew" : @"\-ShellNew", StringComparison.OrdinalIgnoreCase);
-        if (string.Equals(source, target, StringComparison.OrdinalIgnoreCase))
+        var declaredPath = item.RegistryPath ?? DecodeId(item.Id);
+        var (enabledPath, disabledPath) = GetShellNewPhysicalPaths(declaredPath);
+        var enabledExists = RegistryKeyExists(enabledPath, context);
+        var disabledExists = RegistryKeyExists(disabledPath, context);
+
+        if (enabledExists == disabledExists)
         {
-            return item with { IsEnabled = enabled };
+            throw enabledExists
+                ? new InvalidOperationException($"Both active and disabled ShellNew registrations exist: {enabledPath} and {disabledPath}. Resolve the conflicting registrations before toggling.")
+                : new InvalidOperationException($"The ShellNew registration no longer exists at either expected path: {enabledPath} or {disabledPath}.");
         }
 
-        _logger.LogFireAndForget($"SetShellNewEnabledMoveStart: Sid={context.Sid}, Enabled={enabled}, SourcePath={source}, TargetPath={target}.");
-        MoveRegistryKey(source, target, context, _logger);
-        _logger.LogFireAndForget($"SetShellNewEnabledMoveEnd: Sid={context.Sid}, Enabled={enabled}, SourcePath={source}, TargetPath={target}, Result=Success.");
+        var actualSource = enabledExists ? enabledPath : disabledPath;
+        var actualTarget = enabled ? enabledPath : disabledPath;
+        if (!string.Equals(actualSource, actualTarget, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogFireAndForget($"SetShellNewEnabledMoveStart: Sid={context.Sid}, Enabled={enabled}, DeclaredPath={declaredPath}, SourcePath={actualSource}, TargetPath={actualTarget}.");
+            MoveRegistryKey(actualSource, actualTarget, context, _logger, requireTargetAbsent: true);
+            if (RegistryKeyExists(actualSource, context) || !RegistryKeyExists(actualTarget, context))
+            {
+                throw new InvalidOperationException($"ShellNew registry move verification failed. Expected source to be absent ({actualSource}) and target to exist ({actualTarget}).");
+            }
+
+            _logger.LogFireAndForget($"SetShellNewEnabledMoveEnd: Sid={context.Sid}, Enabled={enabled}, SourcePath={actualSource}, TargetPath={actualTarget}, Result=VerifiedSuccess.");
+        }
+
+        var metadata = new Dictionary<string, string>(item.Metadata)
+        {
+            // Despite its historical name, this is the alternate physical path.
+            ["DisabledRegistryPath"] = enabled ? disabledPath : enabledPath
+        };
         return item with
         {
-            Id = EncodeId(SpecialMenuKind.ShellNew, target),
+            Id = EncodeId(SpecialMenuKind.ShellNew, actualTarget),
             IsEnabled = enabled,
-            RegistryPath = target
+            RegistryPath = actualTarget,
+            Metadata = metadata
         };
+    }
+
+    private static (string EnabledPath, string DisabledPath) GetShellNewPhysicalPaths(string path)
+    {
+        var normalized = path.Trim().Replace('/', '\\').TrimEnd('\\');
+        if (normalized.EndsWith(@"\ShellNew", StringComparison.OrdinalIgnoreCase))
+        {
+            return (normalized, normalized[..^"ShellNew".Length] + "-ShellNew");
+        }
+
+        if (normalized.EndsWith(@"\-ShellNew", StringComparison.OrdinalIgnoreCase))
+        {
+            return (normalized[..^"-ShellNew".Length] + "ShellNew", normalized);
+        }
+
+        throw new InvalidOperationException($"ShellNew registration path must end in \\ShellNew or \\-ShellNew: {path}");
     }
 
     private async Task<SpecialMenuEntry> MoveShellNewAsync(ShellNewSortRequest request, BackendUserContext context, CancellationToken cancellationToken)
@@ -4114,7 +4150,7 @@ public sealed class SpecialMenuService
         File.SetAttributes(path, FileAttributes.Normal);
     }
 
-    private static void MoveRegistryKey(string sourcePath, string targetPath, BackendUserContext? context = null, FileLogger? logger = null)
+    private static void MoveRegistryKey(string sourcePath, string targetPath, BackendUserContext? context = null, FileLogger? logger = null, bool requireTargetAbsent = false)
     {
         logger?.LogFireAndForget($"MoveRegistryKeyStart: SourcePath={sourcePath}, TargetPath={targetPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
         if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
@@ -4125,25 +4161,33 @@ public sealed class SpecialMenuService
 
         try
         {
-            MoveRegistryKeyCore(sourcePath, targetPath, context, logger);
+            MoveRegistryKeyCore(sourcePath, targetPath, context, logger, requireTargetAbsent);
             logger?.LogFireAndForget($"MoveRegistryKeyEnd: SourcePath={sourcePath}, TargetPath={targetPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}, Result=Success.");
         }
         catch (UnauthorizedAccessException)
         {
             EnableSecurityPrivilege();
             logger?.LogFireAndForget($"MoveRegistryKeyRetryWithSecurityPrivilege: SourcePath={sourcePath}, TargetPath={targetPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
-            MoveRegistryKeyCore(sourcePath, targetPath, context, logger);
+            MoveRegistryKeyCore(sourcePath, targetPath, context, logger, requireTargetAbsent);
             logger?.LogFireAndForget($"MoveRegistryKeyEnd: SourcePath={sourcePath}, TargetPath={targetPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}, Result=SuccessAfterPrivilege.");
         }
     }
 
-    private static void MoveRegistryKeyCore(string sourcePath, string targetPath, BackendUserContext? context = null, FileLogger? logger = null)
+    private static void MoveRegistryKeyCore(string sourcePath, string targetPath, BackendUserContext? context = null, FileLogger? logger = null, bool requireTargetAbsent = false)
     {
         var (sourceRoot, sourceSubPath) = SplitRegistryPath(sourcePath, context);
         var (targetRoot, targetSubPath) = SplitRegistryPath(targetPath, context);
         logger?.LogFireAndForget($"MoveRegistryKeyCore: SourcePath={sourcePath}, TargetPath={targetPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}, SourceRoot={sourceRoot.Name}, SourceSubPath={sourceSubPath}, TargetRoot={targetRoot.Name}, TargetSubPath={targetSubPath}.");
         using var source = OpenRegistryKey(sourcePath, writable: false, context)
             ?? throw new InvalidOperationException($"Unable to open {sourcePath}.");
+        using var existingTarget = requireTargetAbsent
+            ? OpenRegistryKey(targetPath, writable: false, context)
+            : null;
+        if (existingTarget is not null)
+        {
+            throw new InvalidOperationException($"Unable to move ShellNew registration because destination already exists: {targetPath}");
+        }
+
         CreateRegistryKeyCopy(source, targetPath, context, logger);
         DeleteRegistryTree(sourcePath, context, logger);
     }
@@ -4201,6 +4245,12 @@ public sealed class SpecialMenuService
 
         var (root, subPath) = SplitRegistryPath(fullPath, context);
         return root.OpenSubKey(subPath, writable);
+    }
+
+    private static bool RegistryKeyExists(string fullPath, BackendUserContext context)
+    {
+        using var key = OpenRegistryKey(fullPath, writable: false, context);
+        return key is not null;
     }
 
     private static RegistryKey? CreateRegistryKey(string fullPath, BackendUserContext? context = null)

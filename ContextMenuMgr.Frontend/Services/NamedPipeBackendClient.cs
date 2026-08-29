@@ -16,6 +16,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly object _notificationSync = new();
+    private readonly RecentClientOperationCache _recentLocalOperations;
     private CancellationTokenSource? _notificationLoopCts;
     private Task? _notificationLoopTask;
     private bool _isConnected;
@@ -24,6 +25,16 @@ public sealed class NamedPipeBackendClient : IBackendClient
     public event EventHandler<BackendNotification>? NotificationReceived;
 
     public bool IsConnected => _isConnected;
+
+    public NamedPipeBackendClient()
+        : this(new RecentClientOperationCache())
+    {
+    }
+
+    internal NamedPipeBackendClient(RecentClientOperationCache recentLocalOperations)
+    {
+        _recentLocalOperations = recentLocalOperations;
+    }
 
     /// <summary>
     /// Executes connect Async.
@@ -731,6 +742,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
     public ValueTask DisposeAsync()
     {
         _disposed = true;
+        _recentLocalOperations.Clear();
         CancellationTokenSource? notificationLoopCts;
         Task? notificationLoopTask;
         lock (_notificationSync)
@@ -755,6 +767,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
 
         await _sendLock.WaitAsync(cancellationToken);
+        _recentLocalOperations.Register(request.ClientOperationId);
         var stopwatch = Stopwatch.StartNew();
         var correlationId = Guid.Empty;
         try
@@ -837,6 +850,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         catch (TimeoutException ex)
         {
+            _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
             FrontendDebugLog.Operation(
                 "FrontendOperation",
@@ -846,6 +860,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         catch (OperationCanceledException ex)
         {
+            _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
             FrontendDebugLog.Operation(
                 "FrontendOperation",
@@ -857,6 +872,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         catch (ObjectDisposedException ex) when (_disposed || cancellationToken.IsCancellationRequested)
         {
+            _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
             FrontendDebugLog.Operation(
                 "FrontendOperation",
@@ -868,6 +884,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         catch (IOException ex) when (_disposed || cancellationToken.IsCancellationRequested)
         {
+            _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
             FrontendDebugLog.Operation(
                 "FrontendOperation",
@@ -879,6 +896,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         catch (Exception ex)
         {
+            _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
             FrontendDebugLog.Error(
                 "FrontendOperation",
@@ -955,7 +973,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     var envelope = JsonSerializer.Deserialize<PipeEnvelope>(line, JsonOptions);
                     if (envelope?.MessageType == PipeMessageType.Notification && envelope.Notification is not null)
                     {
-                        NotificationReceived?.Invoke(this, envelope.Notification);
+                        TryForwardSubscriptionNotification(envelope.Notification);
                     }
                 }
             }
@@ -985,6 +1003,17 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 break;
             }
         }
+    }
+
+    internal bool TryForwardSubscriptionNotification(BackendNotification notification)
+    {
+        if (_recentLocalOperations.Contains(notification.ClientOperationId))
+        {
+            return false;
+        }
+
+        NotificationReceived?.Invoke(this, notification);
+        return true;
     }
 
     private static async ValueTask DisposeNotificationLoopAsync(CancellationTokenSource? notificationLoopCts, Task? notificationLoopTask)
