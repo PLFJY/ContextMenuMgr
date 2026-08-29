@@ -9,7 +9,7 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class FileLogger
 {
-    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(7);
+    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(3);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _logPath;
     private readonly string _fallbackLogPath;
