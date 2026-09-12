@@ -298,13 +298,11 @@ if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingPrUrl)) 
     return
 }
 
-$body = @"
-Generated from PLFJY/ContextMenuMgr release $ReleaseTag.
-
-Stable and Beta are mutually exclusive channels and share the same installer AppId and service identity intentionally.
-
-The Beta package-manager channel only tracks GitHub Pre-releases. Stable GitHub Releases do not generate or update this Beta manifest. For Beta prereleases the package version is derived from the GitHub Release publish time.
-"@
+$messageScript = Join-Path $scriptDir 'New-WingetPrMessage.ps1'
+$body = & $messageScript `
+    -PackageIdentifier $PackageIdentifier `
+    -PackageVersion $PackageVersion `
+    -ReleaseTag $ReleaseTag
 
 $title = "New version: $PackageIdentifier version $PackageVersion"
 gh pr create --repo $TargetRepository --head "$($WingetForkRepository.Split('/')[0]):$branchName" --base master --title $title --body $body
