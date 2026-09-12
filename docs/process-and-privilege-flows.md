@@ -129,6 +129,10 @@ Windows Service 运行在服务 Session，不能直接在用户桌面显示 UI�
 5. 检查目标 Session 中是否已有 `ContextMenuManagerPlus.TrayHost.exe` 或 `ContextMenuManagerPlus.exe`。
 6. 使用 `DuplicateTokenEx`、`CreateEnvironmentBlock`、`CreateProcessAsUser`，并设置桌面为 `winsta0\default`。
 
+打开 Frontend 时，已有同 Session 进程但 frontend control pipe 暂时不可用表示该进程可能仍在启动或正在退出。TrayHost 和后端会在有界 startup grace 内重试完整的 pipe handshake；grace 耗尽时不会立即再启动一个 Frontend。只有目标 Session 中没有 Frontend 进程时才创建新进程。每次 pipe 请求的 connect、write 和 response read 共用同一个总超时，调用方不会无限等待。
+
+Frontend 自身仍用全局 mutex 判定单实例。secondary 在 mutex 已被占用时以同一有界策略转发激活请求；如果原 owner 在等待期间退出，secondary 可以安全取得已释放或 abandoned 的 mutex 并成为 primary。pipe 暂时未就绪且 mutex 仍被持有时，secondary 有界退出，不再按一次 IPC 失败杀死同 Session 的 Frontend 进程。
+
 TrayHost 和 Frontend 启动区别：
 
 | 目标 | 触发场景 | 行为 |

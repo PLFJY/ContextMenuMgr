@@ -1,8 +1,5 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
-using System.Text;
-using System.Text.Json;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
@@ -12,8 +9,8 @@ namespace ContextMenuMgr.TrayHost;
 /// </summary>
 internal sealed class FrontendActivationService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _frontendExePath;
+    private readonly Lock _activationLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FrontendActivationService"/> class.
@@ -55,30 +52,41 @@ internal sealed class FrontendActivationService
 
     private bool TryOpenFrontend(FrontendControlRequest request, string startupArguments)
     {
-        if (TrySendFrontendControlRequest(request))
+        lock (_activationLock)
         {
-            return true;
-        }
-
-        if (!File.Exists(_frontendExePath))
-        {
-            return false;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
+            if (IsFrontendRunningInCurrentSession())
             {
-                FileName = _frontendExePath,
-                Arguments = startupArguments,
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(_frontendExePath) ?? AppContext.BaseDirectory
-            });
-            return true;
-        }
-        catch
-        {
-            return false;
+                if (TrySendFrontendControlRequestWithStartupRetry(request))
+                {
+                    return true;
+                }
+
+                if (IsFrontendRunningInCurrentSession())
+                {
+                    return false;
+                }
+            }
+
+            if (!File.Exists(_frontendExePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = _frontendExePath,
+                    Arguments = startupArguments,
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(_frontendExePath) ?? AppContext.BaseDirectory
+                });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
@@ -93,28 +101,39 @@ internal sealed class FrontendActivationService
     }
 
     private static bool TrySendFrontendControlRequest(FrontendControlRequest request)
+        => FrontendControlPipeClient
+            .TrySendAsync(request, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
+    private static bool TrySendFrontendControlRequestWithStartupRetry(FrontendControlRequest request)
+        => FrontendControlPipeClient
+            .TrySendWithStartupRetryAsync(request, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
+    private static bool IsFrontendRunningInCurrentSession()
     {
-        try
+        using var currentProcess = Process.GetCurrentProcess();
+        var currentSessionId = currentProcess.SessionId;
+        foreach (var process in Process.GetProcessesByName("ContextMenuManagerPlus"))
         {
-            using var stream = new NamedPipeClientStream(".", PipeConstants.FrontendControlPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            stream.Connect(500);
-
-            using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-
-            writer.WriteLine(JsonSerializer.Serialize(request, JsonOptions));
-            var line = reader.ReadLine();
-            if (line is null)
+            try
             {
-                return false;
+                if (process.SessionId == currentSessionId)
+                {
+                    return true;
+                }
             }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
 
-            var response = JsonSerializer.Deserialize<FrontendControlResponse>(line, JsonOptions);
-            return response?.Success == true;
-        }
-        catch
-        {
-            return false;
-        }
+        return false;
     }
 }

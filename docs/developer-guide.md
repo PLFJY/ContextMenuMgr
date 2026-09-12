@@ -25,7 +25,7 @@ ContextMenuMgr 是一个以“审核优先、用户控制”为核心的 Windows
 | Backend Service | `ContextMenuMgr.Backend` | `ContextMenuManagerPlus.Service.exe` | LocalSystem 服务、pipe server、注册表目录、监控、审核、SpecialMenu、Win11、AutoStart、Explorer restart、拉起 TrayHost/Frontend | 不在服务 Session 直接显示 UI；不把 SYSTEM 的 `HKCU` 当成用户 hive。 |
 | TrayHost | `ContextMenuMgr.TrayHost` | `ContextMenuManagerPlus.TrayHost.exe` | 每用户托盘进程、后台通知、从通知打开前端或审核页 | 不承担注册表写入和菜单管理核心逻辑。 |
 | ProbeHost | `ContextMenuMgr.ProbeHost` | `ContextMenuMgr.ProbeHost.exe` | Deep Analysis 的隔离 COM 探测进程，多架构发布 | 不提权、不写注册表、不执行菜单命令。 |
-| Contracts | `ContextMenuMgr.Contracts` | `ContextMenuMgr.Contracts.dll` | pipe 契约、通知、菜单模型、Deep Analysis 模型、路径和服务元数据 | 不放具体平台操作实现。 |
+| Contracts | `ContextMenuMgr.Contracts` | `ContextMenuMgr.Contracts.dll` | pipe 契约、通知、菜单模型、Deep Analysis 模型、路径和服务元数据，以及三个进程共用的轻量 frontend control pipe client | 不放注册表、WTS、UI 或其它业务实现。 |
 
 ## 3. 代码地图
 
@@ -53,6 +53,8 @@ ContextMenuMgr 是一个以“审核优先、用户控制”为核心的 Windows
 | 构建脚本 | `build.ps1`、`Scripts/Build.Common.psm1`、`ContextMenuMgr.Frontend.csproj`、`Installer/build_Installer.iss` | 多目标发布、ProbeHost 多架构、安装包 | 改动后必须验证 x86/x64/arm64 ProbeHost 布局。 |
 
 ## 4. 启动与运行时流程
+
+Frontend 单实例启动先取得全局 mutex。secondary 不再把一次 control pipe 失败视为 stale primary；它会在有界 startup grace 内重试完整的 connect/write/read handshake。原 owner 已退出时，secondary 可取得 released/abandoned mutex 并继续成为 primary；owner 仍持有 mutex 且 grace 耗尽时则安全退出，不杀同 Session 进程。底层 `FrontendControlPipeClient` 的所有 await 都不捕获调用方 `SynchronizationContext`，并对完整请求应用总超时，因此 WPF startup 的同步单实例判定不会无限阻塞 Dispatcher。
 
 前端启动的大致流程：
 

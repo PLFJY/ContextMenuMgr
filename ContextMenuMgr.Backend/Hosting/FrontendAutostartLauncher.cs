@@ -1,10 +1,7 @@
-﻿﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
-using System.Text;
-using System.Text.Json;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 
@@ -18,10 +15,9 @@ internal sealed class FrontendAutostartLauncher
     private const string FrontendPolicyKeyPath = @"Software\ContextMenuMgr\Frontend";
     private const string FrontendPolicyValueName = "StartWithWindows";
     private const string ShowTrayIconPolicyValueName = "ShowTrayIcon";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     private readonly string _frontendExePath;
     private readonly string _trayHostExePath;
+    private readonly Lock _frontendActivationLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FrontendAutostartLauncher"/> class.
@@ -98,9 +94,11 @@ internal sealed class FrontendAutostartLauncher
             return true;
         }
 
-        return await TrySendFrontendControlRequestAsync(
-            new FrontendControlRequest { Command = FrontendControlCommand.Shutdown },
-            cancellationToken);
+        return await FrontendControlPipeClient
+            .TrySendAsync(
+                new FrontendControlRequest { Command = FrontendControlCommand.Shutdown },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -136,13 +134,26 @@ internal sealed class FrontendAutostartLauncher
             return false;
         }
 
-        if (IsFrontendRunning(targetSessionId)
-            && TrySendFrontendControlRequestAsync(request, CancellationToken.None).GetAwaiter().GetResult())
+        lock (_frontendActivationLock)
         {
-            return true;
-        }
+            if (IsFrontendRunning(targetSessionId))
+            {
+                if (FrontendControlPipeClient
+                    .TrySendWithStartupRetryAsync(request, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult())
+                {
+                    return true;
+                }
 
-        return TryCreateUserProcess(targetSessionId, _frontendExePath, startupArguments);
+                if (IsFrontendRunning(targetSessionId))
+                {
+                    return false;
+                }
+            }
+
+            return TryCreateUserProcess(targetSessionId, _frontendExePath, startupArguments);
+        }
     }
 
     private static string BuildFrontendArguments(string command, string? focusItemId)
@@ -374,32 +385,6 @@ internal sealed class FrontendAutostartLauncher
             {
                 NativeMethods.DestroyEnvironmentBlock(environmentBlock);
             }
-        }
-    }
-
-    private static async Task<bool> TrySendFrontendControlRequestAsync(FrontendControlRequest request, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var stream = new NamedPipeClientStream(".", PipeConstants.FrontendControlPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            await stream.ConnectAsync(500, cancellationToken);
-
-            using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-
-            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions)).WaitAsync(cancellationToken);
-            var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
-            if (line is null)
-            {
-                return false;
-            }
-
-            var response = JsonSerializer.Deserialize<FrontendControlResponse>(line, JsonOptions);
-            return response?.Success == true;
-        }
-        catch
-        {
-            return false;
         }
     }
 

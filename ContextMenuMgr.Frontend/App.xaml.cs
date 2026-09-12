@@ -132,28 +132,48 @@ public partial class App : Application
             return true;
         }
 
-        _singleInstanceMutex.Dispose();
-        _singleInstanceMutex = null;
-
-        if (FrontendControlClient.TrySendAsync(initialRequest, CancellationToken.None).GetAwaiter().GetResult())
+        var attemptCount = 0;
+        if (FrontendControlClient
+            .TrySendWithStartupRetryAsync(
+                initialRequest,
+                CancellationToken.None,
+                (attempt, _) => attemptCount = attempt)
+            .GetAwaiter()
+            .GetResult())
         {
+            FrontendDebugLog.Operation(
+                "App",
+                $"Secondary frontend activation succeeded. PID={Environment.ProcessId}, Command={initialRequest.Command}, Attempts={attemptCount}.");
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
             return false;
         }
 
-        FrontendDebugLog.Info("App", "Detected an unresponsive existing frontend instance. Attempting stale-instance recovery.");
-        TerminateStaleFrontendProcesses();
-
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out createdNew);
-        if (createdNew)
+        try
+        {
+            if (_singleInstanceMutex.WaitOne(0))
+            {
+                _ownsSingleInstanceMutex = true;
+                FrontendDebugLog.Operation(
+                    "App",
+                    $"Acquired released single-instance mutex after activation retry. PID={Environment.ProcessId}, Attempts={attemptCount}.");
+                return true;
+            }
+        }
+        catch (AbandonedMutexException)
         {
             _ownsSingleInstanceMutex = true;
-            FrontendDebugLog.Info("App", "Recovered single-instance ownership after terminating stale frontend processes.");
+            FrontendDebugLog.Operation(
+                "App",
+                $"Acquired abandoned single-instance mutex after activation retry. PID={Environment.ProcessId}, Attempts={attemptCount}.");
             return true;
         }
 
         _singleInstanceMutex.Dispose();
         _singleInstanceMutex = null;
-        FrontendDebugLog.Info("App", "Failed to recover single-instance ownership.");
+        FrontendDebugLog.Warning(
+            "App",
+            $"Secondary frontend activation startup grace exhausted. PID={Environment.ProcessId}, Attempts={attemptCount}; existing mutex remains owned, so no stale-process termination was attempted.");
         return false;
     }
 
@@ -246,36 +266,6 @@ public partial class App : Application
         }
 
         return null;
-    }
-
-    private static void TerminateStaleFrontendProcesses()
-    {
-        try
-        {
-            var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
-            var candidates = System.Diagnostics.Process.GetProcessesByName(currentProcess.ProcessName)
-                .Where(process => process.Id != currentProcess.Id && process.SessionId == currentProcess.SessionId)
-                .ToArray();
-
-            foreach (var process in candidates)
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: false);
-                    process.WaitForExit(1500);
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            }
-        }
-        catch
-        {
-        }
     }
 
     private async Task<FrontendControlResponse> HandleFrontendControlRequestAsync(FrontendControlRequest request)
