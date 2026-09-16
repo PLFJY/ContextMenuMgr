@@ -12,4 +12,6 @@ public static class ServiceMetadata
     public const string LegacyServiceName = "ContextMenuManagerService";
 
     public const string KeepFrontendOnStopMarkerFileName = "keep-frontend-on-service-stop.marker";
+
+    public const string StopReasonMarkerFileName = "service-stop-reason.marker";
 }

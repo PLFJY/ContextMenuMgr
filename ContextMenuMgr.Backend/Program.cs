@@ -40,9 +40,11 @@ internal static class Program
             if (BackendWindowsService.ShouldRunAsService(args))
             {
                 BackendEmergencyLogger.Log("Running as Windows Service. Entering ServiceBase.Run.");
-                System.ServiceProcess.ServiceBase.Run(new BackendWindowsService(runtime));
-                BackendEmergencyLogger.Log("ServiceBase.Run returned.");
-                return 0;
+                using var service = new BackendWindowsService(runtime);
+                System.ServiceProcess.ServiceBase.Run(service);
+                var exitCode = service.ProcessExitCode;
+                BackendEmergencyLogger.Log($"ServiceBase.Run returned. StopReason={service.StopReason}, ExitCode={exitCode}.");
+                return exitCode;
             }
 
             BackendEmergencyLogger.Log("Running in console mode.");

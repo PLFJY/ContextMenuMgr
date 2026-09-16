@@ -101,11 +101,11 @@ Portable 包在 `install-or-repair` 触发 UAC 前会先由前端检查当前应
 
 | 命令 | 用途 | 用户 SID |
 | --- | --- | --- |
-| `install-or-repair` | 创建/修复服务、处理旧服务名、按用户自启动策略设置服务启动类型，并等待 pipe 可用 | 需要传 `--user-sid` 才能正确读取用户自启动策略 |
+| `install-or-repair` | 创建/修复服务、处理旧服务名、按用户自启动策略设置并验证服务启动类型与恢复策略，启动服务并等待真实 pipe Ping 可用 | 需要传 `--user-sid` 才能正确读取用户自启动策略 |
 | `uninstall` | 停止并删除服务 | 不依赖用户 SID |
 | `force-remove-service` | 容错移除当前和旧服务名的 SCM 注册，用于残留 / stale service 修复；不删除用户数据、应用设置或右键菜单注册表项 | 不依赖用户 SID |
 | `stop` | 停止服务 | 不依赖用户 SID |
-| `set-startup-mode` | 设置服务 `auto` / `demand`，并写用户级 `StartWithWindows` 策略 | 需要 `--user-sid` |
+| `set-startup-mode` | 关闭时设置并验证 `demand` 后写 policy；开启时复用完整 install/repair 收敛路径，只有启动模式、恢复策略、Running 与真实 pipe Ping 均成功才写 `StartWithWindows=1` | 需要 `--user-sid` |
 | `repair-runtime-data-acl` | 只修复 `RuntimePaths.RootDirectory` 运行时目录 ACL，不安装/卸载/修改服务 | 不依赖用户 SID |
 
 结果通过 `--result-file` 指向的 JSON 文件返回，形状对应 `BootstrapResult(bool Success, string Code, string Detail)`。`BackendServiceManager` 会等待进程退出，读取 result file，然后删除临时文件。bootstrapper 还写 `RuntimePaths.LogsDirectory\bootstrap.log`。
@@ -113,6 +113,8 @@ Portable 包在 `install-or-repair` 触发 UAC 前会先由前端检查当前应
 `--user-sid` 的意义是让 elevated 进程明确知道前端用户是谁。elevated 进程自己的 `HKCU` 不能当作前端用户 `HKCU` 使用。当前代码在 `BackendServiceBootstrapper` 中验证 SID，并在服务安装/启动模式场景读取或写入 `HKEY_USERS\<sid>\Software\ContextMenuMgr\Frontend`。
 
 服务移除使用同一套容错路径：停止服务只是 best-effort，即使 `ServiceController.Status`、`Stop()` 或 `WaitForStatus(Stopped)` 失败，bootstrapper 仍会继续向 SCM 请求删除服务注册，并轮询 SCM 而不是只看注册表。删除返回 `SERVICE_PENDING_DELETE` 时表示 Windows 已标记删除但仍有进程持有服务句柄；用户需要关闭 Services MMC、任务管理器服务页或其它持有句柄的进程，必要时重启后再重试。
+
+服务创建、Install/Repair 与 Force Repair 重建都会覆盖式配置 SCM failure actions：约 5 秒、15 秒、60 秒重启，失败计数约 1 天后重置，并开启 non-crash failure actions。正常 SCM stop、前端明确请求、卸载/强力修复和 Windows shutdown 保持零退出码；runtime 启动异常或无法解释的 `ServiceBase.Run` 返回使用非零退出码，使 SCM 恢复策略可以生效。移除服务前还会 best-effort 关闭 failure-actions flag，避免修复/升级与恢复动作竞争。
 
 不要用这条链路做普通菜单开关、Win11 禁用、SpecialMenu 修改、AutoStart 运行时读写或 Restart Explorer。它的主要职责是服务生命周期维护，不是 runtime backend；`repair-runtime-data-acl` 是为了 portable / broken install 自修复保留的窄 fallback，不应扩展成普通运行时操作入口。
 
@@ -130,6 +132,8 @@ Windows Service 运行在服务 Session，不能直接在用户桌面显示 UI�
 4. 读取同一 policy key 下的 `ShowTrayIcon`，缺失时默认为显示；为 `0` 时用 `--hide-tray-icon` 启动 TrayHost。
 5. 检查目标 Session 中是否已有 `ContextMenuManagerPlus.TrayHost.exe` 或 `ContextMenuManagerPlus.exe`。
 6. 使用 `DuplicateTokenEx`、`CreateEnvironmentBlock`、`CreateProcessAsUser`，并设置桌面为 `winsta0\default`。
+
+服务启动本身也会主动执行一次上述 TrayHost 检查，因此即使使用 delayed-auto 且服务在登录 Session 事件之后才启动，也仍能发现当前交互 Session。TrayHost 的“是否已运行”检查与 `CreateProcessAsUser` 在同一锁内执行，避免服务启动和 Session 通知同时触发时创建两个进程。
 
 打开 Frontend 时，已有同 Session 进程但 frontend control pipe 暂时不可用表示该进程可能仍在启动或正在退出。TrayHost 和后端会在有界 startup grace 内重试完整的 pipe handshake；grace 耗尽时不会立即再启动一个 Frontend。只有目标 Session 中没有 Frontend 进程时才创建新进程。每次 pipe 请求的 connect、write 和 response read 共用同一个总超时，调用方不会无限等待。
 

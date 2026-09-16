@@ -156,7 +156,7 @@
 “Run key 没写。”
 
 正确方向：
-先查服务启动模式、`StartWithWindows` policy、`BackendServiceBootstrapper` 的 `--user-sid`、`FrontendAutostartLauncher` 是否能找到交互式 Session。
+先把用户意图与系统实现分开检查：`StartWithWindows` policy、实际 SCM start type / delayed-auto、service status、failure actions、backend pipe Ping、`BackendServiceBootstrapper` 的 `--user-sid`，以及 `FrontendAutostartLauncher` 是否能找到交互式 Session。服务程序在非系统卷时还应检查开机阶段卷是否可用，但没有日志或复现时只能列为假设。
 
 ### 例 3：ShellNew 解锁失败
 
@@ -193,6 +193,8 @@
 - 遇到 SpecialMenu 问题时必须检查 `SpecialMenuService`，不要先改 `ContextMenuRegistryCatalog`。
 - 遇到服务安装问题时必须检查 `BackendServiceManager` / `BackendServiceBootstrapper`，不要先改 `NamedPipeBackendServer`。
 - 服务卸载、强力修复和 install-or-repair 的 stale service 恢复必须共用 bootstrapper 的容错移除路径；停止失败只能作为警告记录，不能阻止后续 SCM 删除请求。
+- 启用 AutoStart 是生命周期收敛，不是只写 policy 或只执行 `sc config`；必须验证 SCM 配置、恢复策略、Running 和真实 pipe Ping，最后才提交用户 policy。
+- runtime 启动失败必须以可被 SCM recovery 识别的非零失败结束；前端请求、卸载/强力修复、明确 SCM stop 与 Windows shutdown 必须保持有意停止，不能触发重启风暴。
 - 遇到 UI 启动 / TrayHost 问题时必须检查 `FrontendAutostartLauncher` / WTS 链路。
 - 如果不确定，应该输出“当前证据不足”，不要编造原因。
 

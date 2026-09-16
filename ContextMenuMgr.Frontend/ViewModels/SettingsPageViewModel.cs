@@ -655,6 +655,17 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     {
         try
         {
+            var startupResult = await _workspace.SetServiceAutoStartEnabledAsync(false);
+            if (!startupResult.Success)
+            {
+                if (startupResult.Cancelled)
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(startupResult.Detail);
+            }
+
             _settingsService.ResetToDefaults();
 
             _suppressAutoStartSync = true;
@@ -666,22 +677,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             _settingsService.UpdateShowTrayIcon(true);
             _suppressTrayIconSync = false;
 
-            // Use async version to avoid blocking UI thread
-            try
-            {
-                await _startupService.SetAutoStartEnabledAsync(false, CancellationToken.None, showTrayIcon: true);
-            }
-            catch
-            {
-                // Ignore errors during reset
-            }
-
+            await _startupService.SetTrayIconPolicyAsync(true, CancellationToken.None);
             await TryApplyRuntimeTrayIconVisibilityAsync(true);
-
-            if (_workspace.IsServiceInstalled())
-            {
-                await _workspace.SetServiceAutoStartEnabledAsync(false);
-            }
 
             _suppressProtectionSync = true;
             LockNewContextMenuItems = false;
@@ -1093,18 +1090,20 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     {
         try
         {
-            // Use async version to avoid blocking UI thread
-            await _startupService.SetAutoStartEnabledAsync(value, CancellationToken.None, ShowTrayIcon);
-            _settingsService.UpdateAutoStartOnLogin(value);
-
-            if (_workspace.IsServiceInstalled())
+            // Machine realization comes first. The elevated bootstrap commits
+            // StartWithWindows only after SCM mode, recovery, Running, and pipe
+            // readiness converge, preventing policy/SCM split-brain success.
+            var result = await _workspace.SetServiceAutoStartEnabledAsync(value);
+            if (!result.Success)
             {
-                var result = await _workspace.SetServiceAutoStartEnabledAsync(value);
-                if (!result.Success && !result.Cancelled)
-                {
-                    throw new InvalidOperationException(result.Detail);
-                }
+                throw new InvalidOperationException(result.Cancelled
+                    ? _localization.Translate("ServiceOperationCancelled")
+                    : result.Detail);
             }
+
+            await _startupService.SetTrayIconPolicyAsync(ShowTrayIcon, CancellationToken.None);
+            _settingsService.UpdateAutoStartOnLogin(value);
+            RefreshServiceState();
         }
         catch (Exception ex)
         {

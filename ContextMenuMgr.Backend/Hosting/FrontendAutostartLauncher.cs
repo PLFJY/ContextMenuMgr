@@ -18,6 +18,7 @@ internal sealed class FrontendAutostartLauncher
     private readonly string _frontendExePath;
     private readonly string _trayHostExePath;
     private readonly Lock _frontendActivationLock = new();
+    private readonly Lock _trayHostActivationLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FrontendAutostartLauncher"/> class.
@@ -49,16 +50,36 @@ internal sealed class FrontendAutostartLauncher
             return false;
         }
 
-        if (IsTrayHostRunning(targetSessionId))
+        lock (_trayHostActivationLock)
         {
-            return true;
+            if (IsTrayHostRunning(targetSessionId))
+            {
+                return true;
+            }
+
+            var trayHostArguments = IsTrayIconVisibleForUser(userSid) ? string.Empty : "--hide-tray-icon";
+
+            // The tray host lives in the user's session, so service-side code must
+            // cross the session boundary with a user token before starting it.
+            // Serialize the check/create pair because delayed service startup and
+            // a simultaneous session notification can otherwise race.
+            return TryCreateUserProcess(targetSessionId, _trayHostExePath, trayHostArguments);
+        }
+    }
+
+    internal ActiveSessionPolicyDiagnostics GetActiveSessionPolicyDiagnostics()
+    {
+        var sessionId = GetBestInteractiveSessionId();
+        if (sessionId < 0 || !TryGetUserSid(sessionId, out var userSid))
+        {
+            return new ActiveSessionPolicyDiagnostics(null, null, null, null);
         }
 
-        var trayHostArguments = IsTrayIconVisibleForUser(userSid) ? string.Empty : "--hide-tray-icon";
-
-        // The tray host lives in the user's session, so service-side code must
-        // cross the session boundary with a user token before starting it.
-        return TryCreateUserProcess(targetSessionId, _trayHostExePath, trayHostArguments);
+        return new ActiveSessionPolicyDiagnostics(
+            sessionId,
+            userSid,
+            IsAutostartEnabledForUser(userSid),
+            IsTrayIconVisibleForUser(userSid));
     }
 
     /// <summary>
@@ -403,6 +424,12 @@ internal sealed class FrontendAutostartLauncher
 
         protected override bool ReleaseHandle() => NativeMethods.CloseHandle(handle);
     }
+
+    internal sealed record ActiveSessionPolicyDiagnostics(
+        int? SessionId,
+        string? UserSid,
+        bool? StartWithWindows,
+        bool? ShowTrayIcon);
 
     private static class NativeMethods
     {

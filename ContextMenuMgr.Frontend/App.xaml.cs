@@ -376,21 +376,34 @@ public partial class App : Application
 
     private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_isShuttingDown || _frontendSettingsService?.Current.KeepBackgroundAfterClose != false)
+        if (_isShuttingDown || _frontendSettingsService is null)
         {
             return;
         }
 
-        TryShutdownBackgroundRuntimeOnClose();
+        var settings = _frontendSettingsService.Current;
+        var actions = FrontendCloseLifecyclePolicy.Evaluate(
+            settings.KeepBackgroundAfterClose,
+            settings.AutoStartOnLogin);
+        FrontendDebugLog.Operation(
+            "App",
+            $"Main window closing. KeepBackgroundAfterClose={settings.KeepBackgroundAfterClose}, StartWithWindows={settings.AutoStartOnLogin}, "
+            + $"RequestBackendShutdown={actions.RequestBackendShutdown}, RequestTrayHostExit={actions.RequestTrayHostExit}.");
+
+        if (actions.RequestBackendShutdown || actions.RequestTrayHostExit)
+        {
+            TryShutdownBackgroundRuntimeOnClose(actions);
+        }
     }
 
-    private void TryShutdownBackgroundRuntimeOnClose()
+    private void TryShutdownBackgroundRuntimeOnClose(FrontendCloseActions actions)
     {
         try
         {
             var shutdownTask = Task.Run(async () =>
             {
-                if (_serviceProvider?.GetService<IBackendClient>() is { } backendClient)
+                if (actions.RequestBackendShutdown
+                    && _serviceProvider?.GetService<IBackendClient>() is { } backendClient)
                 {
                     try
                     {
@@ -402,7 +415,7 @@ public partial class App : Application
                     }
                 }
 
-                if (_trayHostProcessService is not null)
+                if (actions.RequestTrayHostExit && _trayHostProcessService is not null)
                 {
                     try
                     {

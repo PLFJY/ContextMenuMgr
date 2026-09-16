@@ -260,10 +260,15 @@ snapshot 和开关都需要 userContext。没有用户 SID 时，`Windows11Conte
 | --- | --- | --- |
 | 用户级 policy | `AutoStartService`、`FrontendAutostartLauncher` | 写/读 `HKEY_USERS\<sid>\Software\ContextMenuMgr\Frontend\StartWithWindows` 和 `ShowTrayIcon`。 |
 | 旧 Run key | `AutoStartService` | 读取时作为 fallback；写入时清理 `ContextMenuManagerPlus.TrayHost` 旧值。 |
-| 服务启动模式 | `BackendServiceBootstrapper` | `install-or-repair` 和 `set-startup-mode` 根据 `--user-sid` 对应 policy 设置服务 `auto` 或 `demand`。 |
+| 服务启动模式 | `BackendServiceBootstrapper` | 关闭为 `demand`；开启时，服务程序与 Windows 在同一卷用 `auto`，在其它盘或 UNC 路径用 `delayed-auto`。系统盘来自实际 Windows 目录，不能硬编码 `C:`。 |
+| SCM 恢复 | `BackendServiceBootstrapper`、`BackendWindowsService` | 创建/修复时配置 5 秒、15 秒、60 秒重启和约 1 天 reset，并启用 non-crash failure actions；意外启动失败返回非零，明确停止仍返回零。 |
 | 用户 Session 进程 | `FrontendAutostartLauncher` | 服务启动或 Session 事件时按 policy best-effort 拉起 TrayHost；`ShowTrayIcon=0` 时传入 `--hide-tray-icon`。 |
 
 TrayHost 是每用户进程，因为托盘图标、通知和通知点击激活必须出现在用户交互式桌面。服务只是负责在正确 Session 中启动它，后端通知仍通过 IPC 交给 TrayHost 后再由 `Shell_NotifyIconW` 显示。开机启动必须带用户 SID，因为服务启动模式是机器级，用户是否希望随 Windows 启动以及是否显示托盘图标是用户级。TrayHost 可以没有可见托盘图标，但进程必须继续运行。
+
+`StartWithWindows` 是用户意图，不等于系统已健康实现该意图。启用操作按以下顺序收敛：验证服务注册与 executable path，设置并回读 startup mode，配置并验证 recovery，必要时启动并等待 SCM `Running`，最后等待 backend pipe 的真实 `Ping`；只有全部成功才写用户 policy。`Running` 但 pipe 不响应不能报告成功。普通关闭前端窗口时，如果 `StartWithWindows=true`，即使 `KeepBackgroundAfterClose=false` 也不停止 Backend Service 或 TrayHost；显式托盘退出、服务停止、卸载等仍是有意停止。
+
+`bootstrap.log` 和 `service-startup.log` 的生命周期诊断应包含 service/executable、实际 system/service drive、start type、delayed-auto、SCM status、recovery 是否配置、当前用户 policy，以及停止原因。原因只能在可证明时写 `FrontendRequest`、`WindowsShutdown`、`Uninstall`、`ForceRepair` 等；无法证明的 SCM stop 使用 `ServiceControlManager`，无回调返回才标记 `UnexpectedProcessExit`。
 
 ## 11. Restart Explorer
 
@@ -399,7 +404,7 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 | 前端连不上后端 | `NamedPipeBackendClient.cs`、`NamedPipeBackendServer.cs`、`BackendRuntime.cs` | `frontend-debug.log`、`backend.log`、`service-startup.log` | 把服务未启动当成 pipe 协议错误。 |
 | 服务安装失败 | `BackendServiceManager.cs`、`BackendServiceBootstrapper.cs` | `bootstrap.log`、bootstrap result detail、`service-startup.log` | 链路 B result-file 或 UAC 被取消。 |
 | 托盘不出现 | `FrontendAutostartLauncher.cs`、`BackendWindowsService.cs`、`TrayHostRunner.cs` | `backend.log`、`trayhost.log` | 链路 C 缺 SessionId 或用户 policy 关闭。 |
-| 开机启动不生效 | `AutoStartService.cs`、`BackendServiceBootstrapper.cs`、`FrontendAutostartLauncher.cs` | `backend.log`、`bootstrap.log` | 只改服务启动模式，没写用户 `StartWithWindows`，或反过来。 |
+| 开机启动不生效 | `AutoStartService.cs`、`BackendServiceBootstrapper.cs`、`BackendWindowsService.cs`、`FrontendAutostartLauncher.cs` | `bootstrap.log`、`service-startup.log`、`backend.log` | 分别核对用户意图、SCM start type/delayed-auto、recovery、当前状态、真实 pipe Ping、停止原因和 TrayHost Session 启动；不要把任一单层状态当成整体健康。 |
 | Win11 禁用后刷新丢失 | `Windows11ContextMenuCatalog.cs`、`Windows11BlocksService.cs` | `backend.log` 中 `Win11 command` 和 `OpenUserBlockedKey` | 丢了 `userContext`，写到错误用户 hive。 |
 | ShellNew 锁住后解不开 | `SpecialMenuService.cs` | `backend.log` 中 `ShellNewOrderLockRequest`、`TryReadShellNewOrderLockState` 和 `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew` | 把 ShellNew ACL Lock 当成 Registry Write Protection，或期待主程序 take ownership 修复 broken ACL。 |
 | SendTo / WinX 修改无效 | `SpecialMenuService.cs`、`DesktopIniStore.cs`、`WinXHasher.cs` | `backend.log` | 缺用户 profile 上下文，或 WinX `.lnk` 没重新 hash。 |

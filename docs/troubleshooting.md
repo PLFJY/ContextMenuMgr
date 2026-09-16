@@ -91,10 +91,12 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 项目 | 内容 |
 | --- | --- |
 | 现象 | 登录后没有托盘，服务启动模式或前端设置看似正确但无效。 |
-| 可能原因 | 服务启动模式和用户级 `StartWithWindows` policy 不一致；用户 SID 写错；旧 Run value 干扰。 |
+| 可能原因 | 服务启动模式和用户级 `StartWithWindows` policy 不一致；服务处于 Stopped 或 Running 但 pipe 不可用；用户 SID 写错；旧 Run value 干扰；服务 executable 位于开机早期尚未可用的非系统卷。最后一种只是待日志/复现验证的假设，不能仅凭盘符下结论。 |
 | 优先查看的代码 | `AutoStartService.cs`、`BackendServiceBootstrapper.cs`、`FrontendAutostartLauncher.cs`、`SettingsPageViewModel.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`、`backend.log`、`trayhost.log`。 |
-| 常见修复方向 | 分开检查服务启动模式和用户级策略；bootstrapper 的 `install-or-repair`、`set-startup-mode` 需要 `--user-sid`。 |
+| 优先查看的日志 | `bootstrap.log`、`service-startup.log`、`frontend-debug.log`、`backend.log`、`trayhost.log`。 |
+| 常见修复方向 | 分开检查 policy（用户意图）与 SCM/pipe（系统实现）；确认 `ConfiguredStartType`、`DelayedAutoStart`、`CurrentStatus`、`FailureRecoveryConfigured`、`StopReason`、start attempt 与 pipe readiness。bootstrapper 的 `install-or-repair`、`set-startup-mode` 需要 `--user-sid`。 |
+
+当前实现对非系统卷/UNC 上的服务程序使用 SCM delayed-auto，并同时配置分级 failure recovery；这降低开机早期卷不可用造成服务长期停留在 Stopped 的风险，但不能据此反推历史故障一定由磁盘竞态引起。启用开机启动只有在服务达到 Running 且真实 Ping 成功后才提交 policy。若日志显示 `StopReason=StartupFailure` 或 `UnexpectedProcessExit`，检查后续 SCM 重启；`FrontendRequest`、`WindowsShutdown`、`Uninstall`、`ForceRepair`、`ExplicitServiceStop` 属于有意停止，不应形成重启风暴。
 
 ## 6. Win11 新菜单禁用后刷新状态丢失
 

@@ -12,7 +12,12 @@ namespace ContextMenuMgr.Backend.Hosting;
 public sealed class BackendWindowsService : ServiceBase
 {
     private readonly BackendRuntime _runtime;
+    private readonly BackendServiceTerminationState _terminationState = new();
+    private readonly string _stopReasonMarkerPath = Path.Combine(
+        RuntimePaths.DataDirectory,
+        ServiceMetadata.StopReasonMarkerFileName);
     private CancellationTokenSource? _serviceCts;
+    private int _stopCoreStarted;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BackendWindowsService"/> class.
@@ -22,6 +27,7 @@ public sealed class BackendWindowsService : ServiceBase
         _runtime = runtime;
         ServiceName = ServiceMetadata.ServiceName;
         CanStop = true;
+        CanShutdown = true;
         AutoLog = true;
         CanHandleSessionChangeEvent = true;
     }
@@ -38,6 +44,7 @@ public sealed class BackendWindowsService : ServiceBase
         BackendEmergencyLogger.Log($"OnStart entered. Args={string.Join(' ', args)}, PID={Environment.ProcessId}, ServiceName={ServiceName}.");
         _serviceCts = new CancellationTokenSource();
         _runtime.StopRequested += OnRuntimeStopRequested;
+        _runtime.LogServiceLifecycleDiagnostics();
         BackendEmergencyLogger.Log("OnStart: scheduling StartRuntimeAsync.");
         var startupTask = StartRuntimeAsync(_serviceCts.Token);
         _ = startupTask;
@@ -46,30 +53,52 @@ public sealed class BackendWindowsService : ServiceBase
 
     protected override void OnStop()
     {
-        BackendEmergencyLogger.Log($"OnStop entered. ServiceName={ServiceName}, PID={Environment.ProcessId}.");
+        _terminationState.MarkServiceControlManagerStop(ServiceStopReasonMarker.Read(_stopReasonMarkerPath));
+        StopCore("OnStop");
+    }
+
+    protected override void OnShutdown()
+    {
+        _terminationState.MarkIntentionalStop(BackendServiceStopReason.WindowsShutdown);
+        StopCore("OnShutdown");
+        base.OnShutdown();
+    }
+
+    private void StopCore(string callbackName)
+    {
+        if (Interlocked.Exchange(ref _stopCoreStarted, 1) != 0)
+        {
+            BackendEmergencyLogger.Log($"{callbackName}: cleanup already started. StopReason={_terminationState.StopReason}.");
+            return;
+        }
+
+        ExitCode = _terminationState.ExitCode;
+        BackendEmergencyLogger.Log($"{callbackName} entered. ServiceName={ServiceName}, PID={Environment.ProcessId}, StopReason={_terminationState.StopReason}, ExitCode={ExitCode}.");
         try
         {
             _runtime.StopRequested -= OnRuntimeStopRequested;
             _serviceCts?.Cancel();
-            BackendEmergencyLogger.Log("OnStop: cancellation requested.");
-            BackendEmergencyLogger.Log("OnStop: StopAsync started.");
+            BackendEmergencyLogger.Log($"{callbackName}: cancellation requested. StopReason={_terminationState.StopReason}.");
+            BackendEmergencyLogger.Log($"{callbackName}: StopAsync started. StopReason={_terminationState.StopReason}.");
             _runtime.StopAsync().GetAwaiter().GetResult();
-            BackendEmergencyLogger.Log("OnStop: StopAsync completed.");
+            BackendEmergencyLogger.Log($"{callbackName}: StopAsync completed. StopReason={_terminationState.StopReason}, ExitCode={ExitCode}.");
         }
         catch (Exception ex)
         {
-            BackendEmergencyLogger.Log(ex, "OnStop failed.");
+            BackendEmergencyLogger.Log(ex, $"{callbackName} failed. StopReason={_terminationState.StopReason}, ExitCode={ExitCode}.");
             throw;
         }
         finally
         {
             _serviceCts?.Dispose();
             _serviceCts = null;
+            ServiceStopReasonMarker.Delete(_stopReasonMarkerPath);
         }
     }
 
-    private void OnRuntimeStopRequested(object? sender, EventArgs e)
+    private void OnRuntimeStopRequested(object? sender, BackendStopRequestedEventArgs e)
     {
+        _terminationState.MarkIntentionalStop(e.Reason);
         _ = Task.Run(() =>
         {
             try
@@ -93,9 +122,16 @@ public sealed class BackendWindowsService : ServiceBase
             await _runtime.StartAsync(cancellationToken, ensureTrayHostOnStartup: true);
             BackendEmergencyLogger.Log("StartRuntimeAsync completed.");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            BackendEmergencyLogger.Log($"StartRuntimeAsync canceled during intentional stop. StopReason={_terminationState.StopReason}.");
+        }
         catch (Exception ex)
         {
+            _terminationState.MarkStartupFailure();
+            ExitCode = _terminationState.ExitCode;
             BackendEmergencyLogger.Log(ex, "Windows service runtime startup failed.");
+            BackendEmergencyLogger.Log($"StopReason={_terminationState.StopReason}, ExitCode={ExitCode}, RecoveryEligible=True.");
             BackendEmergencyLogger.Log("ServiceStartupFailedSuppressingFrontendShutdown.");
             try
             {
@@ -129,6 +165,18 @@ public sealed class BackendWindowsService : ServiceBase
             {
                 BackendEmergencyLogger.Log(stopException, "Stop() after Windows service runtime startup failure failed.");
             }
+        }
+    }
+
+    internal BackendServiceStopReason StopReason => _terminationState.StopReason;
+
+    internal int ProcessExitCode
+    {
+        get
+        {
+            _terminationState.MarkUnexpectedRunReturn();
+            ExitCode = _terminationState.ExitCode;
+            return _terminationState.ExitCode;
         }
     }
 

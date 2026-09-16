@@ -26,7 +26,7 @@ public sealed class BackendRuntime : IDisposable
         RuntimePaths.DataDirectory,
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);
 
-    public event EventHandler? StopRequested;
+    internal event EventHandler<BackendStopRequestedEventArgs>? StopRequested;
 
     private BackendRuntime(
         FileLogger logger,
@@ -153,6 +153,25 @@ public sealed class BackendRuntime : IDisposable
             RuntimeLogLevel.Error,
             $"Windows service runtime startup failed. Identity={identity}, CancellationRequested={cancellationRequested}.{Environment.NewLine}{exception}",
             CancellationToken.None);
+    }
+
+    internal void LogServiceLifecycleDiagnostics()
+    {
+        try
+        {
+            var configuration = BackendServiceBootstrapper.ReadServiceConfiguration(ServiceMetadata.ServiceName);
+            var session = _frontendAutostartLauncher.GetActiveSessionPolicyDiagnostics();
+            BackendEmergencyLogger.Log(
+                $"ServiceLifecycleDiagnostics: ServiceName={configuration.ServiceName}, ServiceExePath={configuration.ServiceExePath ?? "<missing>"}, "
+                + $"SystemDrive={configuration.SystemDrive}, ServiceExeDrive={configuration.ServiceExeDrive}, ConfiguredStartType={configuration.ConfiguredStartType}, "
+                + $"DelayedAutoStart={configuration.DelayedAutoStart}, CurrentStatus={configuration.CurrentStatus}, FailureRecoveryConfigured={configuration.FailureRecoveryConfigured}, "
+                + $"InteractiveSessionId={session.SessionId?.ToString() ?? "<none>"}, UserSid={session.UserSid ?? "<none>"}, "
+                + $"StartWithWindowsPolicy={session.StartWithWindows?.ToString() ?? "<unavailable>"}, ShowTrayIcon={session.ShowTrayIcon?.ToString() ?? "<unavailable>"}.");
+        }
+        catch (Exception ex)
+        {
+            BackendEmergencyLogger.Log(ex, "ServiceLifecycleDiagnostics failed.");
+        }
     }
 
     private static void TryMigrateLegacyRuntimeFiles()
@@ -591,7 +610,7 @@ public sealed class BackendRuntime : IDisposable
     private void OnBackendShutdownRequested(object? sender, EventArgs e)
     {
         _shutdownFrontendOnStop = true;
-        StopRequested?.Invoke(this, EventArgs.Empty);
+        StopRequested?.Invoke(this, new BackendStopRequestedEventArgs(BackendServiceStopReason.FrontendRequest));
     }
 
     private void OnEnsureTrayHostRequested(object? sender, EventArgs e)

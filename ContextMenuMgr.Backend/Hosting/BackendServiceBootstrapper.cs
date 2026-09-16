@@ -31,7 +31,12 @@ internal static class BackendServiceBootstrapper
     private static readonly string KeepFrontendOnStopMarkerPath = Path.Combine(
         DataDirectory,
         ServiceMetadata.KeepFrontendOnStopMarkerFileName);
+    private static readonly string StopReasonMarkerPath = Path.Combine(
+        DataDirectory,
+        ServiceMetadata.StopReasonMarkerFileName);
     private static readonly string BootstrapLogPath = Path.Combine(RuntimePaths.LogsDirectory, "bootstrap.log");
+    private const int RecoveryResetPeriodSeconds = 24 * 60 * 60;
+    private const string RecoveryActions = "restart/5000/restart/15000/restart/60000";
 
     /// <summary>
     /// Tries to execute an elevated backend bootstrap command.
@@ -106,7 +111,11 @@ internal static class BackendServiceBootstrapper
         }
     }
 
-    private static (bool Success, string Code, string Detail) InstallOrRepairService(string? userSid, Action<string> log)
+    private static (bool Success, string Code, string Detail) InstallOrRepairService(
+        string? userSid,
+        Action<string> log,
+        bool? requestedAutostartEnabled = null,
+        bool persistRequestedPolicyOnSuccess = false)
     {
         var serviceExePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(serviceExePath) || !File.Exists(serviceExePath))
@@ -115,8 +124,10 @@ internal static class BackendServiceBootstrapper
         }
 
         var binaryPath = $"\"{serviceExePath}\" --service";
-        var isAutostartEnabled = IsAutostartEnabledForUser(userSid, log);
-        var startupMode = isAutostartEnabled ? "auto" : "demand";
+        var isAutostartEnabled = requestedAutostartEnabled ?? IsAutostartEnabledForUser(userSid, log);
+        var startupMode = GetRequestedStartupMode(isAutostartEnabled, serviceExePath);
+        var createStartupMode = isAutostartEnabled ? "auto" : "demand";
+        LogServiceLifecycleDiagnostics(log, userSid, isAutostartEnabled, startupMode);
         log($"InstallOrRepairService: ServiceExePath={serviceExePath}, BinaryPath={binaryPath}, StartupMode={startupMode}, UserSid={userSid ?? "<null>"}, IsAutostartEnabledForUser={isAutostartEnabled}, ServiceExistsScm={ServiceExistsInScm(ServiceMetadata.ServiceName)}, LegacyServiceExistsScm={ServiceExistsInScm(ServiceMetadata.LegacyServiceName)}.");
 
         var health = TestServiceRegistrationHealthy(ServiceMetadata.ServiceName);
@@ -156,7 +167,7 @@ internal static class BackendServiceBootstrapper
                 "binPath=",
                 binaryPath,
                 "start=",
-                startupMode,
+                createStartupMode,
                 "DisplayName=",
                 ServiceMetadata.DisplayName);
             if (!createResult.Success)
@@ -177,19 +188,22 @@ internal static class BackendServiceBootstrapper
                             "binPath=",
                             binaryPath,
                             "start=",
-                            startupMode,
+                            createStartupMode,
                             "DisplayName=",
                             ServiceMetadata.DisplayName);
                     }
                     else
                     {
-                        RunSc(log,
+                        var configExistingResult = TryRunSc(log,
                             "config",
                             ServiceMetadata.ServiceName,
                             "binPath=",
-                            binaryPath,
-                            "start=",
-                            startupMode);
+                            binaryPath);
+                        if (!configExistingResult.Success)
+                        {
+                            return (false, "SERVICE_CONFIG_FAILED", configExistingResult.Detail);
+                        }
+
                         createResult = new ScResult(true, 0, string.Empty, string.Empty, "Existing healthy service will be configured.");
                     }
                 }
@@ -209,13 +223,15 @@ internal static class BackendServiceBootstrapper
         }
         else
         {
-            RunSc(log,
+            var configResult = TryRunSc(log,
                 "config",
                 ServiceMetadata.ServiceName,
                 "binPath=",
-                binaryPath,
-                "start=",
-                startupMode);
+                binaryPath);
+            if (!configResult.Success)
+            {
+                return (false, "SERVICE_CONFIG_FAILED", configResult.Detail);
+            }
         }
 
         health = TestServiceRegistrationHealthy(ServiceMetadata.ServiceName);
@@ -224,84 +240,77 @@ internal static class BackendServiceBootstrapper
             return (false, "SERVICE_REGISTRATION_INCOMPLETE", $"Service registration health check failed. Reason={health.Reason}.");
         }
 
-        RunSc(log, "description", ServiceMetadata.ServiceName, "Context Menu Manager Plus elevated backend service");
-
-        using (var service = new ServiceController(ServiceMetadata.ServiceName))
+        var registeredConfiguration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+        if (!PathsReferToSameFile(registeredConfiguration.ServiceExePath, serviceExePath))
         {
-            var initialStatus = service.Status;
-            log($"ServiceStartCheck: ServiceName={ServiceMetadata.ServiceName}, InitialStatus={initialStatus}.");
-            if (initialStatus != ServiceControllerStatus.Running)
-            {
-                log("ServiceStart: Ensuring keep-frontend marker before service start.");
-                EnsureKeepFrontendMarker();
-                try
-                {
-                    log("ServiceStart: Calling Start.");
-                    service.Start();
-                    log("ServiceStart: WaitForStatus Running started, Timeout=15s.");
-                    service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
-                    service.Refresh();
-                    log($"ServiceStart: WaitForStatus succeeded, Status={service.Status}.");
-                }
-                catch (System.ServiceProcess.TimeoutException ex)
-                {
-                    var finalStatus = TryGetServiceControllerStatusText(service);
-                    log($"ServiceStart: WaitForStatus timeout/failure, FinalStatus={finalStatus}, Exception={ex}.");
-                    if (!string.Equals(finalStatus, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
-                    {
-                        TryDeleteKeepFrontendMarker();
-                    }
-
-                    return (
-                        false,
-                        "SERVICE_START_TIMEOUT",
-                        $"Service did not report Running within 15 seconds. InitialStatus={initialStatus}, FinalStatus={finalStatus}, ServiceName={ServiceMetadata.ServiceName}, ServiceExePath={serviceExePath}, Exception={ex.Message}. Check {RuntimePaths.LogsDirectory}\\bootstrap.log, backend.log, and service-startup.log.");
-                }
-                catch (Exception ex)
-                {
-                    var finalStatus = TryGetServiceControllerStatusText(service);
-                    log($"ServiceStart: WaitForStatus timeout/failure, FinalStatus={finalStatus}, Exception={ex}.");
-                    if (!string.Equals(finalStatus, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
-                    {
-                        TryDeleteKeepFrontendMarker();
-                    }
-
-                    throw;
-                }
-            }
-            else
-            {
-                log($"ServiceStart: Already running, Status={initialStatus}.");
-            }
-        }
-
-        var status = GetServiceStatusText(ServiceMetadata.ServiceName);
-        if (!string.Equals(status, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
-        {
-            TryDeleteKeepFrontendMarker();
-            return (false, "SERVICE_NOT_RUNNING", status);
-        }
-
-        // Treat the service as healthy only after the backend pipe answers a
-        // real Ping request. This prevents false-positive "install succeeded"
-        // results when SCM reports Running but the runtime is still hung during
-        // startup and not yet accepting pipe connections.
-        if (!WaitForBackendPipeReady(TimeSpan.FromSeconds(20), log))
-        {
-            var finalStatus = GetServiceStatusText(ServiceMetadata.ServiceName);
-            log($"BackendPipeReadyFailure: ServiceName={ServiceMetadata.ServiceName}, FinalStatus={finalStatus}.");
-            if (!string.Equals(finalStatus, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
-            {
-                TryDeleteKeepFrontendMarker();
-            }
-
             return (
                 false,
-                "BACKEND_PIPE_NOT_READY",
-                $"Service is running but backend pipe did not become ready in 20 seconds. Status={finalStatus}. ServiceName={ServiceMetadata.ServiceName}. Check {RuntimePaths.LogsDirectory}\\bootstrap.log, backend.log, and service-startup.log.");
+                "SERVICE_IMAGE_PATH_MISMATCH",
+                $"Configured service executable does not match this backend. Expected={serviceExePath}, Actual={registeredConfiguration.ServiceExePath ?? "<missing>"}.");
+        }
+
+        var descriptionResult = TryRunSc(log, "description", ServiceMetadata.ServiceName, "Context Menu Manager Plus elevated backend service");
+        if (!descriptionResult.Success)
+        {
+            return (false, "SERVICE_DESCRIPTION_CONFIG_FAILED", descriptionResult.Detail);
+        }
+
+        if (persistRequestedPolicyOnSuccess)
+        {
+            var transition = ServiceAutostartTransition.Execute(
+                enabled: isAutostartEnabled,
+                serviceExists: true,
+                requestedStartupMode: startupMode,
+                configureStartupMode: () =>
+                {
+                    var result = TryRunSc(log, "config", ServiceMetadata.ServiceName, "start=", startupMode);
+                    return new ServiceCommandResult(result.Success, result.ExitCode, result.Detail);
+                },
+                readConfiguration: () => ReadServiceConfiguration(ServiceMetadata.ServiceName),
+                configureRecovery: () =>
+                {
+                    var result = ConfigureAndVerifyServiceRecovery(log);
+                    return new ServiceCommandResult(result.Success, result.Success ? 0 : -1, result.Detail);
+                },
+                convergeRuntime: () => ConvergeServiceRuntime(serviceExePath, log),
+                commitPolicy: () => SetAutostartPolicyForUser(userSid, isAutostartEnabled, log));
+
+            log($"ServiceStartupModeResult: RequestedStartupMode={startupMode}, ActualStartupMode={transition.ActualStartupMode}, ScExitCode={transition.ScExitCode}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
+            if (!transition.Success)
+            {
+                TryDeleteKeepFrontendMarker();
+                return (false, transition.Code, transition.Detail);
+            }
+
+            if (isAutostartEnabled)
+            {
+                TryEnsureTrayHostViaPipe(log);
+            }
+        }
+        else
+        {
+            var startupConfigurationResult = ConfigureAndVerifyStartupMode(startupMode, log);
+            if (!startupConfigurationResult.Success)
+            {
+                return (false, startupConfigurationResult.Code, startupConfigurationResult.Detail);
+            }
+
+            var recoveryResult = ConfigureAndVerifyServiceRecovery(log);
+            if (!recoveryResult.Success)
+            {
+                return (false, recoveryResult.Code, recoveryResult.Detail);
+            }
+
+            var convergence = ConvergeServiceRuntime(serviceExePath, log);
+            if (!convergence.Success)
+            {
+                TryDeleteKeepFrontendMarker();
+                return (false, convergence.Code, convergence.Detail);
+            }
         }
 
         TryDeleteKeepFrontendMarker();
+        LogServiceLifecycleDiagnostics(log, userSid, isAutostartEnabled, startupMode);
         return (true, "OK", "Running");
     }
 
@@ -399,32 +408,59 @@ internal static class BackendServiceBootstrapper
             return (true, "ALREADY_STOPPED", "Stopped");
         }
 
-        service.Stop();
-        service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
-        var status = GetServiceStatusText(ServiceMetadata.ServiceName);
-        log($"StopService: ServiceName={ServiceMetadata.ServiceName}, Status={status}.");
-        return string.Equals(status, nameof(ServiceControllerStatus.Stopped), StringComparison.OrdinalIgnoreCase)
-            ? (true, "STOPPED", "Stopped")
-            : (false, "SERVICE_NOT_STOPPED", status);
+        TryWriteStopReasonMarker(BackendServiceStopReason.ExplicitServiceStop, log);
+        try
+        {
+            service.Stop();
+            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+            var status = GetServiceStatusText(ServiceMetadata.ServiceName);
+            log($"StopService: ServiceName={ServiceMetadata.ServiceName}, Status={status}.");
+            return string.Equals(status, nameof(ServiceControllerStatus.Stopped), StringComparison.OrdinalIgnoreCase)
+                ? (true, "STOPPED", "Stopped")
+                : (false, "SERVICE_NOT_STOPPED", status);
+        }
+        finally
+        {
+            ServiceStopReasonMarker.Delete(StopReasonMarkerPath);
+        }
     }
 
     private static (bool Success, string Code, string Detail) SetServiceStartupMode(bool enabled, string? userSid, Action<string> log)
     {
-        if (!ServiceExistsInScm(ServiceMetadata.ServiceName))
+        log($"SetServiceStartupMode: Enabled={enabled}, UserSid={userSid ?? "<null>"}.");
+
+        if (enabled)
         {
-            return (true, "NOT_INSTALLED", "Service was not installed.");
+            // Enabling autostart is a convergence operation, not just a Start
+            // value mutation. Reuse the install/repair health, SCM Running, and
+            // real pipe-Ping path so the policy is committed only at the end.
+            var enabledResult = InstallOrRepairService(
+                userSid,
+                log,
+                requestedAutostartEnabled: true,
+                persistRequestedPolicyOnSuccess: true);
+            return enabledResult.Success
+                ? (true, "STARTUP_AUTO", enabledResult.Detail)
+                : enabledResult;
         }
 
-        log($"SetServiceStartupMode: Enabled={enabled}, UserSid={userSid ?? "<null>"}.");
-        RunSc(log,
-            "config",
-            ServiceMetadata.ServiceName,
-            "start=",
-            enabled ? "auto" : "demand");
+        var serviceExists = ServiceExistsInScm(ServiceMetadata.ServiceName);
+        var transition = ServiceAutostartTransition.Execute(
+            enabled: false,
+            serviceExists,
+            requestedStartupMode: "demand",
+            configureStartupMode: () =>
+            {
+                var result = TryRunSc(log, "config", ServiceMetadata.ServiceName, "start=", "demand");
+                return new ServiceCommandResult(result.Success, result.ExitCode, result.Detail);
+            },
+            readConfiguration: () => ReadServiceConfiguration(ServiceMetadata.ServiceName),
+            configureRecovery: static () => new ServiceCommandResult(true, 0, "Not required while disabling autostart."),
+            convergeRuntime: static () => new ServiceRuntimeConvergenceResult(true, "OK", "Not required while disabling autostart."),
+            commitPolicy: () => SetAutostartPolicyForUser(userSid, enabled: false, log));
 
-        SetAutostartPolicyForUser(userSid, enabled, log);
-
-        return (true, enabled ? "STARTUP_AUTO" : "STARTUP_MANUAL", enabled ? "Automatic" : "Manual");
+        log($"ServiceStartupModeResult: RequestedStartupMode=demand, ActualStartupMode={transition.ActualStartupMode}, ScExitCode={transition.ScExitCode}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
+        return (transition.Success, transition.Code, transition.Detail);
     }
 
     private static (bool Success, string Code, string Detail) RepairRuntimeDataAcl(Action<string> log)
@@ -456,6 +492,9 @@ internal static class BackendServiceBootstrapper
         log($"ServiceStatusBeforeStop: ServiceName={serviceName}, Status={statusText}.");
         if (existsInScm && !string.Equals(statusText, nameof(ServiceControllerStatus.Stopped), StringComparison.OrdinalIgnoreCase))
         {
+            TryWriteStopReasonMarker(MapRemovalStopReason(reason), log);
+            var disableFailureFlag = TryRunSc(log, "failureflag", serviceName, "0");
+            log($"RemovalRecoverySuppression: ServiceName={serviceName}, Success={disableFailureFlag.Success}, ScExitCode={disableFailureFlag.ExitCode}. Normal SCM stop remains non-recoverable even if this best-effort guard fails.");
             if (keepFrontendAlive)
             {
                 TryEnsureKeepFrontendMarker(log);
@@ -488,10 +527,12 @@ internal static class BackendServiceBootstrapper
         log($"DeleteAttemptResult: ServiceName={serviceName}, Success={deleteResult.Success}, PendingDelete={deleteResult.PendingDelete}, NotInstalled={deleteResult.NotInstalled}, Fatal={deleteResult.Fatal}, ErrorCode={deleteResult.ErrorCode}, Detail={deleteResult.Detail}.");
         if (deleteResult.Fatal)
         {
+            ServiceStopReasonMarker.Delete(StopReasonMarkerPath);
             return new ServiceRemovalResult(false, deleteResult.Code, deleteResult.Detail, deleteResult.PendingDelete);
         }
 
         var wait = WaitForScmRemoval(serviceName, TimeSpan.FromSeconds(10), log);
+        ServiceStopReasonMarker.Delete(StopReasonMarkerPath);
         log($"WaitForScmRemoval result: ServiceName={serviceName}, Code={wait.Code}, Detail={wait.Detail}.");
         log($"RemoveServiceRegistrationTolerantFinal: ServiceName={serviceName}, Code={wait.Code}, Success={wait.Success}, PendingDelete={wait.IsPendingDelete}.");
         return wait;
@@ -567,6 +608,276 @@ internal static class BackendServiceBootstrapper
         }
 
         return new ServiceHealthResult(true, "OK");
+    }
+
+    internal static string GetRequestedStartupMode(
+        bool enabled,
+        string serviceExePath,
+        string? windowsDirectory = null)
+    {
+        if (!enabled)
+        {
+            return "demand";
+        }
+
+        return ShouldUseDelayedAutoStart(serviceExePath, windowsDirectory)
+            ? "delayed-auto"
+            : "auto";
+    }
+
+    internal static bool ShouldUseDelayedAutoStart(string serviceExePath, string? windowsDirectory = null)
+    {
+        var systemDrive = GetPathRoot(windowsDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+        var serviceDrive = GetPathRoot(serviceExePath);
+        return !string.IsNullOrWhiteSpace(systemDrive)
+               && !string.IsNullOrWhiteSpace(serviceDrive)
+               && !string.Equals(systemDrive, serviceDrive, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static IReadOnlyList<string[]> BuildRecoveryScCommands(string serviceName)
+        =>
+        [
+            [
+                "failure",
+                serviceName,
+                "reset=",
+                RecoveryResetPeriodSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "actions=",
+                RecoveryActions
+            ],
+            ["failureflag", serviceName, "1"]
+        ];
+
+    private static (bool Success, string Code, string Detail) ConfigureAndVerifyStartupMode(
+        string requestedStartupMode,
+        Action<string> log)
+    {
+        var scResult = TryRunSc(
+            log,
+            "config",
+            ServiceMetadata.ServiceName,
+            "start=",
+            requestedStartupMode);
+        var configuration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+        log($"ServiceStartupModeResult: RequestedStartupMode={requestedStartupMode}, ActualStartupMode={configuration.ConfiguredStartType}, DelayedAutoStart={configuration.DelayedAutoStart}, ScExitCode={scResult.ExitCode}, ServiceStatus={configuration.CurrentStatus}.");
+
+        if (!scResult.Success)
+        {
+            return (false, "SERVICE_STARTUP_CONFIG_FAILED", scResult.Detail);
+        }
+
+        if (!configuration.MatchesRequestedStartupMode(requestedStartupMode))
+        {
+            return (
+                false,
+                "SERVICE_STARTUP_CONFIG_MISMATCH",
+                $"RequestedStartupMode={requestedStartupMode}, ActualStartupMode={configuration.ConfiguredStartType}, DelayedAutoStart={configuration.DelayedAutoStart}.");
+        }
+
+        return (true, "OK", configuration.ConfiguredStartType);
+    }
+
+    private static (bool Success, string Code, string Detail) ConfigureAndVerifyServiceRecovery(Action<string> log)
+    {
+        foreach (var arguments in BuildRecoveryScCommands(ServiceMetadata.ServiceName))
+        {
+            var result = TryRunSc(log, arguments);
+            if (!result.Success)
+            {
+                log($"ServiceRecoveryConfiguration: FailureRecoveryConfigured=False, FailedCommand={arguments[0]}, ScExitCode={result.ExitCode}, Detail={result.Detail}.");
+                return (false, "SERVICE_RECOVERY_CONFIG_FAILED", result.Detail);
+            }
+        }
+
+        var queryFailure = TryRunSc(log, "qfailure", ServiceMetadata.ServiceName);
+        var queryFailureFlag = TryRunSc(log, "qfailureflag", ServiceMetadata.ServiceName);
+        if (!queryFailure.Success || !queryFailureFlag.Success)
+        {
+            var failed = !queryFailure.Success ? queryFailure : queryFailureFlag;
+            return (false, "SERVICE_RECOVERY_VERIFY_FAILED", failed.Detail);
+        }
+
+        var configuration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+        log($"ServiceRecoveryConfiguration: FailureRecoveryConfigured={configuration.FailureRecoveryConfigured}, FailureActionsPresent={configuration.FailureActionsPresent}, FailureActionsOnNonCrashFailures={configuration.FailureActionsOnNonCrashFailures}, ResetSeconds={RecoveryResetPeriodSeconds}, Actions={RecoveryActions}.");
+        return configuration.FailureRecoveryConfigured
+            ? (true, "OK", RecoveryActions)
+            : (false, "SERVICE_RECOVERY_CONFIG_MISMATCH", "SCM recovery settings could not be verified after configuration.");
+    }
+
+    private static ServiceRuntimeConvergenceResult ConvergeServiceRuntime(
+        string serviceExePath,
+        Action<string> log)
+    {
+        using (var service = new ServiceController(ServiceMetadata.ServiceName))
+        {
+            var initialStatus = service.Status;
+            log($"ServiceStartCheck: ServiceName={ServiceMetadata.ServiceName}, InitialStatus={initialStatus}.");
+            if (initialStatus != ServiceControllerStatus.Running)
+            {
+                log("ServiceStart: Ensuring keep-frontend marker before service start.");
+                EnsureKeepFrontendMarker();
+                try
+                {
+                    log("ServiceStart: Calling Start.");
+                    service.Start();
+                    log("ServiceStart: WaitForStatus Running started, Timeout=15s.");
+                    service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
+                    service.Refresh();
+                    log($"ServiceStart: WaitForStatus succeeded, Status={service.Status}.");
+                }
+                catch (System.ServiceProcess.TimeoutException ex)
+                {
+                    var finalStatus = TryGetServiceControllerStatusText(service);
+                    log($"ServiceStart: WaitForStatus timeout/failure, FinalStatus={finalStatus}, Exception={ex}.");
+                    TryDeleteKeepFrontendMarker();
+                    return new ServiceRuntimeConvergenceResult(
+                        false,
+                        "SERVICE_START_TIMEOUT",
+                        $"Service did not report Running within 15 seconds. InitialStatus={initialStatus}, FinalStatus={finalStatus}, ServiceName={ServiceMetadata.ServiceName}, ServiceExePath={serviceExePath}, Exception={ex.Message}. Check {RuntimePaths.LogsDirectory}\\bootstrap.log, backend.log, and service-startup.log.");
+                }
+                catch (Exception ex)
+                {
+                    var finalStatus = TryGetServiceControllerStatusText(service);
+                    log($"ServiceStart: Start/wait failed, FinalStatus={finalStatus}, Exception={ex}.");
+                    TryDeleteKeepFrontendMarker();
+                    return new ServiceRuntimeConvergenceResult(
+                        false,
+                        "SERVICE_START_FAILED",
+                        $"Service could not be started. InitialStatus={initialStatus}, FinalStatus={finalStatus}, ServiceName={ServiceMetadata.ServiceName}, ServiceExePath={serviceExePath}, Exception={ex.Message}.");
+                }
+            }
+            else
+            {
+                log($"ServiceStart: Already running, Status={initialStatus}.");
+            }
+        }
+
+        var status = GetServiceStatusText(ServiceMetadata.ServiceName);
+        if (!string.Equals(status, nameof(ServiceControllerStatus.Running), StringComparison.OrdinalIgnoreCase))
+        {
+            TryDeleteKeepFrontendMarker();
+            return new ServiceRuntimeConvergenceResult(false, "SERVICE_NOT_RUNNING", status);
+        }
+
+        // SCM Running is not sufficient: the runtime is healthy only after a
+        // real request/response round trip through the backend pipe.
+        if (!WaitForBackendPipeReady(TimeSpan.FromSeconds(20), log))
+        {
+            var finalStatus = GetServiceStatusText(ServiceMetadata.ServiceName);
+            log($"BackendPipeReadyFailure: ServiceName={ServiceMetadata.ServiceName}, FinalStatus={finalStatus}.");
+            TryDeleteKeepFrontendMarker();
+            return new ServiceRuntimeConvergenceResult(
+                false,
+                "BACKEND_PIPE_NOT_READY",
+                $"Service is running but backend pipe did not become ready in 20 seconds. Status={finalStatus}. ServiceName={ServiceMetadata.ServiceName}. Check {RuntimePaths.LogsDirectory}\\bootstrap.log, backend.log, and service-startup.log.");
+        }
+
+        return new ServiceRuntimeConvergenceResult(true, "OK", "Running and backend pipe Ping succeeded.");
+    }
+
+    internal static ServiceConfigurationSnapshot ReadServiceConfiguration(string serviceName)
+    {
+        using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{serviceName}");
+        if (key is null)
+        {
+            return new ServiceConfigurationSnapshot(
+                false,
+                serviceName,
+                null,
+                null,
+                null,
+                "Missing",
+                false,
+                false,
+                false,
+                "Missing",
+                GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? "<unknown>",
+                "<unknown>");
+        }
+
+        var imagePath = key.GetValue("ImagePath") as string;
+        var serviceExePath = string.IsNullOrWhiteSpace(imagePath) ? null : TryParseExecutablePath(imagePath);
+        int? startValue = key.GetValue("Start") is int start ? start : null;
+        var delayedAutoStart = key.GetValue("DelayedAutostart") is int delayed && delayed != 0;
+        var failureActionsPresent = key.GetValue("FailureActions") is byte[] failureActions && failureActions.Length > 0;
+        var failureActionsOnNonCrashFailures = key.GetValue("FailureActionsOnNonCrashFailures") is int failureFlag && failureFlag != 0;
+        var configuredStartType = startValue switch
+        {
+            0 => "Boot",
+            1 => "System",
+            2 when delayedAutoStart => "DelayedAutomatic",
+            2 => "Automatic",
+            3 => "Manual",
+            4 => "Disabled",
+            _ => "Unknown"
+        };
+
+        return new ServiceConfigurationSnapshot(
+            true,
+            serviceName,
+            imagePath,
+            serviceExePath,
+            startValue,
+            configuredStartType,
+            delayedAutoStart,
+            failureActionsPresent,
+            failureActionsOnNonCrashFailures,
+            GetServiceStatusText(serviceName),
+            GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? "<unknown>",
+            GetPathRoot(serviceExePath) ?? "<unknown>");
+    }
+
+    private static void LogServiceLifecycleDiagnostics(
+        Action<string> log,
+        string? userSid,
+        bool requestedStartWithWindows,
+        string requestedStartupMode)
+    {
+        var configuration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+        var actualStartWithWindowsPolicy = IsAutostartEnabledForUser(userSid, log);
+        log(
+            $"ServiceLifecycleDiagnostics: ServiceName={configuration.ServiceName}, ServiceExePath={configuration.ServiceExePath ?? "<missing>"}, "
+            + $"SystemDrive={configuration.SystemDrive}, ServiceExeDrive={configuration.ServiceExeDrive}, RequestedStartupMode={requestedStartupMode}, "
+            + $"ConfiguredStartType={configuration.ConfiguredStartType}, DelayedAutoStart={configuration.DelayedAutoStart}, CurrentStatus={configuration.CurrentStatus}, "
+            + $"FailureRecoveryConfigured={configuration.FailureRecoveryConfigured}, RequestedStartWithWindows={requestedStartWithWindows}, "
+            + $"StartWithWindowsPolicy={actualStartWithWindowsPolicy}, UserSid={userSid ?? "<null>"}.");
+    }
+
+    private static string? GetPathRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetPathRoot(path.Trim());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool PathsReferToSameFile(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(first),
+                Path.GetFullPath(second),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsAutostartEnabledForUser(string? userSid, Action<string> log)
@@ -685,17 +996,6 @@ internal static class BackendServiceBootstrapper
         catch
         {
         }
-    }
-
-    private static void RunSc(Action<string> log, params string[] arguments)
-    {
-        var result = TryRunSc(log, arguments);
-        if (result.Success)
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(result.Detail);
     }
 
     private static ScResult TryRunSc(Action<string> log, params string[] arguments)
@@ -1050,5 +1350,85 @@ internal static class BackendServiceBootstrapper
         public override bool IsInvalid => handle == IntPtr.Zero;
 
         protected override bool ReleaseHandle() => CloseServiceHandle(handle);
+    }
+
+    private static void TryEnsureTrayHostViaPipe(Action<string> log)
+    {
+        try
+        {
+            using var pipe = new NamedPipeClientStream(
+                ".",
+                PipeConstants.PipeName,
+                PipeDirection.InOut,
+                PipeOptions.None);
+            pipe.Connect(2000);
+
+            using var reader = new StreamReader(
+                pipe,
+                new UTF8Encoding(false),
+                detectEncodingFromByteOrderMarks: false,
+                leaveOpen: true);
+            using var writer = new StreamWriter(
+                pipe,
+                new UTF8Encoding(false),
+                leaveOpen: true)
+            {
+                AutoFlush = true
+            };
+
+            var payload = JsonSerializer.Serialize(new PipeEnvelope
+            {
+                MessageType = PipeMessageType.Request,
+                CorrelationId = Guid.NewGuid(),
+                Request = new PipeRequest
+                {
+                    Command = PipeCommand.EnsureTrayHost
+                }
+            }, JsonOptions);
+
+            writer.WriteLine(payload);
+            var line = reader.ReadLine();
+            var envelope = string.IsNullOrWhiteSpace(line)
+                ? null
+                : JsonSerializer.Deserialize<PipeEnvelope>(line, JsonOptions);
+            var success = envelope?.MessageType == PipeMessageType.Response
+                          && envelope.Response?.Success == true;
+            log($"TrayHostReadinessRequest: Result={(success ? "Accepted" : "FailedResponse")}, BackendPipeReady=True.");
+        }
+        catch (Exception ex)
+        {
+            // The backend pipe has already passed its required Ping. TrayHost is
+            // a separate user-session layer and remains retriable through session
+            // events and explicit frontend requests.
+            log($"TrayHostReadinessRequest: Result=Failure, BackendPipeReady=True, ExceptionType={ex.GetType().FullName}, Message={ex.Message}.");
+        }
+    }
+
+    private static BackendServiceStopReason MapRemovalStopReason(string reason)
+    {
+        if (reason.Contains("UNINSTALL", StringComparison.OrdinalIgnoreCase))
+        {
+            return BackendServiceStopReason.Uninstall;
+        }
+
+        if (reason.Contains("FORCE", StringComparison.OrdinalIgnoreCase))
+        {
+            return BackendServiceStopReason.ForceRepair;
+        }
+
+        return BackendServiceStopReason.InstallRepair;
+    }
+
+    private static void TryWriteStopReasonMarker(BackendServiceStopReason reason, Action<string> log)
+    {
+        try
+        {
+            ServiceStopReasonMarker.Write(StopReasonMarkerPath, reason);
+            log($"ServiceStopReasonMarker: Path={StopReasonMarkerPath}, StopReason={reason}, Result=Created.");
+        }
+        catch (Exception ex)
+        {
+            log($"ServiceStopReasonMarker: Path={StopReasonMarkerPath}, StopReason={reason}, Result=Failure, Exception={ex}.");
+        }
     }
 }
