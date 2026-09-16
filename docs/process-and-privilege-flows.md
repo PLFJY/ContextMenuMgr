@@ -48,6 +48,8 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 
 前端通过 `NamedPipeBackendClient` 连接 `PipeConstants.PipeName`，发送 `PipeEnvelope` / `PipeRequest`。后端 `NamedPipeBackendServer` 接收请求后按 `PipeCommand` 分发，并返回 `PipeResponse`。订阅通知的连接还会收到 `BackendNotification`，用于新增菜单审核、状态变化和服务停止提示。
 
+`NamedPipeBackendClient` 会为未显式提供 `ClientOperationId` 的普通请求生成一个 operation id，并在写入 pipe 前登记到当前前端实例的短期缓存。`NamedPipeBackendServer` 会在 handler 未显式返回 operation id 时，把请求 id 继承到 `PipeResponse`，随后 generic `ItemStateChanged` 广播继续携带同一 id。发起请求的前端因此会抑制自己的重复广播；其它前端实例没有该 id 的本地缓存，仍会收到更新。独立后端通知保持 `ClientOperationId=null`，不会被这一机制过滤。
+
 典型运行时操作走这条链路：
 
 | 操作 | 后端处理入口 |

@@ -394,6 +394,77 @@ public sealed class ClassicShellExtensionRegistryMoveTests
     }
 
     [Fact]
+    public async Task DisabledSceneShellExtension_RemainsInSceneSnapshot_AndStaysOutOfGlobalSnapshot()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("The current test identity has no user SID.");
+        var extension = $".contextmenumgrissue119{Guid.NewGuid():N}";
+        const string keyName = "SceneHandler";
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+        var extensionSubPath = $@"{sid}\Software\Classes\{extension}";
+        var activePath = $@"HKEY_USERS\{extensionSubPath}\shellex\ContextMenuHandlers\{keyName}";
+        var disabledPath = $@"HKEY_USERS\{extensionSubPath}\shellex\-ContextMenuHandlers\{keyName}";
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"ContextMenuMgr.Tests.{Guid.NewGuid():N}");
+
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            using (var key = Registry.Users.CreateSubKey(
+                       $@"{extensionSubPath}\shellex\ContextMenuHandlers\{keyName}",
+                       writable: true)
+                   ?? throw new InvalidOperationException("Unable to create the controlled scene fixture."))
+            {
+                key.SetValue(string.Empty, handlerClsid, RegistryValueKind.String);
+            }
+
+            var logger = new FileLogger(Path.Combine(temporaryDirectory, "backend.log"));
+            var catalog = new ContextMenuRegistryCatalog(
+                logger,
+                new ContextMenuStateStore(Path.Combine(temporaryDirectory, "state.json"), logger),
+                new RegistryBackupService(Path.Combine(temporaryDirectory, "backups"), logger),
+                new BackendProtectionSettingsStore(Path.Combine(temporaryDirectory, "protection.json"), logger));
+            var userContext = new BackendUserContext(
+                sid,
+                Environment.UserName,
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                SessionId: null);
+
+            var enabledSceneSnapshot = await catalog.GetSceneSnapshotAsync(
+                ContextMenuSceneKind.CustomExtension,
+                extension,
+                userContext: userContext);
+            var enabledEntry = Assert.Single(enabledSceneSnapshot, item =>
+                string.Equals(item.KeyName, keyName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.HandlerClsid, handlerClsid, StringComparison.OrdinalIgnoreCase));
+            Assert.True(enabledEntry.IsEnabled);
+            Assert.Equal(activePath, enabledEntry.BackendRegistryPath, ignoreCase: true);
+
+            ContextMenuRegistryCatalog.MoveRegistryKeySafely(activePath, disabledPath);
+
+            var disabledSceneSnapshot = await catalog.GetSceneSnapshotAsync(
+                ContextMenuSceneKind.CustomExtension,
+                extension,
+                userContext: userContext);
+            var disabledEntry = Assert.Single(disabledSceneSnapshot, item =>
+                string.Equals(item.Id, enabledEntry.Id, StringComparison.OrdinalIgnoreCase));
+            Assert.False(disabledEntry.IsEnabled);
+            Assert.Equal(disabledPath, disabledEntry.BackendRegistryPath, ignoreCase: true);
+            Assert.Equal(enabledEntry.SourceRootPath, disabledEntry.SourceRootPath);
+
+            var globalSnapshot = await catalog.GetReadOnlySnapshotAsync();
+            Assert.DoesNotContain(globalSnapshot, item =>
+                string.Equals(item.Id, disabledEntry.Id, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Registry.Users.DeleteSubKeyTree(extensionSubPath, throwOnMissingSubKey: false);
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SceneShellExtension_HandlerMismatchOrAdditionalActiveCopy_FailsVerification()
     {
         const string itemId = @"SystemFileAssociations\Video\shellex\ContextMenuHandlers|SceneHandler";

@@ -7,6 +7,53 @@ namespace ContextMenuMgr.Tests;
 public sealed class NamedPipeBackendClientNotificationSuppressionTests
 {
     [Fact]
+    public void ContextMenuRequestWithoutOperationId_GetsOneAndRegistersItBeforeSend()
+    {
+        var cache = new RecentClientOperationCache();
+        var client = new NamedPipeBackendClient(cache);
+        var request = new PipeRequest
+        {
+            Command = PipeCommand.SetEnabled,
+            ItemId = @"*\shellex\ContextMenuHandlers|RegularHandler",
+            Enable = false
+        };
+
+        var preparedRequest = client.PrepareRequestForSend(request);
+
+        Assert.Null(request.ClientOperationId);
+        Assert.NotNull(preparedRequest.ClientOperationId);
+        Assert.NotEqual(Guid.Empty, preparedRequest.ClientOperationId);
+        Assert.True(cache.Contains(preparedRequest.ClientOperationId));
+        Assert.False(client.TryForwardSubscriptionNotification(new BackendNotification
+        {
+            Kind = PipeNotificationKind.ItemStateChanged,
+            Item = new ContextMenuEntry { Id = request.ItemId },
+            ClientOperationId = preparedRequest.ClientOperationId
+        }));
+    }
+
+    [Fact]
+    public void CallerProvidedOperationId_IsPreservedAndRegistered()
+    {
+        var operationId = Guid.NewGuid();
+        var cache = new RecentClientOperationCache();
+        var client = new NamedPipeBackendClient(cache);
+        var request = new PipeRequest
+        {
+            Command = PipeCommand.SetEnabled,
+            ItemId = @"*\shellex\ContextMenuHandlers|RegularHandler",
+            Enable = false,
+            ClientOperationId = operationId
+        };
+
+        var preparedRequest = client.PrepareRequestForSend(request);
+
+        Assert.Same(request, preparedRequest);
+        Assert.Equal(operationId, preparedRequest.ClientOperationId);
+        Assert.True(cache.Contains(operationId));
+    }
+
+    [Fact]
     public void LocalShellNewNotificationBeforeResponse_IsSuppressedAndCannotCreateDuplicate()
     {
         var operationId = Guid.NewGuid();
@@ -87,12 +134,18 @@ public sealed class NamedPipeBackendClientNotificationSuppressionTests
     {
         var now = DateTimeOffset.UtcNow;
         var cache = new RecentClientOperationCache(() => now);
+        var client = new NamedPipeBackendClient(cache);
+        var failedRequest = client.PrepareRequestForSend(new PipeRequest
+        {
+            Command = PipeCommand.SetEnabled,
+            ItemId = "failed-item",
+            Enable = false
+        });
+
+        cache.Remove(failedRequest.ClientOperationId);
+        Assert.False(cache.Contains(failedRequest.ClientOperationId));
+
         var operationId = Guid.NewGuid();
-
-        cache.Register(operationId);
-        cache.Remove(operationId);
-        Assert.False(cache.Contains(operationId));
-
         cache.Register(operationId);
         now = now.AddSeconds(11);
         Assert.False(cache.Contains(operationId));

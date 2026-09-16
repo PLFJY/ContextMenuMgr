@@ -33,11 +33,11 @@ ContextMenuMgr 是一个以“审核优先、用户控制”为核心的 Windows
 | --- | --- | --- | --- |
 | 前端 DI / 启动 | `App.Services.xaml.cs` | 注册服务、ViewModel、页面和 WPF-UI 导航 | 新服务要按生命周期选择 Singleton，不要绕过 DI 到处 new。 |
 | 主窗口 / 导航 | `MainWindow.xaml`、`MainWindow.xaml.cs`、`ShellViewModel.cs` | 导航栏、全局搜索、刷新、Explorer restart、审批 badge | 搜索跳转需要同时导航和设置页面筛选。 |
-| WorkspaceService | `ContextMenuWorkspaceService.cs` | 后端连接、快照加载、通知、普通菜单动作、服务状态 | 不要在页面 ViewModel 中重复写后端连接流程。 |
-| BackendClient | `NamedPipeBackendClient.cs` | `PipeRequest` 发送、响应解析、通知订阅 | 新 runtime 操作优先新增 `PipeCommand`，保持结构化响应。 |
+| WorkspaceService | `ContextMenuWorkspaceService.cs` | 后端连接、快照加载、通知、普通菜单动作、服务状态 | `ItemDetected` 可以引入新常规项；`ItemStateChanged` 只能更新已属于全局 workspace 的项，不能把 scene-only 项带入普通分类。 |
+| BackendClient | `NamedPipeBackendClient.cs` | `PipeRequest` 发送、响应解析、通知订阅 | 每个请求在发送前都有 `ClientOperationId`；本实例用短期缓存抑制同一操作的重复广播。 |
 | BackendServiceManager | `BackendServiceManager.cs` | UAC bootstrapper、服务安装/卸载/停止/启动模式 | 只用于服务生命周期，不用于普通菜单开关。 |
 | BackendRuntime | `BackendRuntime.cs` | 组合后端服务、启动 pipe/monitor、隔离新增项、确保 TrayHost | 新增项隔离和通知去重要保持稳定逻辑 key。 |
-| NamedPipeBackendServer | `NamedPipeBackendServer.cs` | pipe ACL、请求分发、用户上下文解析、通知广播 | userContext 解析路径不能随意复用到无关功能。 |
+| NamedPipeBackendServer | `NamedPipeBackendServer.cs` | pipe ACL、请求分发、用户上下文解析、通知广播 | handler 未显式设置 operation id 时，响应必须继承请求 id，再用于 generic 广播；userContext 解析路径不能随意复用到无关功能。 |
 | ContextMenuRegistryCatalog | `ContextMenuRegistryCatalog.cs` | 传统菜单枚举、开关、审核、删除备份、Registry Write Protection | 传统菜单和 Win11 新菜单不是同一模型。 |
 | ContextMenuRegistryMonitor | `ContextMenuRegistryMonitor.cs` | 轮询快照、发现运行时新增项、维护内存 baseline | 只有相邻运行时快照确认的关变开才交给 catalog 静默纠正；启动/登录后的首个稳定快照只做离线 baseline。 |
 | ContextMenuStateStore | `ContextMenuStateStore.cs` | `RuntimePaths.StateDatabasePath` 状态库 | 审核状态不是纯 UI 状态。 |

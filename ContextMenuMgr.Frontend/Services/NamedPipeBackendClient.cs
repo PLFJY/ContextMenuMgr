@@ -779,7 +779,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
 
         await _sendLock.WaitAsync(cancellationToken);
-        _recentLocalOperations.Register(request.ClientOperationId);
+        request = PrepareRequestForSend(request);
         var stopwatch = Stopwatch.StartNew();
         var correlationId = Guid.Empty;
         try
@@ -921,6 +921,18 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             _sendLock.Release();
         }
+    }
+
+    internal PipeRequest PrepareRequestForSend(PipeRequest request)
+    {
+        var preparedRequest = request.ClientOperationId is null
+            ? request with { ClientOperationId = Guid.NewGuid() }
+            : request;
+
+        // Register before serialization/write so a fast rebroadcast on the
+        // subscription connection cannot race ahead of local suppression.
+        _recentLocalOperations.Register(preparedRequest.ClientOperationId);
+        return preparedRequest;
     }
 
     private static string BuildOperationStartLog(Guid correlationId, PipeRequest request)

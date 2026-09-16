@@ -1299,12 +1299,29 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                     PendingApprovalDetected?.Invoke(this, notification.Item);
                 }
 
-                if (_uiStateActive)
+                if (_uiStateActive
+                    && ShouldUpsertNotificationItem(
+                        notification,
+                        Items.Select(static existing => existing.Id)))
                 {
                     UpsertItem(notification.Item);
                 }
             }
         });
+    }
+
+    internal static bool ShouldUpsertNotificationItem(
+        BackendNotification notification,
+        IEnumerable<string> existingWorkspaceItemIds)
+    {
+        if (notification.Item is not { } item)
+        {
+            return false;
+        }
+
+        return notification.Kind == PipeNotificationKind.ItemDetected
+               || existingWorkspaceItemIds.Any(existingId =>
+                   string.Equals(existingId, item.Id, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task HandleItemOperationFailureAsync(

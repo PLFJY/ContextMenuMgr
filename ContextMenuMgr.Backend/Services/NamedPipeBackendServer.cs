@@ -221,6 +221,8 @@ public sealed class NamedPipeBackendServer
                     stopwatch.Stop();
                 }
 
+                response = CorrelateResponseWithRequest(envelope.Request, response);
+
                 await _logger.LogAsync(BuildRequestEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
                 await _logger.LogOperationAsync(BuildOperationEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
 
@@ -243,7 +245,8 @@ public sealed class NamedPipeBackendServer
                 if (response.Success && response.Item is not null)
                 {
                     // Successful state-changing requests are rebroadcast so other
-                    // connected surfaces can update without polling.
+                    // connected surfaces can update without polling. The initiating
+                    // frontend suppresses its correlated copy and uses the response.
                     await BroadcastNotificationAsync(
                         new BackendNotification
                         {
@@ -1115,6 +1118,11 @@ public sealed class NamedPipeBackendServer
                 : "Explorer restart requested."
         };
     }
+
+    internal static PipeResponse CorrelateResponseWithRequest(PipeRequest request, PipeResponse response)
+        => response.ClientOperationId is null && request.ClientOperationId is { } operationId
+            ? response with { ClientOperationId = operationId }
+            : response;
 
     private static string BuildRequestStartLog(Guid connectionId, Guid correlationId, PipeRequest request)
         => $"PipeRequestStart: ConnectionId={connectionId}, CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, ItemId={request.ItemId}, SpecialKind={request.SpecialKind}, SceneKind={request.SceneKind}, Enable={request.Enable}, AutoStartEnabled={request.AutoStartEnabled}, ShowTrayIcon={request.ShowTrayIcon}, ShellNewLock={request.ShellNewLock?.Lock}, Timestamp={DateTimeOffset.UtcNow:O}.";

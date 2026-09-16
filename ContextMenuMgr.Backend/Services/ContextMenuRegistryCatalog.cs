@@ -201,7 +201,7 @@ public sealed class ContextMenuRegistryCatalog
         }, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<ContextMenuEntry>> GetReadOnlySnapshotAsync(CancellationToken cancellationToken = default)
+    internal async Task<IReadOnlyList<ContextMenuEntry>> GetReadOnlySnapshotAsync(CancellationToken cancellationToken = default)
     {
         return await BuildSnapshotAsync(
             await EnumerateActualEntriesAsync(cancellationToken),

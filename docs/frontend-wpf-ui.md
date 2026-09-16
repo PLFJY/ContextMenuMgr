@@ -347,6 +347,8 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 
 加载中 / 空状态是前端 UI 状态，不应触发后端状态修改。
 
+`ContextMenuWorkspaceService.Items` 只代表常规全局 snapshot。后端 `ItemDetected` 表示 registry monitor 发现了新的常规项，可以加入该集合；generic `ItemStateChanged` 只允许更新集合中已存在的稳定 Id，不能以通知 payload 为依据创建未知全局项。File Types / scene 项即使使用 `ContextMenuCategory.File`，其归属仍由 scene snapshot 决定，不能因为开关操作的广播进入普通“文件”页。
+
 传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
 
 同一处还提供“隐藏已禁用项”，它直接使用 `FrontendSettings.HideDisabledItems`。开启后只隐藏未删除且已禁用的项目；已删除项目必须继续可见，以便撤销或永久删除。切换视图模式不会刷新后端、重建 workspace 或清空搜索文本；切换此筛选只刷新当前 `ItemsView`，不修改注册表。排序固定为 attention、deleted-state、display name，不能加入 `IsEnabled`，否则用户开关项目时会造成列表跳位。
