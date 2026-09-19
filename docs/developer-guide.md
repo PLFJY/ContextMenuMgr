@@ -236,12 +236,12 @@ Windows 11 新右键菜单由 packaged COM 和 AppX manifest 驱动，不等于�
 `Windows11ContextMenuCatalog` 当前做法：
 
 1. 仅在 `OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)` 时支持。
-2. 从 `Registry.ClassesRoot\PackagedCom\Package` 找 package。
-3. 从 package repository 找安装路径。
-4. 解析 `AppxManifest.xml` 或 `AppxMetadata\AppxBundleManifest.xml`。
-5. 提取 `ComServer`、CLSID、display name 和 `ContextTypes`。
+2. 使用 `PackageManager.FindPackagesForUser(frontendSid)` 枚举该前端用户安装的 package，并按 full package name 去重。
+3. `PackagedContextMenuDiscovery` 读取 `AppxManifest.xml`（bundle manifest 仅作缺失 fallback）。
+4. 按 AppX namespace family、`Extension Category` 和元素 `LocalName` 解析版本无关的 `windows.fileExplorerContextMenus` 与 `windows.comServer`。
+5. 关联 verb CLSID 与 `SurrogateServer` / `ExeServer` class，并保留 package、context type、Verb ID、COM 路径和 display metadata。
 6. 映射到 `ContextMenuCategory` 并生成 `ContextMenuEntry`。
-7. 结合 HKLM blocked list 和用户 blocked list 判断 `IsEnabled`。
+7. 结合 HKLM blocked list 和用户 blocked list 判断 `IsEnabled`，并把机器级 blocked 状态明确传到前端。
 
 blocked list 有两层：
 

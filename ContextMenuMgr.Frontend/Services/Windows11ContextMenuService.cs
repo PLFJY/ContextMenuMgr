@@ -4,7 +4,6 @@ using System.IO;
 using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using ContextMenuMgr.Contracts;
-using Microsoft.Win32;
 
 namespace ContextMenuMgr.Frontend.Services;
 
@@ -38,17 +37,7 @@ public sealed class Windows11ContextMenuService
     /// <summary>
     /// Gets a value indicating whether this instance is supported.
     /// </summary>
-    public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)
-                               && (HasPackagedComRegistryRoot() || HasCommandStoreRegistryRoot());
-
-    /// <summary>
-    /// Gets packaged com Packages.
-    /// </summary>
-    public IReadOnlyList<string> GetPackagedComPackages()
-    {
-        using var subKey = Registry.ClassesRoot.OpenSubKey(@"PackagedCom\Package");
-        return subKey?.GetSubKeyNames() ?? [];
-    }
+    public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
     /// <summary>
     /// Sets enabled Async.
@@ -174,32 +163,6 @@ public sealed class Windows11ContextMenuService
         ItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private static bool HasPackagedComRegistryRoot()
-    {
-        try
-        {
-            using var key = Registry.ClassesRoot.OpenSubKey(@"PackagedCom\Package");
-            return key is not null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool HasCommandStoreRegistryRoot()
-    {
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell");
-            return key is not null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static string NormalizeGuid(string guidText) =>
         Guid.TryParse(guidText, out var guid)
             ? guid.ToString("B")
@@ -215,7 +178,7 @@ public sealed class Windows11ContextMenuService
             : id;
     }
 
-    private static Windows11ContextMenuItemDefinition CreateDefinition(ContextMenuEntry entry)
+    internal static Windows11ContextMenuItemDefinition CreateDefinition(ContextMenuEntry entry)
     {
         if (entry.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)
         {
@@ -241,35 +204,49 @@ public sealed class Windows11ContextMenuService
             };
         }
 
-        var packageFullName = ContextMenuApprovalIdentity.ExtractWin11PackageKey(entry.RegistryPath);
+        var packageFullName = entry.Windows11PackageFullName
+            ?? ContextMenuApprovalIdentity.ExtractWin11PackageKey(entry.RegistryPath);
         if (string.IsNullOrWhiteSpace(packageFullName)
             || string.Equals(packageFullName, entry.RegistryPath, StringComparison.OrdinalIgnoreCase))
         {
             packageFullName = entry.DisplayName;
         }
 
-        var filePath = entry.FilePath ?? string.Empty;
-        var installPath = File.Exists(filePath)
-            ? Path.GetDirectoryName(filePath) ?? string.Empty
-            : filePath;
+        var installPath = entry.Windows11PackageInstallPath ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(installPath) && !string.IsNullOrWhiteSpace(entry.FilePath))
+        {
+            installPath = File.Exists(entry.FilePath)
+                ? Path.GetDirectoryName(entry.FilePath) ?? string.Empty
+                : string.Empty;
+        }
+
+        var contextTypes = entry.Windows11ContextTypes.Count > 0
+            ? entry.Windows11ContextTypes
+            : [ToContextType(entry.Category)];
+        var contextMenus = entry.Windows11Verbs
+            .Select(verb => new Windows11ContextMenuVerb(verb.Id, verb.Id, [verb.ContextType]))
+            .ToArray();
+        var comDisplayName = entry.Windows11ComServerDisplayName
+            ?? entry.Windows11ComClassDisplayName
+            ?? entry.DisplayName;
 
         return new Windows11ContextMenuItemDefinition(
             entry.Id,
             entry.DisplayName,
             new Windows11PackageInfo(
                 packageFullName,
-                packageFullName,
+                entry.Windows11PackageDisplayName ?? packageFullName,
                 installPath)
             {
-                FamilyName = packageFullName.Split('_')[0],
-                PublisherDisplayName = packageFullName
+                FamilyName = entry.Windows11PackageFamilyName ?? packageFullName.Split('_')[0],
+                PublisherDisplayName = entry.Windows11PackagePublisherDisplayName ?? string.Empty
             },
-            [],
-            new Windows11ComServerInfo(entry.HandlerClsid, entry.FilePath, entry.DisplayName),
-            [ToContextType(entry.Category)])
+            contextMenus,
+            new Windows11ComServerInfo(entry.HandlerClsid, entry.FilePath, comDisplayName),
+            contextTypes)
         {
             IsEnabled = entry.IsEnabled,
-            IsMachineBlocked = false,
+            IsMachineBlocked = entry.IsMachineBlocked,
             SourceKind = entry.Windows11SourceKind,
             IsProtected = entry.IsProtectedSystemItem,
             Entry = entry

@@ -101,7 +101,7 @@ public sealed class ContextMenuRegistryCatalog
         _stateStore = stateStore;
         _backupService = backupService;
         _protectionSettingsStore = protectionSettingsStore;
-        _windows11Catalog = new Windows11ContextMenuCatalog();
+        _windows11Catalog = new Windows11ContextMenuCatalog(logger);
         _officeCoexistenceDetector = new OfficeSuiteCoexistenceDetector(logger);
     }
 

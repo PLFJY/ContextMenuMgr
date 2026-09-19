@@ -99,6 +99,58 @@ public sealed record ContextMenuEntry
     public Windows11ContextMenuSourceKind Windows11SourceKind { get; init; } = Windows11ContextMenuSourceKind.PackagedCom;
 
     /// <summary>
+    /// Gets or sets the full name of the package that declared this Windows 11 context menu.
+    /// </summary>
+    public string? Windows11PackageFullName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the family name of the package that declared this Windows 11 context menu.
+    /// </summary>
+    public string? Windows11PackageFamilyName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the package display metadata from the manifest/package registration.
+    /// This is not necessarily the title returned by IExplorerCommand.
+    /// </summary>
+    public string? Windows11PackageDisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the package publisher display metadata.
+    /// </summary>
+    public string? Windows11PackagePublisherDisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the installed package path used for discovery.
+    /// </summary>
+    public string? Windows11PackageInstallPath { get; init; }
+
+    /// <summary>
+    /// Gets or sets the manifest context types associated with this handler.
+    /// </summary>
+    public IReadOnlyList<string> Windows11ContextTypes { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the manifest verb declarations associated with this handler.
+    /// </summary>
+    public IReadOnlyList<Windows11ContextMenuVerbMetadata> Windows11Verbs { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the COM server display metadata from the package manifest.
+    /// </summary>
+    public string? Windows11ComServerDisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the COM class display metadata from the package manifest.
+    /// </summary>
+    public string? Windows11ComClassDisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the handler is blocked by the machine-level list.
+    /// A user-level unblock cannot override this state.
+    /// </summary>
+    public bool IsMachineBlocked { get; init; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether this Windows 11 item is protected from safe modification.
     /// </summary>
     public bool IsProtectedSystemItem { get; init; }

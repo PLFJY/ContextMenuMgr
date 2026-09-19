@@ -4,23 +4,22 @@
 
 Windows 11 新右键菜单不等同于传统 `shell` / `shellex\ContextMenuHandlers`。当前实现区分两类可管理的新菜单来源：
 
-- `PackagedCom`：菜单声明来自 AppX / MSIX package 的 manifest，COM 信息来自 `PackagedCom` 和 package repository，禁用状态通过 Shell Extensions blocked list 表达。
+- `PackagedCom`：菜单声明和 COM 信息来自前端用户已安装 AppX / MSIX package 的 manifest，禁用状态通过 Shell Extensions blocked list 表达。
 - `SystemCommandStore`：Windows 内置命令来自 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell`，例如 `Windows.SendToMyPhone`、`Windows.Share`。这类命令不是 packaged COM 菜单项，不能按 GUID Block / GUID Lock 处理。
 
 传统菜单可以在 `ContextMenuRegistryCatalog` 的 `MonitoredRoots` 中扫描；Windows 11 新菜单由 `Windows11ContextMenuCatalog` 单独枚举，并通过 `IsWindows11ContextMenu = true` 标记。不要把 packaged COM、System CommandStore 和 GUID Block 混为同一种禁用模型。
 
 ## 2. 扫描来源
 
-当前后端扫描主要基于以下来源：
+当前后端扫描主要基于以下来源。package full name 会在读取 manifest 前去重；单个 package 缺少 manifest、XML 损坏、CLSID 无效或 COM class 无法与 verb CLSID 关联时只跳过该声明/package，不中断整个 snapshot：
 
 | 来源 | 作用 |
 | --- | --- |
-| `PackagedCom\Package` | 从 `HKCR` 合并视图读取 packaged COM package 名称。 |
-| `PackageRepository\Packages` | 读取 package 安装路径和版本等信息。 |
+| `PackageManager.FindPackagesForUser(frontendSid)` | 按前端用户 SID 枚举该用户实际安装的 AppX / MSIX package；这是 packaged menu 的权威候选来源，不使用服务进程的合并 HKCR 代替用户 package context。 |
 | `AppxManifest.xml` | package 主 manifest。 |
 | `AppxMetadata\AppxBundleManifest.xml` | 主 manifest 不存在时的 fallback。 |
-| `FileExplorerContextMenus` | manifest 中声明 Explorer context menu verb 的位置。 |
-| `ComServer` | manifest 中声明 COM server 和 class 的位置。 |
+| `Extension Category="windows.fileExplorerContextMenus"` / `FileExplorerContextMenus` | manifest 中声明 Explorer context menu verb 的位置。解析按 AppX manifest namespace family、`Category` 和元素 `LocalName` 定位，兼容 `desktop4` 等版本化 namespace。 |
+| `Extension Category="windows.comServer"` / `ComServer` | manifest 中声明 COM server 和 class 的位置。兼容未版本化 `com` 及 `com4` 等版本化 namespace，当前支持 `SurrogateServer` 和 `ExeServer`。 |
 | `ContextTypes` | 由 manifest 的 item type 映射到项目的 `ContextMenuCategory`。 |
 | `HKLM\...\Explorer\CommandStore\shell` | 读取明确支持的 Windows 内置系统命令，当前包括 `Windows.SendToMyPhone` 和 `Windows.Share`；命令还必须带有 `MUIVerb`、`ExplorerCommandHandler`、`command` 子键或其它 shell 命令元数据。不要把所有 `Windows.*` CommandStore 项都放进 Win11 页面。 |
 
@@ -33,18 +32,20 @@ manifest 解析是 best-effort。缺少命名空间、manifest 不存在、XML �
 ```text
 检查 Windows 版本 >= 10.0.22000
 -> 获取 frontend user SID
--> 枚举 PackagedCom package
--> 从 PackageRepository 解析安装路径
+-> PackageManager.FindPackagesForUser(frontendSid)
+-> 按 package full name 去重并取得安装路径
 -> 读取 AppxManifest.xml 或 AppxBundleManifest.xml
--> 解析 FileExplorerContextMenus
--> 解析 ComServer
+-> PackagedContextMenuDiscovery 按 Category + LocalName 解析 FileExplorerContextMenus
+-> 解析版本无关的 ComServer / SurrogateServer / ExeServer
 -> 匹配 CLSID
 -> 根据 ContextTypes 映射 ContextMenuCategory
 -> 根据 blocked list 判断 IsEnabled
 -> 创建 ContextMenuEntry
 ```
 
-生成的 packaged COM `ContextMenuEntry` 使用 `win11|{clsid}|{category}` 形态的 `Id`，`RegistryPath` 指向 `PackagedCom\Package\...\Class\{CLSID}`，`BackendRegistryPath` 指向当前用户的 blocked list。`FilePath` 会尽量使用 COM server 路径，解析不到时回退到 package 安装目录。
+`PackagedContextMenuDiscovery` 位于 `ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs`，负责 SID-scoped package 枚举、manifest 加载、verb 与 COM class 的 CLSID 关联。`Windows11ContextMenuCatalog` 只负责分类映射、blocked 状态和 `ContextMenuEntry` 投影。
+
+生成的 packaged COM `ContextMenuEntry` 使用 `win11|{clsid}|{category}` 形态的 `Id`，`RegistryPath` 指向逻辑上的 `PackagedCom\Package\...\Class\{CLSID}`，`BackendRegistryPath` 指向当前用户的 blocked list。契约保留 package full/family/display/publisher/install metadata、manifest context type、Verb ID、handler CLSID、COM server/class display metadata 和 manifest 明确声明的 server path。manifest 没有建立 server path 时 `FilePath` 保持为空，不用 package 目录伪造 COM 路径。manifest display metadata 只是诊断/展示候选，不等于 `IExplorerCommand::GetTitle()` 在 Explorer 中动态返回的最终标题。
 
 System CommandStore `ContextMenuEntry` 使用 `win11-system|{commandKey}` 形态的 `Id`，`KeyName` 是命令名（如 `Windows.SendToMyPhone`），`RegistryPath` / `BackendRegistryPath` 指向 HKLM CommandStore 命令键，`HandlerClsid` 来自 `ExplorerCommandHandler` 或等价的 GUID 值，`Windows11SourceKind = SystemCommandStore`。显示名通过 `ShellMetadataResolver.ResolveVerbDisplayName` 解析 `MUIVerb` 等资源字符串。
 
@@ -57,7 +58,7 @@ Win11 新菜单通过 blocked list 启用或禁用：
 | 机器级 | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` | 对所有用户生效，当前 `Windows11BlocksService` 支持读写。 |
 | 用户级 | `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` | 对指定用户生效，必须带正确用户 SID。 |
 
-`SetEnabled` 的本质是写入或删除 CLSID value：禁用时写入 CLSID value，启用时删除该 value。机器级 blocked 优先导致禁用；即使用户级没有 blocked value，只要 HKLM blocked list 存在该 CLSID，snapshot 仍应显示禁用。
+`SetEnabled` 的本质是写入或删除 CLSID value：禁用时写入 CLSID value，启用时删除该 value。机器级 blocked 优先导致禁用；即使用户级没有 blocked value，只要 HKLM blocked list 存在该 CLSID，snapshot 仍显示禁用，并通过 `ContextMenuEntry.IsMachineBlocked` 传到前端。前端会禁用用户级开关，避免把“删除 HKU value”误报为能够覆盖 HKLM block。
 
 System CommandStore 项不使用 blocked list。`Windows.SendToMyPhone`、`Windows.Share` 等命令通过 `ShellVerbVisibility` 的普通 shell verb 可见性值启用 / 禁用：
 
@@ -113,7 +114,7 @@ Win11 新菜单的 snapshot 和开关都依赖用户上下文：
 | `ContextMenuSearchMatcher` | 全局搜索和页面筛选共用匹配逻辑。 |
 | `GlobalSearchNavigationFilterService` | 搜索结果跳转到 Win11 页面后设置页面筛选文本和目标项。 |
 
-`Windows11ContextMenuPageViewModel` 和导航 Page 在 DI 中始终注册，避免 Win10 或其它不支持环境被意外导航到该页面时因服务解析失败而崩溃。正常导航项仍由 `ShellViewModel.IsWindows11ContextMenuSupported` 隐藏；`Windows11ContextMenuService.RefreshAsync` / `EnsureLoadedAsync` 在不支持时直接返回，`IsSupported` 的注册表探测必须及时释放 `RegistryKey`。
+`Windows11ContextMenuPageViewModel` 和导航 Page 在 DI 中始终注册，避免 Win10 或其它不支持环境被意外导航到该页面时因服务解析失败而崩溃。正常导航项仍由 `ShellViewModel.IsWindows11ContextMenuSupported` 按 Windows 版本隐藏；`Windows11ContextMenuService.RefreshAsync` / `EnsureLoadedAsync` 在不支持时直接返回。前端不再用 `HKCR\PackagedCom` 是否存在作为支持门槛，否则会在后端能够从用户 package context 发现项目时跳过 snapshot。
 
 Win11 页面筛选是前端内存筛选。只有刷新 snapshot 或执行开关操作时才需要访问后端。
 
