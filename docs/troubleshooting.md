@@ -155,7 +155,11 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 可能原因 | Registry Write Protection 开启，阻止对受保护菜单注册表路径写入。 |
 | 优先查看的代码 | `ContextMenuRegistryCatalog.cs`、`RegistryProtectionDialog`、`SettingsPageViewModel.cs`。 |
 | 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
-| 常见修复方向 | 提示用户到设置页解锁；应用自身操作如需临时解除保护，应走现有 best-effort unlock/relock 路径。不要和 ShellNew ACL Lock 混用。 |
+| 常见修复方向 | 提示用户到设置页解锁并确认 transition 成功；后端 preflight 在 persisted protection 为 true 时继续阻止 mutation。不要和 ShellNew ACL Lock 混用。 |
+
+Registry Write Protection 切换日志使用 `RegistryProtectionTransitionStarted`、`RegistryProtectionTargetFailed` 和 `RegistryProtectionTransitionCompleted`。完成日志会记录 requested/persisted value、verified/failed target count、settings save 和 enable rollback 结果。排查“设置显示关闭但注册表仍 Access Denied”时，应同时检查 `backend-protection-settings.json` 与 HKLM/HKU target 的实际 DACL；不能把一次 `SetAccessControl` 无异常当成成功。
+
+当前切换只有在所有 applicable target fresh read-back 验证成功后才提交设置。禁用部分失败时 authoritative value 仍为 true，但已经成功解锁的 root 保持解锁，用户应修复失败 target 后重试；不要手工把设置 JSON 改成 false。启用部分失败会恢复本次新增语义；若日志显示 rollback failure，说明可能存在 degraded ACL state，需要按日志中的具体 hive/path 检查。设置页“重置软件设置”若无法完整禁用保护会显示失败，不再吞掉错误或报告全部重置成功。
 
 ### Protected Windows ShellVerb access denied
 

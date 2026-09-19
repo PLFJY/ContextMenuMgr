@@ -666,6 +666,13 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException(startupResult.Detail);
             }
 
+            var registryProtectionEnabled = await _workspace.SetRegistryProtectionSettingAsync(false);
+            if (registryProtectionEnabled)
+            {
+                throw new InvalidOperationException(
+                    _localization.Translate("MaintenanceResetRegistryProtectionFailed"));
+            }
+
             _settingsService.ResetToDefaults();
 
             _suppressAutoStartSync = true;
@@ -683,13 +690,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             _suppressProtectionSync = true;
             LockNewContextMenuItems = false;
             _suppressProtectionSync = false;
-            try
-            {
-                await _workspace.SetRegistryProtectionSettingAsync(false);
-            }
-            catch
-            {
-            }
 
             _suppressWin11ContextMenuSync = true;
             Win11ModernContextMenuDisabled = false;
@@ -726,6 +726,15 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            if (ex is BackendRequestException { RegistryProtectionEnabled: not null } backendException)
+            {
+                var authoritativeValue = backendException.RegistryProtectionEnabled.Value;
+                _settingsService.UpdateLockNewContextMenuItems(authoritativeValue);
+                _suppressProtectionSync = true;
+                LockNewContextMenuItems = authoritativeValue;
+                _suppressProtectionSync = false;
+            }
+
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("DebugToolsTitle"));
@@ -951,8 +960,15 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            var authoritativeValue = ex is BackendRequestException
+            {
+                RegistryProtectionEnabled: not null
+            } backendException
+                ? backendException.RegistryProtectionEnabled.Value
+                : previous;
+            _settingsService.UpdateLockNewContextMenuItems(authoritativeValue);
             _suppressProtectionSync = true;
-            LockNewContextMenuItems = previous;
+            LockNewContextMenuItems = authoritativeValue;
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("ProtectionTitle"));

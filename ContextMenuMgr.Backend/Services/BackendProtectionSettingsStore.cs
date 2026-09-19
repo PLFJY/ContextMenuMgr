@@ -7,7 +7,7 @@ namespace ContextMenuMgr.Backend.Services;
 /// <summary>
 /// Represents the backend Protection Settings Store.
 /// </summary>
-public sealed class BackendProtectionSettingsStore
+public sealed class BackendProtectionSettingsStore : IRegistryProtectionSettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -64,12 +64,42 @@ public sealed class BackendProtectionSettingsStore
     public async Task SaveAsync(BackendProtectionSettings settings, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        var temporaryPath = _storagePath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
             try
             {
-                await using var stream = File.Create(_storagePath);
-                await JsonSerializer.SerializeAsync(stream, settings, JsonOptions, cancellationToken);
+                await using (var stream = new FileStream(
+                                 temporaryPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 81920,
+                                 FileOptions.Asynchronous | FileOptions.WriteThrough))
+                {
+                    await JsonSerializer.SerializeAsync(stream, settings, JsonOptions, cancellationToken);
+                    await stream.FlushAsync(cancellationToken);
+                    stream.Flush(flushToDisk: true);
+                }
+
+                await using (var validationStream = File.OpenRead(temporaryPath))
+                {
+                    _ = await JsonSerializer.DeserializeAsync<BackendProtectionSettings>(
+                            validationStream,
+                            JsonOptions,
+                            cancellationToken)
+                        ?? throw new InvalidDataException("The staged backend protection settings were empty.");
+                }
+
+                if (File.Exists(_storagePath))
+                {
+                    File.Replace(temporaryPath, _storagePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(temporaryPath, _storagePath, overwrite: false);
+                }
+
                 _logger?.LogFireAndForget($"BackendProtectionSettingsStoreSave: Path={_storagePath}, LockNewContextMenuItems={settings.LockNewContextMenuItems}, Result=Success.");
             }
             catch (Exception ex)
@@ -80,6 +110,17 @@ public sealed class BackendProtectionSettingsStore
         }
         finally
         {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch
+            {
+            }
+
             _gate.Release();
         }
     }

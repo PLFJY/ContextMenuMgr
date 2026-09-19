@@ -121,7 +121,7 @@ Classic cascading Shell Verbs expose `CanManageSubMenuItems` in the lightweight 
 
 `ContextMenuStateStore` 保存后端状态，不只是缓存。它用于保存已确认开关状态、pending approval、删除恢复记录和被抑制的检测等。常规菜单与 WPS/Office 分别用 `internal:baseline:regular:v1`、`internal:baseline:wps-office:v1` 标记 baseline 已完整建立；不能再用“存在任意 state”代替某一数据源的 baseline。`RegistryBackupService` 在删除前调用 `reg.exe export` 保存 `.reg`，恢复时调用 `reg.exe import`。
 
-设置页的“重置状态数据库”必须通过链路 A 的 `PipeCommand.ResetStateDatabase` 执行，不能由前端直接删除 `%ProgramData%` 或 portable `Data` 中的文件。后端在持久状态操作门和各 store 自身 gate 内删除 current、`.bak`、临时 generations、backend protection settings 与当前 host 删除备份，然后由同一次前端刷新依次重建 regular 和 WPS baseline。
+设置页的“重置状态数据库”必须通过链路 A 的 `PipeCommand.ResetStateDatabase` 执行，不能由前端直接删除 `%ProgramData%` 或 portable `Data` 中的文件。后端在持久状态操作门和各 store 自身 gate 内删除 current、`.bak`、临时 generations 与当前 host 删除备份，然后由同一次前端刷新依次重建 regular 和 WPS baseline。Registry Write Protection 的持久设置和 ACL 不属于状态数据库重置范围；不得只删除 `backend-protection-settings.json` 而保留保护 ACL。
 
 StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 使用交互用户上下文从当前注册表重建常规与 WPS baseline，避免任何 `Added` / `Modified` / pending 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
 
@@ -173,6 +173,12 @@ Monitor 发现新增项
 
 Registry Write Protection 是针对传统右键菜单受监控根的 ACL 防护。设置入口是 `GetRegistryProtectionSettingAsync` / `SetRegistryProtectionSettingAsync`，配置保存在 `RuntimePaths.BackendProtectionSettingsPath`。
 
+保护状态切换使用独立串行 gate，并按“从 `MonitoredRoots.StableRelativePath` 发现 HKLM/HKU 目标 → 读取当前 DACL → 应用目标语义 → 重新打开 key 回读 DACL → 保存设置”执行。HKU 目标必须先解析并验证 frontend SID 对应 hive；无法解析时不得先修改 HKLM。不存在的具体 root 属于 non-applicable，不是失败。
+
+启用只有在所有 applicable target 都回读到完整 DENY 语义后才保存 `LockNewContextMenuItems=true`。部分启用或启用后的设置保存失败会按每个 target 的操作前语义回滚，只撤销本次新增的保护语义并验证回滚；原有规则必须保留。禁用会继续处理全部 target，成功解锁的 root 不回锁；只有所有 applicable target 都回读为无显式 app protection 语义后才保存 false。禁用后的设置保存失败也不重新加锁，用户可重试完成持久化。设置文件使用同目录 staged write、flush、解析验证和 replace，save 异常不得先截断旧 authoritative value。
+
+ACL 检查按语义处理 Windows/.NET 的 ACE 合并：Builtin Users 与 Authenticated Users、当前 key 与 `ContainerInherit`、`Deny CreateSubKey | SetValue` 必须全部覆盖。禁用只从这两个身份的显式目标形态 DENY ACE 中移除这两个 rights；同一 ACE 的其它 rights、无关 Allow/Deny 和 inherited ACE 保留。`SetAccessControl` 返回不代表成功，必须 fresh read-back。失败响应返回 `Success=false`，并把 `RegistryProtectionEnabled` 保持为持久 authoritative value。
+
 它和普通禁用的区别：
 
 | 功能 | 作用 |
@@ -189,7 +195,7 @@ Registry Write Protection 是针对传统右键菜单受监控根的 ACL 防护�
 
 开启 Registry Write Protection 后，第三方安装器或软件更新器写右键菜单时可能失败或行为异常。前端的 `RegistryProtectionDialog` 会在普通菜单编辑、禁用、删除等操作前提示用户解锁。后端也有 preflight 和异常 fallback：如果检测到保护已开启，会返回 `PipeErrorCodes.RegistryWriteProtectionEnabled`。
 
-代码中存在 app-owned operation 的临时 unlock/relock 路径：`RunWithRegistryWriteProtectionTemporarilyDisabledAsync` 会在后端内部操作前临时解除保护，完成后尝试恢复。这是 best-effort，relock 失败会记录错误并可能把警告追加到响应消息中。
+普通菜单 mutation 仍由 backend preflight 在保护开启时拒绝；本次收敛修复没有引入 ownership takeover、DACL reset、Everyone 权限或绕过 `ProtectedRegistryMutation` 的路径。
 
 ## 8. SpecialMenu 实现
 

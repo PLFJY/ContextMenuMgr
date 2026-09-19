@@ -849,7 +849,10 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     FrontendDebugLog.Operation(
                         "FrontendOperation",
                         BuildOperationEndLog(correlationId, request, responseEnvelope.Response, stopwatch.ElapsedMilliseconds));
-                    throw new BackendRequestException(responseEnvelope.Response.Message, responseEnvelope.Response.ErrorCode);
+                    throw new BackendRequestException(
+                        responseEnvelope.Response.Message,
+                        responseEnvelope.Response.ErrorCode,
+                        responseEnvelope.Response.RegistryProtectionEnabled);
                 }
 
                 stopwatch.Stop();

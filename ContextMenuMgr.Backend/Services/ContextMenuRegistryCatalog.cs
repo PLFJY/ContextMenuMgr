@@ -82,11 +82,13 @@ public sealed class ContextMenuRegistryCatalog
     private readonly FileLogger _logger;
     private readonly ContextMenuStateStore _stateStore;
     private readonly RegistryBackupService _backupService;
-    private readonly BackendProtectionSettingsStore _protectionSettingsStore;
+    private readonly IRegistryProtectionSettingsStore _protectionSettingsStore;
+    private readonly IRegistryProtectionTargetAccessor _registryProtectionTargetAccessor;
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
     private readonly OfficeSuiteCoexistenceDetector _officeCoexistenceDetector;
     private readonly SemaphoreSlim _persistentStateGate = new(1, 1);
     private readonly AsyncLocal<int> _persistentStateGateDepth = new();
+    private readonly SemaphoreSlim _registryProtectionTransitionGate = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryCatalog"/> class.
@@ -96,11 +98,27 @@ public sealed class ContextMenuRegistryCatalog
         ContextMenuStateStore stateStore,
         RegistryBackupService backupService,
         BackendProtectionSettingsStore protectionSettingsStore)
+        : this(
+            logger,
+            stateStore,
+            backupService,
+            protectionSettingsStore,
+            new WindowsRegistryProtectionTargetAccessor())
+    {
+    }
+
+    internal ContextMenuRegistryCatalog(
+        FileLogger logger,
+        ContextMenuStateStore stateStore,
+        RegistryBackupService backupService,
+        IRegistryProtectionSettingsStore protectionSettingsStore,
+        IRegistryProtectionTargetAccessor registryProtectionTargetAccessor)
     {
         _logger = logger;
         _stateStore = stateStore;
         _backupService = backupService;
         _protectionSettingsStore = protectionSettingsStore;
+        _registryProtectionTargetAccessor = registryProtectionTargetAccessor;
         _windows11Catalog = new Windows11ContextMenuCatalog(logger);
         _officeCoexistenceDetector = new OfficeSuiteCoexistenceDetector(logger);
     }
@@ -1540,26 +1558,156 @@ public sealed class ContextMenuRegistryCatalog
     /// </summary>
     public async Task<PipeResponse> SetRegistryProtectionSettingAsync(bool enable, BackendUserContext? userContext, CancellationToken cancellationToken)
     {
-        var errors = ApplyRegistryWriteProtection(enable, userContext);
-        if (errors.Count > 0)
+        await _registryProtectionTransitionGate.WaitAsync(cancellationToken);
+        try
         {
-            var detail = string.Join(Environment.NewLine, errors);
-            await _logger.LogAsync($"Registry write protection update skipped some protected roots:{Environment.NewLine}{detail}", cancellationToken);
+            var stableRootPaths = MonitoredRoots
+                .Select(static root => root.StableRelativePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var intendedTargetCount = stableRootPaths.Length * 2;
+            var frontendSid = userContext?.Sid;
+
+            await _logger.LogOperationAsync(
+                $"RegistryProtectionTransitionStarted: RequestedEnabled={enable}, FrontendSid={frontendSid ?? "<missing>"}, TargetCount={intendedTargetCount}.",
+                CancellationToken.None);
+
+            BackendProtectionSettings settings;
+            try
+            {
+                settings = await _protectionSettingsStore.LoadAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await _logger.LogOperationAsync(
+                    $"RegistryProtectionTransitionCompleted: RequestedEnabled={enable}, Succeeded=false, VerifiedTargetCount=0, FailedTargetCount=0, PersistedValue=Unknown, SettingsSaveAttempted=false, SettingsSaveSucceeded=false, RollbackAttempted=false, RollbackSucceeded=NotApplicable, Exception={ex}",
+                    CancellationToken.None);
+                return new PipeResponse
+                {
+                    Success = false,
+                    ErrorCode = PipeErrorCodes.RegistryProtectionTransitionFailed,
+                    Message = $"Registry protection settings could not be loaded: {ex.Message}",
+                    RegistryProtectionEnabled = null
+                };
+            }
+
+            if (!TryValidateRegistryProtectionUserContext(userContext, out var userContextError))
+            {
+                await _logger.LogOperationAsync(
+                    $"RegistryProtectionTransitionCompleted: RequestedEnabled={enable}, Succeeded=false, VerifiedTargetCount=0, FailedTargetCount={intendedTargetCount}, PersistedValue={settings.LockNewContextMenuItems}, SettingsSaveAttempted=false, SettingsSaveSucceeded=false, RollbackAttempted=false, RollbackSucceeded=NotApplicable, Exception={userContextError}",
+                    CancellationToken.None);
+                return new PipeResponse
+                {
+                    Success = false,
+                    ErrorCode = PipeErrorCodes.RegistryProtectionTransitionFailed,
+                    Message = userContextError,
+                    RegistryProtectionEnabled = settings.LockNewContextMenuItems
+                };
+            }
+
+            var targets = CreateRegistryProtectionTargets(stableRootPaths, frontendSid!);
+            var transition = new RegistryProtectionTransition(
+                _registryProtectionTargetAccessor,
+                _protectionSettingsStore);
+            var result = await transition.ExecuteAsync(enable, settings, targets);
+
+            foreach (var target in result.Targets.Where(static target => !target.Converged || target.RollbackSucceeded == false))
+            {
+                await _logger.LogAsync(
+                    RuntimeLogLevel.Warning,
+                    $"RegistryProtectionTargetFailed: Hive={target.Target.HiveName}, RegistryPath={target.Target.RegistryPath}, RequestedEnabled={enable}, PreviousObservedState={target.PreviousProtectionState}, PostObservedState={target.ObservedProtectionState}, ApplyResult={(target.ApplyAttempted ? target.ApplySucceeded ? "Success" : "Failed" : "NotRequired")}, VerificationResult={(target.VerificationSucceeded ? "Success" : "Failed")}, Exception={target.Error ?? "<none>"}, RollbackAttempted={target.RollbackAttempted}, RollbackSucceeded={target.RollbackSucceeded?.ToString() ?? "NotApplicable"}, RollbackException={target.RollbackError ?? "<none>"}.",
+                    CancellationToken.None);
+            }
+
+            await _logger.LogOperationAsync(
+                $"RegistryProtectionTransitionCompleted: RequestedEnabled={enable}, Succeeded={result.Succeeded}, VerifiedTargetCount={result.VerifiedTargetCount}, FailedTargetCount={result.FailedTargetCount}, PersistedValue={result.PersistedValue}, SettingsSaveAttempted={result.SettingsSaveAttempted}, SettingsSaveSucceeded={result.SettingsSaveSucceeded}, RollbackAttempted={result.RollbackAttempted}, RollbackSucceeded={result.RollbackSucceeded?.ToString() ?? "NotApplicable"}, SettingsSaveException={result.SettingsSaveError ?? "<none>"}.",
+                CancellationToken.None);
+
+            return new PipeResponse
+            {
+                Success = result.Succeeded,
+                ErrorCode = result.Succeeded ? null : PipeErrorCodes.RegistryProtectionTransitionFailed,
+                Message = result.Succeeded
+                    ? "Registry protection setting updated and verified."
+                    : BuildRegistryProtectionFailureMessage(result),
+                RegistryProtectionEnabled = result.PersistedValue
+            };
+        }
+        finally
+        {
+            _registryProtectionTransitionGate.Release();
+        }
+    }
+
+    private static bool TryValidateRegistryProtectionUserContext(
+        BackendUserContext? userContext,
+        out string error)
+    {
+        if (userContext is null || string.IsNullOrWhiteSpace(userContext.Sid))
+        {
+            error = "Registry protection could not be changed because the frontend user context is not available.";
+            return false;
         }
 
-        var settings = await _protectionSettingsStore.LoadAsync(cancellationToken);
-        settings.LockNewContextMenuItems = enable;
-        await _protectionSettingsStore.SaveAsync(settings, cancellationToken);
-        await _logger.LogAsync($"Registry write protection for new context menu items changed to {enable}.", cancellationToken);
-
-        return new PipeResponse
+        try
         {
-            Success = true,
-            Message = errors.Count == 0
-                ? "Registry protection setting updated."
-                : $"Registry protection setting updated. Some protected system roots were skipped.{Environment.NewLine}{string.Join(Environment.NewLine, errors)}",
-            RegistryProtectionEnabled = enable
-        };
+            _ = new SecurityIdentifier(userContext.Sid);
+            using var userHive = Registry.Users.OpenSubKey(userContext.Sid, writable: false);
+            if (userHive is null)
+            {
+                error = $"Registry protection could not be changed because the registry hive for frontend user {userContext.Sid} is not loaded.";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"Registry protection could not resolve frontend user hive {userContext.Sid}: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static IReadOnlyList<RegistryProtectionTarget> CreateRegistryProtectionTargets(
+        IEnumerable<string> stableRootPaths,
+        string frontendSid)
+    {
+        var targets = new List<RegistryProtectionTarget>();
+        foreach (var relativePath in stableRootPaths)
+        {
+            targets.Add(new RegistryProtectionTarget(
+                RegistryHive.LocalMachine,
+                $@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\{relativePath}",
+                $@"SOFTWARE\Classes\{relativePath}"));
+            targets.Add(new RegistryProtectionTarget(
+                RegistryHive.Users,
+                $@"HKEY_USERS\{frontendSid}\Software\Classes\{relativePath}",
+                $@"{frontendSid}\Software\Classes\{relativePath}"));
+        }
+
+        return targets;
+    }
+
+    private static string BuildRegistryProtectionFailureMessage(RegistryProtectionTransitionResult result)
+    {
+        var diagnostics = result.Targets
+            .Where(static target => !target.Converged || target.RollbackSucceeded == false)
+            .Select(target =>
+                $"{target.Target.RegistryPath}: {target.Error ?? "did not converge"}"
+                + (target.RollbackSucceeded == false
+                    ? $" Rollback failed: {target.RollbackError ?? "verification failed"}"
+                    : string.Empty))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(result.SettingsSaveError))
+        {
+            diagnostics.Add($"Protection setting persistence failed: {result.SettingsSaveError}");
+        }
+
+        return diagnostics.Count == 0
+            ? "Registry protection did not converge; the persisted setting was not changed."
+            : $"Registry protection did not converge. Persisted value remains {result.PersistedValue}.{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}";
     }
 
     /// <summary>
@@ -2145,7 +2293,6 @@ public sealed class ContextMenuRegistryCatalog
         => await RunPersistentStateOperationAsync(async () =>
         {
             await _stateStore.ResetAsync(cancellationToken);
-            await _protectionSettingsStore.ResetAsync(cancellationToken);
             _backupService.ClearCurrentHostBackups();
 
             await _logger.LogAsync(
@@ -5091,37 +5238,6 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
-    private List<string> ApplyRegistryWriteProtection(bool enable, BackendUserContext? userContext)
-    {
-        var errors = new List<string>();
-
-        foreach (var relativePath in MonitoredRoots
-                     .Select(static root => root.StableRelativePath)
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            ApplyRegistryWriteProtection(RegistryHive.LocalMachine, relativePath, enable, errors);
-
-            if (userContext is not null)
-            {
-                try
-                {
-                    using var userRoot = OpenUserRegistryRoot(userContext, writable: true);
-                    ApplyRegistryWriteProtectionToUserKey(userRoot, relativePath, enable, errors);
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"Unable to apply protection to user registry: {ex.Message}");
-                }
-            }
-            else
-            {
-                errors.Add("Unable to apply protection to user registry: caller user context is not available.");
-            }
-        }
-
-        return errors;
-    }
-
     private static RegistryKey OpenUserRegistryRoot(BackendUserContext userContext, bool writable)
     {
         if (string.IsNullOrWhiteSpace(userContext.Sid))
@@ -5131,123 +5247,6 @@ public sealed class ContextMenuRegistryCatalog
 
         return Registry.Users.OpenSubKey(userContext.Sid, writable)
             ?? throw new InvalidOperationException($"The registry hive for user {userContext.Sid} is not loaded.");
-    }
-
-    private static void ApplyRegistryWriteProtectionToUserKey(RegistryKey userRoot, string relativePath, bool enable, List<string> errors)
-    {
-        try
-        {
-            using var classesRoot = userRoot.OpenSubKey(@"Software\Classes", writable: false);
-            if (classesRoot is null)
-            {
-                return;
-            }
-
-            using var key = classesRoot.OpenSubKey(
-                relativePath,
-                RegistryKeyPermissionCheck.ReadWriteSubTree,
-                RegistryRights.ChangePermissions | RegistryRights.ReadKey);
-
-            if (key is null)
-            {
-                return;
-            }
-
-            var security = key.GetAccessControl(AccessControlSections.Access);
-            foreach (var rule in CreateProtectionRules())
-            {
-                if (enable)
-                {
-                    security.AddAccessRule(rule);
-                }
-                else
-                {
-                    security.RemoveAccessRuleSpecific(rule);
-                }
-            }
-
-            key.SetAccessControl(security);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            errors.Add($"Access denied to {relativePath} in user registry: {ex.Message}");
-        }
-        catch (SecurityException ex)
-        {
-            errors.Add($"Security error on {relativePath} in user registry: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"Error protecting {relativePath} in user registry: {ex.Message}");
-        }
-    }
-
-    private static void ApplyRegistryWriteProtection(RegistryHive hive, string relativePath, bool enable, List<string> errors)
-    {
-        try
-        {
-            using var classesRoot = RegistryKey.OpenBaseKey(hive, RegistryView.Default);
-            using var key = classesRoot.OpenSubKey(
-                $@"Software\Classes\{relativePath}",
-                RegistryKeyPermissionCheck.ReadWriteSubTree,
-                RegistryRights.ChangePermissions | RegistryRights.ReadKey);
-
-            if (key is null)
-            {
-                return;
-            }
-
-            var security = key.GetAccessControl(AccessControlSections.Access);
-            foreach (var rule in CreateProtectionRules())
-            {
-                if (enable)
-                {
-                    security.AddAccessRule(rule);
-                }
-                else
-                {
-                    security.RemoveAccessRuleSpecific(rule);
-                }
-            }
-
-            key.SetAccessControl(security);
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"{hive}\\Software\\Classes\\{relativePath}: {ex.Message}");
-        }
-    }
-
-    private static IEnumerable<RegistryAccessRule> CreateProtectionRules()
-    {
-        var rights = RegistryRights.CreateSubKey | RegistryRights.SetValue;
-        yield return new RegistryAccessRule(
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
-            rights,
-            InheritanceFlags.None,
-            PropagationFlags.None,
-            AccessControlType.Deny);
-
-        yield return new RegistryAccessRule(
-            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-            rights,
-            InheritanceFlags.None,
-            PropagationFlags.None,
-            AccessControlType.Deny);
-
-        yield return new RegistryAccessRule(
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
-            rights,
-            InheritanceFlags.ContainerInherit,
-            PropagationFlags.None,
-            AccessControlType.Deny);
-
-        yield return new RegistryAccessRule(
-            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-            rights,
-            InheritanceFlags.ContainerInherit,
-            PropagationFlags.None,
-            AccessControlType.Deny);
     }
 
     private static IEnumerable<RegistryRootDescriptor> GetSceneRoots(ContextMenuSceneKind sceneKind, string? scopeValue, BackendUserContext? userContext)

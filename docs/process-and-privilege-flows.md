@@ -187,7 +187,7 @@ ProbeHost 的边界：
 | 编辑菜单显示名 | 链路 A | 可能需要 | 否 | `SetDisplayText`，受 Registry Write Protection preflight 影响。 |
 | 编辑传统 ShellVerb 命令文本 | 链路 A | 可能需要 | 否 | `SetCommandText` -> `ApplyCommandTextAsync`，只允许普通 legacy ShellVerb 写 `<verb>\command` 默认值，不处理 Shell Extension、Win11、SubCommands、DelegateExecute、DropTarget 或 ExplorerCommandHandler。 |
 | 管理经典级联 Shell Verb 子菜单 | 链路 A | 可能需要 | 否 | `GetShellSubMenuItems` 按需读取 `SubCommands`、`ExtendedSubCommandsKey` 或父级 `shell`；`SetShellSubMenuItemEnabled` 由后端重新解析稳定 parent/child identity。`SubCommands` 仅改父级引用并持久化被移除引用的顺序，不修改共享 CommandStore 项。 |
-| Registry Write Protection 设置 | 链路 A | 否 | 否 | 作用于受监控传统菜单根的 ACL。 |
+| Registry Write Protection 设置 | 链路 A | 是 | 否 | 作用于 HKLM 和 frontend SID 的 HKU 受监控传统菜单根 ACL；先验证用户 hive，再串行 apply/read-back verify/persist。 |
 | Win11 新菜单项禁用/恢复 | 链路 A | 是 | 否 | user blocked list 必须带 `BackendUserContext`，机器级另有 HKLM blocked list。 |
 | Win11 全局恢复经典菜单设置 | 链路 A | 是 | 否 | 写 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32`，不得写服务 `HKCU` 或 HKLM；生效需要重启 Explorer 或重新登录。 |
 | Win11 snapshot | 链路 A | 是 | 否 | `Windows11ContextMenuCatalog.EnumerateEntriesAsync` 没有 SID 会跳过。 |

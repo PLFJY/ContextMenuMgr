@@ -257,6 +257,16 @@ File Types / scene（包括 `SystemFileAssociations`）根不必属于常规 `Mo
 
 ## 11. 常见坑
 
+Registry Write Protection 的设置值不是“用户最后一次点击的值”，而是 ACL 已完成收敛的提交标记。后端从 `MonitoredRoots` 的 distinct `StableRelativePath` 派生 HKLM 与 frontend `HKEY_USERS\<SID>` target，先读取每个现存 root 的 DACL，再修改并 fresh read-back。只有全部 applicable target 验证成功才写 `backend-protection-settings.json`。
+
+- 禁用部分失败时保留 persisted true，已成功移除的 ACL 不回滚；重试继续收敛剩余 root。
+- 启用部分失败或启用后的设置保存失败时，只恢复本次操作前观察到的保护语义；不得移除原有保护规则。
+- 禁用后的设置保存失败不重新加锁。
+- 缺少 frontend SID 或 user hive 未加载时，在任何 HKLM/HKU mutation 前失败。
+- Windows 可能合并等价 DENY ACE；验证按 SID、rights、inheritance/propagation 语义而不是 ACE 数量判断。
+- 禁用只修改 Builtin Users / Authenticated Users 的显式目标 DENY rights `CreateSubKey | SetValue`，保留其它 rights、无关 ACE 和 inherited ACE。
+- Registry Write Protection transition 使用独立 gate，不与状态库 gate 耦合。
+
 | 坑 | 正确处理 |
 | --- | --- |
 | 只看 `DisplayName` 判断同一项 | 使用 `Id`、`KeyName`、`RegistryPath`、`HandlerClsid` 等稳定信息。 |

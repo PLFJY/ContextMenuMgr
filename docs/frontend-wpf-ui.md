@@ -376,6 +376,8 @@ Deep Analysis 失败、ProbeHost crash、Shell Extension 不兼容等属于可�
 
 设置页“增强”卡片包含 Registry Write Protection 和 Win11 全局恢复经典右键菜单两个独立开关。前者有单独风险确认 flyout；后者只通过说明文字提示需要重启 Explorer 或重新登录，不应在切换时自动重启 Explorer，也不应复用 Registry Write Protection 的确认逻辑。
 
+“重置软件设置”必须先等待 Registry Write Protection 的 disable transition 成功；后端返回失败时应保留 authoritative toggle、显示错误并停止后续 reset，不能吞掉异常后显示“已恢复默认值”。
+
 只有开发者需求、目标参考代码或规则字典明确标注“需要重启 Explorer / 资源管理器后生效”的设置，才应联动主窗口已有的全局重启按钮；不要只凭经验推断生效条件，也不要在各页面重复添加按钮。当前约定是注入单例 `ExplorerRestartStateService`，操作成功后调用 `MarkRequired()`；`MainWindow.xaml` 通过 `ShellViewModel.NeedsExplorerRestart` 显示顶部全局“重启资源管理器”按钮，用户点击后由 `ShellViewModel.RestartExplorerCommand` 调用后端并在成功后 `Clear()`。
 
 Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说明：快捷方式在应用中可见但未出现在实际 Win+X 菜单时，可能是新版 Windows 的额外筛选限制，而不是创建或 hash 写入失败。

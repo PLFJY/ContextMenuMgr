@@ -623,6 +623,9 @@
   <data name="MaintenanceResetSettingsSucceeded" xml:space="preserve">
     <value>軟體設定已還原為預設值。</value>
   </data>
+  <data name="MaintenanceResetRegistryProtectionFailed" xml:space="preserve">
+    <value>無法停用並驗證登錄寫入保護。其餘設定未重設。</value>
+  </data>
   <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
     <value>前端、後端和系統匣記錄檔已清除。</value>
   </data>

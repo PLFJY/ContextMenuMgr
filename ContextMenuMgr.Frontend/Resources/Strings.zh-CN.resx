@@ -623,6 +623,9 @@
   <data name="MaintenanceResetSettingsSucceeded" xml:space="preserve">
     <value>软件设置已恢复为默认值。</value>
   </data>
+  <data name="MaintenanceResetRegistryProtectionFailed" xml:space="preserve">
+    <value>无法禁用并验证注册表写入保护。其余设置未重置。</value>
+  </data>
   <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
     <value>前端、后端和托盘日志已清空。</value>
   </data>

@@ -623,6 +623,9 @@ Continue anyway? (Not recommended)</value>
   <data name="MaintenanceResetSettingsSucceeded" xml:space="preserve">
     <value>The application settings were restored to defaults.</value>
   </data>
+  <data name="MaintenanceResetRegistryProtectionFailed" xml:space="preserve">
+    <value>Registry Write Protection could not be disabled and verified. The remaining settings were not reset.</value>
+  </data>
   <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
     <value>The frontend, backend, and tray logs were cleared.</value>
   </data>
