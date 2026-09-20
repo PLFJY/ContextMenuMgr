@@ -9,6 +9,7 @@ using System.Xml.Linq;
 using System.Text.RegularExpressions;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace ContextMenuMgr.Backend.Services;
 
@@ -219,10 +220,12 @@ public sealed class ContextMenuRegistryCatalog
         }, cancellationToken);
     }
 
-    internal async Task<IReadOnlyList<ContextMenuEntry>> GetReadOnlySnapshotAsync(CancellationToken cancellationToken = default)
+    internal async Task<IReadOnlyList<ContextMenuEntry>> GetReadOnlySnapshotAsync(
+        CancellationToken cancellationToken = default,
+        BackendUserContext? userContext = null)
     {
         return await BuildSnapshotAsync(
-            await EnumerateActualEntriesAsync(cancellationToken),
+            await EnumerateActualEntriesAsync(cancellationToken, userContext),
             static state => MonitoredStableRootPaths.Contains(state.SourceRootPath) || state.IsWindows11ContextMenu,
             persistDiscoveredStates: false,
             persistSnapshotUpdates: false,
@@ -651,7 +654,9 @@ public sealed class ContextMenuRegistryCatalog
         bool enable,
         CancellationToken cancellationToken,
         BackendUserContext? userContext,
-        ContextMenuEntry? fallbackItem)
+        ContextMenuEntry? fallbackItem,
+        bool markPendingApproval = false,
+        ContextMenuChangeKind? pendingApprovalChangeKind = null)
     {
         if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
         {
@@ -722,6 +727,50 @@ public sealed class ContextMenuRegistryCatalog
             return preflight with { Item = item };
         }
 
+        IReadOnlyList<ContextMenuEntry> plannedPhysicalCandidates = item.IsWindows11ContextMenu
+            ? []
+            : await FindEntriesByIdAsync(item.Id, cancellationToken, userContext);
+        if (!item.IsWindows11ContextMenu
+            && !plannedPhysicalCandidates.Any(candidate => string.Equals(
+                candidate.BackendRegistryPath,
+                item.BackendRegistryPath,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return CreateFailure(
+                "The selected physical registry source no longer exists; no mutation was attempted.",
+                item,
+                PipeErrorCodes.RegistryMutationVerificationFailed);
+        }
+
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        var mutationState = GetOrCreateState(states, item);
+        ShellVerbVisibilityTransaction? shellVerbTransaction = null;
+        ShellExtensionMutationTransaction? shellExtensionTransaction = null;
+        var mutationId = Guid.NewGuid();
+        var mutationApplied = false;
+        var physicalVerificationSucceeded = false;
+        var logicalVerificationSucceeded = false;
+        var stateSaveSucceeded = false;
+
+        if (!enable
+            && item.EntryKind == ContextMenuEntryKind.ShellVerb
+            && !item.IsWindows11ContextMenu
+            && IsProtectedActivationVerb(item, userContext, out var activationReason))
+        {
+            await _logger.LogAsync(
+                RuntimeLogLevel.Warning,
+                $"ClassicMutationRejected: TransactionId={mutationId}, ItemId={item.Id}, EntryKind={item.EntryKind}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, KeyName={item.KeyName}, RequestedEnabled={enable}, AssociationSourceKind={GetAssociationSourceKind(item)}, ParentShellDefaultVerb={ReadParentShellDefaultVerb(item.BackendRegistryPath) ?? "<none>"}, ErrorCode={PipeErrorCodes.FileTypeActivationVerbProtected}, Reason={activationReason}.",
+                cancellationToken);
+            return CreateFailure(
+                "This active file-type open verb is protected because hiding it could change double-click/default activation behavior.",
+                item,
+                PipeErrorCodes.FileTypeActivationVerbProtected);
+        }
+
+        await _logger.LogAsync(
+            $"ClassicMutationStarted: TransactionId={mutationId}, ItemId={item.Id}, EntryKind={item.EntryKind}, KeyName={item.KeyName}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, RequestedEnabled={enable}, SourceRootPath={item.SourceRootPath}, IsSceneOnly={!snapshot.Any(entry => string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase))}, PhysicalCandidateCount={plannedPhysicalCandidates.Count}, EffectivePhysicalPath={item.BackendRegistryPath}, ShadowedPhysicalPaths={string.Join(";", plannedPhysicalCandidates.Where(candidate => !string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase)).Select(static candidate => candidate.BackendRegistryPath))}, AssociationSourceKind={GetAssociationSourceKind(item)}, ParentShellDefaultVerb={ReadParentShellDefaultVerb(item.BackendRegistryPath) ?? "<none>"}, NormalizedCommandExecutable={item.FilePath ?? "<none>"}, ControlDomain={(item.IsWindows11ContextMenu ? "Win11PackagedCom" : item.EntryKind == ContextMenuEntryKind.ShellVerb ? "ClassicShellVerb" : "ClassicShellExtension")}.",
+            cancellationToken);
+
         try
         {
             if (item.IsWindows11ContextMenu)
@@ -737,10 +786,21 @@ public sealed class ContextMenuRegistryCatalog
                 switch (item.EntryKind)
                 {
                     case ContextMenuEntryKind.ShellVerb:
-                        SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable);
+                        shellVerbTransaction = CreateShellVerbVisibilityTransaction(
+                            item,
+                            enable,
+                            FindShellVerbProvenance(mutationState, item.BackendRegistryPath));
+                        ApplyShellVerbVisibilityTransaction(shellVerbTransaction);
+                        mutationApplied = shellVerbTransaction.Applied;
                         break;
                     case ContextMenuEntryKind.ShellExtension:
-                        await SetShellExtensionEnabledAsync(item, enable, cancellationToken, userContext);
+                        shellExtensionTransaction = await CreateShellExtensionMutationTransactionAsync(
+                            item,
+                            enable,
+                            cancellationToken,
+                            userContext);
+                        shellExtensionTransaction.Apply();
+                        mutationApplied = shellExtensionTransaction.AppliedCount > 0;
                         break;
                     default:
                         throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
@@ -756,7 +816,8 @@ public sealed class ContextMenuRegistryCatalog
                 physicalCandidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
             }
 
-            var refreshedLogical = (await GetSnapshotAsync(cancellationToken, userContext))
+            physicalVerificationSucceeded = true;
+            var refreshedLogical = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
             var refreshed = refreshedLogical;
             ShellVerbMutationReconciliation? shellVerbReconciliation = null;
@@ -795,6 +856,8 @@ public sealed class ContextMenuRegistryCatalog
                     $"The registry change for '{item.DisplayName}' could not be verified after refresh.");
             }
 
+            logicalVerificationSucceeded = true;
+
             if (shellVerbReconciliation is { UsedPhysicalSourceFallback: true })
             {
                 await _logger.LogAsync(
@@ -809,7 +872,6 @@ public sealed class ContextMenuRegistryCatalog
                     cancellationToken);
             }
 
-            var states = await _stateStore.LoadAsync(cancellationToken);
             // For scene-only classic handlers the global snapshot intentionally has
             // no entry. Persist the verified physical projection so a later scene
             // operation retains the mirror path that actually exists.
@@ -823,45 +885,111 @@ public sealed class ContextMenuRegistryCatalog
                 state.DesiredEnabled = enable;
                 state.ObservedEnabled = enable;
                 state.IsDeleted = false;
-                state.IsPendingApproval = false;
+                state.IsPendingApproval = markPendingApproval
+                                          && string.Equals(linkedEntry.Id, item.Id, StringComparison.OrdinalIgnoreCase);
+                if (state.IsPendingApproval && pendingApprovalChangeKind is not null)
+                {
+                    state.PendingApprovalChangeKind = pendingApprovalChangeKind.Value;
+                }
                 state.UpdatedAtUtc = DateTimeOffset.UtcNow;
                 state.DeletedAtUtc = null;
                 state.BackupFilePath = null;
             }
 
+            if (shellVerbTransaction is not null)
+            {
+                mutationState.ShellVerbVisibilityProvenance ??= [];
+                mutationState.ShellVerbVisibilityProvenance.RemoveAll(provenance =>
+                    string.Equals(provenance.PhysicalRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
+                if (!enable && shellVerbTransaction.Provenance is not null)
+                {
+                    mutationState.ShellVerbVisibilityProvenance.Add(shellVerbTransaction.Provenance);
+                }
+            }
+
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
+            stateSaveSucceeded = true;
+            NotifyAssociationsChangedBestEffort("SetEnabled", mutationId);
 
-            // Re-fetch the item after the approval state was persisted. The
-            // earlier `refreshed` snapshot was captured before IsPendingApproval
-            // was cleared, so returning it would keep the approval card visible
-            // and force the user to click Allow/Deny a second time.
-            var finalItem = (await GetSnapshotAsync(cancellationToken, userContext))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
-
-            await _logger.LogAsync($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
+            _logger.LogFireAndForget($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).");
+            _logger.LogFireAndForget(
+                $"ClassicMutationCompleted: TransactionId={mutationId}, MutationApplied={mutationApplied}, PhysicalVerificationSucceeded={physicalVerificationSucceeded}, LogicalVerificationSucceeded={logicalVerificationSucceeded}, StateSaveSucceeded={stateSaveSucceeded}, RollbackAttempted=False, RollbackSucceeded=NotApplicable, RollbackConflict=False, FinalObservedState={refreshed.IsEnabled}.");
 
             return new PipeResponse
             {
                 Success = true,
                 Message = $"{(enable ? "Enabled" : "Disabled")} {item.DisplayName}.",
-                Item = finalItem ?? refreshed
+                Item = refreshed with { IsPendingApproval = markPendingApproval }
             };
+        }
+        catch (Exception ex) when (shellVerbTransaction is not null)
+        {
+            mutationApplied = shellVerbTransaction.Applied;
+            var rollback = TryRollbackShellVerbVisibilityTransaction(shellVerbTransaction);
+            var errorCode = rollback.Conflict || !rollback.Succeeded
+                ? PipeErrorCodes.RegistryMutationRollbackConflict
+                : mutationApplied
+                    ? PipeErrorCodes.RegistryMutationRolledBack
+                    : ex is ShellVerbMutationException shellVerbException
+                        ? shellVerbException.ErrorCode
+                        : ex is ProtectedRegistryMutationException protectedException
+                            ? protectedException.ErrorCode
+                            : PipeErrorCodes.RegistryMutationVerificationFailed;
+            await _logger.LogAsync(
+                RuntimeLogLevel.Warning,
+                $"ClassicMutationCompleted: TransactionId={mutationId}, MutationApplied={mutationApplied}, PhysicalVerificationSucceeded={physicalVerificationSucceeded}, LogicalVerificationSucceeded={logicalVerificationSucceeded}, StateSaveSucceeded={stateSaveSucceeded}, RollbackAttempted={rollback.Attempted}, RollbackSucceeded={rollback.Succeeded}, RollbackConflict={rollback.Conflict}, FinalObservedState=Unknown, ErrorCode={errorCode}, RollbackError={rollback.Error ?? "<none>"}, Exception={ex}",
+                CancellationToken.None);
+            var message = rollback.Conflict || !rollback.Succeeded
+                ? $"{ex.Message} The registry rollback could not be completed safely because the registration changed concurrently."
+                : mutationApplied
+                    ? $"{ex.Message} The registry change was rolled back and verified."
+                    : ex.Message;
+            return CreateFailure(message, item, errorCode);
+        }
+        catch (Exception ex) when (shellExtensionTransaction is not null)
+        {
+            mutationApplied = shellExtensionTransaction.AppliedCount > 0;
+            var rollback = shellExtensionTransaction.TryRollback();
+            var errorCode = rollback.Conflict || !rollback.Succeeded
+                ? PipeErrorCodes.RegistryMutationRollbackConflict
+                : mutationApplied
+                    ? PipeErrorCodes.RegistryMutationRolledBack
+                    : PipeErrorCodes.RegistryMutationVerificationFailed;
+            await _logger.LogAsync(
+                RuntimeLogLevel.Warning,
+                $"ClassicMutationCompleted: TransactionId={mutationId}, MutationApplied={mutationApplied}, PhysicalVerificationSucceeded={physicalVerificationSucceeded}, LogicalVerificationSucceeded={logicalVerificationSucceeded}, StateSaveSucceeded={stateSaveSucceeded}, RollbackAttempted={rollback.Attempted}, RollbackSucceeded={rollback.Succeeded}, RollbackConflict={rollback.Conflict}, FinalObservedState=Unknown, ErrorCode={errorCode}, RollbackError={rollback.Error ?? "<none>"}, Exception={ex}",
+                CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The Shell Extension rollback could not be completed safely."
+                    : mutationApplied
+                        ? $"{ex.Message} The Shell Extension changes were rolled back and verified."
+                        : ex.Message,
+                item,
+                errorCode);
+        }
+        catch (ShellVerbMutationException ex)
+        {
+            await _logger.LogAsync(
+                RuntimeLogLevel.Warning,
+                $"ClassicMutationCompleted: TransactionId={mutationId}, MutationApplied=False, PhysicalVerificationSucceeded=False, LogicalVerificationSucceeded=False, StateSaveSucceeded=False, RollbackAttempted=False, RollbackSucceeded=NotApplicable, RollbackConflict=False, ErrorCode={ex.ErrorCode}, Exception={ex}",
+                CancellationToken.None);
+            return CreateFailure(ex.Message, item, ex.ErrorCode);
         }
         catch (ProtectedRegistryMutationException ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Protected registry mutation failed. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, ErrorCode={ex.ErrorCode}, Exception={ex}", cancellationToken);
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Protected registry mutation failed. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, ErrorCode={ex.ErrorCode}, Exception={ex}", CancellationToken.None);
             return CreateFailure(ex.Message, item, ex.ErrorCode);
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry access denied. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Exception={ex}", cancellationToken);
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry access denied. ItemId={item.Id}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Exception={ex}", CancellationToken.None);
             return CreateFailure("Windows denied access to the registry entry. No changes were applied.", item, PipeErrorCodes.ProtectedRegistryMutationFailed);
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync($"Failed to update {item.DisplayName}: {ex.Message}", cancellationToken);
+            await _logger.LogAsync($"Failed to update {item.DisplayName}: {ex.Message}", CancellationToken.None);
             return CreateFailure(ex.Message, item);
         }
     }
@@ -994,18 +1122,20 @@ public sealed class ContextMenuRegistryCatalog
         string itemId,
         ContextMenuShellAttribute attribute,
         bool enable,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext = null)
         => await RunPersistentStateOperationAsync(
-            () => ApplyShellAttributeCoreAsync(itemId, attribute, enable, cancellationToken),
+            () => ApplyShellAttributeCoreAsync(itemId, attribute, enable, cancellationToken, userContext),
             cancellationToken);
 
     private async Task<PipeResponse> ApplyShellAttributeCoreAsync(
         string itemId,
         ContextMenuShellAttribute attribute,
         bool enable,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
-        var snapshot = await GetSnapshotAsync(cancellationToken);
+        var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
@@ -1022,9 +1152,38 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"Menu item '{item.DisplayName}' is deleted. Undo the deletion before editing its attributes.", item);
         }
 
+        if (IsProtectedActivationVerb(item, userContext, out _))
+        {
+            return CreateFailure(
+                "Generic attribute changes are blocked for an active file-type open verb.",
+                item,
+                PipeErrorCodes.FileTypeActivationVerbProtected);
+        }
+
+        var valueName = GetShellVerbAttributeValueName(attribute);
+        RegistryValueMutationTransaction? transaction = null;
+
         try
         {
-            SetShellVerbAttribute(item.BackendRegistryPath, attribute, enable);
+            using (var key = OpenRegistryKey(item.BackendRegistryPath, writable: false)
+                   ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath}."))
+            {
+                transaction = RegistryValueMutationTransaction.Create(
+                    key,
+                    item.BackendRegistryPath,
+                    new PersistedRegistryValueSnapshot
+                    {
+                        Name = valueName,
+                        Existed = enable,
+                        Kind = (int)RegistryValueKind.String,
+                        StringValue = string.Empty
+                    });
+            }
+            ApplyRegistryValueTransaction(transaction);
+
+            var refreshed = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
+                ?? item;
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             var state = GetOrCreateState(states, item);
@@ -1035,13 +1194,8 @@ public sealed class ContextMenuRegistryCatalog
             state.ShowAsDisabledIfHidden = attribute == ContextMenuShellAttribute.ShowAsDisabledIfHidden ? enable : state.ShowAsDisabledIfHidden;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
-
-            await _logger.LogAsync($"Set attribute {attribute}={(enable ? "on" : "off")} for {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
-
-            var refreshed = (await GetSnapshotAsync(cancellationToken))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? item;
+            NotifyAssociationsChangedBestEffort("SetShellAttribute");
+            _logger.LogFireAndForget($"Set attribute {attribute}={(enable ? "on" : "off")} for {item.DisplayName} ({item.RegistryPath}).");
 
             return new PipeResponse
             {
@@ -1052,22 +1206,44 @@ public sealed class ContextMenuRegistryCatalog
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync($"Failed to set {attribute} for {item.DisplayName}: {ex.Message}", cancellationToken);
-            return CreateFailure(ex.Message, item);
+            var rollback = transaction is null
+                ? new ShellVerbRollbackResult(false, true, false, null)
+                : TryRollbackRegistryValueTransaction(transaction);
+            await _logger.LogAsync($"Failed to set {attribute} for {item.DisplayName}: {ex.Message}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}.", CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The registry rollback could not be completed safely."
+                    : transaction?.Applied == true
+                        ? $"{ex.Message} The registry change was rolled back and verified."
+                        : ex.Message,
+                item,
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : transaction?.Applied == true
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
     /// <summary>
     /// Applies display Text Async.
     /// </summary>
-    public async Task<PipeResponse> ApplyDisplayTextAsync(string itemId, string textValue, CancellationToken cancellationToken)
+    public async Task<PipeResponse> ApplyDisplayTextAsync(
+        string itemId,
+        string textValue,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext = null)
         => await RunPersistentStateOperationAsync(
-            () => ApplyDisplayTextCoreAsync(itemId, textValue, cancellationToken),
+            () => ApplyDisplayTextCoreAsync(itemId, textValue, cancellationToken, userContext),
             cancellationToken);
 
-    private async Task<PipeResponse> ApplyDisplayTextCoreAsync(string itemId, string textValue, CancellationToken cancellationToken)
+    private async Task<PipeResponse> ApplyDisplayTextCoreAsync(
+        string itemId,
+        string textValue,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
-        var snapshot = await GetSnapshotAsync(cancellationToken);
+        var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
@@ -1105,11 +1281,28 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure("The resolved menu text is too long.", item);
         }
 
+        RegistryValueMutationTransaction? transaction = null;
         try
         {
-            using var menuKey = OpenRegistryKey(item.BackendRegistryPath, writable: true)
-                ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath} for writing.");
-            menuKey.SetValue("MUIVerb", textValue, RegistryValueKind.String);
+            using (var menuKey = OpenRegistryKey(item.BackendRegistryPath, writable: false)
+                   ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath}."))
+            {
+                transaction = RegistryValueMutationTransaction.Create(
+                    menuKey,
+                    item.BackendRegistryPath,
+                    new PersistedRegistryValueSnapshot
+                    {
+                        Name = "MUIVerb",
+                        Existed = true,
+                        Kind = (int)RegistryValueKind.String,
+                        StringValue = textValue
+                    });
+            }
+            ApplyRegistryValueTransaction(transaction);
+
+            var refreshed = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
+                ?? item;
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             var state = GetOrCreateState(states, item);
@@ -1118,11 +1311,7 @@ public sealed class ContextMenuRegistryCatalog
             state.ObservedEnabled = item.IsEnabled;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
-
-            var refreshed = (await GetSnapshotAsync(cancellationToken))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? item;
+            NotifyAssociationsChangedBestEffort("SetDisplayText");
 
             return new PipeResponse
             {
@@ -1133,19 +1322,41 @@ public sealed class ContextMenuRegistryCatalog
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync($"Failed to update display text for {item.DisplayName}: {ex.Message}", cancellationToken);
-            return CreateFailure(ex.Message, item);
+            var rollback = transaction is null
+                ? new ShellVerbRollbackResult(false, true, false, null)
+                : TryRollbackRegistryValueTransaction(transaction);
+            await _logger.LogAsync($"Failed to update display text for {item.DisplayName}: {ex.Message}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}.", CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The registry rollback could not be completed safely."
+                    : transaction?.Applied == true
+                        ? $"{ex.Message} The registry change was rolled back and verified."
+                        : ex.Message,
+                item,
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : transaction?.Applied == true
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
-    public async Task<PipeResponse> ApplyCommandTextAsync(string itemId, string commandText, CancellationToken cancellationToken)
+    public async Task<PipeResponse> ApplyCommandTextAsync(
+        string itemId,
+        string commandText,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext = null)
         => await RunPersistentStateOperationAsync(
-            () => ApplyCommandTextCoreAsync(itemId, commandText, cancellationToken),
+            () => ApplyCommandTextCoreAsync(itemId, commandText, cancellationToken, userContext),
             cancellationToken);
 
-    private async Task<PipeResponse> ApplyCommandTextCoreAsync(string itemId, string commandText, CancellationToken cancellationToken)
+    private async Task<PipeResponse> ApplyCommandTextCoreAsync(
+        string itemId,
+        string commandText,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
-        var snapshot = await GetSnapshotAsync(cancellationToken);
+        var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
@@ -1177,6 +1388,14 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure("Command cannot be empty.", item);
         }
 
+        if (IsProtectedActivationVerb(item, userContext, out _))
+        {
+            return CreateFailure(
+                "Generic command editing is blocked for an active file-type open verb.",
+                item,
+                PipeErrorCodes.FileTypeActivationVerbProtected);
+        }
+
         using (var itemKey = OpenRegistryKey(item.BackendRegistryPath, writable: false))
         {
             if (itemKey is null)
@@ -1200,27 +1419,30 @@ public sealed class ContextMenuRegistryCatalog
             return preflight with { Item = item };
         }
 
+        RegistryValueMutationTransaction? transaction = null;
         try
         {
             var commandPath = $@"{item.BackendRegistryPath}\command";
-            using var commandKey = CreateRegistrySubKey(commandPath, writable: true)
-                ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath}\\command for writing.");
-            var oldValue = commandKey.GetValue(null);
-            commandKey.SetValue(string.Empty, commandText, RegistryValueKind.String);
-            await _logger.LogAsync(
-                DiagnosticLogFormatter.BuildRegistryOperationLog(
-                    "ApplyCommandText",
+            using (var commandKey = OpenRegistryKey(commandPath, writable: false)
+                   ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath}\\command."))
+            {
+                transaction = RegistryValueMutationTransaction.Create(
+                    commandKey,
                     commandPath,
-                    "(Default)",
-                    RegistryValueKind.String,
-                    commandText,
-                    writable: true,
-                    result: $"Success, OldValue={DiagnosticLogFormatter.FormatRegistryValueData(oldValue)}"),
+                    new PersistedRegistryValueSnapshot
+                    {
+                        Name = string.Empty,
+                        Existed = true,
+                        Kind = (int)RegistryValueKind.String,
+                        StringValue = commandText
+                    });
+            }
+            ApplyRegistryValueTransaction(transaction);
+            await _logger.LogAsync(
+                $"ApplyCommandText: RegistryPath={commandPath}, Result=PhysicalWriteVerified, CommandArgumentsRedacted=True.",
                 cancellationToken);
 
-            ShellChangeNotifier.NotifyAssociationsChanged();
-
-            var refreshed = (await GetSnapshotAsync(cancellationToken))
+            var refreshed = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
                 ?? item with
                 {
@@ -1233,8 +1455,10 @@ public sealed class ContextMenuRegistryCatalog
             var state = GetOrCreateState(states, refreshed);
             UpdateMetadata(state, refreshed);
             state.ObservedEnabled = refreshed.IsEnabled;
+            RefreshShellVerbProvenanceGeneration(state, item.BackendRegistryPath);
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
+            NotifyAssociationsChangedBestEffort("SetCommandText");
 
             return new PipeResponse
             {
@@ -1251,8 +1475,22 @@ public sealed class ContextMenuRegistryCatalog
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to update command text for {item.DisplayName}: {ex}", cancellationToken);
-            return CreateFailure(ex.Message, item);
+            var rollback = transaction is null
+                ? new ShellVerbRollbackResult(false, true, false, null)
+                : TryRollbackRegistryValueTransaction(transaction);
+            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to update command text for {item.DisplayName}: {ex}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}.", CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The registry rollback could not be completed safely."
+                    : transaction?.Applied == true
+                        ? $"{ex.Message} The registry change was rolled back and verified."
+                        : ex.Message,
+                item,
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : transaction?.Applied == true
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
@@ -1765,6 +2003,9 @@ public sealed class ContextMenuRegistryCatalog
                 deleteTarget);
         }
 
+        string? deleteRegistryPath = null;
+        string? exportedBackupPath = null;
+        var registryDeleted = false;
         try
         {
             var backendRegistryPath = item?.BackendRegistryPath ?? persistedState?.BackendRegistryPath;
@@ -1773,8 +2014,20 @@ public sealed class ContextMenuRegistryCatalog
                 return CreateFailure($"Cannot delete '{itemId}': registry path is unknown.");
             }
 
+            deleteRegistryPath = backendRegistryPath;
             var backupFilePath = await _backupService.ExportKeyAsync(backendRegistryPath, cancellationToken);
+            exportedBackupPath = backupFilePath;
             DeleteRegistryKey(backendRegistryPath);
+            using (var deletionVerification = OpenRegistryKey(backendRegistryPath, writable: false))
+            {
+                if (deletionVerification is not null)
+                {
+                    throw new ProtectedRegistryMutationException(
+                        PipeErrorCodes.RegistryMutationVerificationFailed,
+                        "The registry item still exists after deletion.");
+                }
+            }
+            registryDeleted = true;
 
             var state = GetOrCreateState(states, item ?? CreateMinimalEntry(itemId, persistedState!));
             state.DesiredEnabled = null;
@@ -1784,13 +2037,11 @@ public sealed class ContextMenuRegistryCatalog
             state.DeletedAtUtc = DateTimeOffset.UtcNow;
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
+            NotifyAssociationsChangedBestEffort("DeleteItem");
 
-            await _logger.LogAsync($"Deleted {state.DisplayName} with backup {backupFilePath}.", cancellationToken);
+            _logger.LogFireAndForget($"Deleted {state.DisplayName} with backup {backupFilePath}.");
 
-            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? CreateVirtualEntry(state, null, ContextMenuChangeKind.None, null);
+            var refreshed = CreateVirtualEntry(state, null, ContextMenuChangeKind.None, null);
 
             return new PipeResponse
             {
@@ -1802,8 +2053,45 @@ public sealed class ContextMenuRegistryCatalog
         catch (Exception ex)
         {
             var displayName = item?.DisplayName ?? persistedState?.DisplayName ?? itemId;
-            await _logger.LogAsync($"Failed to delete {displayName}: {ex.Message}", cancellationToken);
-            return CreateFailure(ex.Message, item);
+            var rollback = new ShellVerbRollbackResult(false, true, false, null);
+            if (registryDeleted && deleteRegistryPath is not null && exportedBackupPath is not null)
+            {
+                try
+                {
+                    using var concurrentKey = OpenRegistryKey(deleteRegistryPath, writable: false);
+                    if (concurrentKey is not null)
+                    {
+                        rollback = new ShellVerbRollbackResult(true, false, true, "The deleted path was recreated by another process.");
+                    }
+                    else
+                    {
+                        await _backupService.RestoreBackupAsync(exportedBackupPath, CancellationToken.None);
+                        using var restored = OpenRegistryKey(deleteRegistryPath, writable: false);
+                        rollback = new ShellVerbRollbackResult(
+                            true,
+                            restored is not null,
+                            false,
+                            restored is null ? "The restored key could not be verified." : null);
+                    }
+                }
+                catch (Exception rollbackException)
+                {
+                    rollback = new ShellVerbRollbackResult(true, false, false, rollbackException.Message);
+                }
+            }
+            await _logger.LogAsync($"Failed to delete {displayName}: {ex.Message}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}; RollbackError={rollback.Error ?? "<none>"}.", CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The deleted registry key could not be restored safely."
+                    : registryDeleted
+                        ? $"{ex.Message} The deletion was rolled back and verified."
+                        : ex.Message,
+                item,
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : registryDeleted
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
@@ -1970,11 +2258,17 @@ public sealed class ContextMenuRegistryCatalog
         var targetPathExists = matchingPhysicalCandidates.Any(candidate =>
             string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
         var mismatchedPhysicalPaths = matchingPhysicalCandidates
-            .Where(candidate => candidate.IsEnabled != requestedEnabled)
+            .Where(candidate => string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase)
+                                && candidate.IsEnabled != requestedEnabled)
             .Select(static candidate => candidate.BackendRegistryPath)
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var logicalMatchesRequest = refreshedLogicalEntry is null || refreshedLogicalEntry.IsEnabled == requestedEnabled;
+        var logicalRepresentsTarget = refreshedLogicalEntry is not null
+                                      && string.Equals(
+                                          refreshedLogicalEntry.BackendRegistryPath,
+                                          item.BackendRegistryPath,
+                                          StringComparison.OrdinalIgnoreCase);
+        var logicalMatchesRequest = !logicalRepresentsTarget || refreshedLogicalEntry!.IsEnabled == requestedEnabled;
         var failureReason = matchingPhysicalCandidates.Length == 0
             ? "No physical shell-verb candidate was found after mutation."
             : !targetPathExists
@@ -1984,8 +2278,9 @@ public sealed class ContextMenuRegistryCatalog
                     : !logicalMatchesRequest
                         ? "The refreshed logical candidate does not match the requested visibility state."
                         : null;
-        var physicalEntry = SelectPreferredDeleteCandidate(matchingPhysicalCandidates);
-        var entry = refreshedLogicalEntry ?? physicalEntry;
+        var physicalEntry = matchingPhysicalCandidates.FirstOrDefault(candidate =>
+            string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
+        var entry = logicalRepresentsTarget ? refreshedLogicalEntry : physicalEntry;
 
         return new ShellVerbMutationReconciliation(
             entry,
@@ -2203,6 +2498,8 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"No backup was found for '{itemId}'.");
         }
 
+        var restoredRegistry = false;
+        string? restoredFingerprint = null;
         try
         {
             if (RuntimePaths.PackageKind == RuntimePackageKind.Portable
@@ -2217,8 +2514,28 @@ public sealed class ContextMenuRegistryCatalog
                     state.ToDeletedEntry("The backup file belongs to a different Windows installation or user profile."));
             }
 
-            await _backupService.RestoreBackupAsync(state.BackupFilePath, cancellationToken);
-            _backupService.DeleteBackupFile(state.BackupFilePath);
+            using (var existing = OpenRegistryKey(state.BackendRegistryPath, writable: false))
+            {
+                if (existing is not null)
+                {
+                    return CreateFailure(
+                        "The deleted registry path was recreated externally, so its backup was not imported.",
+                        state.ToDeletedEntry(),
+                        PipeErrorCodes.RegistryMutationRollbackConflict);
+                }
+            }
+
+            var backupFilePath = state.BackupFilePath;
+            await _backupService.RestoreBackupAsync(backupFilePath, cancellationToken);
+            using (var restored = OpenRegistryKey(state.BackendRegistryPath, writable: false)
+                   ?? throw new ProtectedRegistryMutationException(
+                       PipeErrorCodes.RegistryMutationVerificationFailed,
+                       "The restored registry key could not be verified."))
+            {
+                restoredFingerprint = ComputeRegistryKeyTreeFingerprint(restored);
+            }
+            restoredRegistry = true;
+            var refreshed = await TryFindEntryByIdAsync(itemId, cancellationToken, userContext);
 
             state.IsDeleted = false;
             state.BackupFilePath = null;
@@ -2229,13 +2546,18 @@ public sealed class ContextMenuRegistryCatalog
             state.DesiredEnabled = state.ObservedEnabled;
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
-
-            await _logger.LogAsync($"Restored deleted item {state.DisplayName}.", cancellationToken);
-
-            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? await TryFindEntryByIdAsync(itemId, cancellationToken, userContext);
+            try
+            {
+                _backupService.DeleteBackupFile(backupFilePath);
+            }
+            catch (Exception cleanupException)
+            {
+                _logger.LogFireAndForget(
+                    RuntimeLogLevel.Warning,
+                    $"RestoredBackupCleanupFailed: ItemId={itemId}, BackupFilePath={backupFilePath}, Exception={cleanupException}");
+            }
+            NotifyAssociationsChangedBestEffort("UndoDelete");
+            _logger.LogFireAndForget($"Restored deleted item {state.DisplayName}.");
 
             return new PipeResponse
             {
@@ -2248,8 +2570,50 @@ public sealed class ContextMenuRegistryCatalog
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync($"Failed to restore {state.DisplayName}: {ex.Message}", cancellationToken);
-            return CreateFailure(ex.Message, state.ToDeletedEntry());
+            var rollback = new ShellVerbRollbackResult(false, true, false, null);
+            if (restoredRegistry && restoredFingerprint is not null)
+            {
+                try
+                {
+                    using var current = OpenRegistryKey(state.BackendRegistryPath, writable: false);
+                    if (current is null)
+                    {
+                        rollback = new ShellVerbRollbackResult(true, true, false, null);
+                    }
+                    else if (!string.Equals(ComputeRegistryKeyTreeFingerprint(current), restoredFingerprint, StringComparison.Ordinal))
+                    {
+                        rollback = new ShellVerbRollbackResult(true, false, true, "The restored key was externally modified.");
+                    }
+                    else
+                    {
+                        current.Dispose();
+                        DeleteRegistryKeyTree(state.BackendRegistryPath);
+                        using var verification = OpenRegistryKey(state.BackendRegistryPath, writable: false);
+                        rollback = new ShellVerbRollbackResult(
+                            true,
+                            verification is null,
+                            false,
+                            verification is null ? null : "The restored key still exists after rollback.");
+                    }
+                }
+                catch (Exception rollbackException)
+                {
+                    rollback = new ShellVerbRollbackResult(true, false, false, rollbackException.Message);
+                }
+            }
+            await _logger.LogAsync($"Failed to restore {state.DisplayName}: {ex.Message}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}; RollbackError={rollback.Error ?? "<none>"}.", CancellationToken.None);
+            return CreateFailure(
+                rollback.Conflict || !rollback.Succeeded
+                    ? $"{ex.Message} The restored key could not be removed safely."
+                    : restoredRegistry
+                        ? $"{ex.Message} The restore was rolled back and verified."
+                        : ex.Message,
+                state.ToDeletedEntry(),
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : restoredRegistry
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
@@ -2271,9 +2635,19 @@ public sealed class ContextMenuRegistryCatalog
 
         try
         {
-            _backupService.DeleteBackupFile(state.BackupFilePath);
+            var backupFilePath = state.BackupFilePath;
             states.Remove(itemId);
             await _stateStore.SaveAsync(states, cancellationToken);
+            try
+            {
+                _backupService.DeleteBackupFile(backupFilePath);
+            }
+            catch (Exception cleanupException)
+            {
+                _logger.LogFireAndForget(
+                    RuntimeLogLevel.Warning,
+                    $"PurgedBackupCleanupFailed: ItemId={itemId}, BackupFilePath={backupFilePath ?? "<none>"}, Exception={cleanupException}");
+            }
             await _logger.LogAsync($"Permanently removed backup for {state.DisplayName}.", cancellationToken);
 
             return new PipeResponse
@@ -2336,80 +2710,27 @@ public sealed class ContextMenuRegistryCatalog
         CancellationToken cancellationToken,
         BackendUserContext? userContext)
     {
-        // Step 1: disable the newly detected item immediately. This keeps the
-        // service in a deny-by-default posture until the user explicitly allows it.
-        switch (item.EntryKind)
+        // Use the same transactional mutation engine as a manual toggle. The
+        // visibility provenance and approval marker share one state-store commit,
+        // so quarantine cannot leave a partially committed registry/state pair.
+        var mutation = await ApplyDesiredStateCoreAsync(
+            item.Id,
+            enable: false,
+            cancellationToken,
+            userContext,
+            item,
+            markPendingApproval: true,
+            pendingApprovalChangeKind: ContextMenuChangeKind.Added);
+        if (!mutation.Success)
         {
-            case ContextMenuEntryKind.ShellVerb when !item.IsWindows11ContextMenu:
-                SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable: false);
-                break;
-            case ContextMenuEntryKind.ShellExtension when item.IsWindows11ContextMenu:
-                if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, userContext, enable: false))
-                {
-                    throw new InvalidOperationException($"Unable to quarantine the Win11 context menu item '{item.DisplayName}'.");
-                }
-                break;
-            case ContextMenuEntryKind.ShellExtension:
-                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken, userContext);
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
+            throw new ShellVerbMutationException(
+                mutation.ErrorCode ?? PipeErrorCodes.RegistryMutationVerificationFailed,
+                mutation.Message);
         }
 
-        var states = await _stateStore.LoadAsync(cancellationToken);
-        var state = GetOrCreateState(states, item);
+        _logger.LogFireAndForget($"Quarantined new menu item pending approval: {item.DisplayName} ({item.RegistryPath}).");
 
-        // Step 2: persist the blocked state and mark it as waiting for approval.
-        state.DesiredEnabled = false;
-        state.ObservedEnabled = false;
-        state.IsPendingApproval = true;
-        state.PendingApprovalChangeKind = ContextMenuChangeKind.Added;
-        state.IsDeleted = false;
-        state.DeletedAtUtc = null;
-        state.BackupFilePath = null;
-        state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        await _stateStore.SaveAsync(states, cancellationToken);
-        ShellChangeNotifier.NotifyAssociationsChanged();
-
-        await _logger.LogAsync($"Quarantined new menu item pending approval: {item.DisplayName} ({item.RegistryPath}).", cancellationToken);
-
-        return (await GetSnapshotAsync(cancellationToken, userContext))
-            .FirstOrDefault(entry => string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase))
-            ?? item with
-            {
-                IsEnabled = false,
-                IsPendingApproval = true
-            };
-    }
-
-    /// <summary>
-    /// Disables a single registry entry using the per-entry-kind write path.
-    /// This is the shared disable primitive used by reconciliation and new-item
-    /// quarantine.
-    /// </summary>
-    private async Task DisableEntryCoreAsync(ContextMenuEntry item, BackendUserContext? userContext, CancellationToken cancellationToken)
-    {
-        if (item.IsWindows11ContextMenu)
-        {
-            if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, userContext, enable: false))
-            {
-                throw new InvalidOperationException($"Unable to disable the Win11 context menu item '{item.DisplayName}'.");
-            }
-
-            return;
-        }
-
-        switch (item.EntryKind)
-        {
-            case ContextMenuEntryKind.ShellVerb:
-                SetShellVerbEnabled(item.BackendRegistryPath, item.RegistryPath, enable: false);
-                break;
-            case ContextMenuEntryKind.ShellExtension:
-                await SetShellExtensionEnabledAsync(item, enable: false, cancellationToken, userContext);
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported entry kind: {item.EntryKind}");
-        }
+        return mutation.Item ?? item with { IsEnabled = false, IsPendingApproval = true };
     }
 
     /// <summary>
@@ -2452,10 +2773,18 @@ public sealed class ContextMenuRegistryCatalog
                     $"DesiredStateDriftDetected: ItemId={entry.Id}, DesiredEnabled=False, ObservedEnabled=True.",
                     cancellationToken);
 
-                await DisableEntryCoreAsync(entry, userContext, cancellationToken);
-
-                state.ObservedEnabled = false;
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                var response = await ApplyDesiredStateCoreAsync(
+                    entry.Id,
+                    enable: false,
+                    cancellationToken,
+                    userContext,
+                    entry);
+                if (!response.Success)
+                {
+                    throw new ShellVerbMutationException(
+                        response.ErrorCode ?? PipeErrorCodes.RegistryMutationVerificationFailed,
+                        response.Message);
+                }
 
                 reconciledItemIds.Add(entry.Id);
 
@@ -2471,12 +2800,6 @@ public sealed class ContextMenuRegistryCatalog
                     cancellationToken);
                 failedItemIds.Add(entry.Id);
             }
-        }
-
-        if (reconciledItemIds.Count > 0)
-        {
-            await _stateStore.SaveAsync(states, cancellationToken);
-            ShellChangeNotifier.NotifyAssociationsChanged();
         }
 
         return new DisabledStateReconciliationResult(
@@ -3174,24 +3497,28 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure("Recycle Bin 'Pin to Quick access' registry key was not found.");
         }
 
+        RegistryValueMutationTransaction? transaction = null;
         try
         {
-            using var menuKey = OpenRegistryKey(RecycleBinPinToHomeRegistryPath, writable: true)
-                ?? throw new InvalidOperationException($"Unable to open {RecycleBinPinToHomeRegistryPath} for writing.");
-
+            using var menuKey = OpenRegistryKey(RecycleBinPinToHomeRegistryPath, writable: false)
+                ?? throw new InvalidOperationException($"Unable to open {RecycleBinPinToHomeRegistryPath}.");
             var existingAppliesTo = menuKey.GetValue("AppliesTo")?.ToString();
             var nextAppliesTo = enable
                 ? RemoveRecycleBinParsingNameExclusion(existingAppliesTo)
                 : AddRecycleBinParsingNameExclusion(existingAppliesTo);
-
-            if (string.IsNullOrWhiteSpace(nextAppliesTo))
-            {
-                menuKey.DeleteValue("AppliesTo", throwOnMissingValue: false);
-            }
-            else
-            {
-                menuKey.SetValue("AppliesTo", nextAppliesTo, RegistryValueKind.String);
-            }
+            transaction = RegistryValueMutationTransaction.Create(
+                menuKey,
+                RecycleBinPinToHomeRegistryPath,
+                new PersistedRegistryValueSnapshot
+                {
+                    Name = "AppliesTo",
+                    Existed = !string.IsNullOrWhiteSpace(nextAppliesTo),
+                    Kind = (int)RegistryValueKind.String,
+                    StringValue = nextAppliesTo
+                });
+            menuKey.Dispose();
+            ApplyRegistryValueTransaction(transaction);
+            var refreshed = TryCreateRecycleBinPinToHomeEntry() ?? item with { IsEnabled = enable };
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             var state = GetOrCreateState(states, item);
@@ -3204,8 +3531,7 @@ public sealed class ContextMenuRegistryCatalog
             state.BackupFilePath = null;
             await _stateStore.SaveAsync(states, cancellationToken);
 
-            ShellChangeNotifier.NotifyAssociationsChanged();
-            var refreshed = TryCreateRecycleBinPinToHomeEntry() ?? item with { IsEnabled = enable };
+            NotifyAssociationsChangedBestEffort("RecycleBinPinToHome");
             return new PipeResponse
             {
                 Success = true,
@@ -3213,20 +3539,20 @@ public sealed class ContextMenuRegistryCatalog
                 Item = refreshed
             };
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Permission denied when updating Recycle Bin Pin to Quick access. Sid={DiagnosticLogFormatter.FormatSid(userContext)}, Error={ex}", cancellationToken);
-            return CreateFailure("Access denied while updating Recycle Bin 'Pin to Quick access'.", item);
-        }
-        catch (SecurityException ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Security error when updating Recycle Bin Pin to Quick access. Sid={DiagnosticLogFormatter.FormatSid(userContext)}, Error={ex}", cancellationToken);
-            return CreateFailure("Access denied while updating Recycle Bin 'Pin to Quick access'.", item);
-        }
         catch (Exception ex)
         {
-            await _logger.LogAsync($"Failed to update Recycle Bin Pin to Quick access: {ex}", cancellationToken);
-            return CreateFailure(ex.Message, item);
+            var rollback = transaction is null
+                ? new ShellVerbRollbackResult(false, true, false, null)
+                : TryRollbackRegistryValueTransaction(transaction);
+            await _logger.LogAsync($"Failed to update Recycle Bin Pin to Quick access: {ex}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}.", CancellationToken.None);
+            return CreateFailure(
+                ex.Message,
+                item,
+                rollback.Conflict || !rollback.Succeeded
+                    ? PipeErrorCodes.RegistryMutationRollbackConflict
+                    : transaction?.Applied == true
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : null);
         }
     }
 
@@ -3319,17 +3645,40 @@ public sealed class ContextMenuRegistryCatalog
             {
                 var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync("SetShellSubMenuItemEnabled", [parent.BackendRegistryPath], cancellationToken);
                 if (preflight is not null) return preflight;
-                using var writableParent = OpenRegistryKey(parent.BackendRegistryPath, writable: true)
-                    ?? throw new InvalidOperationException("The cascading menu registry key no longer exists.");
-                var before = writableParent.GetValue("SubCommands")?.ToString() ?? string.Empty;
+                var before = parentKey.GetValue("SubCommands")?.ToString() ?? string.Empty;
                 var reference = child.ReferenceName!;
                 state ??= GetOrCreateState(states, parent);
                 var after = UpdateSubCommandsReference(before, reference, enable, state.DisabledSubMenuReferences);
-                writableParent.SetValue("SubCommands", after, RegistryValueKind.String);
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-                await _stateStore.SaveAsync(states, cancellationToken);
-                ShellChangeNotifier.NotifyAssociationsChanged();
-                await _logger.LogAsync($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind=SubCommands, ChildId={child.Id}, ReferenceName={reference}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, SubCommandsBefore={before}, SubCommandsAfter={after}, Result=Success.", cancellationToken);
+                var transaction = RegistryValueMutationTransaction.Create(
+                    parentKey,
+                    parent.BackendRegistryPath,
+                    new PersistedRegistryValueSnapshot
+                    {
+                        Name = "SubCommands",
+                        Existed = true,
+                        Kind = (int)RegistryValueKind.String,
+                        StringValue = after
+                    });
+                try
+                {
+                    ApplyRegistryValueTransaction(transaction);
+                    state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                    await _stateStore.SaveAsync(states, cancellationToken);
+                    NotifyAssociationsChangedBestEffort("SetShellSubMenuItemEnabled", correlationId);
+                    _logger.LogFireAndForget($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind=SubCommands, ChildId={child.Id}, ReferenceName={reference}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, SubCommandsBefore={before}, SubCommandsAfter={after}, Result=Success.");
+                }
+                catch (Exception ex)
+                {
+                    var rollback = TryRollbackRegistryValueTransaction(transaction);
+                    return CreateFailure(
+                        rollback.Succeeded && !rollback.Conflict
+                            ? $"{ex.Message} The SubCommands change was rolled back and verified."
+                            : $"{ex.Message} The SubCommands rollback could not be completed safely.",
+                        parent,
+                        rollback.Succeeded && !rollback.Conflict
+                            ? PipeErrorCodes.RegistryMutationRolledBack
+                            : PipeErrorCodes.RegistryMutationRollbackConflict);
+                }
             }
             else
             {
@@ -3338,14 +3687,63 @@ public sealed class ContextMenuRegistryCatalog
                 var childPath = $@"{target.BackendPath}\{keyName}";
                 var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync("SetShellSubMenuItemEnabled", [childPath], cancellationToken);
                 if (preflight is not null) return preflight;
-                SetShellVerbEnabled(childPath, $@"{target.DisplayPath}\{keyName}", enable);
-                ShellChangeNotifier.NotifyAssociationsChanged();
-                await _logger.LogAsync($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind={child.SourceKind}, ChildId={child.Id}, ChildRegistryPath={childPath}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, Result=Success.", cancellationToken);
+                var childEntry = parent with
+                {
+                    Id = child.Id,
+                    KeyName = keyName,
+                    RegistryPath = $@"{target.DisplayPath}\{keyName}",
+                    BackendRegistryPath = childPath,
+                    SourceRootPath = target.DisplayPath,
+                    EntryKind = ContextMenuEntryKind.ShellVerb
+                };
+                if (!enable && IsProtectedActivationVerb(childEntry, userContext, out _))
+                {
+                    return CreateFailure(
+                        "This active file-type open verb is protected because hiding it could change default activation behavior.",
+                        parent,
+                        PipeErrorCodes.FileTypeActivationVerbProtected);
+                }
+
+                state ??= GetOrCreateState(states, parent);
+                var transaction = CreateShellVerbVisibilityTransaction(
+                    childEntry,
+                    enable,
+                    FindShellVerbProvenance(state, childPath));
+                try
+                {
+                    ApplyShellVerbVisibilityTransaction(transaction);
+                    state.ShellVerbVisibilityProvenance ??= [];
+                    state.ShellVerbVisibilityProvenance.RemoveAll(provenance =>
+                        string.Equals(provenance.PhysicalRegistryPath, childPath, StringComparison.OrdinalIgnoreCase));
+                    if (!enable && transaction.Provenance is not null)
+                    {
+                        state.ShellVerbVisibilityProvenance.Add(transaction.Provenance);
+                    }
+                    state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                    await _stateStore.SaveAsync(states, cancellationToken);
+                    NotifyAssociationsChangedBestEffort("SetShellSubMenuItemEnabled", correlationId);
+                    _logger.LogFireAndForget($"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ParentRegistryPath={parent.BackendRegistryPath}, SubMenuSourceKind={child.SourceKind}, ChildId={child.Id}, ChildRegistryPath={childPath}, RequestedEnabled={enable}, ObservedEnabledBefore={child.IsEnabled}, ObservedEnabledAfter={enable}, Result=Success.");
+                }
+                catch (Exception ex)
+                {
+                    var rollback = TryRollbackShellVerbVisibilityTransaction(transaction);
+                    var errorCode = rollback.Succeeded && !rollback.Conflict
+                        ? PipeErrorCodes.RegistryMutationRolledBack
+                        : PipeErrorCodes.RegistryMutationRollbackConflict;
+                    await _logger.LogAsync(
+                        RuntimeLogLevel.Warning,
+                        $"ShellSubMenuMutation: CorrelationId={correlationId}, ParentItemId={parent.Id}, ChildRegistryPath={childPath}, RequestedEnabled={enable}, Result=Failed, RollbackAttempted={rollback.Attempted}, RollbackSucceeded={rollback.Succeeded}, RollbackConflict={rollback.Conflict}, Error={ex}.",
+                        CancellationToken.None);
+                    return CreateFailure(ex.Message, parent, errorCode);
+                }
             }
 
-            using var refreshedParent = OpenRegistryKey(parent.BackendRegistryPath, writable: false);
-            var refreshed = refreshedParent is null ? null : EnumerateShellSubMenuItems(parent, refreshedParent, state).FirstOrDefault(x => x.Id == childId);
-            return new PipeResponse { Success = true, Message = "Shell submenu item updated.", ShellSubMenuItem = refreshed ?? child with { IsEnabled = enable } };
+            return new PipeResponse
+            {
+                Success = true,
+                Message = "Shell submenu item updated.",
+                ShellSubMenuItem = child with { IsEnabled = enable }
+            };
         }, cancellationToken);
 
     private IEnumerable<ShellSubMenuItem> EnumerateShellSubMenuItems(ContextMenuEntry parent, RegistryKey parentKey, PersistedContextMenuState? state)
@@ -3445,51 +3843,289 @@ public sealed class ContextMenuRegistryCatalog
         return ($@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\{target}\shell", $@"{target}\shell");
     }
 
-    private void SetShellVerbEnabled(string registryPath, string displayRegistryPath, bool enable)
+    private static PersistedShellVerbVisibilityProvenance? FindShellVerbProvenance(
+        PersistedContextMenuState state,
+        string physicalRegistryPath)
+        => state.ShellVerbVisibilityProvenance?.FirstOrDefault(provenance =>
+            string.Equals(provenance.PhysicalRegistryPath, physicalRegistryPath, StringComparison.OrdinalIgnoreCase));
+
+    internal static void RefreshShellVerbProvenanceGeneration(
+        PersistedContextMenuState state,
+        string physicalRegistryPath)
+    {
+        var provenance = FindShellVerbProvenance(state, physicalRegistryPath);
+        if (provenance is null)
+        {
+            return;
+        }
+
+        using var key = OpenRegistryKey(physicalRegistryPath, writable: false)
+            ?? throw new InvalidOperationException("The Shell verb disappeared while updating its visibility provenance.");
+        provenance.GenerationFingerprint = ShellVerbVisibility.ComputeGenerationFingerprint(key);
+    }
+
+    private static ShellVerbVisibilityTransaction CreateShellVerbVisibilityTransaction(
+        ContextMenuEntry item,
+        bool enable,
+        PersistedShellVerbVisibilityProvenance? provenance)
+    {
+        using var key = OpenRegistryKey(item.BackendRegistryPath, writable: false)
+            ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath} for visibility planning.");
+        return ShellVerbVisibilityTransaction.Create(key, item.BackendRegistryPath, enable, provenance);
+    }
+
+    private void ApplyShellVerbVisibilityTransaction(ShellVerbVisibilityTransaction transaction)
     {
         try
         {
-            using var menuKey = OpenRegistryKey(registryPath, writable: true)
-                ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
-            ApplyAndVerifyShellVerbVisibility(menuKey, displayRegistryPath, enable);
-            return;
+            using (var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+                   ?? throw new InvalidOperationException($"Unable to open {transaction.PhysicalRegistryPath} for writing."))
+            {
+                transaction.Apply(key);
+            }
         }
-        catch (Exception ex) when (IsRegistryAccessDenied(ex) && ProtectedRegistryMutation.IsEligibleMachineClassesPath(registryPath))
+        catch (Exception ex) when (IsRegistryAccessDenied(ex)
+                                   && ProtectedRegistryMutation.IsEligibleMachineClassesPath(transaction.PhysicalRegistryPath))
         {
-            _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"ProtectedShellVerbFallbackStarted: BackendRegistryPath={registryPath}, Enable={enable}, InitialException={ex.GetType().Name}: {ex.Message}");
+            _logger.LogFireAndForget(
+                RuntimeLogLevel.Warning,
+                $"ProtectedShellVerbFallbackStarted: BackendRegistryPath={transaction.PhysicalRegistryPath}, ContextMenuVisible={transaction.RequestedVisible}, InitialException={ex.GetType().Name}: {ex.Message}");
             ProtectedRegistryMutation.Execute(
-                registryPath,
-                key => ShellVerbVisibility.SetEnabled(key, displayRegistryPath, enable),
-                key => VerifyShellVerbVisibility(key, enable));
-            _logger.LogFireAndForget($"ProtectedShellVerbFallbackSucceeded: BackendRegistryPath={registryPath}, Enable={enable}, SecurityDescriptorRestored=True.");
+                transaction.PhysicalRegistryPath,
+                transaction.Apply,
+                key =>
+                {
+                    if (!transaction.Verify(key))
+                    {
+                        throw new ProtectedRegistryMutationException(
+                            PipeErrorCodes.RegistryMutationVerificationFailed,
+                            "The requested Shell verb context-menu visibility change could not be verified.");
+                    }
+                });
+            _logger.LogFireAndForget(
+                $"ProtectedShellVerbFallbackSucceeded: BackendRegistryPath={transaction.PhysicalRegistryPath}, ContextMenuVisible={transaction.RequestedVisible}, SecurityDescriptorRestored=True.");
         }
-    }
 
-    private static void ApplyAndVerifyShellVerbVisibility(RegistryKey menuKey, string displayRegistryPath, bool enable)
-    {
-        ShellVerbVisibility.SetEnabled(menuKey, displayRegistryPath, enable);
-        VerifyShellVerbVisibility(menuKey, enable);
-    }
-
-    private static void VerifyShellVerbVisibility(RegistryKey menuKey, bool expectedEnabled)
-    {
-        if (ShellVerbVisibility.IsEnabled(menuKey) != expectedEnabled)
+        using var verificationKey = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false)
+            ?? throw new ProtectedRegistryMutationException(
+                PipeErrorCodes.RegistryMutationVerificationFailed,
+                "The Shell verb registry key disappeared after mutation.");
+        if (!transaction.Verify(verificationKey))
         {
             throw new ProtectedRegistryMutationException(
                 PipeErrorCodes.RegistryMutationVerificationFailed,
-                "The requested shell verb visibility change could not be verified.");
+                "The requested Shell verb context-menu visibility change could not be verified after reopening the key.");
         }
     }
+
+    private ShellVerbRollbackResult TryRollbackShellVerbVisibilityTransaction(ShellVerbVisibilityTransaction transaction)
+    {
+        if (!transaction.Applied)
+        {
+            return new ShellVerbRollbackResult(false, true, false, null);
+        }
+
+        try
+        {
+            ShellVerbRollbackResult result;
+            try
+            {
+                using var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+                    ?? throw new InvalidOperationException("The physical Shell verb key no longer exists.");
+                result = transaction.TryRollback(key);
+            }
+            catch (Exception ex) when (IsRegistryAccessDenied(ex)
+                                       && ProtectedRegistryMutation.IsEligibleMachineClassesPath(transaction.PhysicalRegistryPath))
+            {
+                result = new ShellVerbRollbackResult(true, false, false, ex.Message);
+                ProtectedRegistryMutation.Execute(
+                    transaction.PhysicalRegistryPath,
+                    key => result = transaction.TryRollback(key),
+                    _ => { });
+            }
+
+            if (!result.Succeeded || result.Conflict)
+            {
+                return result;
+            }
+
+            using var verificationKey = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false);
+            if (verificationKey is null)
+            {
+                return new ShellVerbRollbackResult(true, false, false, "The physical key disappeared during rollback verification.");
+            }
+            return transaction.VerifyRolledBack(verificationKey)
+                ? result
+                : new ShellVerbRollbackResult(true, false, false, "Fresh rollback read-back did not match the captured value.");
+        }
+        catch (Exception ex)
+        {
+            return new ShellVerbRollbackResult(true, false, false, ex.Message);
+        }
+    }
+
+    private static void ApplyRegistryValueTransaction(RegistryValueMutationTransaction transaction)
+    {
+        using (var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+               ?? throw new InvalidOperationException($"Unable to open {transaction.PhysicalRegistryPath} for writing."))
+        {
+            transaction.Apply(key);
+        }
+        using var verificationKey = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false)
+            ?? throw new InvalidOperationException("The registry key disappeared after mutation.");
+        if (!transaction.Verify(verificationKey))
+        {
+            throw new ProtectedRegistryMutationException(
+                PipeErrorCodes.RegistryMutationVerificationFailed,
+                "The registry value mutation could not be verified after reopening the key.");
+        }
+    }
+
+    private static ShellVerbRollbackResult TryRollbackRegistryValueTransaction(RegistryValueMutationTransaction transaction)
+    {
+        if (!transaction.Applied)
+        {
+            return new ShellVerbRollbackResult(false, true, false, null);
+        }
+        try
+        {
+            ShellVerbRollbackResult result;
+            using (var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+                   ?? throw new InvalidOperationException("The registry key no longer exists."))
+            {
+                result = transaction.TryRollback(key);
+            }
+            if (!result.Succeeded || result.Conflict)
+            {
+                return result;
+            }
+            using var verification = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false)
+                ?? throw new InvalidOperationException("The registry key disappeared during rollback verification.");
+            return transaction.VerifyRolledBack(verification)
+                ? result
+                : new ShellVerbRollbackResult(true, false, false, "Fresh rollback read-back failed.");
+        }
+        catch (Exception ex)
+        {
+            return new ShellVerbRollbackResult(true, false, false, ex.Message);
+        }
+    }
+
+    private void NotifyAssociationsChangedBestEffort(string operation, Guid? transactionId = null)
+    {
+        try
+        {
+            ShellChangeNotifier.NotifyAssociationsChanged();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogFireAndForget(
+                RuntimeLogLevel.Warning,
+                $"ShellAssociationNotificationFailed: Operation={operation}, TransactionId={transactionId?.ToString() ?? "<none>"}, Exception={ex}");
+        }
+    }
+
+    internal static string? ReadParentShellDefaultVerb(string backendRegistryPath)
+    {
+        var separator = backendRegistryPath.LastIndexOf('\\');
+        if (separator <= 0)
+        {
+            return null;
+        }
+
+        using var shellKey = OpenRegistryKey(backendRegistryPath[..separator], writable: false);
+        return shellKey?.GetValue(null)?.ToString()?.Trim();
+    }
+
+    internal static bool IsProtectedActivationVerb(
+        ContextMenuEntry item,
+        BackendUserContext? userContext,
+        out string reason)
+    {
+        reason = string.Empty;
+        if (item.Category != ContextMenuCategory.File
+            || !string.Equals(item.KeyName, "open", StringComparison.OrdinalIgnoreCase)
+            || !item.SourceRootPath.EndsWith(@"\shell", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var associationRoot = item.SourceRootPath[..^@"\shell".Length];
+        if (associationRoot is "*" or "AllFilesystemObjects"
+            || associationRoot.StartsWith("SystemFileAssociations\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var parentDefault = ReadParentShellDefaultVerb(item.BackendRegistryPath);
+        if (string.Equals(parentDefault, item.KeyName, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "ParentShellDefaultSelectsTarget";
+            return true;
+        }
+
+        if (IsEffectiveProgIdForAnyExtension(associationRoot, userContext))
+        {
+            reason = "EffectiveFileAssociationUsesProgIdOpenVerb";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsEffectiveProgIdForAnyExtension(string progId, BackendUserContext? userContext)
+    {
+        using var machineClasses = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Classes", writable: false);
+        using var userClasses = string.IsNullOrWhiteSpace(userContext?.Sid)
+            ? null
+            : Registry.Users.OpenSubKey($@"{userContext.Sid}\Software\Classes", writable: false);
+        using var userFileExts = string.IsNullOrWhiteSpace(userContext?.Sid)
+            ? null
+            : Registry.Users.OpenSubKey($@"{userContext.Sid}\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts", writable: false);
+
+        var extensions = (machineClasses?.GetSubKeyNames() ?? [])
+            .Concat(userClasses?.GetSubKeyNames() ?? [])
+            .Where(static name => name.StartsWith(".", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var extension in extensions)
+        {
+            using var userChoice = userFileExts?.OpenSubKey($@"{extension}\UserChoice", writable: false);
+            var effectiveProgId = userChoice?.GetValue("ProgId")?.ToString();
+            if (string.IsNullOrWhiteSpace(effectiveProgId))
+            {
+                using var userExtension = userClasses?.OpenSubKey(extension, writable: false);
+                effectiveProgId = userExtension?.GetValue(null)?.ToString();
+            }
+            if (string.IsNullOrWhiteSpace(effectiveProgId))
+            {
+                using var machineExtension = machineClasses?.OpenSubKey(extension, writable: false);
+                effectiveProgId = machineExtension?.GetValue(null)?.ToString();
+            }
+            if (string.Equals(effectiveProgId, progId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static string GetAssociationSourceKind(ContextMenuEntry item)
+        => item.IsWindows11ContextMenu
+            ? item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore
+                ? "Win11SystemCommandStore"
+                : "Win11PackagedCom"
+            : item.SourceRootPath.StartsWith("SystemFileAssociations\\", StringComparison.OrdinalIgnoreCase)
+                ? "SystemFileAssociations"
+                : item.EntryKind == ContextMenuEntryKind.ShellExtension
+                    ? "ClassicShellExtension"
+                    : "ClassicShellVerb";
 
     private static bool IsRegistryAccessDenied(Exception exception)
         => exception is UnauthorizedAccessException or SecurityException;
 
-    private static void SetShellVerbAttribute(string registryPath, ContextMenuShellAttribute attribute, bool enable)
-    {
-        using var menuKey = OpenRegistryKey(registryPath, writable: true)
-            ?? throw new InvalidOperationException($"Unable to open {registryPath} for writing.");
-
-        var valueName = attribute switch
+    private static string GetShellVerbAttributeValueName(ContextMenuShellAttribute attribute)
+        => attribute switch
         {
             ContextMenuShellAttribute.OnlyWithShift => "Extended",
             ContextMenuShellAttribute.OnlyInExplorer => "OnlyInBrowserWindow",
@@ -3499,17 +4135,7 @@ public sealed class ContextMenuRegistryCatalog
             _ => throw new InvalidOperationException($"Unsupported shell attribute: {attribute}")
         };
 
-        if (enable)
-        {
-            menuKey.SetValue(valueName, string.Empty, RegistryValueKind.String);
-        }
-        else
-        {
-            menuKey.DeleteValue(valueName, throwOnMissingValue: false);
-        }
-    }
-
-    private async Task SetShellExtensionEnabledAsync(
+    private async Task<ShellExtensionMutationTransaction> CreateShellExtensionMutationTransactionAsync(
         ContextMenuEntry item,
         bool enable,
         CancellationToken cancellationToken,
@@ -3549,10 +4175,8 @@ public sealed class ContextMenuRegistryCatalog
                 $"The physical Shell Extension registration for '{item.Id}' no longer matches handler '{item.HandlerClsid}'.");
         }
 
-        foreach (var physical in physicalEntries)
-        {
-            await MoveShellExtensionRegistrationAsync(physical, enable, cancellationToken);
-        }
+        await Task.CompletedTask;
+        return ShellExtensionMutationTransaction.Create(physicalEntries, enable);
     }
 
     /// <summary>
@@ -3578,44 +4202,155 @@ public sealed class ContextMenuRegistryCatalog
         return matches.Length == 0 ? [item] : matches;
     }
 
-    private async Task MoveShellExtensionRegistrationAsync(ContextMenuEntry item, bool enable, CancellationToken cancellationToken)
+    internal sealed class ShellExtensionMutationTransaction
     {
-        var sourcePath = item.BackendRegistryPath;
-        var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
-        if (enable == !sourceIsDisabled)
+        private readonly List<ShellExtensionMoveJournal> _moves;
+
+        private ShellExtensionMutationTransaction(List<ShellExtensionMoveJournal> moves)
         {
-            return;
+            _moves = moves;
         }
 
-        var destinationPath = GetSiblingContextMenuHandlersPath(sourcePath, enable);
+        public int AppliedCount => _moves.Count(static move => move.Applied);
 
-        string? ReadPhysicalClsid(string path)
+        public static ShellExtensionMutationTransaction Create(
+            IEnumerable<ContextMenuEntry> physicalEntries,
+            bool enable)
         {
-            using var key = OpenRegistryKey(path, writable: false);
-            var rawDefault = key?.GetValue(null)?.ToString();
-            return string.IsNullOrWhiteSpace(rawDefault)
-                ? null
-                : ResolveShellExtensionHandlerClsid(Path.GetFileName(path), rawDefault);
+            var moves = new List<ShellExtensionMoveJournal>();
+            foreach (var physical in physicalEntries
+                         .DistinctBy(static entry => entry.BackendRegistryPath, StringComparer.OrdinalIgnoreCase))
+            {
+                var sourcePath = physical.BackendRegistryPath;
+                var sourceIsDisabled = IsDisabledContextMenuHandlersPath(sourcePath);
+                if (enable == !sourceIsDisabled)
+                {
+                    continue;
+                }
+
+                var destinationPath = GetSiblingContextMenuHandlersPath(sourcePath, enable);
+                using var source = OpenRegistryKey(sourcePath, writable: false)
+                    ?? throw new InvalidOperationException($"Source Shell Extension registration was not found: {sourcePath}.");
+                using var destination = OpenRegistryKey(destinationPath, writable: false);
+                if (destination is not null && !RegistryKeyTreesEquivalent(source, destination))
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot move Shell Extension registration because the destination conflicts with the source. Source={sourcePath}; Destination={destinationPath}.");
+                }
+
+                moves.Add(new ShellExtensionMoveJournal(
+                    sourcePath,
+                    destinationPath,
+                    destination is not null,
+                    ComputeRegistryKeyTreeFingerprint(source)));
+            }
+
+            return new ShellExtensionMutationTransaction(moves);
         }
 
-        var sourceExistedBefore = OpenRegistryKey(sourcePath, writable: false) is not null;
-        var destinationExistedBefore = OpenRegistryKey(destinationPath, writable: false) is not null;
-        var sourceClsid = ReadPhysicalClsid(sourcePath);
-        var destinationClsid = ReadPhysicalClsid(destinationPath);
+        public void Apply(Action<int>? beforeMove = null)
+        {
+            for (var index = 0; index < _moves.Count; index++)
+            {
+                beforeMove?.Invoke(index);
+                var move = _moves[index];
+                MoveRegistryKeySafely(move.SourcePath, move.DestinationPath);
+                move.Applied = true;
+            }
+        }
 
-        await _logger.LogAsync(
-            $"ClassicShellExtensionMoveStarted: ItemId={item.Id}, Category={item.Category}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Source={sourcePath}, Destination={destinationPath}, SourceExistedBefore={sourceExistedBefore}, DestinationExistedBefore={destinationExistedBefore}, SourceClsid={sourceClsid ?? "<none>"}, DestinationClsid={destinationClsid ?? "<none>"}.",
-            cancellationToken);
+        public ShellVerbRollbackResult TryRollback()
+        {
+            if (AppliedCount == 0)
+            {
+                return new ShellVerbRollbackResult(false, true, false, null);
+            }
 
-        MoveRegistryKeySafely(sourcePath, destinationPath);
+            var errors = new List<string>();
+            var conflict = false;
+            foreach (var move in _moves.Where(static move => move.Applied).Reverse())
+            {
+                try
+                {
+                    using (var destination = OpenRegistryKey(move.DestinationPath, writable: false))
+                    {
+                        if (destination is null)
+                        {
+                            errors.Add($"Destination disappeared: {move.DestinationPath}");
+                            continue;
+                        }
+                        if (!string.Equals(
+                                ComputeRegistryKeyTreeFingerprint(destination),
+                                move.SourceFingerprint,
+                                StringComparison.Ordinal))
+                        {
+                            conflict = true;
+                            errors.Add($"Destination was externally modified: {move.DestinationPath}");
+                            continue;
+                        }
+                    }
 
-        var sourceExistedAfter = OpenRegistryKey(sourcePath, writable: false) is not null;
-        var destinationExistedAfter = OpenRegistryKey(destinationPath, writable: false) is not null;
-        var finalClsid = ReadPhysicalClsid(destinationPath);
+                    using (var currentSource = OpenRegistryKey(move.SourcePath, writable: false))
+                    {
+                        if (currentSource is not null)
+                        {
+                            conflict = true;
+                            errors.Add($"Source was externally recreated: {move.SourcePath}");
+                            continue;
+                        }
+                    }
 
-        await _logger.LogAsync(
-            $"ClassicShellExtensionMoveSucceeded: ItemId={item.Id}, Category={item.Category}, EntryKind={item.EntryKind}, HandlerClsid={item.HandlerClsid ?? "<none>"}, RequestedEnabled={enable}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, Source={sourcePath}, Destination={destinationPath}, SourceExistedBefore={sourceExistedBefore}, DestinationExistedBefore={destinationExistedBefore}, SourceExistedAfter={sourceExistedAfter}, DestinationExistedAfter={destinationExistedAfter}, DestinationClsid={finalClsid ?? "<none>"}.",
-            cancellationToken);
+                    if (move.DestinationExistedBefore)
+                    {
+                        using var destination = OpenRegistryKey(move.DestinationPath, writable: false)!;
+                        using var restoredSource = CreateRegistrySubKey(move.SourcePath, writable: true)
+                            ?? throw new InvalidOperationException($"Unable to recreate {move.SourcePath}.");
+                        CopyRegistryKeyTree(destination, restoredSource);
+                        VerifyRegistryKeyTree(destination, restoredSource);
+                    }
+                    else
+                    {
+                        MoveRegistryKeySafely(move.DestinationPath, move.SourcePath);
+                    }
+
+                    using var verification = OpenRegistryKey(move.SourcePath, writable: false);
+                    if (verification is null
+                        || !string.Equals(
+                            ComputeRegistryKeyTreeFingerprint(verification),
+                            move.SourceFingerprint,
+                            StringComparison.Ordinal))
+                    {
+                        errors.Add($"Restored source verification failed: {move.SourcePath}");
+                        continue;
+                    }
+
+                    move.Applied = false;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{move.SourcePath}: {ex.Message}");
+                }
+            }
+
+            return new ShellVerbRollbackResult(
+                Attempted: true,
+                Succeeded: errors.Count == 0,
+                Conflict: conflict,
+                Error: errors.Count == 0 ? null : string.Join(" | ", errors));
+        }
+
+        private sealed class ShellExtensionMoveJournal(
+            string sourcePath,
+            string destinationPath,
+            bool destinationExistedBefore,
+            string sourceFingerprint)
+        {
+            public string SourcePath { get; } = sourcePath;
+            public string DestinationPath { get; } = destinationPath;
+            public bool DestinationExistedBefore { get; } = destinationExistedBefore;
+            public string SourceFingerprint { get; } = sourceFingerprint;
+            public bool Applied { get; set; }
+        }
     }
 
     internal static string GetSiblingContextMenuHandlersPath(string sourcePath, bool enable)
@@ -3841,6 +4576,43 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         return true;
+    }
+
+    private static string ComputeRegistryKeyTreeFingerprint(RegistryKey key)
+    {
+        var material = new StringBuilder();
+        AppendRegistryKeyTreeFingerprint(key, material);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material.ToString())));
+    }
+
+    private static void AppendRegistryKeyTreeFingerprint(RegistryKey key, StringBuilder material)
+    {
+        foreach (var valueName in key.GetValueNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+        {
+            var value = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            material.Append("V:").Append(valueName).Append(':').Append((int)key.GetValueKind(valueName)).Append(':');
+            switch (value)
+            {
+                case byte[] bytes:
+                    material.Append(Convert.ToBase64String(bytes));
+                    break;
+                case string[] strings:
+                    material.AppendJoin('\u001f', strings);
+                    break;
+                default:
+                    material.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
+                    break;
+            }
+            material.Append('\u001e');
+        }
+
+        foreach (var subKeyName in key.GetSubKeyNames().OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+        {
+            material.Append("K:").Append(subKeyName).Append('\u001e');
+            using var child = key.OpenSubKey(subKeyName, writable: false)
+                ?? throw new InvalidOperationException($"Unable to read registry subkey '{subKeyName}' while fingerprinting.");
+            AppendRegistryKeyTreeFingerprint(child, material);
+        }
     }
 
     private static bool RegistryValueEquals(object? left, object? right)

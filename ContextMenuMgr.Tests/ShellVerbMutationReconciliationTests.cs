@@ -67,7 +67,7 @@ public sealed class ShellVerbMutationReconciliationTests
     }
 
     [Fact]
-    public void AdditionalEnabledPhysicalRegistration_PreventsFalseDisableSuccess()
+    public void ShadowedRegistration_DoesNotCauseFalseTargetFailure()
     {
         var item = CreateEntry(MachinePath, enabled: true);
         var result = ContextMenuRegistryCatalog.ReconcileShellVerbMutation(
@@ -76,9 +76,48 @@ public sealed class ShellVerbMutationReconciliationTests
             refreshedLogicalEntry: null,
             requestedEnabled: false);
 
-        Assert.False(result.IsVerified);
+        Assert.True(result.IsVerified);
         Assert.Equal(2, result.MatchingPhysicalCandidateCount);
-        Assert.Equal(UserPath, Assert.Single(result.MismatchedPhysicalPaths));
+        Assert.Empty(result.MismatchedPhysicalPaths);
+        Assert.Equal(MachinePath, result.Entry!.BackendRegistryPath);
+    }
+
+    [Fact]
+    public void TargetedUserRegistration_IsVerifiedWithoutMutatingMachineCopy()
+    {
+        var item = CreateEntry(UserPath, enabled: true);
+        var result = ContextMenuRegistryCatalog.ReconcileShellVerbMutation(
+            item,
+            [CreateEntry(MachinePath, enabled: true), CreateEntry(UserPath, enabled: false)],
+            refreshedLogicalEntry: CreateEntry(UserPath, enabled: false),
+            requestedEnabled: false);
+
+        Assert.True(result.IsVerified);
+        Assert.Empty(result.MismatchedPhysicalPaths);
+        Assert.Equal(UserPath, result.Entry!.BackendRegistryPath);
+    }
+
+    [Fact]
+    public void DifferentAssociationSource_IsNotCollapsedIntoTargetIdentity()
+    {
+        var systemAssociation = CreateEntry(
+            @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Enqueue",
+            enabled: true) with
+        {
+            Id = @"SystemFileAssociations\.mp4\shell|Enqueue",
+            SourceRootPath = @"SystemFileAssociations\.mp4\shell"
+        };
+        var item = CreateEntry(MachinePath, enabled: true);
+
+        var result = ContextMenuRegistryCatalog.ReconcileShellVerbMutation(
+            item,
+            [CreateEntry(MachinePath, enabled: false), systemAssociation],
+            refreshedLogicalEntry: null,
+            requestedEnabled: false);
+
+        Assert.True(result.IsVerified);
+        Assert.Equal(1, result.MatchingPhysicalCandidateCount);
+        Assert.Equal(MachinePath, result.Entry!.BackendRegistryPath);
     }
 
     [Fact]

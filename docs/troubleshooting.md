@@ -167,6 +167,8 @@ For a classic machine ShellVerb that immediately returns its switch to the old s
 
 When a machine key denies the ordinary LocalSystem write, the backend records `ProtectedShellVerbFallbackStarted` and uses the controlled fallback documented in `registry-model.md`. It records either `ProtectedShellVerbFallbackSucceeded` or a structured protected-mutation/security-restoration error. User-hive keys do not use this fallback. ContextMenuMgr Registry Write Protection blocks the operation before this flow and must not be confused with Windows ACL/TrustedInstaller protection.
 
+For v1.7.6 classic mutations, correlate `ClassicMutationStarted` and `ClassicMutationCompleted` by `TransactionId`. `REGISTRY_MUTATION_ROLLED_BACK` means a later verification/state-save/cancellation failure occurred but the exact pre-write value was restored and verified. `REGISTRY_MUTATION_ROLLBACK_CONFLICT` means the target changed after ContextMenuMgrPlus wrote it, so conservative rollback left the newer external value untouched. `FILE_TYPE_ACTIVATION_VERB_PROTECTED` is a pre-write refusal for an effective file-association `open` verb, not a registry permission failure. `SHELL_VERB_VISIBILITY_PROVENANCE_MISSING` means the hidden metadata is not known to be owned by ContextMenuMgrPlus and was therefore not deleted.
+
 ## 第三方软件 / 驱动安装异常的归因原则
 
 不要默认把第三方软件、驱动或安装器异常归因到本项目。先确认 Registry Write Protection 或 ShellNew ACL Lock 是否开启，再找对应时间点的 `backend.log` / `frontend-debug.log`，并确认目标注册表路径是否属于本项目保护范围。没有 Access Denied、UnauthorizedAccessException、项目日志或注册表路径证据时，不要下结论。必要时可以关闭相关保护或停止服务做 A/B 验证，详细流程见 [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)。

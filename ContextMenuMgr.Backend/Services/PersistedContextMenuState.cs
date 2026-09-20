@@ -8,6 +8,14 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class PersistedContextMenuState
 {
     /// <summary>
+    /// Exact pre-mutation values for ShellVerb visibility changes made by this
+    /// application. Entries are keyed by physical registry path and are recovery
+    /// metadata; they are deliberately excluded from logical item identity and
+    /// external-change classification.
+    /// </summary>
+    public List<PersistedShellVerbVisibilityProvenance> ShellVerbVisibilityProvenance { get; set; } = [];
+
+    /// <summary>
     /// Per-parent disabled CommandStore references. The physical CommandStore
     /// command is intentionally not changed: the parent SubCommands value is
     /// the control domain.
@@ -304,4 +312,24 @@ public sealed class PersistedContextMenuState
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
     }
+}
+
+public sealed class PersistedShellVerbVisibilityProvenance
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string PhysicalRegistryPath { get; set; } = string.Empty;
+    public string GenerationFingerprint { get; set; } = string.Empty;
+    public List<PersistedRegistryValueSnapshot> OriginalValues { get; set; } = [];
+    public DateTimeOffset CapturedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PersistedRegistryValueSnapshot
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Existed { get; set; }
+    public int Kind { get; set; }
+    public string? StringValue { get; set; }
+    public long? IntegerValue { get; set; }
+    public string? BinaryBase64 { get; set; }
+    public string[]? StringArrayValue { get; set; }
 }

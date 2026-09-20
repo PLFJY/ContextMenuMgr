@@ -532,6 +532,42 @@ public sealed class ClassicShellExtensionRegistryMoveTests
             hasLegacyGlobalShellExtensionBlock: true));
     }
 
+    [Fact]
+    public void MultiTargetTransaction_WhenSecondMoveFails_RollsBackFirstMove()
+    {
+        using var fixture = RegistryMoveFixture.Create();
+        const string handlerClsid = "{11111111-1111-1111-1111-111111111111}";
+        fixture.CreateHandler("First", "Handler", handlerClsid, includeNestedValues: true);
+        fixture.CreateHandler("Second", "Handler", handlerClsid, includeNestedValues: true);
+        var firstPath = fixture.GetActiveAbsolutePath("First", "Handler");
+        var secondPath = fixture.GetActiveAbsolutePath("Second", "Handler");
+        var transaction = ContextMenuRegistryCatalog.ShellExtensionMutationTransaction.Create(
+            [
+                CreateSceneShellExtensionEntry(@"First\shellex\ContextMenuHandlers|Handler", firstPath, handlerClsid, enabled: true),
+                CreateSceneShellExtensionEntry(@"Second\shellex\ContextMenuHandlers|Handler", secondPath, handlerClsid, enabled: true)
+            ],
+            enable: false);
+
+        Assert.Throws<InvalidOperationException>(() => transaction.Apply(index =>
+        {
+            if (index == 1)
+            {
+                throw new InvalidOperationException("Injected second move failure.");
+            }
+        }));
+        var rollback = transaction.TryRollback();
+
+        Assert.True(rollback.Attempted);
+        Assert.True(rollback.Succeeded);
+        Assert.False(rollback.Conflict);
+        using var firstActive = fixture.Open("First", @"ContextMenuHandlers\Handler");
+        using var secondActive = fixture.Open("Second", @"ContextMenuHandlers\Handler");
+        Assert.NotNull(firstActive);
+        Assert.NotNull(secondActive);
+        Assert.Null(fixture.Open("First", @"-ContextMenuHandlers\Handler"));
+        Assert.Null(fixture.Open("Second", @"-ContextMenuHandlers\Handler"));
+    }
+
     private static ContextMenuEntry CreateSceneShellExtensionEntry(
         string itemId,
         string backendRegistryPath,

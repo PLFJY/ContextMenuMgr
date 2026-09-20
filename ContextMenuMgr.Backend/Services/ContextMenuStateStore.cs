@@ -63,6 +63,12 @@ public sealed class ContextMenuStateStore
     public event EventHandler<ContextMenuStateStoreRecovery>? RecoveryOccurred;
 
     /// <summary>
+    /// Test-only fault hook used to prove that callers recover physical registry
+    /// changes when persistence fails after a successful write.
+    /// </summary>
+    internal Func<Dictionary<string, PersistedContextMenuState>, CancellationToken, Task>? BeforeSaveAsync { get; set; }
+
+    /// <summary>
     /// Loads persisted state, recovering a malformed current file from a
     /// validated backup where possible.
     /// </summary>
@@ -105,6 +111,10 @@ public sealed class ContextMenuStateStore
         try
         {
             CleanupStaleTemporaryFiles();
+            if (BeforeSaveAsync is not null)
+            {
+                await BeforeSaveAsync(states, cancellationToken);
+            }
             await SaveCoreAsync(states, cancellationToken);
         }
         finally

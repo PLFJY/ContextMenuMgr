@@ -101,7 +101,7 @@
 
 | 类型 | 当前实现倾向 |
 | --- | --- |
-| `shell` verb | 普通开关通过 `ShellVerbVisibility` 统一判断和写入，综合处理 `HideBasedOnVelocityId`、`ProgrammaticAccessOnly`、`LegacyDisable` 和相关 `CommandFlags`，避免只依赖 `LegacyDisable`。 |
+| `shell` verb | 普通开关把“Explorer 右键菜单可见性”作为独立控制域。ContextMenuMgrPlus 只引入文档化的 `ProgrammaticAccessOnly`；该值隐藏右键菜单，但显式指定 verb 的 `ShellExecuteEx` 仍可调用命令。`LegacyDisable`、`HideBasedOnVelocityId` 仍参与只读可见性判断，但不会被普通开关盲删。`CommandFlags` 是 `EXPCMDFLAGS`，不是启用/禁用位，普通开关永不改写。 |
 | 级联 `shell` verb 子项 | 顶层快照只标记 `CanManageSubMenuItems`，不递归展开。按需读取 `SubCommands`、`ExtendedSubCommandsKey` 或父级 `shell`。`SubCommands` 禁用仅从该父级列表移除引用并保存恢复顺序，绝不全局修改共享 CommandStore 命令；其余物理 ShellVerb 子项复用可见性模型。 |
 | `shellex` handler | 可能在 `ContextMenuHandlers` 与 disabled mirror 路径之间移动。 |
 | disabled mirror path | 用 `-ContextMenuHandlers` 识别被移出的 handler。 |
@@ -109,7 +109,17 @@
 
 不要承诺所有菜单项都能用同一种方式开关。某些项由第三方安装器、系统策略或 COM handler 自身逻辑控制，项目只能 best-effort 地修改注册表状态并记录结果。
 
-ShellVerb 开关有两层验证。首先在刚写入的物理 key 上用 `ShellVerbVisibility.IsEnabled` read-back 验证；随后按稳定 `Id` 重读同一 Classes source root 的所有物理候选。File Types / scene 的 ProgID root 不一定属于常规 `MonitoredRoots`，因此常规 snapshot 未返回该项时，会以这个已验证的物理候选作为操作结果，而不会把“常规目录未扫描此 ProgID”误报为注册表写入失败。反之，目标物理 key 缺失，或任一同 Id 物理候选仍不符合请求状态，操作仍失败；不会以缺失 logical snapshot 伪造成功。
+ShellVerb 开关使用物理路径级事务。写入前先捕获本次会改变的 value、类型、精确数据和不含可见性值的物理注册代际指纹；写入后关闭 handle，重新打开同一物理 key 做 read-back，再执行 logical / physical reconciliation，最后才提交状态库。File Types / scene 的 ProgID root 不一定属于常规 `MonitoredRoots`，因此常规 snapshot 未返回该项时，仍以已验证的目标物理候选作为结果，保留 #111 行为。
+
+同一个稳定 Id 可以同时存在于 `HKLM\Software\Classes` 与前端用户的 `HKEY_USERS\<SID>\Software\Classes`。用户级同名注册通常遮蔽机器级注册；单项操作只改变该卡片所代表的 `BackendRegistryPath`，验证也以该目标路径为准，不要求被遮蔽副本具有相同可见性。另一方面，ProgID、`SystemFileAssociations\.ext` 和其它 association-array source 是不同来源，其路径/Id 不会仅因 verb 名或可执行文件相同而合并；批量页可以发现相关项，但每个 mutation 仍是显式、逐物理来源执行。
+
+首次受管禁用会把 `ProgrammaticAccessOnly` 的原始存在性、`RegistryValueKind` 和精确值写入 `PersistedContextMenuState.ShellVerbVisibilityProvenance`，并以物理路径为键。重复禁用不会覆盖原始 provenance。启用只恢复 ContextMenuMgrPlus 自己保存的值；缺少 provenance 时不会删除第三方 `ProgrammaticAccessOnly` / `LegacyDisable` / `HideBasedOnVelocityId`。如果命令或 handler 代发生变化，旧 provenance 不会应用到新注册。
+
+事务在物理验证、logical reconciliation、状态保存、取消或异常失败时执行乐观回滚：仅当当前值仍等于本事务写入值时才恢复原值，并重新打开 key 验证。若第三方已把值改成其它内容，则保留第三方内容并返回 `REGISTRY_MUTATION_ROLLBACK_CONFLICT`；安全回滚成功返回 `REGISTRY_MUTATION_ROLLED_BACK`。多物理 classic Shell Extension move 同样记录每一步，后续 move 或状态保存失败时逆序恢复，继续保留 #108 的 active / `-ContextMenuHandlers` 冲突保护。
+
+File category 的 `open` 是 activation-critical safety class。若父 `shell` 默认值选中它，或前端用户的有效扩展名关联使用该 ProgID，则普通禁用、通用命令编辑和通用属性编辑在写入前返回 `FILE_TYPE_ACTIVATION_VERB_PROTECTED`。本保护不会修改 `UserChoice` 或默认应用，也不 blanket-ban `print` / `printto`；例如隐藏 `print` 只改变目标 print verb 的受管可见性 value，不改 sibling `open`、两个 command、父 `shell` 默认值或其它 association source。
+
+Classic ShellVerb / ShellExtension、`SystemFileAssociations`、Win11 packaged COM 和 Win11 SystemCommandStore 在诊断中使用不同 source kind。Classic mutation 不写 Win11 CLSID blocked list，Win11 packaged handler mutation 也不按厂商名联动 classic ProgID。
 
 Recycle Bin 页面额外投影一个虚拟传统项 `special:recyclebin:pintohome`，用于控制系统的“Pin to Quick access” verb。它的真实注册表位置是 `HKCR\Folder\shell\pintohome`，但只在 Recycle Bin 分类显示。启用状态不使用普通 shell verb 隐藏值，而是检查 `AppliesTo` 是否包含 `System.ParsingName:<>"::{645FF040-5081-101B-9F08-00AA002F954E}"`；禁用时只追加这个 Recycle Bin 排除条件，启用时只移除这个排除条件并保留其它 `AppliesTo` 子句。如果 `pintohome` key 不存在，快照不显示该虚拟项。
 

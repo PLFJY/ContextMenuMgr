@@ -354,11 +354,11 @@ public sealed class NamedPipeBackendServer
             PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
                 => await HandleSetEnabledAsync(request, stream, cancellationToken),
             PipeCommand.SetShellAttribute when request.ItemId is not null && request.Enable is not null && request.ShellAttribute is not null
-                => await _catalog.ApplyShellAttributeAsync(request.ItemId, request.ShellAttribute.Value, request.Enable.Value, cancellationToken),
+                => await _catalog.ApplyShellAttributeAsync(request.ItemId, request.ShellAttribute.Value, request.Enable.Value, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetDisplayText when request.ItemId is not null && request.TextValue is not null
-                => await _catalog.ApplyDisplayTextAsync(request.ItemId, request.TextValue, cancellationToken),
+                => await _catalog.ApplyDisplayTextAsync(request.ItemId, request.TextValue, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetCommandText when request.ItemId is not null && request.TextValue is not null
-                => await _catalog.ApplyCommandTextAsync(request.ItemId, request.TextValue, cancellationToken),
+                => await _catalog.ApplyCommandTextAsync(request.ItemId, request.TextValue, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.GetShellSubMenuItems when request.ParentItemId is not null
                 => await _catalog.GetShellSubMenuItemsAsync(request.ParentItemId, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetShellSubMenuItemEnabled when request.ParentItemId is not null && request.SubMenuItemId is not null && request.Enable is not null

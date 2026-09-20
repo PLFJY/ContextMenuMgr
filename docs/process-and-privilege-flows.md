@@ -69,6 +69,8 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 | 运行时数据目录 ACL 修复 | `RuntimeDataAclRepairService` |
 
 受保护的机器级 classic ShellVerb 仍走链路 A：先由服务对 `HKLM\SOFTWARE\Classes` 的真实 `BackendRegistryPath` 执行普通写入；仅在该写入因 Windows ACL 被拒绝、且 Registry Write Protection preflight 已通过时，才临时启用 `SeTakeOwnershipPrivilege` / `SeRestorePrivilege` 完成受控 value mutation。这个 fallback 只适用于实际机器级 Classes path，绝不用于 `HKEY_USERS\<SID>\Software\Classes`，并在写入后恢复、验证原 owner/DACL。它不是 UAC bootstrapper、ShellNew ACL lock 或通用注册表 take-ownership 机制。
+
+Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务快照，并把 visibility provenance 按真实 `BackendRegistryPath` 持久化。物理 read-back、logical reconciliation 或状态库提交失败时，后端只在当前值仍等于本事务写入值时回滚；第三方并发改写产生 conflict，不会被覆盖。File-category 的有效 `open` activation path 在服务端写入前拒绝。HKU/HKLM 同名副本按前端所选物理来源处理，ProgID 与 `SystemFileAssociations` 仍是不同 mutation target；这些规则不调用 Win11 packaged handler blocked-list 流程。
 `NamedPipeBackendServer` 会在需要用户上下文时创建 `BackendUserContextResolver`。解析顺序是先从 pipe client 解析，失败时部分场景回退到交互式用户。`BackendUserContext` 包含 `Sid`、`UserName`、`ProfilePath`、`LocalAppDataPath`、`RoamingAppDataPath` 和可选 `SessionId`。
 
 必须有 frontend user context 的场景包括：

@@ -19,4 +19,8 @@ public static class PipeErrorCodes
     public const string ProtectedRegistryMutationFailed = "PROTECTED_REGISTRY_MUTATION_FAILED";
     public const string RegistrySecurityRestoreFailed = "REGISTRY_SECURITY_RESTORE_FAILED";
     public const string RegistryMutationVerificationFailed = "REGISTRY_MUTATION_VERIFICATION_FAILED";
+    public const string RegistryMutationRolledBack = "REGISTRY_MUTATION_ROLLED_BACK";
+    public const string RegistryMutationRollbackConflict = "REGISTRY_MUTATION_ROLLBACK_CONFLICT";
+    public const string FileTypeActivationVerbProtected = "FILE_TYPE_ACTIVATION_VERB_PROTECTED";
+    public const string ShellVerbVisibilityProvenanceMissing = "SHELL_VERB_VISIBILITY_PROVENANCE_MISSING";
 }

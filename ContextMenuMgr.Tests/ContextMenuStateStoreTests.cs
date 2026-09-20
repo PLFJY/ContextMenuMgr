@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
+using Microsoft.Win32;
 using Xunit;
 
 namespace ContextMenuMgr.Tests;
@@ -143,6 +144,105 @@ public sealed class ContextMenuStateStoreTests
         Assert.Equal("legacy", loaded["entry"].DisplayName);
         Assert.True(loaded["entry"].IsDeleted);
         Assert.Equal(ContextMenuStateStoreHealth.Healthy, legacyStore.Health);
+    }
+
+    [Fact]
+    public async Task ShellVerbVisibilityProvenance_RoundTripsAcrossStoreReload()
+    {
+        using var fixture = new StateStoreFixture();
+        var states = CreateStates("with-provenance", isDeleted: false);
+        states["entry"].ShellVerbVisibilityProvenance.Add(new PersistedShellVerbVisibilityProvenance
+        {
+            PhysicalRegistryPath = @"HKEY_USERS\S-1-5-21-test\Software\Classes\Test.File\shell\print",
+            GenerationFingerprint = "ABC123",
+            OriginalValues =
+            [
+                new PersistedRegistryValueSnapshot
+                {
+                    Name = "ProgrammaticAccessOnly",
+                    Existed = true,
+                    Kind = (int)Microsoft.Win32.RegistryValueKind.ExpandString,
+                    StringValue = "%TEST_VALUE%"
+                }
+            ]
+        });
+
+        await fixture.CreateStore().SaveAsync(states, CancellationToken.None);
+        var loaded = await fixture.CreateStore().LoadAsync(CancellationToken.None);
+
+        var provenance = Assert.Single(loaded["entry"].ShellVerbVisibilityProvenance);
+        Assert.Equal(@"HKEY_USERS\S-1-5-21-test\Software\Classes\Test.File\shell\print", provenance.PhysicalRegistryPath);
+        Assert.Equal("ABC123", provenance.GenerationFingerprint);
+        var value = Assert.Single(provenance.OriginalValues);
+        Assert.Equal((int)Microsoft.Win32.RegistryValueKind.ExpandString, value.Kind);
+        Assert.Equal("%TEST_VALUE%", value.StringValue);
+    }
+
+    [Fact]
+    public async Task ShellVerbVisibilityProvenance_ReloadedAfterRestart_RestoresExactRegistryState()
+    {
+        using var fixture = new StateStoreFixture();
+        var keyPath = $@"Software\ContextMenuMgr.Tests\StateStoreProvenance\{Guid.NewGuid():N}";
+        try
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(keyPath, writable: true)!)
+            {
+                key.SetValue("CommandFlags", 0x48, RegistryValueKind.DWord);
+                using var command = key.CreateSubKey("command", writable: true)!;
+                command.SetValue(null, "restart-test.exe \"%1\"", RegistryValueKind.String);
+            }
+
+            PersistedShellVerbVisibilityProvenance provenance;
+            using (var key = Registry.CurrentUser.OpenSubKey(keyPath, writable: true)!)
+            {
+                var disable = ShellVerbVisibilityTransaction.Create(
+                    key,
+                    key.Name,
+                    requestedVisible: false,
+                    existingProvenance: null);
+                disable.Apply(key);
+                provenance = Assert.IsType<PersistedShellVerbVisibilityProvenance>(disable.Provenance);
+            }
+
+            var states = CreateStates("restart-provenance", isDeleted: false);
+            states["entry"].ShellVerbVisibilityProvenance.Add(provenance);
+            await fixture.CreateStore().SaveAsync(states, CancellationToken.None);
+
+            // A new store instance represents the next backend process lifetime.
+            var reloaded = await fixture.CreateStore().LoadAsync(CancellationToken.None);
+            var reloadedProvenance = Assert.Single(reloaded["entry"].ShellVerbVisibilityProvenance);
+            using (var key = Registry.CurrentUser.OpenSubKey(keyPath, writable: true)!)
+            {
+                var enable = ShellVerbVisibilityTransaction.Create(
+                    key,
+                    key.Name,
+                    requestedVisible: true,
+                    reloadedProvenance);
+                enable.Apply(key);
+                Assert.True(enable.Verify(key));
+                Assert.Null(key.GetValue(ShellVerbVisibility.ManagedMarkerName));
+                Assert.Equal(0x48, Convert.ToInt32(key.GetValue("CommandFlags")));
+                using var command = key.OpenSubKey("command", writable: false)!;
+                Assert.Equal("restart-test.exe \"%1\"", command.GetValue(null));
+            }
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
+    public async Task OldStateWithoutVisibilityProvenance_DeserializesToEmptyCollection()
+    {
+        using var fixture = new StateStoreFixture();
+        await File.WriteAllTextAsync(
+            fixture.StatePath,
+            "{\"entry\":{\"id\":\"entry\",\"displayName\":\"legacy\",\"sourceRootPath\":\"Test.File\\\\shell\"}}");
+
+        var loaded = await fixture.CreateStore().LoadAsync(CancellationToken.None);
+
+        Assert.Empty(loaded["entry"].ShellVerbVisibilityProvenance);
     }
 
     [Fact]
