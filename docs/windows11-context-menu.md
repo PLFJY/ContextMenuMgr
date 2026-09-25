@@ -43,9 +43,11 @@ manifest 解析是 best-effort。缺少命名空间、manifest 不存在、XML �
 -> 创建 ContextMenuEntry
 ```
 
-`PackagedContextMenuDiscovery` 位于 `ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs`，负责 SID-scoped package 枚举、manifest 加载、verb 与 COM class 的 CLSID 关联。`Windows11ContextMenuCatalog` 只负责分类映射、blocked 状态和 `ContextMenuEntry` 投影。
+`PackagedContextMenuDiscovery` 位于 `ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs`，负责 SID-scoped package 枚举、manifest 加载、verb 与 COM class 的 CLSID 关联。`Windows11ContextMenuCatalog` 通过 `PackagedContextMenuScanCache` 对同一 SID 的包发现结果做 30 秒缓存；并发快照复用正在进行的扫描，单个调用方超时不会取消共享扫描。blocked list 不进入缓存，每次投影仍按当前用户 SID 重新读取，所以开关后的刷新不会沿用旧的禁用状态。新安装/卸载的 package 最多延迟约 30 秒进入常规快照。单包读取异常按轮次汇总为 `PackagedContextMenuPackagesSkipped`，记录总数及少量带 package、阶段、HRESULT 的样本，避免异常包刷满日志。
 
 生成的 packaged COM `ContextMenuEntry` 使用 `win11|{clsid}|{category}` 形态的 `Id`，`RegistryPath` 指向逻辑上的 `PackagedCom\Package\...\Class\{CLSID}`，`BackendRegistryPath` 指向当前用户的 blocked list。契约保留 package full/family/display/publisher/install metadata、manifest context type、Verb ID、handler CLSID、COM server/class display metadata 和 manifest 明确声明的 server path。manifest 没有建立 server path 时 `FilePath` 保持为空，不用 package 目录伪造 COM 路径。manifest display metadata 只是诊断/展示候选，不等于 `IExplorerCommand::GetTitle()` 在 Explorer 中动态返回的最终标题。
+
+packaged COM 条目的 `BackendRegistryPath` 是共享 blocked list，不能当作单条菜单注册表键删除。普通删除命令对 Win11 条目会拒绝；待审核界面也不提供这类项目的“移除”，应使用“保持禁用”或在 Windows 中卸载对应 package。
 
 System CommandStore `ContextMenuEntry` 使用 `win11-system|{commandKey}` 形态的 `Id`，`KeyName` 是命令名（如 `Windows.SendToMyPhone`），`RegistryPath` / `BackendRegistryPath` 指向 HKLM CommandStore 命令键，`HandlerClsid` 来自 `ExplorerCommandHandler` 或等价的 GUID 值，`Windows11SourceKind = SystemCommandStore`。显示名通过 `ShellMetadataResolver.ResolveVerbDisplayName` 解析 `MUIVerb` 等资源字符串。
 

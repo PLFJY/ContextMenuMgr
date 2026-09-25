@@ -95,6 +95,8 @@
 
 `ContextMenuRegistryMonitor` 基于周期性 snapshot 比较发现变化。首次 baseline 和用户登录后的 baseline 重建很重要，否则容易把系统已有项误判为新安装项。
 
+待审核 `ApplyDecision` 在持久状态操作门内只取得一次完整 snapshot；Allow/Deny 把该 snapshot 传给开关核心逻辑，Remove 把已解析的物理条目传给删除核心逻辑。普通独立开关/删除请求仍自行取 snapshot。这样不会在一次审核操作中重复做完整注册表与 Win11 包枚举，也不会绕过原有状态库串行化。
+
 ## 6. 启用 / 禁用策略
 
 传统菜单的禁用方式按 `EntryKind` 和实际路径分流：

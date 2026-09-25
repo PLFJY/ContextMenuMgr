@@ -656,14 +656,15 @@ public sealed class ContextMenuRegistryCatalog
         BackendUserContext? userContext,
         ContextMenuEntry? fallbackItem,
         bool markPendingApproval = false,
-        ContextMenuChangeKind? pendingApprovalChangeKind = null)
+        ContextMenuChangeKind? pendingApprovalChangeKind = null,
+        IReadOnlyList<ContextMenuEntry>? resolvedSnapshot = null)
     {
         if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
         {
             return await ApplyRecycleBinPinToHomeStateAsync(enable, cancellationToken, userContext);
         }
 
-        var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
+        var snapshot = resolvedSnapshot ?? await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
@@ -1026,11 +1027,11 @@ public sealed class ContextMenuRegistryCatalog
         {
             ContextMenuDecision.Allow => item is null
                 ? CreateFailure($"Menu item '{itemId}' was not found.")
-                : await ApplyDesiredStateAsync(itemId, enable: true, cancellationToken, userContext),
+                : await ApplyDesiredStateCoreAsync(itemId, enable: true, cancellationToken, userContext, null, resolvedSnapshot: snapshot),
             ContextMenuDecision.Deny => item is null
                 ? await RemovePendingApprovalStateAsync(itemId, cancellationToken)
-                : await ApplyDesiredStateAsync(itemId, enable: false, cancellationToken, userContext),
-            ContextMenuDecision.Remove => await RemovePendingApprovalItemAsync(item, itemId, cancellationToken),
+                : await ApplyDesiredStateCoreAsync(itemId, enable: false, cancellationToken, userContext, null, resolvedSnapshot: snapshot),
+            ContextMenuDecision.Remove => await RemovePendingApprovalItemAsync(item, itemId, cancellationToken, userContext),
             _ => CreateFailure("Unknown approval decision.")
         };
     }
@@ -1964,10 +1965,15 @@ public sealed class ContextMenuRegistryCatalog
         string itemId,
         CancellationToken cancellationToken,
         BackendUserContext? userContext,
-        ContextMenuEntry? fallbackItem)
+        ContextMenuEntry? fallbackItem,
+        ContextMenuEntry? resolvedItem = null)
     {
-        var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
-        var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+        var item = resolvedItem;
+        if (item is null)
+        {
+            var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
+            item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+        }
         if (item is null)
         {
             item = TryUseSceneFallbackItem(itemId, fallbackItem);
@@ -1988,6 +1994,11 @@ public sealed class ContextMenuRegistryCatalog
         if (item is not null && item.IsDeleted)
         {
             return CreateFailure($"Menu item '{item.DisplayName}' is already deleted.", item);
+        }
+
+        if (item?.IsWindows11ContextMenu == true)
+        {
+            return CreateFailure("Packaged Windows 11 menu declarations cannot be deleted as registry keys. Keep the item disabled instead.", item);
         }
 
         if (item is not null && !item.IsPresentInRegistry)
@@ -2427,11 +2438,12 @@ public sealed class ContextMenuRegistryCatalog
     private async Task<PipeResponse> RemovePendingApprovalItemAsync(
         ContextMenuEntry? item,
         string itemId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
         if (item is not null && item.IsPresentInRegistry && !item.IsDeleted)
         {
-            return await DeleteItemAsync(itemId, cancellationToken);
+            return await DeleteItemCoreAsync(itemId, cancellationToken, userContext, null, item);
         }
 
         return await RemovePendingApprovalStateAsync(itemId, cancellationToken);

@@ -36,6 +36,10 @@ Portable 包中 `frontend-settings.json` 的语言、主题、颜色等纯偏好
 | 优先查看的日志 | `frontend-debug.log`、`backend.log`、bootstrap result file。 |
 | 常见修复方向 | 检查 Windows Service 状态；重新执行 install/repair；确认 `ContextMenuManagerPlus.Service.exe` 路径正确；不要把 runtime pipe 操作改走 UAC bootstrapper。 |
 
+若 SCM 显示服务运行、`Ping` 成功，但菜单仍加载失败，不要直接判断为“安装失败”。对照 `frontend-debug.log` 的 `GetSnapshot` 取消时间和 `backend.log` 中相同 `CorrelationId` 的完成时间：前端先超时而后端稍后成功，说明是快照延迟，不是服务缺失。排查 `PackagedContextMenuPackagesSkipped` 的数量/样本、Win11 枚举摘要、状态库锁等待及同时运行的后台刷新；当前前端快照等待 20 秒，Win11 包发现按 SID 缓存 30 秒。
+
+待审核决策同理：若前端 `ApplyDecision` 超时，但后端稍后记录成功，应先刷新并核对真实条目的 `IsPendingApproval`、`IsEnabled` 或 `IsDeleted`，不要立即重复提交。当前前端审核等待 45 秒，超时后会另发快照核对；结果仍不确定时提示状态未确认并在约 1 分钟内拦截同一条目的重复请求。删除项还应检查状态库和 `DeletedBackups`，避免把“已删除”误报成注册表写入失败。
+
 ## 2. 后端服务安装 / 修复失败
 
 | 项目 | 内容 |

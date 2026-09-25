@@ -411,6 +411,9 @@
   <data name="DecisionApplyFailedStatus" xml:space="preserve">
     <value>无法应用决策：{0}</value>
   </data>
+  <data name="DecisionOutcomeUncertainStatus" xml:space="preserve">
+    <value>决策请求超时，暂时无法确认结果。刷新时会再次核对，请稍候再重试。</value>
+  </data>
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>已在 {0:T} 收到后台通知。</value>
   </data>

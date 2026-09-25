@@ -26,6 +26,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly HashSet<string> _seenPendingApprovalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenChangedItemIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenWpsOfficeApprovalIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (ContextMenuDecision Decision, DateTimeOffset RetryAfterUtc)> _uncertainDecisions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _decisionsInProgress = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _decisionSync = new();
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private readonly SemaphoreSlim _wpsOfficeApprovalRefreshLock = new(1, 1);
     private CancellationTokenSource? _wpsOfficeApprovalRefreshCts;
@@ -196,7 +199,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         ClearMenuLoadFailure();
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             var snapshot = await _backendClient.GetSnapshotAsync(cts.Token);
             // The frontend works from a backend-authored snapshot so every page
             // stays consistent after a single refresh pass.
@@ -434,10 +437,27 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async Task ApplyDecisionAsync(string itemId, ContextMenuDecision decision)
     {
+        lock (_decisionSync)
+        {
+            if (_decisionsInProgress.Contains(itemId)
+                || _uncertainDecisions.TryGetValue(itemId, out var uncertain)
+                   && uncertain.RetryAfterUtc > DateTimeOffset.UtcNow)
+            {
+                return;
+            }
+
+            _uncertainDecisions.Remove(itemId);
+            _decisionsInProgress.Add(itemId);
+        }
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var updated = await _backendClient.ApplyDecisionAsync(itemId, decision, cts.Token);
+            lock (_decisionSync)
+            {
+                _uncertainDecisions.Remove(itemId);
+            }
             var isWpsOfficeApproval = IsWpsOfficeApprovalItemId(itemId);
             if (updated is not null)
             {
@@ -468,6 +488,24 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 await RefreshWpsOfficeApprovalsAsync();
             }
         }
+        catch (Exception ex) when (ex is TimeoutException || ex is OperationCanceledException && cts.IsCancellationRequested)
+        {
+            FrontendDebugLog.Warning("ContextMenuWorkspaceService", $"ApplyDecisionAsync timed out for {itemId}; verifying backend state. {ex.Message}");
+            if (await TryVerifyTimedOutDecisionAsync(itemId, decision))
+            {
+                return;
+            }
+
+            lock (_decisionSync)
+            {
+                _uncertainDecisions[itemId] = (decision, DateTimeOffset.UtcNow.AddMinutes(1));
+            }
+
+            ConnectionStatus = _localization.Translate("DecisionOutcomeUncertainStatus");
+            await FrontendMessageBox.ShowErrorAsync(
+                _localization.Translate("DecisionOutcomeUncertainStatus"),
+                _localization.Translate("WindowTitle"));
+        }
         catch (Exception ex)
         {
             FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, $"ApplyDecisionAsync failed for {itemId}.");
@@ -476,6 +514,52 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 _localization.Format("DecisionApplyFailedStatus", ex.Message),
                 _localization.Translate("WindowTitle"));
         }
+        finally
+        {
+            lock (_decisionSync)
+            {
+                _decisionsInProgress.Remove(itemId);
+            }
+        }
+    }
+
+    private async Task<bool> TryVerifyTimedOutDecisionAsync(string itemId, ContextMenuDecision decision)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            if (IsWpsOfficeApprovalItemId(itemId))
+            {
+                var approvals = await _backendClient.GetWpsOfficePendingApprovalsAsync(cts.Token);
+                ApplyWpsOfficeApprovalSnapshot(approvals);
+                return !approvals.Any(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase)
+                                               && entry.IsPendingApproval);
+            }
+
+            var snapshot = await _backendClient.GetSnapshotAsync(cts.Token);
+            ApplySnapshot(snapshot);
+            return IsDecisionApplied(snapshot, itemId, decision);
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Warning("ContextMenuWorkspaceService", $"Decision outcome verification failed for {itemId}: {ex.Message}");
+            return false;
+        }
+    }
+
+    internal static bool IsDecisionApplied(
+        IReadOnlyList<ContextMenuEntry> snapshot,
+        string itemId,
+        ContextMenuDecision decision)
+    {
+        var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+        return decision switch
+        {
+            ContextMenuDecision.Allow => item is { IsPendingApproval: false, IsEnabled: true },
+            ContextMenuDecision.Deny => item is null or { IsPendingApproval: false, IsEnabled: false },
+            ContextMenuDecision.Remove => item is null or { IsPendingApproval: false, IsDeleted: true },
+            _ => false
+        };
     }
 
     public async Task<bool> RefreshWpsOfficeApprovalsAsync()
@@ -776,7 +860,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 await Task.Delay(retryDelay, cancellationToken);
                 var success = await RefreshWpsOfficeApprovalsAsync();
                 retryDelay = success
-                    ? TimeSpan.FromSeconds(5)
+                    ? TimeSpan.FromSeconds(15)
                     : TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1008,6 +1092,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private void ApplySnapshot(IReadOnlyList<ContextMenuEntry> snapshot)
     {
+        ClearResolvedDecisions(snapshot);
         var existing = Items.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in snapshot)
@@ -1031,8 +1116,33 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         UpdateNotifications(snapshot);
     }
 
+    private void ClearResolvedDecisions(IReadOnlyList<ContextMenuEntry> snapshot)
+    {
+        lock (_decisionSync)
+        {
+            foreach (var pending in _uncertainDecisions.ToArray())
+            {
+                if (!IsWpsOfficeApprovalItemId(pending.Key)
+                    && IsDecisionApplied(snapshot, pending.Key, pending.Value.Decision))
+                {
+                    _uncertainDecisions.Remove(pending.Key);
+                }
+            }
+        }
+    }
+
     private void ApplyWpsOfficeApprovalSnapshot(IReadOnlyList<ContextMenuEntry> snapshot)
     {
+        lock (_decisionSync)
+        {
+            foreach (var id in _uncertainDecisions.Keys.Where(id => IsWpsOfficeApprovalItemId(id)
+                && !snapshot.Any(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase)
+                                          && entry.IsPendingApproval)).ToArray())
+            {
+                _uncertainDecisions.Remove(id);
+            }
+        }
+
         var existing = WpsOfficeApprovalItems.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
         var pendingItems = snapshot.Where(static entry => entry.IsPendingApproval).ToArray();
         var currentPendingIds = pendingItems

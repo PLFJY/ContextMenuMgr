@@ -21,10 +21,13 @@ internal sealed class Windows11ContextMenuCatalog
     };
 
     private readonly FileLogger? _logger;
+    private readonly PackagedContextMenuScanCache _packageScanCache;
 
     public Windows11ContextMenuCatalog(FileLogger? logger = null)
     {
         _logger = logger;
+        _packageScanCache = new PackagedContextMenuScanCache(
+            sid => PackagedContextMenuDiscovery.FindForUser(sid, _logger, CancellationToken.None));
     }
 
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
@@ -54,9 +57,7 @@ internal sealed class Windows11ContextMenuCatalog
             items[commandEntry.Id] = commandEntry;
         }
 
-        var definitions = await Task.Run(
-            () => PackagedContextMenuDiscovery.FindForUser(userSid, _logger, cancellationToken),
-            cancellationToken);
+        var definitions = await _packageScanCache.GetAsync(userSid, cancellationToken);
         foreach (var definition in definitions)
         {
             cancellationToken.ThrowIfCancellationRequested();

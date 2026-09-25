@@ -25,24 +25,32 @@ internal static class PackagedContextMenuDiscovery
         }
 
         var packages = new List<PackagedContextMenuPackage>();
+        var skippedPackageCount = 0;
+        var skippedPackageSamples = new List<string>(3);
         try
         {
             var packageManager = new PackageManager();
             foreach (var package in packageManager.FindPackagesForUser(userSid))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var packageName = "<unavailable>";
+                var stage = "PackageIdentity";
                 try
                 {
+                    packageName = package.Id.FullName;
+                    stage = "InstalledLocation";
                     var installPath = package.InstalledLocation.Path;
+                    stage = "ManifestPath";
                     var manifestPath = GetManifestPath(installPath);
-                    if (string.IsNullOrWhiteSpace(package.Id.FullName)
+                    if (string.IsNullOrWhiteSpace(packageName)
                         || string.IsNullOrWhiteSpace(manifestPath))
                     {
                         continue;
                     }
 
+                    stage = "PackageMetadata";
                     packages.Add(new PackagedContextMenuPackage(
-                        package.Id.FullName,
+                        packageName,
                         package.Id.FamilyName,
                         package.Id.Name,
                         package.DisplayName,
@@ -50,11 +58,18 @@ internal static class PackagedContextMenuDiscovery
                         installPath,
                         manifestPath));
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
-                    logger?.LogFireAndForget(
-                        RuntimeLogLevel.Warning,
-                        $"PackagedContextMenuPackageSkipped: Sid={userSid}, Exception={ex.GetType().Name}: {ex.Message}");
+                    skippedPackageCount++;
+                    if (skippedPackageSamples.Count < 3)
+                    {
+                        skippedPackageSamples.Add(
+                            $"Package={packageName}, Stage={stage}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}");
+                    }
                 }
             }
         }
@@ -66,7 +81,14 @@ internal static class PackagedContextMenuDiscovery
         {
             logger?.LogFireAndForget(
                 RuntimeLogLevel.Warning,
-                $"PackagedContextMenuDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}: {ex.Message}");
+                $"PackagedContextMenuDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}");
+        }
+
+        if (skippedPackageCount > 0)
+        {
+            logger?.LogFireAndForget(
+                RuntimeLogLevel.Warning,
+                $"PackagedContextMenuPackagesSkipped: Sid={userSid}, Count={skippedPackageCount}, Samples=[{string.Join("; ", skippedPackageSamples)}].");
         }
 
         return Discover(

@@ -169,6 +169,8 @@ Monitor 发现新增项
 | `Deny` | 保持禁用并清除或更新 pending 状态。 |
 | `Remove` | 对待审核项走删除路径，必要时清理备份状态。 |
 
+审核请求先取得一次完整快照，再把同一快照传给 Allow/Deny 的状态变更，或把已解析条目传给 Remove 的删除路径，避免一次决策重复执行昂贵的 Win11 package 枚举。前端常规快照等待上限为 20 秒，审核请求为 45 秒；审核请求超时后会再读取快照核对目标状态，只有结果仍无法确认时才提示“结果未确认”并短暂阻止同一项重复提交。WPS/Office 待审核后台刷新成功间隔为 15 秒。
+
 `ContextMenuApprovalIdentity` 为传统菜单和 Win11 packaged 菜单生成逻辑 key，用于分组和通知去重。Win11 项可能在多个 category 下出现，所以逻辑 key 不直接等于 category-specific ID。
 
 ## 7. Registry Write Protection
