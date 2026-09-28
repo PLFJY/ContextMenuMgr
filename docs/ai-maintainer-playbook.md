@@ -46,6 +46,8 @@
 
 ## 3. 四条链路速查
 
+运行时新项隔离必须沿 monitor 的 `ItemDetected` 事件保留同一次交互用户 `BackendUserContext`，并传到 `QuarantineNewItemAsync`；否则同名 HKLM/HKU 项可能在无上下文重扫时选错物理来源。旧版 classic ShellVerb 可见性兼容恢复的签名与事务规则见 `registry-model.md`。
+
 | 链路 | 用途 | 不适合做什么 | 最常见误用 |
 | --- | --- | --- | --- |
 | 链路 A：Frontend -> Backend Pipe -> Service | 普通 runtime 操作：传统菜单开关、Win11 blocked list、SpecialMenu、AutoStart 运行时读写、Restart Explorer。 | 不适合安装/卸载服务，不负责弹 UAC。 | 忘记解析 frontend userContext，导致用户级注册表写到错误 hive。 |

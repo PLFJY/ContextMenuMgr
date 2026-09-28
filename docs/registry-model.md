@@ -117,6 +117,8 @@ ShellVerb 开关使用物理路径级事务。写入前先捕获本次会改变�
 
 首次受管禁用会把 `ProgrammaticAccessOnly` 的原始存在性、`RegistryValueKind` 和精确值写入 `PersistedContextMenuState.ShellVerbVisibilityProvenance`，并以物理路径为键。重复禁用不会覆盖原始 provenance。启用只恢复 ContextMenuMgrPlus 自己保存的值；缺少 provenance 时不会删除第三方 `ProgrammaticAccessOnly` / `LegacyDisable` / `HideBasedOnVelocityId`。如果命令或 handler 代发生变化，旧 provenance 不会应用到新注册。
 
+v1.7.5 在禁用 classic ShellVerb 时直接写 `HideBasedOnVelocityId=0x639bc8` (DWORD)、空字符串 `ProgrammaticAccessOnly`，普通 verb 还写空字符串 `LegacyDisable`；`Folder\shell\opennewwindow` 不写 `LegacyDisable`，有 `ShowAsDisabledIfHidden` 时只保留 velocity hide marker。该版本没有保存原始 visibility provenance。升级后，只有状态库在本次 snapshot 之前已记录同一逻辑项的明确禁用意图、其物理 `BackendRegistryPath` 完全一致，且真实 key 的值与相应 v1.7.5 签名及类型严格匹配时，Allow/Enable 才能使用一次性 legacy recovery 删除这些确定的旧 marker。恢复操作执行物理代际比较、重新打开验证、逻辑核对、状态提交及有条件回滚；它不伪造未知原始值的 v1.7.6+ provenance。签名不完整、来源不明或第三方 visibility metadata 均继续返回 `SHELL_VERB_VISIBILITY_PROVENANCE_MISSING`，不会被自动删除。后续再次禁用由当前事务建立正常 provenance。
+
 事务在物理验证、logical reconciliation、状态保存、取消或异常失败时执行乐观回滚：仅当当前值仍等于本事务写入值时才恢复原值，并重新打开 key 验证。若第三方已把值改成其它内容，则保留第三方内容并返回 `REGISTRY_MUTATION_ROLLBACK_CONFLICT`；安全回滚成功返回 `REGISTRY_MUTATION_ROLLED_BACK`。多物理 classic Shell Extension move 同样记录每一步，后续 move 或状态保存失败时逆序恢复，继续保留 #108 的 active / `-ContextMenuHandlers` 冲突保护。
 
 File category 的 `open` 是 activation-critical safety class。若父 `shell` 默认值选中它，或前端用户的有效扩展名关联使用该 ProgID，则普通禁用、通用命令编辑和通用属性编辑在写入前返回 `FILE_TYPE_ACTIVATION_VERB_PROTECTED`。本保护不会修改 `UserChoice` 或默认应用，也不 blanket-ban `print` / `printto`；例如隐藏 `print` 只改变目标 print verb 的受管可见性 value，不改 sibling `open`、两个 command、父 `shell` 默认值或其它 association source。

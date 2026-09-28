@@ -6,6 +6,7 @@ using Xunit;
 
 namespace ContextMenuMgr.Tests;
 
+[Collection("Registry catalog integration")]
 public sealed class ShellVerbMutationTransactionIntegrationTests
 {
     [Theory]

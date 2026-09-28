@@ -563,23 +563,41 @@ public sealed class BackendRuntime : IDisposable
         _lifetimeCts?.Cancel();
     }
 
-    private void OnItemDetected(object? sender, ContextMenuEntry item)
+    private void OnItemDetected(object? sender, ContextMenuDetectedEventArgs detected)
     {
+        var item = detected.Item;
         if (!_quarantineInProgress.TryAdd(item.Id, 0))
         {
             return;
         }
 
-        _ = HandleNewItemDetectedAsync(item);
+        _ = HandleNewItemDetectedAsync(detected);
     }
 
-    private async Task HandleNewItemDetectedAsync(ContextMenuEntry item)
+    internal static Task<ContextMenuEntry> QuarantineDetectedItemAsync(
+        ContextMenuRegistryCatalog catalog,
+        ContextMenuDetectedEventArgs detected,
+        CancellationToken cancellationToken)
     {
+        var context = detected.UserContext
+            ?? throw new InvalidOperationException("Runtime quarantine requires the interactive snapshot user context.");
+        if (detected.Item.BackendRegistryPath.StartsWith(@"HKEY_USERS\", StringComparison.OrdinalIgnoreCase)
+            && !detected.Item.BackendRegistryPath.StartsWith($@"HKEY_USERS\{context.Sid}\", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The detected user-hive item does not belong to the snapshot user context.");
+        }
+
+        return catalog.QuarantineNewItemAsync(detected.Item, cancellationToken, context);
+    }
+
+    private async Task HandleNewItemDetectedAsync(ContextMenuDetectedEventArgs detected)
+    {
+        var item = detected.Item;
         try
         {
             // Deleted recovery records are excluded from monitoring identity.
             // Every unknown live key therefore follows the same Added rule.
-            var quarantinedItem = await _monitor.Catalog.QuarantineNewItemAsync(item, CancellationToken.None);
+            var quarantinedItem = await QuarantineDetectedItemAsync(_monitor.Catalog, detected, CancellationToken.None);
             var notificationMessage = $"A new context menu item was blocked pending approval: {quarantinedItem.DisplayName}";
 
             // Notify the tray/frontends once per logical item so the

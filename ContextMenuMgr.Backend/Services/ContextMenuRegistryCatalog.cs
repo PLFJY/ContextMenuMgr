@@ -657,13 +657,15 @@ public sealed class ContextMenuRegistryCatalog
         ContextMenuEntry? fallbackItem,
         bool markPendingApproval = false,
         ContextMenuChangeKind? pendingApprovalChangeKind = null,
-        IReadOnlyList<ContextMenuEntry>? resolvedSnapshot = null)
+        IReadOnlyList<ContextMenuEntry>? resolvedSnapshot = null,
+        IReadOnlyDictionary<string, PersistedContextMenuState>? preSnapshotStates = null)
     {
         if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
         {
             return await ApplyRecycleBinPinToHomeStateAsync(enable, cancellationToken, userContext);
         }
 
+        preSnapshotStates ??= enable ? await _stateStore.LoadAsync(cancellationToken) : null;
         var snapshot = resolvedSnapshot ?? await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
@@ -745,7 +747,7 @@ public sealed class ContextMenuRegistryCatalog
 
         var states = await _stateStore.LoadAsync(cancellationToken);
         var mutationState = GetOrCreateState(states, item);
-        ShellVerbVisibilityTransaction? shellVerbTransaction = null;
+        IShellVerbVisibilityMutation? shellVerbTransaction = null;
         ShellExtensionMutationTransaction? shellExtensionTransaction = null;
         var mutationId = Guid.NewGuid();
         var mutationApplied = false;
@@ -787,10 +789,27 @@ public sealed class ContextMenuRegistryCatalog
                 switch (item.EntryKind)
                 {
                     case ContextMenuEntryKind.ShellVerb:
-                        shellVerbTransaction = CreateShellVerbVisibilityTransaction(
-                            item,
-                            enable,
-                            FindShellVerbProvenance(mutationState, item.BackendRegistryPath));
+                        var provenance = FindShellVerbProvenance(mutationState, item.BackendRegistryPath);
+                        if (enable && provenance is null && !item.IsEnabled)
+                        {
+                            PersistedContextMenuState? legacyState = null;
+                            preSnapshotStates?.TryGetValue(item.Id, out legacyState);
+                            using var key = OpenRegistryKey(item.BackendRegistryPath, writable: false)
+                                ?? throw new InvalidOperationException($"Unable to open {item.RegistryPath} for legacy visibility planning.");
+                            if (LegacyShellVerbVisibilityRecoveryTransaction.TryCreate(
+                                    key, item.BackendRegistryPath, legacyState, item.Id,
+                                    out var legacyRecovery, out var recoveryReason))
+                            {
+                                shellVerbTransaction = legacyRecovery;
+                                _logger.LogFireAndForget($"LegacyShellVerbVisibilityRecoveryStarted: TransactionId={mutationId}, ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Reason={recoveryReason}.");
+                            }
+                            else
+                            {
+                                _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                                    $"LegacyShellVerbVisibilityRecoveryRejected: TransactionId={mutationId}, ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Reason={recoveryReason}.");
+                            }
+                        }
+                        shellVerbTransaction ??= CreateShellVerbVisibilityTransaction(item, enable, provenance);
                         ApplyShellVerbVisibilityTransaction(shellVerbTransaction);
                         mutationApplied = shellVerbTransaction.Applied;
                         break;
@@ -914,6 +933,10 @@ public sealed class ContextMenuRegistryCatalog
             NotifyAssociationsChangedBestEffort("SetEnabled", mutationId);
 
             _logger.LogFireAndForget($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).");
+            if (shellVerbTransaction is LegacyShellVerbVisibilityRecoveryTransaction)
+            {
+                _logger.LogFireAndForget($"LegacyShellVerbVisibilityRecoverySucceeded: TransactionId={mutationId}, ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Reason=Committed.");
+            }
             _logger.LogFireAndForget(
                 $"ClassicMutationCompleted: TransactionId={mutationId}, MutationApplied={mutationApplied}, PhysicalVerificationSucceeded={physicalVerificationSucceeded}, LogicalVerificationSucceeded={logicalVerificationSucceeded}, StateSaveSucceeded={stateSaveSucceeded}, RollbackAttempted=False, RollbackSucceeded=NotApplicable, RollbackConflict=False, FinalObservedState={refreshed.IsEnabled}.");
 
@@ -928,6 +951,16 @@ public sealed class ContextMenuRegistryCatalog
         {
             mutationApplied = shellVerbTransaction.Applied;
             var rollback = TryRollbackShellVerbVisibilityTransaction(shellVerbTransaction);
+            if (shellVerbTransaction is LegacyShellVerbVisibilityRecoveryTransaction)
+            {
+                var recoveryEvent = !mutationApplied
+                    ? "LegacyShellVerbVisibilityRecoveryRejected"
+                    : rollback.Conflict || !rollback.Succeeded
+                        ? "LegacyShellVerbVisibilityRecoveryConflict"
+                        : "LegacyShellVerbVisibilityRecoveryRolledBack";
+                _logger.LogFireAndForget(recoveryEvent == "LegacyShellVerbVisibilityRecoveryRolledBack" ? RuntimeLogLevel.Information : RuntimeLogLevel.Warning,
+                    $"{recoveryEvent}: TransactionId={mutationId}, ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Reason={ex.GetType().Name}, RollbackError={rollback.Error ?? "<none>"}.");
+            }
             var errorCode = rollback.Conflict || !rollback.Succeeded
                 ? PipeErrorCodes.RegistryMutationRollbackConflict
                 : mutationApplied
@@ -993,6 +1026,10 @@ public sealed class ContextMenuRegistryCatalog
             await _logger.LogAsync($"Failed to update {item.DisplayName}: {ex.Message}", CancellationToken.None);
             return CreateFailure(ex.Message, item);
         }
+        finally
+        {
+            (shellVerbTransaction as IDisposable)?.Dispose();
+        }
     }
 
     /// <summary>
@@ -1020,6 +1057,9 @@ public sealed class ContextMenuRegistryCatalog
             return await AcknowledgeWpsOfficeSyntheticStateAsync(itemId, wpsItem, cancellationToken);
         }
 
+        var preSnapshotStates = decision == ContextMenuDecision.Allow
+            ? await _stateStore.LoadAsync(cancellationToken)
+            : null;
         var snapshot = await GetSnapshotAsync(cancellationToken, userContext);
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
 
@@ -1027,7 +1067,7 @@ public sealed class ContextMenuRegistryCatalog
         {
             ContextMenuDecision.Allow => item is null
                 ? CreateFailure($"Menu item '{itemId}' was not found.")
-                : await ApplyDesiredStateCoreAsync(itemId, enable: true, cancellationToken, userContext, null, resolvedSnapshot: snapshot),
+                : await ApplyDesiredStateCoreAsync(itemId, enable: true, cancellationToken, userContext, null, resolvedSnapshot: snapshot, preSnapshotStates: preSnapshotStates),
             ContextMenuDecision.Deny => item is null
                 ? await RemovePendingApprovalStateAsync(itemId, cancellationToken)
                 : await ApplyDesiredStateCoreAsync(itemId, enable: false, cancellationToken, userContext, null, resolvedSnapshot: snapshot),
@@ -3886,7 +3926,7 @@ public sealed class ContextMenuRegistryCatalog
         return ShellVerbVisibilityTransaction.Create(key, item.BackendRegistryPath, enable, provenance);
     }
 
-    private void ApplyShellVerbVisibilityTransaction(ShellVerbVisibilityTransaction transaction)
+    private void ApplyShellVerbVisibilityTransaction(IShellVerbVisibilityMutation transaction)
     {
         try
         {
@@ -3930,7 +3970,7 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private ShellVerbRollbackResult TryRollbackShellVerbVisibilityTransaction(ShellVerbVisibilityTransaction transaction)
+    private ShellVerbRollbackResult TryRollbackShellVerbVisibilityTransaction(IShellVerbVisibilityMutation transaction)
     {
         if (!transaction.Applied)
         {
@@ -7032,7 +7072,7 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
-    private static RegistryKey? OpenRegistryKey(string absoluteRegistryPath, bool writable)
+    internal static RegistryKey? OpenRegistryKey(string absoluteRegistryPath, bool writable)
     {
         if (TrySplitAbsoluteRegistryPath(absoluteRegistryPath, out var rootKey, out var subPath))
         {

@@ -2,6 +2,8 @@ using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Services;
 
+public sealed record ContextMenuDetectedEventArgs(ContextMenuEntry Item, BackendUserContext? UserContext);
+
 // Timed polling keeps the scaffold simple while still showing how the service can
 // push real-time-ish notifications into the frontend over IPC.
 /// <summary>
@@ -33,7 +35,7 @@ public sealed class ContextMenuRegistryMonitor
 
     public ContextMenuRegistryCatalog Catalog => _catalog;
 
-    public event EventHandler<ContextMenuEntry>? ItemDetected;
+    public event EventHandler<ContextMenuDetectedEventArgs>? ItemDetected;
 
     /// <summary>
     /// Requests that the monitor rebuild its runtime baseline from the first snapshot
@@ -58,8 +60,8 @@ public sealed class ContextMenuRegistryMonitor
         // Startup is an offline comparison boundary. Do not silently reconcile
         // disabled-to-enabled drift here: rule 5 requires both switch directions
         // to remain visible as Modified until the user handles them.
-        var initialSnapshot = await ReadSnapshotAsync(cancellationToken);
-        var knownItems = initialSnapshot
+        var initialScan = await ReadSnapshotAsync(cancellationToken);
+        var knownItems = initialScan.Items
             .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
             .ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
@@ -79,7 +81,8 @@ public sealed class ContextMenuRegistryMonitor
                 await _logger.LogAsync($"RegistryMonitorDebounceWait: DelayMs={_pollInterval.TotalMilliseconds}.", cancellationToken);
                 await Task.Delay(_pollInterval, cancellationToken);
 
-                var currentSnapshot = (await ReadSnapshotAsync(cancellationToken))
+                var currentScan = await ReadSnapshotAsync(cancellationToken);
+                var currentSnapshot = currentScan.Items
                     .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                     .ToList();
 
@@ -149,7 +152,8 @@ public sealed class ContextMenuRegistryMonitor
                             $"RuntimeDisabledStateReconciliation: Reconciled={reconciliation.ReconciledItemIds.Count}, " +
                             $"Failed={reconciliation.FailedItemIds.Count}, ReloadingSnapshot=True.",
                             cancellationToken);
-                        currentSnapshot = (await ReadSnapshotAsync(cancellationToken))
+                        currentScan = await ReadSnapshotAsync(cancellationToken);
+                        currentSnapshot = currentScan.Items
                             .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                             .ToList();
                     }
@@ -178,7 +182,7 @@ public sealed class ContextMenuRegistryMonitor
                             $"RegistryMonitorChangeDetected: Kind={item.DetectedChangeKind}, ItemId={item.Id}, " +
                             $"DisplayName={item.DisplayName}, Root={item.SourceRootPath}, Path={item.RegistryPath}.",
                             cancellationToken);
-                        ItemDetected?.Invoke(this, item);
+                        ItemDetected?.Invoke(this, new ContextMenuDetectedEventArgs(item, currentScan.UserContext));
                         continue;
                     }
 
@@ -226,7 +230,7 @@ public sealed class ContextMenuRegistryMonitor
     /// monitor only after this snapshot has been compared with its in-memory
     /// baseline.
     /// </summary>
-    private async Task<IReadOnlyList<ContextMenuEntry>> ReadSnapshotAsync(CancellationToken cancellationToken)
+    private async Task<(IReadOnlyList<ContextMenuEntry> Items, BackendUserContext? UserContext)> ReadSnapshotAsync(CancellationToken cancellationToken)
     {
         // The monitor runs independently of frontend pipe connections. Without an
         // explicit user context, Windows 11 packaged COM entries and per-user
@@ -235,6 +239,6 @@ public sealed class ContextMenuRegistryMonitor
         // UAC elevation, fast-user switch). This causes mass false-negative
         // disappearances that corrupt the persisted state baseline.
         var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
-        return await _catalog.GetSnapshotAsync(cancellationToken, userContext);
+        return (await _catalog.GetSnapshotAsync(cancellationToken, userContext), userContext);
     }
 }
