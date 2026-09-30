@@ -1,5 +1,7 @@
 # Windows 11 新右键菜单实现说明
 
+Win11 页面经 `SetWin11BlockedItem` / `RemoveWin11BlockedItem` 修改 packaged COM blocked list 或受支持的 System CommandStore 后，后端在常规持久状态操作门内重新枚举目标项，并以实际开关状态和元数据更新常规监控 baseline。同一 CLSID 的各分类投影一起更新；未能在当前交互用户上下文中解析到的项不写入 baseline。这样软件内开关不会在下一次常规快照中被标为外部 `Modified`。
+
 ## 1. Windows 11 新菜单和传统菜单的区别
 
 Windows 11 新右键菜单不等同于传统 `shell` / `shellex\ContextMenuHandlers`。当前实现区分两类可管理的新菜单来源：

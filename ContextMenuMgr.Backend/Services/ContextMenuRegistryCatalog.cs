@@ -363,6 +363,50 @@ public sealed class ContextMenuRegistryCatalog
             cancellationToken);
     }
 
+    public async Task<PipeResponse> ExecuteWindows11MutationAsync(
+        Func<Task<PipeResponse>> mutation,
+        string targetId,
+        bool isSystemCommand,
+        BackendUserContext? userContext,
+        CancellationToken cancellationToken)
+        => await RunPersistentStateOperationAsync(async () =>
+        {
+            if (userContext is not null)
+            {
+                // A user command must not create the first regular state record
+                // ahead of the full baseline, or all other entries look Added.
+                _ = await GetSnapshotAsync(cancellationToken, userContext);
+            }
+
+            var response = await mutation();
+            if (!response.Success || userContext is null)
+            {
+                return response;
+            }
+
+            var entries = (await GetWindows11SnapshotAsync(cancellationToken, userContext))
+                .Where(entry => isSystemCommand
+                    ? string.Equals(entry.Id, $"win11-system|{targetId}", StringComparison.OrdinalIgnoreCase)
+                    : entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                      && Guid.TryParse(entry.HandlerClsid, out var entryGuid)
+                      && Guid.TryParse(targetId, out var targetGuid)
+                      && entryGuid == targetGuid)
+                .ToArray();
+            if (entries.Length == 0)
+            {
+                return response;
+            }
+
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            foreach (var entry in entries)
+            {
+                RecordVerifiedSwitchState(states, entry, pendingApproval: false, pendingApprovalChangeKind: null);
+            }
+
+            await _stateStore.SaveAsync(states, cancellationToken);
+            return response;
+        }, cancellationToken);
+
     internal async Task<PipeResponse?> CreateRegistryWriteProtectionPreflightFailureAsync(
         string operationName,
         IEnumerable<string?> targetPaths,
@@ -837,7 +881,8 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             physicalVerificationSucceeded = true;
-            var refreshedLogical = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+            var postWriteSnapshot = await GetReadOnlySnapshotAsync(cancellationToken, userContext);
+            var refreshedLogical = postWriteSnapshot
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
             var refreshed = refreshedLogical;
             ShellVerbMutationReconciliation? shellVerbReconciliation = null;
@@ -895,25 +940,16 @@ public sealed class ContextMenuRegistryCatalog
             // For scene-only classic handlers the global snapshot intentionally has
             // no entry. Persist the verified physical projection so a later scene
             // operation retains the mirror path that actually exists.
-            var stateEntry = shellExtensionReconciliation?.Entry ?? item;
-            var linkedEntries = GetStateLinkedEntries(snapshot, stateEntry);
+            var linkedEntries = GetStateLinkedEntries(postWriteSnapshot, refreshed);
             foreach (var linkedEntry in linkedEntries)
             {
-                // One user gesture may affect several projected entries, so we keep
-                // their persisted desired/observed state in sync here.
-                var state = GetOrCreateState(states, linkedEntry);
-                state.DesiredEnabled = enable;
-                state.ObservedEnabled = enable;
-                state.IsDeleted = false;
-                state.IsPendingApproval = markPendingApproval
-                                          && string.Equals(linkedEntry.Id, item.Id, StringComparison.OrdinalIgnoreCase);
-                if (state.IsPendingApproval && pendingApprovalChangeKind is not null)
-                {
-                    state.PendingApprovalChangeKind = pendingApprovalChangeKind.Value;
-                }
-                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
-                state.DeletedAtUtc = null;
-                state.BackupFilePath = null;
+                // The post-write projection is the new baseline. The pre-write
+                // entry can have different mirror paths and visibility metadata.
+                RecordVerifiedSwitchState(
+                    states,
+                    linkedEntry,
+                    markPendingApproval && string.Equals(linkedEntry.Id, item.Id, StringComparison.OrdinalIgnoreCase),
+                    pendingApprovalChangeKind);
             }
 
             if (shellVerbTransaction is not null)
@@ -944,7 +980,12 @@ public sealed class ContextMenuRegistryCatalog
             {
                 Success = true,
                 Message = $"{(enable ? "Enabled" : "Disabled")} {item.DisplayName}.",
-                Item = refreshed with { IsPendingApproval = markPendingApproval }
+                Item = refreshed with
+                {
+                    IsPendingApproval = markPendingApproval,
+                    DetectedChangeKind = ContextMenuChangeKind.None,
+                    DetectedChangeDetails = null
+                }
             };
         }
         catch (Exception ex) when (shellVerbTransaction is not null)
@@ -3396,6 +3437,27 @@ public sealed class ContextMenuRegistryCatalog
         var state = PersistedContextMenuState.FromEntry(entry);
         states[entry.Id] = state;
         return state;
+    }
+
+    private static void RecordVerifiedSwitchState(
+        IDictionary<string, PersistedContextMenuState> states,
+        ContextMenuEntry entry,
+        bool pendingApproval,
+        ContextMenuChangeKind? pendingApprovalChangeKind)
+    {
+        var state = GetOrCreateState(states, entry);
+        state.DesiredEnabled = entry.IsEnabled;
+        state.ObservedEnabled = entry.IsEnabled;
+        state.IsDeleted = false;
+        state.IsPendingApproval = pendingApproval;
+        if (pendingApproval && pendingApprovalChangeKind is not null)
+        {
+            state.PendingApprovalChangeKind = pendingApprovalChangeKind.Value;
+        }
+
+        state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        state.DeletedAtUtc = null;
+        state.BackupFilePath = null;
     }
 
     private static ContextMenuEntry? TryUseSceneFallbackItem(string itemId, ContextMenuEntry? fallbackItem)

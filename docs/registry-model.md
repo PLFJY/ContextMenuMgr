@@ -266,6 +266,7 @@ File Types / scene（包括 `SystemFileAssociations`）根不必属于常规 `Mo
 - 所有会读写 `ContextMenuStateStore` 的常规快照、WPS 快照、审核、删除/恢复和 reconciliation 必须通过 catalog 的持久状态操作门串行化。
 - reconciliation 写入失败时保留 `DesiredEnabled=false`，记录结构化日志并在后续快照重试；不得伪造 `ObservedEnabled=false`，也不得转成待审核。
 - ContextMenuMgr 自己的写入必须从 post-write 快照更新 baseline，不能被下一轮识别为外部变化。
+- 普通开关在物理写入和逻辑验证成功后，必须用同一次写后快照的条目更新开关状态与全部可比对元数据（包括 handler 移动后的路径），并将返回前端的本次操作结果清除 `DetectedChangeKind`；写前条目及其 `Modified` 标记不能作为软件自身写入的结果。
 - `SuppressNextDetection` 只能抑制一次由应用自身恢复/创建导致的检测，建立 monitor baseline 时必须消费。
 - WPS/Office 是否已有 baseline 只看 WPS marker 或旧版 WPS state，不能被常规菜单 state 影响。
 

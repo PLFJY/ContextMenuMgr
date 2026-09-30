@@ -603,11 +603,10 @@ public sealed class NamedPipeBackendServer
         var blockMachine = request.BlockMachine ?? false;
         if (IsWindows11SystemCommandKey(handlerClsid))
         {
-            var systemResponse = await _catalog.SetWindows11SystemCommandEnabledAsync(
-                handlerClsid,
-                enable: false,
-                request.ClientOperationId,
-                cancellationToken);
+            var systemResponse = await _catalog.ExecuteWindows11MutationAsync(
+                () => _catalog.SetWindows11SystemCommandEnabledAsync(
+                    handlerClsid, enable: false, request.ClientOperationId, cancellationToken),
+                handlerClsid, isSystemCommand: true, userContext, cancellationToken);
             await LogWin11CommandAsync(
                 PipeCommand.SetWin11BlockedItem,
                 userContext,
@@ -626,13 +625,11 @@ public sealed class NamedPipeBackendServer
             "started",
             cancellationToken);
 
-        var response = await _windows11BlocksService.SetWin11BlockedItemAsync(
-            handlerClsid,
-            request.DisplayName ?? string.Empty,
-            blockMachine,
-            request.ClientOperationId,
-            userContext,
-            cancellationToken);
+        var response = await _catalog.ExecuteWindows11MutationAsync(
+            () => _windows11BlocksService.SetWin11BlockedItemAsync(
+                handlerClsid, request.DisplayName ?? string.Empty, blockMachine,
+                request.ClientOperationId, userContext, cancellationToken),
+            handlerClsid, isSystemCommand: false, userContext, cancellationToken);
 
         await LogWin11CommandAsync(
             PipeCommand.SetWin11BlockedItem,
@@ -655,11 +652,10 @@ public sealed class NamedPipeBackendServer
         var unblockMachine = request.UnblockMachine ?? false;
         if (IsWindows11SystemCommandKey(handlerClsid))
         {
-            var systemResponse = await _catalog.SetWindows11SystemCommandEnabledAsync(
-                handlerClsid,
-                enable: true,
-                request.ClientOperationId,
-                cancellationToken);
+            var systemResponse = await _catalog.ExecuteWindows11MutationAsync(
+                () => _catalog.SetWindows11SystemCommandEnabledAsync(
+                    handlerClsid, enable: true, request.ClientOperationId, cancellationToken),
+                handlerClsid, isSystemCommand: true, userContext, cancellationToken);
             await LogWin11CommandAsync(
                 PipeCommand.RemoveWin11BlockedItem,
                 userContext,
@@ -678,12 +674,11 @@ public sealed class NamedPipeBackendServer
             "started",
             cancellationToken);
 
-        var response = await _windows11BlocksService.RemoveWin11BlockedItemAsync(
-            handlerClsid,
-            unblockMachine,
-            request.ClientOperationId,
-            userContext,
-            cancellationToken);
+        var response = await _catalog.ExecuteWindows11MutationAsync(
+            () => _windows11BlocksService.RemoveWin11BlockedItemAsync(
+                handlerClsid, unblockMachine, request.ClientOperationId,
+                userContext, cancellationToken),
+            handlerClsid, isSystemCommand: false, userContext, cancellationToken);
 
         await LogWin11CommandAsync(
             PipeCommand.RemoveWin11BlockedItem,
