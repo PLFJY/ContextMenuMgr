@@ -240,9 +240,17 @@ internal sealed class ShellVerbVisibilityTransaction : IShellVerbVisibilityMutat
         if (existingProvenance is not null
             && !string.Equals(existingProvenance.GenerationFingerprint, fingerprint, StringComparison.Ordinal))
         {
-            throw new ShellVerbMutationException(
-                "SHELL_VERB_PHYSICAL_GENERATION_CONFLICT",
-                "The Shell verb registration was recreated or materially changed; its old visibility recovery data was not applied.");
+            if (requestedVisible || !ShellVerbVisibility.GetState(key).ContextMenuVisible)
+            {
+                throw new ShellVerbMutationException(
+                    "SHELL_VERB_PHYSICAL_GENERATION_CONFLICT",
+                    "The Shell verb registration was recreated or materially changed; its old visibility recovery data was not applied.");
+            }
+
+            // A third party recreated the same logical verb as a visible new
+            // physical generation. Its old restore data must never be applied
+            // to this generation; capture a fresh before value for re-disable.
+            existingProvenance = null;
         }
 
         var provenance = existingProvenance;
@@ -257,9 +265,18 @@ internal sealed class ShellVerbVisibilityTransaction : IShellVerbVisibilityMutat
                 if (!ShellVerbVisibility.ValueMatches(key, managedWrite)
                     && !ShellVerbVisibility.ValueMatches(key, original))
                 {
-                    throw new ShellVerbMutationException(
-                        "SHELL_VERB_VISIBILITY_CONCURRENT_CHANGE",
-                        "The Shell verb visibility value was changed by another process; it was not overwritten.");
+                    if (!ShellVerbVisibility.GetState(key).ContextMenuVisible)
+                    {
+                        throw new ShellVerbMutationException(
+                            "SHELL_VERB_VISIBILITY_CONCURRENT_CHANGE",
+                            "The Shell verb visibility value was changed by another process; it was not overwritten.");
+                    }
+
+                    // A visible value is no longer the hidden registration that
+                    // the old provenance described. Re-disable it with fresh
+                    // restore data, preserving the new owner's current value.
+                    existingProvenance = null;
+                    provenance = null;
                 }
             }
 

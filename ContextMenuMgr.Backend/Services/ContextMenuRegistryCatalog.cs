@@ -91,6 +91,8 @@ public sealed class ContextMenuRegistryCatalog
     private readonly AsyncLocal<int> _persistentStateGateDepth = new();
     private readonly SemaphoreSlim _registryProtectionTransitionGate = new(1, 1);
 
+    internal event Action<BackendUserContext?, IReadOnlyList<ContextMenuEntry>>? VerifiedSwitchCommitted;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryCatalog"/> class.
     /// </summary>
@@ -404,6 +406,7 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             await _stateStore.SaveAsync(states, cancellationToken);
+            VerifiedSwitchCommitted?.Invoke(userContext, entries);
             return response;
         }, cancellationToken);
 
@@ -815,12 +818,24 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         await _logger.LogAsync(
-            $"ClassicMutationStarted: TransactionId={mutationId}, ItemId={item.Id}, EntryKind={item.EntryKind}, KeyName={item.KeyName}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, RequestedEnabled={enable}, SourceRootPath={item.SourceRootPath}, IsSceneOnly={!snapshot.Any(entry => string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase))}, PhysicalCandidateCount={plannedPhysicalCandidates.Count}, EffectivePhysicalPath={item.BackendRegistryPath}, ShadowedPhysicalPaths={string.Join(";", plannedPhysicalCandidates.Where(candidate => !string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase)).Select(static candidate => candidate.BackendRegistryPath))}, AssociationSourceKind={GetAssociationSourceKind(item)}, ParentShellDefaultVerb={ReadParentShellDefaultVerb(item.BackendRegistryPath) ?? "<none>"}, NormalizedCommandExecutable={item.FilePath ?? "<none>"}, ControlDomain={(item.IsWindows11ContextMenu ? "Win11PackagedCom" : item.EntryKind == ContextMenuEntryKind.ShellVerb ? "ClassicShellVerb" : "ClassicShellExtension")}.",
+            $"ClassicMutationStarted: TransactionId={mutationId}, ItemId={item.Id}, EntryKind={item.EntryKind}, KeyName={item.KeyName}, RegistryPath={item.RegistryPath}, BackendRegistryPath={item.BackendRegistryPath}, RequestedEnabled={enable}, SourceRootPath={item.SourceRootPath}, IsSceneOnly={!snapshot.Any(entry => string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase))}, PhysicalCandidateCount={plannedPhysicalCandidates.Count}, EffectivePhysicalPath={item.BackendRegistryPath}, ShadowedPhysicalPaths={string.Join(";", plannedPhysicalCandidates.Where(candidate => !string.Equals(candidate.BackendRegistryPath, item.BackendRegistryPath, StringComparison.OrdinalIgnoreCase)).Select(static candidate => candidate.BackendRegistryPath))}, AssociationSourceKind={GetAssociationSourceKind(item)}, ParentShellDefaultVerb={ReadParentShellDefaultVerb(item.BackendRegistryPath) ?? "<none>"}, NormalizedCommandExecutable={item.FilePath ?? "<none>"}, ControlDomain={(item.IsWindows11ContextMenu ? item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore ? "Win11SystemCommandStore" : "Win11PackagedCom" : item.EntryKind == ContextMenuEntryKind.ShellVerb ? "ClassicShellVerb" : "ClassicShellExtension")}.",
             cancellationToken);
 
         try
         {
-            if (item.IsWindows11ContextMenu)
+            if (item.IsWindows11ContextMenu
+                && item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)
+            {
+                var systemResponse = await _windows11Catalog.SetSystemCommandEnabledAsync(
+                    item.KeyName, enable, operationId: null, cancellationToken);
+                if (!systemResponse.Success)
+                {
+                    return CreateFailure(systemResponse.Message, item, systemResponse.ErrorCode);
+                }
+
+                mutationApplied = true;
+            }
+            else if (item.IsWindows11ContextMenu)
             {
                 // Win11 packaged verbs do not use the classic shell verb/handler
                 // write paths, so they are toggled through the blocked-extension list.
@@ -966,6 +981,7 @@ public sealed class ContextMenuRegistryCatalog
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
             stateSaveSucceeded = true;
+            VerifiedSwitchCommitted?.Invoke(userContext, linkedEntries);
             NotifyAssociationsChangedBestEffort("SetEnabled", mutationId);
 
             _logger.LogFireAndForget($"{(enable ? "Enabled" : "Disabled")} {item.DisplayName} ({item.RegistryPath}).");
@@ -1119,15 +1135,26 @@ public sealed class ContextMenuRegistryCatalog
     /// <summary>
     /// Executes acknowledge Item State Async.
     /// </summary>
-    public async Task<PipeResponse> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
+    public async Task<PipeResponse> AcknowledgeItemStateAsync(
+        string itemId,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext = null)
         => await RunPersistentStateOperationAsync(
-            () => AcknowledgeItemStateCoreAsync(itemId, cancellationToken),
+            () => AcknowledgeItemStateCoreAsync(itemId, cancellationToken, userContext),
             cancellationToken);
 
-    private async Task<PipeResponse> AcknowledgeItemStateCoreAsync(string itemId, CancellationToken cancellationToken)
+    private async Task<PipeResponse> AcknowledgeItemStateCoreAsync(
+        string itemId,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
     {
+        if (userContext is null)
+        {
+            return CreateFailure("Cannot acknowledge a menu change without the frontend user context.");
+        }
+
         var states = await _stateStore.LoadAsync(cancellationToken);
-        var actualEntry = (await EnumerateActualEntriesAsync(cancellationToken))
+        var actualEntry = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
             .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
 
         if (actualEntry is not null)
@@ -1150,7 +1177,7 @@ public sealed class ContextMenuRegistryCatalog
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
 
-            var refreshed = (await GetSnapshotAsync(cancellationToken))
+            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
                 ?? actualEntry;
 
@@ -2935,7 +2962,14 @@ public sealed class ContextMenuRegistryCatalog
     private async Task<IReadOnlyList<ContextMenuEntry>> EnumerateActualEntriesAsync(CancellationToken cancellationToken, BackendUserContext? userContext = null)
     {
         var results = new List<ContextMenuEntry>();
-        foreach (var item in EnumerateEntries(MonitoredRoots))
+        // Regular monitoring is scoped to the frontend/interactive user. A
+        // service-side snapshot without that context sees only HKLM and cannot
+        // establish or prune a user baseline.
+        foreach (var item in EnumerateEntries(
+                     MonitoredRoots.Select(static root => root with
+                     {
+                         InstanceScope = RegistryRootInstanceScope.MachineAndFrontendUser
+                     }), userContext))
         {
             results.Add(item);
         }
@@ -3644,6 +3678,7 @@ public sealed class ContextMenuRegistryCatalog
             state.DeletedAtUtc = null;
             state.BackupFilePath = null;
             await _stateStore.SaveAsync(states, cancellationToken);
+            VerifiedSwitchCommitted?.Invoke(userContext, [refreshed]);
 
             NotifyAssociationsChangedBestEffort("RecycleBinPinToHome");
             return new PipeResponse

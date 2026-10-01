@@ -1065,7 +1065,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task DismissDetectedChangeAsync()
     {
-        await TryAcknowledgeItemStateAsync();
+        if (!await TryAcknowledgeItemStateAsync())
+        {
+            return;
+        }
 
         // Acknowledge only reconciles the persisted desired/observed state. It
         // does not clear registry-conflict style consistency issues (e.g. both
@@ -1080,7 +1083,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task DismissConsistencyIssueAsync()
     {
-        await TryAcknowledgeItemStateAsync();
+        if (!await TryAcknowledgeItemStateAsync())
+        {
+            return;
+        }
         IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
     }

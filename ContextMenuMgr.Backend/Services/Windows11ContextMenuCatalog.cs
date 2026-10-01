@@ -512,6 +512,7 @@ internal sealed class Windows11ContextMenuCatalog
             IsWindows11ContextMenu = true,
             Windows11SourceKind = Windows11ContextMenuSourceKind.SystemCommandStore,
             IsProtectedSystemItem = isProtected,
+            CanToggle = !isProtected,
             IsEnabled = isEnabled,
             IsPresentInRegistry = true,
             Notes = notes

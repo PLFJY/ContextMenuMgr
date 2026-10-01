@@ -69,7 +69,7 @@
 | `IsEnabled` | 合并真实注册表和项目状态后的启用状态。 |
 | `IsPresentInRegistry` | 当前真实注册表是否仍存在该项。 |
 | `IsDeleted` | 项目状态库认为该项已删除。 |
-| `IsPendingApproval` | 新增项或外部变化需要用户审核。 |
+| `IsPendingApproval` | 运行时新增项隔离成功后进入待审核；普通 `Modified` 只显示变化提示。 |
 | `HasBackup` / `DeletedAtUtc` | 删除备份相关状态。 |
 | `CanToggle` | 是否具有经过验证的普通启用/禁用操作。`PropertySheetHandlers` 等未验证类型为只读。 |
 | `HasConsistencyIssue` / `ConsistencyIssue` | 状态库和真实注册表不一致时的诊断信息。 |
@@ -192,7 +192,7 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 | 编号 | 场景 | 后端行为 | 前端状态 |
 | --- | --- | --- | --- |
-| 1 | 软件运行期间出现未知菜单项 | 立即禁用并写入状态库，进入待审核 | `Added` + `IsPendingApproval=true` |
+| 1 | 软件运行期间出现未知菜单项 | 下一轮监控发现后禁用并写入状态库，进入待审核；隔离失败时保留为未知项并在后续轮询重试 | `Added` + `IsPendingApproval=true`（成功隔离后） |
 | 2 | 软件运行期间，已知项从开变关 | 不自动重新打开，保留旧 baseline 供用户确认 | `Modified`，不再叠加“状态不一致” |
 | 3 | 软件运行期间，相邻稳定快照观察到已知项从关变开 | 静默重新关闭，继续保留 `DesiredEnabled=false` | 纠偏后无待审核、无外部修改、无 generic consistency |
 | 4 | 软件停止后出现未知菜单项，重启时发现 | 不隔离、不自动禁用，等待用户确认当前变化 | `Added`，不进入待审核 |
@@ -236,6 +236,7 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 ```
 
 监控循环独立于前端 Pipe 连接运行。普通开关、Win11 blocked list 和用户级 Classes 必须继续使用 frontend/interactive SID，不能使用服务进程 HKCU。
+常规扫描只枚举 HKLM 和当前交互用户的 `HKEY_USERS\<SID>\Software\Classes`；暂时取不到交互用户上下文时，监控保留已有运行时基准，不进行新增项隔离或静默纠偏。软件内开关成功提交后，其写后条目会同步到 monitor 的内存基准，避免“用户关闭→应用在下一次轮询前重新打开”被误看成“开→开”。
 
 ### 10.3 启动/离线比对
 
@@ -265,6 +266,7 @@ File Types / scene（包括 `SystemFileAssociations`）根不必属于常规 `Mo
 
 - 所有会读写 `ContextMenuStateStore` 的常规快照、WPS 快照、审核、删除/恢复和 reconciliation 必须通过 catalog 的持久状态操作门串行化。
 - reconciliation 写入失败时保留 `DesiredEnabled=false`，记录结构化日志并在后续快照重试；不得伪造 `ObservedEnabled=false`，也不得转成待审核。
+- 已禁用 ShellVerb 的同一稳定 Id 若被第三方重新创建为可见项，且命令等物理代际指纹改变，静默重新禁用时丢弃旧代际恢复数据、捕获新代际的原值并验证写入；旧代际恢复数据仍不得用于启用新注册项。连续两次完整快照确认删除并移出 baseline 后重新出现的项仍按未知 `Added` 处理。
 - ContextMenuMgr 自己的写入必须从 post-write 快照更新 baseline，不能被下一轮识别为外部变化。
 - 普通开关在物理写入和逻辑验证成功后，必须用同一次写后快照的条目更新开关状态与全部可比对元数据（包括 handler 移动后的路径），并将返回前端的本次操作结果清除 `DetectedChangeKind`；写前条目及其 `Modified` 标记不能作为软件自身写入的结果。
 - `SuppressNextDetection` 只能抑制一次由应用自身恢复/创建导致的检测，建立 monitor baseline 时必须消费。

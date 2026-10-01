@@ -130,6 +130,7 @@ Classic cascading Shell Verbs expose `CanManageSubMenuItems` in the lightweight 
 StateStore 的 JSON 写入是 crash-safe staged write：unique temp（与 current 同目录）→ write-through flush/close → 用生产 parser 验证 envelope 或 legacy dictionary → `File.Replace` current，同时保留已验证旧 current 的 `.bak`。加载发现损坏的 current 会保留原始文件到 `RuntimePaths.QuarantineDirectory\corrupt-state-...`，然后验证并恢复 `.bak`；没有有效备份时返回空状态，由 catalog 使用交互用户上下文从当前注册表重建常规与 WPS baseline，避免任何 `Added` / `Modified` / pending 误报。恢复不修改注册表。读写 ACL/I/O 失败和未来 schema 不是 corruption reset；Portable host identity mismatch 仍走独立的 `foreign-host-...` quarantine。
 
 外部变化检测由 `ContextMenuRegistryMonitor` 轮询实现。状态库相关快照和用户操作通过 catalog 的持久状态操作门串行，避免 monitor、前端刷新和 WPS 刷新互相覆盖。服务启动早于交互式 Session 时，无用户上下文的快照不得提交首次 baseline；观察到 Session 后重建内存 baseline 前，仍用持久活跃数量的 80% 阈值防止用户 hive 尚未完全加载时制造运行时新增通知。
+成功的应用内开关把写后实际项通知 monitor 更新内存基准；运行时新项只有隔离成功提交待审核状态后才被 monitor 采纳，失败则在下一轮重试。传统 ShellVerb 被应用以同一稳定 Id 重建为可见新代际时，可重新捕获该代际原值并静默禁用，不能用旧代际 provenance 执行启用。System CommandStore 的自动禁用使用其 ShellVerb 可见性写入，而不是 Win11 CLSID blocked list。
 
 传统菜单和 Win11 新菜单不是同一套模型。不要把 `PackagedCom` 项当作普通 `shell` / `shellex` 项处理。
 

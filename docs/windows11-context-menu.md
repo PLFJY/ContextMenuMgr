@@ -70,6 +70,8 @@ System CommandStore 项不使用 blocked list。`Windows.SendToMyPhone`、`Windo
 - 禁用使用 `ShellVerbVisibility.SetEnabled(commandKey, registryPath, false)`；
 - 启用使用 `ShellVerbVisibility.SetEnabled(commandKey, registryPath, true)`。
 
+运行时新增项隔离及已知禁用项的静默纠偏也按此路径处理 System CommandStore；不可写的受保护命令标记为不可切换，不进入自动禁用尝试。Packaged COM 项仍按用户 blocked list 处理。
+
 如果 HKLM CommandStore 命令键受 Windows 保护，后端不接管所有权、不修改 ACL、不使用 TrustedInstaller hack，而是返回结构化失败：`This Windows 11 system command is protected by Windows and cannot be safely modified by ContextMenuMgr.` 前端应显示受保护、不可切换状态，而不是通用权限错误。
 
 更改 packaged COM blocked list 或 System CommandStore 可见性后，都需要重启 Explorer 或重新登录才会可靠反映在实际右键菜单中。

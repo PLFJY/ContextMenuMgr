@@ -25,6 +25,7 @@
 | `NavigationPages.cs` | WPF-UI NavigationView 使用的页面类型 | 导航项的 `TargetPageType` 应指向 Page 类型。 |
 
 前端是 UI 层。它通过 `NamedPipeBackendClient` 请求 Backend Service，通过 `BackendServiceManager` 触发服务安装/修复等 UAC bootstrapper 操作，通过 `ContextMenuDeepAnalysisService` 启动 ProbeHost。前端不应该直接执行高权限注册表操作，也不应该直接加载第三方 Shell Extension DLL。
+外部变化或一致性提示的“忽略/确认”按钮只有在后端 `AcknowledgeItemState` 成功后才在当前界面隐藏提示；请求失败时保留提示，避免 UI 显示已确认而状态库仍未采纳。
 
 ## 3. App.xaml 资源字典与全局样式
 

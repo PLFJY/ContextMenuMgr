@@ -350,7 +350,10 @@ public sealed class NamedPipeBackendServer
                     request.RuleUserSid,
                     cancellationToken),
             PipeCommand.AcknowledgeItemState when request.ItemId is not null
-                => await _catalog.AcknowledgeItemStateAsync(request.ItemId, cancellationToken),
+                => await _catalog.AcknowledgeItemStateAsync(
+                    request.ItemId,
+                    cancellationToken,
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
                 => await HandleSetEnabledAsync(request, stream, cancellationToken),
             PipeCommand.SetShellAttribute when request.ItemId is not null && request.Enable is not null && request.ShellAttribute is not null

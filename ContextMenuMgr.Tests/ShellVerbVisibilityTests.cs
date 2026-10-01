@@ -193,6 +193,30 @@ public sealed class ShellVerbVisibilityTests
     }
 
     [Fact]
+    public void VisibleVerbAfterExternalMarkerRemoval_CapturesFreshDisableProvenance()
+    {
+        WithTestKey(key =>
+        {
+            key.SetValue("ProgrammaticAccessOnly", "previous-owner", RegistryValueKind.String);
+            var originalDisable = ShellVerbVisibilityTransaction.Create(
+                key, key.Name, requestedVisible: false, existingProvenance: null);
+            originalDisable.Apply(key);
+
+            key.DeleteValue("ProgrammaticAccessOnly");
+            Assert.True(ShellVerbVisibility.IsEnabled(key));
+
+            var repeatedDisable = ShellVerbVisibilityTransaction.Create(
+                key, key.Name, requestedVisible: false, originalDisable.Provenance);
+            repeatedDisable.Apply(key);
+
+            Assert.True(repeatedDisable.Verify(key));
+            Assert.False(ShellVerbVisibility.IsEnabled(key));
+            Assert.NotSame(originalDisable.Provenance, repeatedDisable.Provenance);
+            Assert.False(Assert.Single(repeatedDisable.Provenance!.OriginalValues).Existed);
+        });
+    }
+
+    [Fact]
     public void GenerationFingerprint_IgnoresDisplayTextButTracksCommandIdentity()
     {
         WithTestKey(key =>

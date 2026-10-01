@@ -47,6 +47,7 @@
 ## 3. 四条链路速查
 
 运行时新项隔离必须沿 monitor 的 `ItemDetected` 事件保留同一次交互用户 `BackendUserContext`，并传到 `QuarantineNewItemAsync`；否则同名 HKLM/HKU 项可能在无上下文重扫时选错物理来源。旧版 classic ShellVerb 可见性兼容恢复的签名与事务规则见 `registry-model.md`。
+常规监控快照只扫描 HKLM 与该交互用户 SID 的 Classes；隔离失败不能把未知项加入已稳定的 monitor 基准，否则后续轮询不再重试。前端确认外部变化也必须传递前端用户上下文，且确认失败时不能仅在 UI 隐藏提示。
 
 | 链路 | 用途 | 不适合做什么 | 最常见误用 |
 | --- | --- | --- | --- |

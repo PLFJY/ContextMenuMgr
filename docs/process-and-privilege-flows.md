@@ -73,6 +73,7 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务快照，并把 visibility provenance 按真实 `BackendRegistryPath` 持久化。物理 read-back、logical reconciliation 或状态库提交失败时，后端只在当前值仍等于本事务写入值时回滚；第三方并发改写产生 conflict，不会被覆盖。File-category 的有效 `open` activation path 在服务端写入前拒绝。HKU/HKLM 同名副本按前端所选物理来源处理，ProgID 与 `SystemFileAssociations` 仍是不同 mutation target；这些规则不调用 Win11 packaged handler blocked-list 流程。
 
 运行时 monitor 在交互用户上下文下发现新项时，把该次 snapshot 的 `BackendUserContext` 随 `ItemDetected` 传给 `BackendRuntime`，再原样传入 `QuarantineNewItemAsync`。缺少上下文或 HKU 物理路径与 SID 不符时隔离会拒绝执行。隔离和后续审核仍走链路 A；服务进程的 `HKCU` 不用于替代交互用户 hive。v1.7.5 classic ShellVerb 的无 provenance 隐藏值仅可通过 `registry-model.md` 所述严格物理路径签名执行一次性恢复。
+常规快照只组合 HKLM 和该次交互用户 SID 的 Classes；无交互用户上下文的监控轮询不执行隔离、纠偏或缺失清理。`AcknowledgeItemState` 也从 Pipe 客户端解析同一前端用户上下文，再采纳该用户的实际项。
 `NamedPipeBackendServer` 会在需要用户上下文时创建 `BackendUserContextResolver`。解析顺序是先从 pipe client 解析，失败时部分场景回退到交互式用户。`BackendUserContext` 包含 `Sid`、`UserName`、`ProfilePath`、`LocalAppDataPath`、`RoamingAppDataPath` 和可选 `SessionId`。
 
 必须有 frontend user context 的场景包括：
@@ -93,7 +94,7 @@ Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务�
 - 不要在 Win11 snapshot 或 Win11 blocked list 操作中丢掉 `userContext`。
 - 不要把 `RestartExplorer` 当成普通注册表写入，它需要 SessionId。
 
-`ContextMenuRegistryMonitor` 的监控循环独立于前端 pipe 连接运行。`ReconcileAndRefreshSnapshotAsync` 在每次轮询时通过 `BackendUserContextResolver.TryResolveInteractiveUserFallback()` 解析当前交互式用户上下文并传递给 `GetSnapshotAsync`。这确保 Win11 packaged COM 项和 `HKEY_USERS\<sid>` 下的 per-user 项在用户会话暂时不可用（屏幕锁定、UAC 提升、快速用户切换）时仍能被正确枚举，避免因枚举不完整导致状态库被错误清理。
+`ContextMenuRegistryMonitor` 的监控循环独立于前端 pipe 连接运行。`ReadSnapshotAsync` 在每次轮询时通过 `BackendUserContextResolver.TryResolveInteractiveUserFallback()` 解析当前交互式用户上下文并传递给 `GetSnapshotAsync`。解析失败的轮询不比较或修改内存基准；用户上下文恢复后重新建立会话基准，避免因用户 hive 暂时不可见而误清理状态或误报新增。
 
 ## 5. 链路 B：Frontend -> UAC Bootstrapper
 

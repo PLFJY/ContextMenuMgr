@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Backend.Services;
@@ -13,8 +14,10 @@ public sealed class ContextMenuRegistryMonitor
 {
     private readonly ContextMenuRegistryCatalog _catalog;
     private readonly FileLogger _logger;
-    private readonly BackendUserContextResolver _userContextResolver;
+    private readonly Func<BackendUserContext?> _resolveUserContext;
     private readonly TimeSpan _pollInterval;
+    private readonly ConcurrentQueue<(string? Sid, IReadOnlyList<ContextMenuEntry> Items)> _committedSwitches = new();
+    private readonly TaskCompletionSource _baselineEstablished = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _monitorTask;
     private volatile bool _interactiveBaselineResetRequested;
 
@@ -26,14 +29,29 @@ public sealed class ContextMenuRegistryMonitor
         FileLogger logger,
         BackendUserContextResolver userContextResolver,
         TimeSpan? pollInterval = null)
+        : this(catalog, logger, userContextResolver.TryResolveInteractiveUserFallback, pollInterval)
+    {
+    }
+
+    internal ContextMenuRegistryMonitor(
+        ContextMenuRegistryCatalog catalog,
+        FileLogger logger,
+        Func<BackendUserContext?> resolveUserContext,
+        TimeSpan? pollInterval = null)
     {
         _catalog = catalog;
         _logger = logger;
-        _userContextResolver = userContextResolver;
+        _resolveUserContext = resolveUserContext;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(5);
+        _catalog.VerifiedSwitchCommitted += (context, items) =>
+            _committedSwitches.Enqueue((context?.Sid, items));
     }
 
     public ContextMenuRegistryCatalog Catalog => _catalog;
+
+    internal Task BaselineEstablished => _baselineEstablished.Task;
+
+    internal Task Completion => _monitorTask ?? Task.CompletedTask;
 
     public event EventHandler<ContextMenuDetectedEventArgs>? ItemDetected;
 
@@ -60,7 +78,9 @@ public sealed class ContextMenuRegistryMonitor
         // Startup is an offline comparison boundary. Do not silently reconcile
         // disabled-to-enabled drift here: rule 5 requires both switch directions
         // to remain visible as Modified until the user handles them.
+        ClearCommittedSwitches();
         var initialScan = await ReadSnapshotAsync(cancellationToken);
+        var baselineSid = initialScan.UserContext?.Sid;
         var knownItems = initialScan.Items
             .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
             .ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
@@ -73,6 +93,7 @@ public sealed class ContextMenuRegistryMonitor
         }
 
         await _logger.LogAsync($"RegistryMonitorBaseline: VisibleItemCount={knownItems.Count}.", cancellationToken);
+        _baselineEstablished.TrySetResult();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -81,7 +102,26 @@ public sealed class ContextMenuRegistryMonitor
                 await _logger.LogAsync($"RegistryMonitorDebounceWait: DelayMs={_pollInterval.TotalMilliseconds}.", cancellationToken);
                 await Task.Delay(_pollInterval, cancellationToken);
 
+                if (!_interactiveBaselineResetRequested)
+                {
+                    ApplyCommittedSwitches(knownItems, baselineSid);
+                }
+
                 var currentScan = await ReadSnapshotAsync(cancellationToken);
+                if (currentScan.UserContext is null)
+                {
+                    // No user hive is authoritative while an interactive
+                    // session is unavailable. Keep the settled baseline and
+                    // retry when a user context returns.
+                    _interactiveBaselineResetRequested = true;
+                    continue;
+                }
+
+                if (!string.Equals(baselineSid, currentScan.UserContext.Sid, StringComparison.OrdinalIgnoreCase))
+                {
+                    _interactiveBaselineResetRequested = true;
+                }
+
                 var currentSnapshot = currentScan.Items
                     .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
                     .ToList();
@@ -114,6 +154,7 @@ public sealed class ContextMenuRegistryMonitor
                     }
 
                     knownItems = currentSnapshot.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+                    baselineSid = currentScan.UserContext.Sid;
 
                     // Consume SuppressNextDetection flags for items present in the
                     // new baseline so they do not suppress genuine later recreations.
@@ -140,7 +181,7 @@ public sealed class ContextMenuRegistryMonitor
                 IReadOnlySet<string> failedReconciliationIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (runtimeReenabledItems.Length > 0)
                 {
-                    var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
+                    var userContext = currentScan.UserContext;
                     var reconciliation = await _catalog.ReconcilePersistedDisabledItemsAsync(
                         runtimeReenabledItems,
                         cancellationToken,
@@ -194,6 +235,16 @@ public sealed class ContextMenuRegistryMonitor
                 // new external change on the next poll.
                 foreach (var item in currentSnapshot)
                 {
+                    // The runtime event is asynchronous. Keep a new Added item
+                    // outside knownItems until quarantine has committed its
+                    // approval state; a failed write is retried next poll.
+                    if (!knownItems.ContainsKey(item.Id)
+                        && item.CanToggle
+                        && item.DetectedChangeKind == ContextMenuChangeKind.Added)
+                    {
+                        continue;
+                    }
+
                     // Keep the preceding disabled observation after a failed
                     // corrective write so the same runtime transition is retried
                     // on the next poll.
@@ -238,7 +289,31 @@ public sealed class ContextMenuRegistryMonitor
         // when the interactive session is temporarily unavailable (screen lock,
         // UAC elevation, fast-user switch). This causes mass false-negative
         // disappearances that corrupt the persisted state baseline.
-        var userContext = _userContextResolver.TryResolveInteractiveUserFallback();
+        var userContext = _resolveUserContext();
         return (await _catalog.GetSnapshotAsync(cancellationToken, userContext), userContext);
+    }
+
+    private void ApplyCommittedSwitches(Dictionary<string, ContextMenuEntry> knownItems, string? baselineSid)
+    {
+        while (_committedSwitches.TryDequeue(out var committed))
+        {
+            if (baselineSid is null
+                || !string.Equals(committed.Sid, baselineSid, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var item in committed.Items.Where(static item => item.IsPresentInRegistry && !item.IsDeleted))
+            {
+                knownItems[item.Id] = item;
+            }
+        }
+    }
+
+    private void ClearCommittedSwitches()
+    {
+        while (_committedSwitches.TryDequeue(out _))
+        {
+        }
     }
 }
