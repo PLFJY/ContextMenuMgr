@@ -414,6 +414,9 @@
   <data name="DecisionOutcomeUncertainStatus" xml:space="preserve">
     <value>决策请求超时，暂时无法确认结果。刷新时会再次核对，请稍候再重试。</value>
   </data>
+  <data name="SetEnabledOutcomeUncertainStatus" xml:space="preserve">
+    <value>菜单更改请求超时，暂时无法确认结果。刷新时会再次核对，请稍候再重试。</value>
+  </data>
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>已在 {0:T} 收到后台通知。</value>
   </data>

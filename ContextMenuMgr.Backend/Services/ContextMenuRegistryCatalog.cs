@@ -115,14 +115,15 @@ public sealed class ContextMenuRegistryCatalog
         ContextMenuStateStore stateStore,
         RegistryBackupService backupService,
         IRegistryProtectionSettingsStore protectionSettingsStore,
-        IRegistryProtectionTargetAccessor registryProtectionTargetAccessor)
+        IRegistryProtectionTargetAccessor registryProtectionTargetAccessor,
+        Windows11ContextMenuCatalog? windows11Catalog = null)
     {
         _logger = logger;
         _stateStore = stateStore;
         _backupService = backupService;
         _protectionSettingsStore = protectionSettingsStore;
         _registryProtectionTargetAccessor = registryProtectionTargetAccessor;
-        _windows11Catalog = new Windows11ContextMenuCatalog(logger);
+        _windows11Catalog = windows11Catalog ?? new Windows11ContextMenuCatalog(logger);
         _officeCoexistenceDetector = new OfficeSuiteCoexistenceDetector(logger);
     }
 
@@ -142,6 +143,72 @@ public sealed class ContextMenuRegistryCatalog
                 allowBaselineInitialization: userContext is not null,
                 cancellationToken),
             cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ContextMenuEntry>> GetClassicSnapshotAsync(
+        CancellationToken cancellationToken, BackendUserContext? userContext, bool persistUpdates = false)
+        => await BuildSnapshotAsync(
+            await EnumerateActualEntriesAsync(cancellationToken, userContext, includeWindows11: false),
+            static state => MonitoredStableRootPaths.Contains(state.SourceRootPath) && !state.IsWindows11ContextMenu,
+            persistDiscoveredStates: false,
+            persistSnapshotUpdates: persistUpdates,
+            RegularBaselineMarkerId,
+            allowBaselineInitialization: false,
+            cancellationToken);
+
+    public Task<PipeResponse> GetContextMenuItemStateAsync(
+        string itemId, ContextMenuEntry original, CancellationToken cancellationToken, BackendUserContext? userContext)
+        => RunPersistentStateOperationAsync(async () =>
+        {
+            if (!string.Equals(itemId, original.Id, StringComparison.OrdinalIgnoreCase))
+                return CreateFailure("The requested item identity does not match its source.");
+
+            if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
+            {
+                var special = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+                    .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+                return new PipeResponse { Success = true, Item = special, Message = "Item state loaded." };
+            }
+
+            if (original.IsWindows11ContextMenu)
+            {
+                var win11 = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+                    .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+                return new PipeResponse { Success = true, Item = win11, Message = win11 is null ? "The original item is missing." : "Item state loaded." };
+            }
+
+            if (original.EntryKind is not (ContextMenuEntryKind.ShellVerb or ContextMenuEntryKind.ShellExtension)
+                || string.IsNullOrWhiteSpace(original.BackendRegistryPath))
+                return CreateFailure("The requested classic item has no physical source.");
+
+            var candidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
+            var sourcePrefix = GetSourceHivePrefix(original.BackendRegistryPath);
+            var sourceCandidates = candidates.Where(entry =>
+                string.Equals(GetSourceHivePrefix(entry.BackendRegistryPath), sourcePrefix, StringComparison.OrdinalIgnoreCase)
+                && entry.EntryKind == original.EntryKind
+                && (original.EntryKind != ContextMenuEntryKind.ShellVerb
+                    || string.Equals(entry.BackendRegistryPath, original.BackendRegistryPath, StringComparison.OrdinalIgnoreCase))
+                && (original.EntryKind != ContextMenuEntryKind.ShellExtension
+                    || string.Equals(entry.HandlerClsid, original.HandlerClsid, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+            if (sourceCandidates.Length == 0)
+                return new PipeResponse { Success = true, Message = "The original physical registry source no longer exists." };
+
+            var projection = await BuildSnapshotAsync(sourceCandidates,
+                state => string.Equals(state.Id, itemId, StringComparison.OrdinalIgnoreCase),
+                persistDiscoveredStates: false, persistSnapshotUpdates: false,
+                baselineMarkerId: null, allowBaselineInitialization: false, cancellationToken);
+            return new PipeResponse { Success = true,
+                Item = projection.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase)),
+                Message = "Item state loaded." };
+        }, cancellationToken);
+
+    private static string GetSourceHivePrefix(string path)
+    {
+        var parts = path.Split('\\');
+        return parts.Length > 1 && parts[0].Equals("HKEY_USERS", StringComparison.OrdinalIgnoreCase)
+            ? $"{parts[0]}\\{parts[1]}"
+            : parts[0];
     }
 
     /// <summary>
@@ -713,7 +780,12 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         preSnapshotStates ??= enable ? await _stateStore.LoadAsync(cancellationToken) : null;
-        var snapshot = resolvedSnapshot ?? await GetSnapshotAsync(cancellationToken, userContext);
+        var isWindows11Target = fallbackItem?.IsWindows11ContextMenu == true
+            || itemId.StartsWith("win11|", StringComparison.OrdinalIgnoreCase)
+            || itemId.StartsWith("win11-system|", StringComparison.OrdinalIgnoreCase);
+        var snapshot = resolvedSnapshot ?? (isWindows11Target
+            ? await GetSnapshotAsync(cancellationToken, userContext)
+            : await GetClassicSnapshotAsync(cancellationToken, userContext, persistUpdates: userContext is not null));
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
@@ -756,6 +828,16 @@ public sealed class ContextMenuRegistryCatalog
                 $"SceneItemPhysicalResolutionFailed: ItemId={itemId}, RequestedEnabled={enable}, RegularSnapshotMiss=True, FallbackSupplied={fallbackItem is not null}, FallbackBackendRegistryPath={fallbackItem?.BackendRegistryPath ?? "<none>"}, PhysicalCandidateCount=0, Reason=NoValidatedFallbackOrPhysicalCandidate.",
                 cancellationToken);
             return CreateFailure($"Menu item '{itemId}' was not found.");
+        }
+
+        if (fallbackItem is { IsWindows11ContextMenu: false }
+            && !string.IsNullOrWhiteSpace(fallbackItem.BackendRegistryPath))
+        {
+            var sourceState = await GetContextMenuItemStateAsync(itemId, fallbackItem, cancellationToken, userContext);
+            if (!sourceState.Success || sourceState.Item is null)
+                return CreateFailure("The selected physical registry source no longer exists; no mutation was attempted.",
+                    fallbackItem, PipeErrorCodes.RegistryMutationVerificationFailed);
+            item = sourceState.Item;
         }
 
         if (item.IsDeleted)
@@ -896,7 +978,9 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             physicalVerificationSucceeded = true;
-            var postWriteSnapshot = await GetReadOnlySnapshotAsync(cancellationToken, userContext);
+            var postWriteSnapshot = item.IsWindows11ContextMenu
+                ? await GetReadOnlySnapshotAsync(cancellationToken, userContext)
+                : await GetClassicSnapshotAsync(cancellationToken, userContext);
             var refreshedLogical = postWriteSnapshot
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
             var refreshed = refreshedLogical;
@@ -2959,7 +3043,7 @@ public sealed class ContextMenuRegistryCatalog
         return true;
     }
 
-    private async Task<IReadOnlyList<ContextMenuEntry>> EnumerateActualEntriesAsync(CancellationToken cancellationToken, BackendUserContext? userContext = null)
+    private async Task<IReadOnlyList<ContextMenuEntry>> EnumerateActualEntriesAsync(CancellationToken cancellationToken, BackendUserContext? userContext = null, bool includeWindows11 = true)
     {
         var results = new List<ContextMenuEntry>();
         // Regular monitoring is scoped to the frontend/interactive user. A
@@ -2979,7 +3063,7 @@ public sealed class ContextMenuRegistryCatalog
             results.Add(recycleBinPinToHomeEntry);
         }
 
-        if (_windows11Catalog.IsSupported)
+        if (includeWindows11 && _windows11Catalog.IsSupported)
         {
             results.AddRange(await _windows11Catalog.EnumerateEntriesAsync(cancellationToken, userContext));
         }

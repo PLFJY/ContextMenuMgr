@@ -428,3 +428,7 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 | 全局搜索搜得到但不跳转 | `ShellViewModel.cs`、`GlobalSearchNavigationFilterService.cs`、目标页面 ViewModel | `frontend-debug.log` 中 `GlobalSearchOpenResult`、`GlobalSearchFilterRequested` | 只导航，没消费 pending filter 或 target page type 不匹配。 |
 | 主题启动时不生效 | `FrontendThemeService.cs`、`SettingsPageViewModel.cs` | `frontend-debug.log` 中 `ThemeStartupInitialize` | 设置服务没加载、System watcher 状态和显式主题混用。 |
 | 传统 Shell Extension 开关影响其它分类 | `ContextMenuRegistryCatalog.cs`、`ContextMenuStateStore.cs` | `backend.log` 中 `ClassicShellExtensionMove*`、`ClassicShellExtensionDuplicateAutoRepair*` | 误把注册项状态当作 CLSID 全局 Blocked 状态；确认 active/disabled sibling container、key 最后写入时间和 frontend SID hive。 |
+
+## Ordinary toggle timeout behavior
+
+`NamedPipeBackendClient` opens an independent pipe per request; slow WPS approval refreshes do not queue user toggles in the frontend. Ordinary `SetEnabled` has a 20-second response budget. A timeout means the outcome needs verification, not that the registry write failed: the frontend queries `GetContextMenuItemState` for the original physical source and uses the returned authoritative item. A confirmed old state reverts the toggle; a confirmed requested state succeeds; an unavailable result is shown as uncertain and prevents another toggle until a notification or refresh updates that item. `RecentClientOperationCache` keeps local requests in flight without time expiry, retains completed requests for 10 seconds, and removes timed-out or failed requests so late success notifications are delivered.

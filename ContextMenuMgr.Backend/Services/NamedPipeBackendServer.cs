@@ -226,51 +226,32 @@ public sealed class NamedPipeBackendServer
                 await _logger.LogAsync(BuildRequestEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
                 await _logger.LogOperationAsync(BuildOperationEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
 
-                await connection.SendAsync(
-                    new PipeEnvelope
-                    {
-                        MessageType = PipeMessageType.Response,
-                        CorrelationId = envelope.CorrelationId,
-                        Response = response
-                    },
-                    cancellationToken);
+                var deliveryFailure = await PublishAndDeliverResponseAsync(
+                    envelope.Request, response,
+                    notification => BroadcastNotificationAsync(notification, cancellationToken),
+                    () => connection.SendAsync(
+                        new PipeEnvelope
+                        {
+                            MessageType = PipeMessageType.Response,
+                            CorrelationId = envelope.CorrelationId,
+                            Response = response
+                        }, cancellationToken));
+                if (response.Success && response.Item is not null
+                    && envelope.Request.Command != PipeCommand.GetContextMenuItemState)
+                    await _logger.LogAsync($"BackendMutationNotification: CorrelationId={envelope.CorrelationId}, ClientOperationId={response.ClientOperationId}, Command={envelope.Request.Command}, ItemId={response.Item.Id}, BackendRegistryPath={response.Item.BackendRegistryPath}.", cancellationToken);
+                if (deliveryFailure is not null)
+                {
+                    var notificationPublished = response.Item is not null
+                        && envelope.Request.Command != PipeCommand.GetContextMenuItemState
+                        || response.SpecialItem is not null;
+                    await _logger.LogAsync(RuntimeLogLevel.Warning,
+                        $"DirectResponseWriteFailed: CorrelationId={envelope.CorrelationId}, ClientOperationId={response.ClientOperationId}, Command={envelope.Request.Command}, ItemId={response.Item?.Id}, NotificationBroadcastBeforeResponseFailure={notificationPublished}, Message={deliveryFailure.Message}.", CancellationToken.None);
+                    break;
+                }
                 if (!response.Success)
                 {
-                    await _logger.LogAsync(
-                        RuntimeLogLevel.Warning,
+                    await _logger.LogAsync(RuntimeLogLevel.Warning,
                         $"Pipe request {envelope.Request.Command} returned failure for {connection.Id}: {response.Message}",
-                        cancellationToken);
-                }
-
-                if (response.Success && response.Item is not null)
-                {
-                    // Successful state-changing requests are rebroadcast so other
-                    // connected surfaces can update without polling. The initiating
-                    // frontend suppresses its correlated copy and uses the response.
-                    await BroadcastNotificationAsync(
-                        new BackendNotification
-                        {
-                            Kind = PipeNotificationKind.ItemStateChanged,
-                            Item = response.Item,
-                            Message = response.Message,
-                            ClientOperationId = response.ClientOperationId,
-                            Timestamp = DateTimeOffset.UtcNow
-                        },
-                        cancellationToken);
-                }
-
-                if (response.Success && response.SpecialItem is not null)
-                {
-                    await BroadcastNotificationAsync(
-                        new BackendNotification
-                        {
-                            Kind = PipeNotificationKind.ItemStateChanged,
-                            SpecialKind = response.SpecialItem.Kind,
-                            SpecialItem = response.SpecialItem,
-                            Message = response.Message,
-                            ClientOperationId = response.ClientOperationId,
-                            Timestamp = DateTimeOffset.UtcNow
-                        },
                         cancellationToken);
                 }
             }
@@ -292,6 +273,42 @@ public sealed class NamedPipeBackendServer
             {
                 await _logger.LogAsync($"Pipe subscriber disconnected: {connection.Id}", CancellationToken.None);
             }
+        }
+    }
+
+    internal static async Task<IOException?> PublishAndDeliverResponseAsync(
+        PipeRequest request, PipeResponse response,
+        Func<BackendNotification, Task> publish,
+        Func<Task> deliver)
+    {
+        if (response.Success && response.Item is not null
+            && request.Command != PipeCommand.GetContextMenuItemState)
+            await publish(new BackendNotification
+            {
+                Kind = PipeNotificationKind.ItemStateChanged,
+                Item = response.Item,
+                Message = response.Message,
+                ClientOperationId = response.ClientOperationId,
+                Timestamp = DateTimeOffset.UtcNow
+            });
+        if (response.Success && response.SpecialItem is not null)
+            await publish(new BackendNotification
+            {
+                Kind = PipeNotificationKind.ItemStateChanged,
+                SpecialKind = response.SpecialItem.Kind,
+                SpecialItem = response.SpecialItem,
+                Message = response.Message,
+                ClientOperationId = response.ClientOperationId,
+                Timestamp = DateTimeOffset.UtcNow
+            });
+        try
+        {
+            await deliver();
+            return null;
+        }
+        catch (IOException ex) when (response.Success)
+        {
+            return ex;
         }
     }
 
@@ -356,6 +373,9 @@ public sealed class NamedPipeBackendServer
                     await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
                 => await HandleSetEnabledAsync(request, stream, cancellationToken),
+            PipeCommand.GetContextMenuItemState when request.ItemId is not null && request.Item is not null
+                => await _catalog.GetContextMenuItemStateAsync(request.ItemId, request.Item,
+                    cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetShellAttribute when request.ItemId is not null && request.Enable is not null && request.ShellAttribute is not null
                 => await _catalog.ApplyShellAttributeAsync(request.ItemId, request.ShellAttribute.Value, request.Enable.Value, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.SetDisplayText when request.ItemId is not null && request.TextValue is not null

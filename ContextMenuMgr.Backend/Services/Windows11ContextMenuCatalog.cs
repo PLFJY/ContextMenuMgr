@@ -24,9 +24,14 @@ internal sealed class Windows11ContextMenuCatalog
     private readonly PackagedContextMenuScanCache _packageScanCache;
 
     public Windows11ContextMenuCatalog(FileLogger? logger = null)
+        : this(logger, null)
+    {
+    }
+
+    internal Windows11ContextMenuCatalog(FileLogger? logger, PackagedContextMenuScanCache? packageScanCache)
     {
         _logger = logger;
-        _packageScanCache = new PackagedContextMenuScanCache(
+        _packageScanCache = packageScanCache ?? new PackagedContextMenuScanCache(
             sid => PackagedContextMenuDiscovery.FindForUser(sid, _logger, CancellationToken.None));
     }
 

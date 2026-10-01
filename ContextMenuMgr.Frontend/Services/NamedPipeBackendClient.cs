@@ -14,9 +14,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly object _notificationSync = new();
     private readonly RecentClientOperationCache _recentLocalOperations;
+    private readonly string _pipeName;
     private CancellationTokenSource? _notificationLoopCts;
     private Task? _notificationLoopTask;
     private bool _isConnected;
@@ -32,8 +32,14 @@ public sealed class NamedPipeBackendClient : IBackendClient
     }
 
     internal NamedPipeBackendClient(RecentClientOperationCache recentLocalOperations)
+        : this(recentLocalOperations, PipeConstants.PipeName)
+    {
+    }
+
+    internal NamedPipeBackendClient(RecentClientOperationCache recentLocalOperations, string pipeName)
     {
         _recentLocalOperations = recentLocalOperations;
+        _pipeName = pipeName;
     }
 
     /// <summary>
@@ -202,6 +208,18 @@ public sealed class NamedPipeBackendClient : IBackendClient
             },
             cancellationToken);
 
+        return response.Item;
+    }
+
+    public async Task<ContextMenuEntry?> GetContextMenuItemStateAsync(
+        string itemId, ContextMenuEntry item, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest
+        {
+            Command = PipeCommand.GetContextMenuItemState,
+            ItemId = itemId,
+            Item = item
+        }, cancellationToken);
         return response.Item;
     }
 
@@ -778,13 +796,12 @@ public sealed class NamedPipeBackendClient : IBackendClient
             throw new OperationCanceledException("The backend client is shutting down.");
         }
 
-        await _sendLock.WaitAsync(cancellationToken);
         request = PrepareRequestForSend(request);
         var stopwatch = Stopwatch.StartNew();
         var correlationId = Guid.Empty;
         try
         {
-            using var stream = new NamedPipeClientStream(".", PipeConstants.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var stream = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await stream.ConnectAsync(2000, cancellationToken);
             stream.ReadMode = PipeTransmissionMode.Byte;
 
@@ -795,6 +812,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
             };
 
             correlationId = Guid.NewGuid();
+            FrontendDebugLog.Info("NamedPipeBackendClient",
+                $"FrontendRequestStarted: CorrelationId={correlationId}, ClientOperationId={request.ClientOperationId}, Command={request.Command}, ItemId={request.ItemId}, QueueWaitMs=0.");
             var envelope = new PipeEnvelope
             {
                 MessageType = PipeMessageType.Request,
@@ -860,6 +879,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     "FrontendOperation",
                     BuildOperationEndLog(correlationId, request, responseEnvelope.Response, stopwatch.ElapsedMilliseconds));
                 FrontendDebugLog.Info("NamedPipeBackendClient", $"SendRequestAsync <- {request.Command} succeeded.");
+                _recentLocalOperations.MarkCompleted(request.ClientOperationId);
                 return responseEnvelope.Response;
             }
         }
@@ -920,10 +940,6 @@ public sealed class NamedPipeBackendClient : IBackendClient
             FrontendDebugLog.Error("NamedPipeBackendClient", ex, $"SendRequestAsync failed for {request.Command}.");
             throw;
         }
-        finally
-        {
-            _sendLock.Release();
-        }
     }
 
     internal PipeRequest PrepareRequestForSend(PipeRequest request)
@@ -939,10 +955,10 @@ public sealed class NamedPipeBackendClient : IBackendClient
     }
 
     private static string BuildOperationStartLog(Guid correlationId, PipeRequest request)
-        => $"FrontendOperationStart: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, ItemId={request.ItemId}, SpecialKind={request.SpecialKind}, SceneKind={request.SceneKind}, Enable={request.Enable}, AutoStartEnabled={request.AutoStartEnabled}, ShowTrayIcon={request.ShowTrayIcon}, Timestamp={DateTimeOffset.UtcNow:O}.";
+        => $"FrontendOperationStart: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, ItemId={request.ItemId}, BackendRegistryPath={request.Item?.BackendRegistryPath}, SpecialKind={request.SpecialKind}, SceneKind={request.SceneKind}, Enable={request.Enable}, AutoStartEnabled={request.AutoStartEnabled}, ShowTrayIcon={request.ShowTrayIcon}, Timestamp={DateTimeOffset.UtcNow:O}.";
 
     private static string BuildOperationEndLog(Guid correlationId, PipeRequest request, PipeResponse response, long elapsedMs)
-        => $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success={response.Success}, ErrorCode={response.ErrorCode ?? "<none>"}, Message={response.Message}, ElapsedMs={elapsedMs}, HasItem={response.Item is not null}, HasSpecialItem={response.SpecialItem is not null}.";
+        => $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success={response.Success}, ErrorCode={response.ErrorCode ?? "<none>"}, Message={response.Message}, WireElapsedMs={elapsedMs}, HasItem={response.Item is not null}, HasSpecialItem={response.SpecialItem is not null}.";
 
     private async Task NotificationLoopAsync(CancellationToken cancellationToken)
     {
@@ -950,7 +966,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             try
             {
-                using var stream = new NamedPipeClientStream(".", PipeConstants.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                using var stream = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                 await stream.ConnectAsync(2000, cancellationToken);
                 stream.ReadMode = PipeTransmissionMode.Byte;
 

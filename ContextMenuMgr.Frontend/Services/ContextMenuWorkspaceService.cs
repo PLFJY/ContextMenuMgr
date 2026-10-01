@@ -31,6 +31,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly object _decisionSync = new();
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private readonly SemaphoreSlim _wpsOfficeApprovalRefreshLock = new(1, 1);
+    private readonly CancellationTokenSource _shutdownCts = new();
     private CancellationTokenSource? _wpsOfficeApprovalRefreshCts;
     private Task? _wpsOfficeApprovalRefreshTask;
     private bool _pendingApprovalBaselineInitialized;
@@ -269,7 +270,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async Task<bool> SetEnabledAsync(ContextMenuItemViewModel item, bool enable)
     {
+        if (item.IsToggleOutcomeUncertain)
+            return false;
         var isWorkspaceItem = Items.Any(existing => string.Equals(existing.Id, item.Id, StringComparison.OrdinalIgnoreCase));
+        var original = item.Entry;
 
         try
         {
@@ -286,21 +290,42 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 return false;
             }
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var updated = await _backendClient.SetEnabledAsync(item.Id, enable, cts.Token, item.Entry);
-            if (updated is not null)
+            var resolution = await SetEnabledOperationResolver.ExecuteAsync(
+                _backendClient, item.Entry, enable,
+                BackendRequestBudgets.ClassicMutation,
+                BackendRequestBudgets.MutationOutcomeVerification,
+                _shutdownCts.Token);
+            if (!ReferenceEquals(item.Entry, original) && item.Entry.IsEnabled == enable)
+                return true; // A newer authoritative notification already converged this item.
+            if (resolution.Item is { } updated)
             {
                 if (isWorkspaceItem)
                 {
                     UpsertItem(updated);
                 }
+                else
+                {
+                    item.Update(updated);
+                }
 
+            }
+            if (resolution.Outcome == SetEnabledOutcome.Uncertain)
+            {
+                if (!ReferenceEquals(item.Entry, original))
+                    return item.Entry.IsEnabled == enable;
+                item.MarkToggleOutcomeUncertain();
+                ConnectionStatus = _localization.Translate("SetEnabledOutcomeUncertainStatus");
+                await FrontendMessageBox.ShowErrorAsync(ConnectionStatus, _localization.Translate("WindowTitle"));
+                // Preserve the optimistic state until a late notification or refresh.
                 return true;
             }
-
-            throw new InvalidOperationException("The backend completed the request without returning the updated menu item.");
+            return resolution.Outcome == SetEnabledOutcome.Applied;
         }
 
+        catch (OperationCanceledException) when (_shutdownCts.IsCancellationRequested)
+        {
+            return false;
+        }
         catch (Exception ex)
         {
             FrontendDebugLog.Error(
@@ -452,7 +477,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             _decisionsInProgress.Add(itemId);
         }
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var cts = new CancellationTokenSource(BackendRequestBudgets.ApprovalDecision);
         try
         {
             var updated = await _backendClient.ApplyDecisionAsync(itemId, decision, cts.Token);
@@ -820,6 +845,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async ValueTask DisposeAsync()
     {
+        _shutdownCts.Cancel();
         _wpsOfficeApprovalRefreshCts?.Cancel();
         if (_wpsOfficeApprovalRefreshTask is not null)
         {
@@ -836,6 +862,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _wpsOfficeApprovalRefreshLock.Dispose();
         _backendClient.NotificationReceived -= OnBackendNotificationReceived;
         await _backendClient.DisposeAsync();
+        _shutdownCts.Dispose();
     }
 
     private void StartWpsOfficeApprovalRefreshLoop()

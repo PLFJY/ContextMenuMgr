@@ -26,6 +26,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private readonly Func<ContextMenuItemViewModel, string, Task<bool>>? _setCommandTextAsync;
     private readonly Func<ContextMenuItemViewModel, Task<bool>>? _acknowledgeItemStateAsync;
     private bool _suppressEnabledSync;
+    private long _authoritativeVersion;
     private bool _suppressAttributeSync;
     private string _detectedChangeSignature = string.Empty;
     private string _consistencyIssueSignature = string.Empty;
@@ -347,6 +348,10 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsToggleBusy { get; private set; }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggle))]
+    public partial bool IsToggleOutcomeUncertain { get; private set; }
+
     /// <summary>
     /// Gets or sets a value indicating whether attributes Busy.
     /// </summary>
@@ -439,7 +444,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanReviewApproval => IsPendingApproval && IsPresentInRegistry && !IsDeleted;
 
-    public bool CanToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry && !IsToggleBusy;
+    public bool CanToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry && !IsToggleBusy && !IsToggleOutcomeUncertain;
 
     public bool ShowToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry;
 
@@ -573,7 +578,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (IsToggleBusy)
+        if (IsToggleBusy || IsToggleOutcomeUncertain)
         {
             RevertEnabled(oldValue);
             return;
@@ -609,6 +614,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Update(ContextMenuEntry entry)
     {
+        _authoritativeVersion++;
+        IsToggleOutcomeUncertain = false;
         Entry = entry;
         ApplyEntry(entry);
         OnPropertyChanged(nameof(DisplayName));
@@ -646,6 +653,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowToggle));
         OnPropertyChanged(nameof(CanManageSubMenuItems));
     }
+
+    public void MarkToggleOutcomeUncertain() => IsToggleOutcomeUncertain = true;
 
     private void ApplyEntry(ContextMenuEntry entry)
     {
@@ -712,16 +721,20 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
         try
         {
+            var versionAtSubmission = _authoritativeVersion;
             await ToggleBusyPresentation.WaitForFirstFrameAsync();
             var success = await _setEnabledAsync(this, newValue);
-            if (!success)
+            if (!success && _authoritativeVersion == versionAtSubmission)
             {
                 RevertEnabled(oldValue);
             }
         }
         catch
         {
-            RevertEnabled(oldValue);
+            // A late authoritative notification can arrive before the original
+            // task unwinds. Never overwrite a newer backend state here.
+            if (Entry.IsEnabled != IsEnabled)
+                RevertEnabled(Entry.IsEnabled);
         }
         finally
         {

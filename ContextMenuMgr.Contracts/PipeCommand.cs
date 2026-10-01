@@ -57,5 +57,6 @@ public enum PipeCommand
     RepairRuntimeDataAcl,
     GetOfficeSuiteCoexistenceStatus,
     GetWpsOfficePendingApprovals,
-    SetDocumentIconProvider
+    SetDocumentIconProvider,
+    GetContextMenuItemState
 }

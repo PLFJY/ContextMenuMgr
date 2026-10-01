@@ -196,19 +196,28 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ToggleItemAsync(ContextMenuItemViewModel? item)
     {
-        if (item is null)
+        if (item is null || item.IsToggleOutcomeUncertain)
         {
             return;
         }
 
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var updated = await _backendClient.SetEnabledAsync(item.Id, !item.IsEnabled, cts.Token);
-            if (updated is not null)
+            var resolution = await SetEnabledOperationResolver.ExecuteAsync(
+                _backendClient, item.Entry, !item.IsEnabled,
+                BackendRequestBudgets.ClassicMutation,
+                BackendRequestBudgets.MutationOutcomeVerification);
+            if (resolution.Item is { } updated)
             {
                 UpdateItem(updated);
-                ConnectionStatus = _localization.Format("ItemUpdatedStatus", updated.DisplayName, DateTime.Now);
+                ConnectionStatus = resolution.Outcome == SetEnabledOutcome.Applied
+                    ? _localization.Format("ItemUpdatedStatus", updated.DisplayName, DateTime.Now)
+                    : _localization.Format("ItemUpdateFailedStatus", item.DisplayName, "The requested state was not applied.");
+            }
+            else if (resolution.Outcome == SetEnabledOutcome.Uncertain)
+            {
+                item.MarkToggleOutcomeUncertain();
+                ConnectionStatus = _localization.Translate("SetEnabledOutcomeUncertainStatus");
             }
         }
         catch (Exception ex)

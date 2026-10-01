@@ -292,3 +292,7 @@ Registry Write Protection 的设置值不是“用户最后一次点击的值”
 | 用同一种开关策略处理 `ShellVerb` 和 `ShellExtension` | 按 `EntryKind` 和路径分流。 |
 | 把 Registry Write Protection 当普通禁用 | Registry Write Protection 是权限保护功能，不是菜单项状态。 |
 | 假设状态库和注册表永远一致 | 外部安装器、系统更新和手工修改都会造成短暂不一致。 |
+
+## Classic mutation snapshot isolation
+
+Ordinary classic `SetEnabled` resolves and verifies ShellVerb/ShellExtension changes from classic monitored roots and persisted classic state. Its pre-write and post-write projections do not enumerate Windows 11 packaged COM or CommandStore entries. The pre-write projection still repairs duplicate active/disabled handler containers and updates established classic state, but cannot establish a partial first baseline. Win11 item IDs continue through the Win11 catalog. Scene-only File Types items still use `FindEntriesByIdAsync` and the existing physical reconciliation. The targeted outcome query also uses `FindEntriesByIdAsync`, preserves the original HKLM or frontend `HKEY_USERS\<SID>` source, and merges its state under `_persistentStateGate`.

@@ -254,3 +254,7 @@ ProbeHost 的边界：
 | TrayHost 不出现 | `backend.log` 的 `TryEnsureTrayHost` 相关记录，`trayhost.log`，确认 `StartWithWindows` policy。 |
 | Restart Explorer 无效 | `backend.log` 的 `RestartExplorerRequest`，检查 `SessionId` 和 `KilledCount`。 |
 | Deep Analysis 失败 | `frontend-debug.log` 的 `ProbeHostSelection`、`ProbeHostExit`、`ProbeHostCapturedOutput` 和结果 diagnostics。 |
+
+## Issue #125: ordinary toggle request and outcome flow
+
+Frontend pipe requests use separate connections and are not globally serialized. The backend catalog's `_persistentStateGate` serializes state-store-sensitive work, including `SetEnabled` and `GetContextMenuItemState`. The latter resolves the pipe client's `BackendUserContext`, verifies the original physical HKLM or `HKEY_USERS\<SID>` source and handler identity, and returns a state-store-merged item without scanning Win11 packages for a classic item. It reports a missing original source instead of switching to another hive. `SetEnabled` uses a 20-second response budget, followed by a separate 10-second authoritative query if the response times out. Shutdown cancellation skips that query. Approval decisions retain their 45-second budget and existing verification flow. Successful mutation notifications carry `ClientOperationId` and are published before direct response delivery, so a closed request pipe cannot suppress the state change broadcast.

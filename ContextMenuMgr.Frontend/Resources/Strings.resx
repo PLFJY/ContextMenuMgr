@@ -414,6 +414,9 @@
   <data name="DecisionOutcomeUncertainStatus" xml:space="preserve">
     <value>The decision timed out and its result could not be confirmed. The item will be checked on refresh; please wait before trying again.</value>
   </data>
+  <data name="SetEnabledOutcomeUncertainStatus" xml:space="preserve">
+    <value>The menu change timed out and its result could not be confirmed. The item will be checked on refresh; please wait before trying again.</value>
+  </data>
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>Received backend notification at {0:T}.</value>
   </data>

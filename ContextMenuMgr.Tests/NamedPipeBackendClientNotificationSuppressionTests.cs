@@ -1,5 +1,7 @@
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
+using System.IO.Pipes;
+using System.Text.Json;
 using Xunit;
 
 namespace ContextMenuMgr.Tests;
@@ -147,8 +149,66 @@ public sealed class NamedPipeBackendClientNotificationSuppressionTests
 
         var operationId = Guid.NewGuid();
         cache.Register(operationId);
+        cache.MarkCompleted(operationId);
         now = now.AddSeconds(11);
         Assert.False(cache.Contains(operationId));
+    }
+
+    [Fact]
+    public void LongRunningLocalOperation_StaysSuppressedUntilTimeoutThenForwardsLateSuccess()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cache = new RecentClientOperationCache(() => now);
+        var client = new NamedPipeBackendClient(cache);
+        var id = Guid.NewGuid();
+        cache.Register(id);
+        now = now.AddSeconds(46);
+        Assert.False(client.TryForwardSubscriptionNotification(new BackendNotification { ClientOperationId = id }));
+        cache.Remove(id);
+        Assert.True(client.TryForwardSubscriptionNotification(new BackendNotification { ClientOperationId = id }));
+    }
+
+    [Fact]
+    public async Task SlowBackgroundRequest_DoesNotDelayIndependentSetEnabledSend()
+    {
+        var pipeName = $"ContextMenuMgr.Test.{Guid.NewGuid():N}";
+        var firstReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+
+        async Task ServeAsync(TaskCompletionSource received, Task? hold, ContextMenuEntry? item)
+        {
+            await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 2,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            await server.WaitForConnectionAsync(timeout.Token);
+            using var reader = new StreamReader(server, leaveOpen: true);
+            using var writer = new StreamWriter(server, leaveOpen: true) { AutoFlush = true };
+            var line = await reader.ReadLineAsync(timeout.Token);
+            var request = JsonSerializer.Deserialize<PipeEnvelope>(line!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            received.SetResult();
+            if (hold is not null) await hold.WaitAsync(timeout.Token);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeEnvelope
+            {
+                MessageType = PipeMessageType.Response,
+                CorrelationId = request.CorrelationId,
+                Response = new PipeResponse { Success = true, Item = item, Items = [] }
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        }
+
+        var slowServer = ServeAsync(firstReceived, releaseFirst.Task, null);
+        var fastServer = ServeAsync(secondReceived, null,
+            new ContextMenuEntry { Id = "test|item", IsEnabled = false });
+        var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        var slow = client.GetWpsOfficePendingApprovalsAsync(timeout.Token);
+        await firstReceived.Task.WaitAsync(timeout.Token);
+        var fast = client.SetEnabledAsync("test|item", false, timeout.Token);
+        await secondReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(slow.IsCompleted);
+        Assert.False((await fast)!.IsEnabled);
+        releaseFirst.SetResult();
+        await slow;
+        await Task.WhenAll(slowServer, fastServer);
     }
 
     [Fact]

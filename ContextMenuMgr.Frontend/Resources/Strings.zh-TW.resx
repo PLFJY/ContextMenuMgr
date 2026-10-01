@@ -414,6 +414,9 @@
   <data name="DecisionOutcomeUncertainStatus" xml:space="preserve">
     <value>決策請求逾時，暫時無法確認結果。重新整理時會再次核對，請稍候再重試。</value>
   </data>
+  <data name="SetEnabledOutcomeUncertainStatus" xml:space="preserve">
+    <value>功能表變更請求逾時，暫時無法確認結果。重新整理時會再次核對，請稍候再重試。</value>
+  </data>
   <data name="NotificationReceivedStatus" xml:space="preserve">
     <value>已於 {0:T} 收到後端通知。</value>
   </data>

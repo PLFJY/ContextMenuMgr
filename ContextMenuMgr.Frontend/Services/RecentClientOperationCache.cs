@@ -10,7 +10,7 @@ internal sealed class RecentClientOperationCache
     private static readonly TimeSpan Retention = TimeSpan.FromSeconds(10);
 
     private readonly object _sync = new();
-    private readonly Dictionary<Guid, DateTimeOffset> _operationExpiry = [];
+    private readonly Dictionary<Guid, (bool InFlight, DateTimeOffset Timestamp)> _operations = [];
     private readonly Func<DateTimeOffset> _utcNow;
 
     public RecentClientOperationCache(Func<DateTimeOffset>? utcNow = null)
@@ -29,13 +29,26 @@ internal sealed class RecentClientOperationCache
         {
             var now = _utcNow();
             PruneExpired(now);
-            _operationExpiry[id] = now + Retention;
+            _operations[id] = (true, now);
 
-            while (_operationExpiry.Count > MaximumEntries)
+            while (_operations.Count > MaximumEntries)
             {
-                var oldest = _operationExpiry.MinBy(pair => pair.Value).Key;
-                _operationExpiry.Remove(oldest);
+                // Prefer evicting a completed entry. An in-flight entry must not
+                // age out merely because its backend operation takes a long time.
+                var oldest = _operations.OrderBy(pair => pair.Value.InFlight)
+                    .ThenBy(pair => pair.Value.Timestamp).First().Key;
+                _operations.Remove(oldest);
             }
+        }
+    }
+
+    public void MarkCompleted(Guid? operationId)
+    {
+        if (operationId is not { } id || id == Guid.Empty) return;
+        lock (_sync)
+        {
+            if (_operations.ContainsKey(id))
+                _operations[id] = (false, _utcNow() + Retention);
         }
     }
 
@@ -48,7 +61,7 @@ internal sealed class RecentClientOperationCache
 
         lock (_sync)
         {
-            _operationExpiry.Remove(id);
+            _operations.Remove(id);
         }
     }
 
@@ -63,7 +76,7 @@ internal sealed class RecentClientOperationCache
         {
             var now = _utcNow();
             PruneExpired(now);
-            return _operationExpiry.ContainsKey(id);
+            return _operations.ContainsKey(id);
         }
     }
 
@@ -71,7 +84,7 @@ internal sealed class RecentClientOperationCache
     {
         lock (_sync)
         {
-            _operationExpiry.Clear();
+            _operations.Clear();
         }
     }
 
@@ -82,19 +95,19 @@ internal sealed class RecentClientOperationCache
             lock (_sync)
             {
                 PruneExpired(_utcNow());
-                return _operationExpiry.Count;
+                return _operations.Count;
             }
         }
     }
 
     private void PruneExpired(DateTimeOffset now)
     {
-        foreach (var operationId in _operationExpiry
-                     .Where(pair => pair.Value <= now)
+        foreach (var operationId in _operations
+                     .Where(pair => !pair.Value.InFlight && pair.Value.Timestamp <= now)
                      .Select(pair => pair.Key)
                      .ToArray())
         {
-            _operationExpiry.Remove(operationId);
+            _operations.Remove(operationId);
         }
     }
 }

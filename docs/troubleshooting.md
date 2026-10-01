@@ -274,3 +274,7 @@ ShellEx 开关不会自动删除它。升级自 1.7.2 时，如果一个启用�
 注册项显示，不会有普通开关，也不会自动隔离或 reconciliation。
 Windows 11 packaged context-menu 项仍使用其既有的
 blocked-list 实现。
+
+## Toggle request timed out while the registry changed
+
+For issue #125, compare `FrontendRequestStarted`, `SetEnabledTimeout`, `SetEnabledOutcomeVerificationStarted`, and `SetEnabledOutcomeVerifiedApplied` / `SetEnabledOutcomeVerifiedNotApplied` / `SetEnabledOutcomeUncertain` with backend operation logs. The 20-second response timeout is not proof of mutation failure. A later `ItemStateChanged` with the same `ClientOperationId` must reach a frontend that stopped waiting; the cache removes timed-out operations. `DirectResponseWriteFailed` with `NotificationBroadcastBeforeResponseFailure=True` means the backend completed and broadcast a successful mutation before finding the request pipe closed. Check `BackendRegistryPath` and the frontend SID when comparing physical state. A slow WPS approval request may coexist on another frontend pipe connection; backend persistent-state work still runs through its catalog gate.

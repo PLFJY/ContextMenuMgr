@@ -461,3 +461,7 @@ Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说�
 - 前端本地化规则。
 
 前端问题的排查文档要以当前 XAML 和 ViewModel 实现为准，不要只复述 WPF-UI 官方文档。
+
+## Ordinary toggle outcome verification
+
+The per-item `AsyncToggleSwitch` ProgressRing stays active throughout a `SetEnabled` request and any timeout verification. A timed-out direct response is reconciled against the original physical source before the ViewModel receives a definitive failure. An uncertain result keeps the optimistic value and disables a second toggle until a notification or refresh supplies an authoritative item. A late authoritative `Update` increments the item version so an older failed task cannot roll it back.
