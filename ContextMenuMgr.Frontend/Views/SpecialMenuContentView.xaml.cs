@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.ViewModels;
 
 namespace ContextMenuMgr.Frontend.Views;
@@ -31,6 +32,20 @@ public partial class SpecialMenuContentView : UserControl
         catch (OperationCanceledException)
         {
         }
+    }
+
+    private void OnDocumentIconProviderChecked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (DataContext is not SpecialMenuPageViewModel viewModel
+            || sender is not RadioButton { IsChecked: true } radio
+            || viewModel.IsDocumentIconProviderBusy
+            || !viewModel.ShowDocumentIconProvider
+            || !Enum.TryParse<DocumentIconProvider>(radio.Tag as string, out var provider))
+        {
+            return;
+        }
+
+        viewModel.SelectedDocumentIconProvider = provider;
     }
 
 }

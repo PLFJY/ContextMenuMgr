@@ -64,10 +64,18 @@ public partial class DetailedEditRuleViewModel : ObservableObject
 
     public string ApplyText => _localization.Translate("Apply");
 
+    public string ToggleLabel => _localization.Translate(BoolValue ? "ToggleOn" : "ToggleOff");
+
+    [ObservableProperty]
+    public partial bool IsBusy { get; private set; }
+
+    public bool CanToggle => !IsBusy;
+
     /// <summary>
     /// Gets or sets the bool Value.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     public partial bool BoolValue { get; set; }
 
     /// <summary>
@@ -82,19 +90,37 @@ public partial class DetailedEditRuleViewModel : ObservableObject
     [ObservableProperty]
     public partial string StringValue { get; set; } = string.Empty;
 
-    partial void OnBoolValueChanged(bool value)
+    partial void OnBoolValueChanged(bool oldValue, bool newValue)
     {
         if (_suppressAutoApply)
         {
             return;
         }
 
-        _ = ApplyBooleanAsync(value);
+        if (IsBusy)
+        {
+            _suppressAutoApply = true;
+            BoolValue = oldValue;
+            _suppressAutoApply = false;
+            return;
+        }
+
+        IsBusy = true;
+        _ = ApplyBooleanAsync(oldValue, newValue);
     }
 
-    [RelayCommand]
+    partial void OnIsBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanToggle));
+        ApplyCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanApply() => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanApply))]
     private async Task ApplyAsync()
     {
+        IsBusy = true;
         try
         {
             switch (EditorKind)
@@ -139,6 +165,10 @@ public partial class DetailedEditRuleViewModel : ObservableObject
                 DisplayName);
             Refresh();
         }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     /// <summary>
@@ -168,10 +198,11 @@ public partial class DetailedEditRuleViewModel : ObservableObject
         }
     }
 
-    private async Task ApplyBooleanAsync(bool value)
+    private async Task ApplyBooleanAsync(bool oldValue, bool value)
     {
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
             {
                 await _ruleService.WriteBooleanAsync(_definition, value, cts.Token);
@@ -182,8 +213,18 @@ public partial class DetailedEditRuleViewModel : ObservableObject
         catch (Exception ex)
         {
             _suppressAutoApply = true;
-            BoolValue = _ruleService.ReadBoolean(_definition);
-            _suppressAutoApply = false;
+            try
+            {
+                BoolValue = _ruleService.ReadBoolean(_definition);
+            }
+            catch
+            {
+                BoolValue = oldValue;
+            }
+            finally
+            {
+                _suppressAutoApply = false;
+            }
             if (RegistryProtectionDialog.IsRegistryProtectionError(ex))
             {
                 await RegistryProtectionDialog.ShowAsync(_localization);
@@ -193,6 +234,10 @@ public partial class DetailedEditRuleViewModel : ObservableObject
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 DisplayName);
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 

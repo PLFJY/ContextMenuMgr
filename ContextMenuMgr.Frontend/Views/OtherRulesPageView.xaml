@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:modernNavigation="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Navigation"
+    xmlns:controls="clr-namespace:ContextMenuMgr.Frontend.Controls"
     xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
@@ -215,14 +216,14 @@
                                                                     Visibility="{Binding HasTip, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                             </StackPanel>
 
-                                                            <ui:ToggleSwitch
+                                                            <controls:AsyncToggleSwitch
                                                                 Grid.Column="1"
                                                                 Margin="0,4,0,0"
                                                                 HorizontalAlignment="Right"
+                                                                Label="{Binding ToggleLabel}"
                                                                 IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                IsEnabled="{Binding CanToggle}"
-                                                                OffContent="{Binding ToggleOffText}"
-                                                                OnContent="{Binding ToggleOnText}" />
+                                                                CanToggle="{Binding CanToggle}"
+                                                                IsBusy="{Binding IsBusy}" />
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
@@ -393,6 +394,7 @@
                                                             <Border
                                                                 Margin="0,8,0,0"
                                                                 Padding="8,2"
+                                                                HorizontalAlignment="Left"
                                                                 Background="{DynamicResource AccentFillColorSecondaryBrush}"
                                                                 CornerRadius="4"
                                                                 Visibility="{Binding RequiresExplorerRestart, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -402,10 +404,13 @@
                                                                     Text="{Binding RestartExplorerHint}" />
                                                             </Border>
 
-                                                            <ui:ToggleSwitch
+                                                            <controls:AsyncToggleSwitch
                                                                 Margin="0,12,0,0"
-                                                                Content="{Binding DisplayName}"
+                                                                HorizontalAlignment="Left"
+                                                                Label="{Binding ToggleLabel}"
                                                                 IsChecked="{Binding BoolValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                CanToggle="{Binding CanToggle}"
+                                                                IsBusy="{Binding IsBusy}"
                                                                 Visibility="{Binding IsBooleanRule, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                                                             <DockPanel Margin="0,12,0,0" Visibility="{Binding IsNumberRule, Converter={StaticResource BooleanToVisibilityConverter}}">

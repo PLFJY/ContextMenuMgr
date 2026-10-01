@@ -204,9 +204,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             // The frontend works from a backend-authored snapshot so every page
             // stays consistent after a single refresh pass.
             ApplySnapshot(snapshot);
-            await RefreshWpsOfficeApprovalsAsync();
             UpdateServiceAttention(ServiceAttentionState.None);
             ConnectionStatus = _localization.Translate("ConnectedStatus");
+            // The normal menu snapshot is ready. WPS approvals are secondary data.
+            IsLoading = false;
+            await RefreshWpsOfficeApprovalsAsync();
         }
         catch (Exception ex)
         {

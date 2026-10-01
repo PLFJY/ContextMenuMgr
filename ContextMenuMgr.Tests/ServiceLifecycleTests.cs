@@ -285,17 +285,14 @@ public sealed class ServiceLifecycleTests
     }
 
     [Theory]
-    [InlineData(false, false, true, true)]
-    [InlineData(false, true, false, false)]
-    [InlineData(true, false, false, false)]
-    [InlineData(true, true, false, false)]
-    public void FrontendClosePreservesEnabledAutostart(
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    public void FrontendCloseHonorsKeepBackgroundSetting(
         bool keepBackgroundAfterClose,
-        bool autoStartOnLogin,
         bool expectedBackendShutdown,
         bool expectedTrayExit)
     {
-        var actions = FrontendCloseLifecyclePolicy.Evaluate(keepBackgroundAfterClose, autoStartOnLogin);
+        var actions = FrontendCloseLifecyclePolicy.Evaluate(keepBackgroundAfterClose);
 
         Assert.Equal(expectedBackendShutdown, actions.RequestBackendShutdown);
         Assert.Equal(expectedTrayExit, actions.RequestTrayHostExit);

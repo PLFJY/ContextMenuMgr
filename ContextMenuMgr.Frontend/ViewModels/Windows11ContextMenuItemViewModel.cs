@@ -54,6 +54,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
 
         _languageChangedHandler = (_, _) =>
         {
+            OnPropertyChanged(nameof(ToggleLabel));
             OnPropertyChanged(nameof(ToggleOnText));
             OnPropertyChanged(nameof(ToggleOffText));
             OnPropertyChanged(nameof(ContextTypesText));
@@ -138,6 +139,8 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     public string ToggleOnText => _localization.Translate("ToggleOn");
 
     public string ToggleOffText => _localization.Translate("ToggleOff");
+
+    public string ToggleLabel => _localization.Translate(IsEnabled ? "ToggleOn" : "ToggleOff");
 
     public string MachineBlockedText => _localization.Translate("Windows11MachineBlockedText");
 
@@ -230,8 +233,15 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
 
     partial void OnIsEnabledChanged(bool oldValue, bool newValue)
     {
+        OnPropertyChanged(nameof(ToggleLabel));
         if (_suppressSync || oldValue == newValue)
         {
+            return;
+        }
+
+        if (IsBusy)
+        {
+            RevertEnabled(oldValue);
             return;
         }
 
@@ -243,6 +253,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     {
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             foreach (var definition in Definitions.DistinctBy(static definition => definition.ComServer.Id ?? definition.Id))
             {
                 await _service.SetEnabledAsync(definition.Id, definition.DisplayName, newValue, CancellationToken.None);
@@ -252,15 +263,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         }
         catch (Exception ex)
         {
-            _suppressSync = true;
-            try
-            {
-                IsEnabled = oldValue;
-            }
-            finally
-            {
-                _suppressSync = false;
-            }
+            RevertEnabled(oldValue);
 
             await FrontendMessageBox.ShowErrorAsync(ex.Message, DisplayName);
         }
@@ -268,6 +271,13 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         {
             IsBusy = false;
         }
+    }
+
+    private void RevertEnabled(bool value)
+    {
+        _suppressSync = true;
+        try { IsEnabled = value; }
+        finally { _suppressSync = false; }
     }
 
     [RelayCommand(CanExecute = nameof(CanOpenFileLocation))]

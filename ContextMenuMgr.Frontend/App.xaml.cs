@@ -382,9 +382,7 @@ public partial class App : Application
         }
 
         var settings = _frontendSettingsService.Current;
-        var actions = FrontendCloseLifecyclePolicy.Evaluate(
-            settings.KeepBackgroundAfterClose,
-            settings.AutoStartOnLogin);
+        var actions = FrontendCloseLifecyclePolicy.Evaluate(settings.KeepBackgroundAfterClose);
         FrontendDebugLog.Operation(
             "App",
             $"Main window closing. KeepBackgroundAfterClose={settings.KeepBackgroundAfterClose}, StartWithWindows={settings.AutoStartOnLogin}, "

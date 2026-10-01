@@ -19,6 +19,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     private readonly LocalizationService _localization;
     private readonly GlobalSearchNavigationFilterService _navigationFilterService;
     private readonly ContextMenuApplicationIdentityService _identityService;
+    private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private bool _applyingNavigationFilter;
     private CancellationTokenSource? _rebuildCts;
     private DispatcherTimer? _appendTimer;
@@ -33,6 +34,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         _localization = localization;
         _navigationFilterService = navigationFilterService;
         _identityService = identityService;
+        _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         _workspace.Items.CollectionChanged += OnItemsChanged;
         foreach (var item in _workspace.Items)
         {
@@ -46,6 +48,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
             // header/search/loading placeholder immediately. Groups are then
             // computed and populated in chunks to keep the UI responsive while
             // the (potentially large) grouped list is built.
+            IsLoading = true;
             ScheduleRebuildGroups();
         }
     }
@@ -72,10 +75,28 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     [ObservableProperty]
     public partial bool IsNavigationFilterActive { get; private set; }
 
-    public bool IsEmpty => Groups.Count == 0 && !IsLoading;
+    public bool IsEmpty => Groups.Count == 0 && !IsLoading && !IsListLoading;
+
+    public bool IsListLoading => _loadingPresentation.IsVisible;
+
+    public bool ShowListContent => !IsListLoading && !IsEmpty;
 
     [ObservableProperty]
     public partial bool IsLoading { get; private set; }
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        _loadingPresentation.Update(value);
+        OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(ShowListContent));
+    }
+
+    private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(IsListLoading));
+        OnPropertyChanged(nameof(ShowListContent));
+        OnPropertyChanged(nameof(IsEmpty));
+    }
 
     partial void OnSearchTextChanged(string value)
     {
@@ -115,6 +136,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         catch (Exception ex)
         {
             FrontendDebugLog.Warning(nameof(ApplicationGroupsPageViewModel), $"RebuildGroups failed: {ex}");
+            if (ReferenceEquals(_rebuildCts, cts)) IsLoading = false;
         }
     }
 
@@ -155,6 +177,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
         IsLoading = false;
         OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(ShowListContent));
 
         if (groups.Length > visibleCount)
         {
@@ -220,7 +243,9 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
                 groupItems,
                 _workspace,
                 _localization));
+            IsLoading = false;
             OnPropertyChanged(nameof(IsEmpty));
+            OnPropertyChanged(nameof(ShowListContent));
             return;
         }
 
@@ -309,8 +334,33 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (sender is ContextMenuItemViewModel toggleItem
+            && e.PropertyName is (nameof(ContextMenuItemViewModel.IsEnabled)
+                or nameof(ContextMenuItemViewModel.IsToggleBusy)))
+        {
+            // Keep the click path free of group-wide scans. The busy item is
+            // already excluded by CanToggle from a concurrent batch action.
+            if (toggleItem.IsToggleBusy)
+            {
+                return;
+            }
+
+            foreach (var group in Groups.Where(group => group.Items.Contains(toggleItem)))
+            {
+                group.RefreshToggleActions();
+            }
+
+            // State labels can participate in the local search. Defer that
+            // regroup until a pending mutation finishes; unfiltered groups stay put.
+            if (!string.IsNullOrWhiteSpace(SearchText))
+            {
+                ScheduleRebuildGroups();
+            }
+
+            return;
+        }
+
         if (e.PropertyName is nameof(ContextMenuItemViewModel.UserNote)
-            or nameof(ContextMenuItemViewModel.IsEnabled)
             or nameof(ContextMenuItemViewModel.DisplayName))
         {
             if (sender is ContextMenuItemViewModel item
@@ -444,6 +494,8 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     public void Dispose()
     {
+        _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
+        _loadingPresentation.Dispose();
         _appendTimer?.Stop();
         _rebuildCts?.Cancel();
         _rebuildCts?.Dispose();
@@ -486,6 +538,16 @@ public partial class ApplicationGroupViewModel : ObservableObject
     public bool CanEnableAll => !IsDisabling && Items.Any(static item => !item.IsEnabled && item.CanToggle);
     public bool ShowEnableAll => CanEnableAll && !CanDisableAll;
     public bool CanToggleAll => CanDisableAll || CanEnableAll;
+
+    public void RefreshToggleActions()
+    {
+        OnPropertyChanged(nameof(CanDisableAll));
+        OnPropertyChanged(nameof(CanEnableAll));
+        OnPropertyChanged(nameof(ShowEnableAll));
+        OnPropertyChanged(nameof(CanToggleAll));
+        OnPropertyChanged(nameof(DisableAllText));
+        DisableAllCommand.NotifyCanExecuteChanged();
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisableAllText))]

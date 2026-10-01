@@ -1,0 +1,34 @@
+<UserControl
+    x:Class="ContextMenuMgr.Frontend.Controls.AsyncToggleSwitch"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    x:Name="Root"
+    MinWidth="90">
+    <Grid MinWidth="90" MinHeight="32">
+        <ui:ToggleSwitch
+            Margin="0,0,10,0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Center"
+            Content="{Binding Label, ElementName=Root}"
+            IsChecked="{Binding IsChecked, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            IsEnabled="{Binding CanToggle, ElementName=Root}">
+            <ui:ToggleSwitch.Style>
+                <Style BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}" TargetType="ui:ToggleSwitch">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsBusy, ElementName=Root}" Value="True">
+                            <Setter Property="Visibility" Value="Hidden" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ui:ToggleSwitch.Style>
+        </ui:ToggleSwitch>
+        <ui:ProgressRing
+            Width="22"
+            Height="22"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            IsIndeterminate="True"
+            Visibility="{Binding IsBusy, ElementName=Root, Converter={StaticResource BooleanToVisibilityConverter}}" />
+    </Grid>
+</UserControl>

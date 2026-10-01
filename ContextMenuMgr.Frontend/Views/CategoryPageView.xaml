@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:behaviors="clr-namespace:ContextMenuMgr.Frontend.Behaviors"
+    xmlns:controls="clr-namespace:ContextMenuMgr.Frontend.Controls"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
@@ -81,6 +82,7 @@
         <Grid Grid.Row="1">
             <ListBox
                 behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+                Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}"
                 Background="Transparent"
                 BorderThickness="0"
                 ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
@@ -90,17 +92,9 @@
                 ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type viewModels:ContextMenuItemViewModel}">
-                        <Border
-                            Margin="0,0,0,10"
-                            Padding="12"
-                            Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
-                            BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8">
+                        <Border>
                             <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorSecondaryBrush}" />
-                                    <Setter Property="BorderThickness" Value="1" />
+                                <Style BasedOn="{StaticResource ContextMenuItemCardStyle}" TargetType="Border">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding HasDetectedChange}" Value="True">
                                             <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
@@ -146,37 +140,8 @@
                                                     FontSize="15"
                                                     FontWeight="SemiBold"
                                                     Text="{Binding DisplayName}" />
-                                                <Border
-                                                    Height="23"
-                                                    Margin="8,0,0,0"
-                                                    Padding="8,2"
-                                                    VerticalAlignment="Center"
-                                                    CornerRadius="4">
-                                                    <Border.Style>
-                                                        <Style TargetType="Border">
-                                                            <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                                    <Setter Property="Background" Value="{DynamicResource SystemFillColorNeutralBackgroundBrush}" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Border.Style>
-                                                    <ui:TextBlock
-                                                        VerticalAlignment="Center"
-                                                        FontSize="11"
-                                                        Text="{Binding StateLabel}">
-                                                        <ui:TextBlock.Style>
-                                                            <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
-                                                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </ui:TextBlock.Style>
-                                                    </ui:TextBlock>
+                                                <Border Margin="8,0,0,0" Style="{StaticResource ContextMenuEnabledBadgeStyle}">
+                                                    <ui:TextBlock Style="{StaticResource ContextMenuEnabledBadgeTextStyle}" Text="{Binding StateLabel}" />
                                                 </Border>
                                                 <Border
                                                     Height="23"
@@ -354,7 +319,7 @@
                                     </ui:Button>
                                     <StackPanel Margin="0,15,0,8" Orientation="Horizontal">
                                         <ui:Button Width="36" Height="36" Margin="0,0,8,0" Appearance="Secondary" Command="{Binding ManageSubMenuItemsCommand}" ToolTip="{Binding ManageSubMenuItemsToolTip}" Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" Icon="{ui:SymbolIcon Symbol=Apps24}" />
-                                        <ui:ToggleSwitch MinWidth="72" VerticalAlignment="Center" Content="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanToggle}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <controls:AsyncToggleSwitch VerticalAlignment="Center" Label="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" CanToggle="{Binding CanToggle}" IsBusy="{Binding IsToggleBusy}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                     </StackPanel>
                                     <StackPanel Visibility="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <ui:Button

@@ -22,6 +22,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private readonly FrontendSettingsService _settingsService;
     private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
+    private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private readonly HashSet<string> _loggedDesktopCompatibilityItemIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _lastHideDisabledItems;
 
@@ -48,6 +49,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         _localization.LanguageChanged += OnLanguageChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _workspace.PropertyChanged += OnWorkspacePropertyChanged;
+        _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         _placeholderDebug.PropertyChanged += OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested += OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged += OnItemsCollectionChanged;
@@ -62,6 +64,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         ItemsView = itemsView;
 
         RefreshLocalizedText();
+        _loadingPresentation.Update(_workspace.IsLoading || _workspace.IsServiceBootstrapInProgress);
         RefreshListPlaceholderState();
         ApplyPendingGlobalSearchFilter();
     }
@@ -154,8 +157,9 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     public bool IsListLoading =>
         _placeholderDebug.ForceLoadingState
-        || _workspace.IsLoading
-        || _workspace.IsServiceBootstrapInProgress;
+        || _loadingPresentation.IsVisible;
+
+    public bool ShowListContent => !IsListLoading && !HasListLoadFailure && !IsListEmpty;
 
     public bool HasListLoadFailure => !IsListLoading && _workspace.HasMenuLoadFailure;
 
@@ -181,7 +185,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     {
         get
         {
-            if (IsListLoading || HasListLoadFailure)
+            if (IsListLoading || _workspace.IsLoading || _workspace.IsServiceBootstrapInProgress || HasListLoadFailure)
             {
                 return false;
             }
@@ -454,9 +458,16 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             or nameof(ContextMenuWorkspaceService.MenuLoadFailureText)
             or nameof(ContextMenuWorkspaceService.HasMenuLoadFailure))
         {
+            if (e.PropertyName is nameof(ContextMenuWorkspaceService.IsLoading)
+                or nameof(ContextMenuWorkspaceService.IsServiceBootstrapInProgress))
+            {
+                _loadingPresentation.Update(_workspace.IsLoading || _workspace.IsServiceBootstrapInProgress);
+            }
             RefreshListPlaceholderState();
         }
     }
+
+    private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e) => RefreshListPlaceholderState();
 
     private void OnPlaceholderDebugPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -583,13 +594,28 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.IsEnabled)
+            or nameof(ContextMenuItemViewModel.IsToggleBusy))
+        {
+            // The card binds directly to the item. A full CollectionView.Reset here
+            // blocks the first ProgressRing frame and recreates every item container.
+            // Only the hide-disabled filter needs reevaluation, after the write settles.
+            if (_settingsService.Current.HideDisabledItems
+                && sender is ContextMenuItemViewModel { IsToggleBusy: false })
+            {
+                ItemsView.Refresh();
+                RefreshListPlaceholderState();
+            }
+
+            return;
+        }
+
         if (e.PropertyName is nameof(ContextMenuItemViewModel.DisplayName)
             or nameof(ContextMenuItemViewModel.KeyName)
             or nameof(ContextMenuItemViewModel.RegistryPath)
             or nameof(ContextMenuItemViewModel.Subtitle)
             or nameof(ContextMenuItemViewModel.Notes)
             or nameof(ContextMenuItemViewModel.UserNote)
-            or nameof(ContextMenuItemViewModel.IsEnabled)
             or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu)
             or nameof(ContextMenuItemViewModel.IsDeleted)
             or nameof(ContextMenuItemViewModel.HasDetectedChange)
@@ -604,6 +630,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private void RefreshListPlaceholderState()
     {
         OnPropertyChanged(nameof(IsListLoading));
+        OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(HasListLoadFailure));
         OnPropertyChanged(nameof(IsListEmpty));
         OnPropertyChanged(nameof(ShowListPlaceholder));
@@ -618,6 +645,8 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         _localization.LanguageChanged -= OnLanguageChanged;
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+        _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
+        _loadingPresentation.Dispose();
         _placeholderDebug.PropertyChanged -= OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested -= OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;

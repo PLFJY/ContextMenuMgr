@@ -336,6 +336,18 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 
 ## 12. 页面筛选、占位状态与加载状态
 
+常规菜单的 `ContextMenuWorkspaceService.IsLoading` 只表示主菜单 snapshot 尚未就绪：`ApplySnapshot()` 后立即清除，再刷新次要的 WPS/Office 审核数据。SpecialMenu 的 `IsLoading` 也只表示当前列表 snapshot 加载；页面级 `IsBusy` 或单项 `IsBusy` 不能单独激活整页加载占位。
+
+列表页通过共用的 `DelayedLoadingPresentation` 将真实加载与显示状态分离：加载持续超过 140ms 才显示进度条；显示后至少保持约 250ms。新一轮状态更新会取消旧回调，ViewModel 销毁时也取消回调。显示加载占位时，列表内容折叠，空状态不显示；快加载直接显示内容，不人为延长真实 `IsLoading`。Application Groups 只在首次分组加载使用该状态，本地搜索与筛选不激活整页加载。
+
+`SpecialMenuContentView` 的加载/空状态小卡片根据进度条、图标或文字的实际高度和内边距自适应，不设置固定最小高度；它仍位于列表区域中央。
+
+普通菜单项使用 `ContextMenuItemCardStyle`，与页头的通用 `CardBorderStyle` 分开。启用/禁用状态标签共用 `ContextMenuEnabledBadgeStyle` 与文字样式：启用态为 accent 和 accent 前景，禁用态为中性色与次要文字前景，均跟随动态主题资源。
+
+后端写入型菜单开关共用 `AsyncToggleSwitch`：普通状态显示本地化的开/关，单项 Busy 时在同一布局槽显示 WPF-UI `ProgressRing` 并禁用重复操作。传统菜单、Win11、SpecialMenu、增强菜单和详细编辑布尔规则沿用各自 ViewModel 的 Busy 状态及原有失败回滚。详细编辑的数值/字符串 Apply 在写入期间也禁用重复提交。ShellNew 的图标来源使用同一个 `WrapPanel` 内互斥的两个 `RadioButton`，不设置跨视图共用的 `GroupName`；`SelectedDocumentIconProvider` 是唯一来源状态，首次读取后刷新选中绑定，写入失败恢复旧选项。
+
+开关点击后先同步设置单项 Busy，再通过 `ToggleBusyPresentation.WaitForFirstFrameAsync()` 等待至多 100ms 的两个 WPF 渲染事件（隐藏窗口有超时兜底），之后才启动后端写入。传统分类页与 Scene 页不在普通 `IsEnabled` 属性变化时对整个 `ItemsView.Refresh()`；只有“隐藏已禁用项”开启时，才在单项操作结束后刷新筛选结果。Application Groups 直接通知当前组的批量操作按钮；普通单项开关不重建所有分组，只有当前搜索可能受状态文字影响时才在操作结束后重算。这些同步列表操作曾挡住 ProgressRing 的首帧。
+
 页面内筛选和全局搜索不是同一个状态。
 
 | 功能 | 位置 | 作用 |

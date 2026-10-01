@@ -205,6 +205,7 @@ ProbeHost 的边界：
 | WinX 操作 | 链路 A | 是 | 否 | 操作用户 `%LOCALAPPDATA%\Microsoft\Windows\WinX`，`.lnk` 需要 hash。 |
 | OpenWith 操作 | 链路 A | 是 | 否 | 枚举 HKU/HKLM Classes `Applications`；新增和用户 policy 写 `HKEY_USERS\<sid>`，机器级项按真实 HKLM 路径修改。 |
 | AutoStart 运行时读写 | 链路 A | 是 | 否 | `PipeCommand.SetAutoStartEnabled` / `GetAutoStartEnabled` 写读用户 `StartWithWindows` policy，并清理旧 Run value。 |
+| 关闭前端时退出后台 | 既有 backend pipe `RequestShutdown` + TrayHost control pipe | 否 | 否 | 仅由 `KeepBackgroundAfterClose=false` 触发；`StartWithWindows` 只影响下次登录，不覆盖本次关闭选择。 |
 | 托盘图标显示策略 | 链路 A + TrayHost control pipe | 是 | 否 | `PipeCommand.SetTrayIconPolicy` 写用户 `ShowTrayIcon` policy；运行中的 TrayHost 通过 Win32 `Shell_NotifyIconW` 隐藏/显示图标。TrayHost 进程继续运行。 |
 | 安装/修复服务 | 链路 B | 是 | 否 | `install-or-repair --user-sid` 用于读取用户启动策略并决定服务启动模式。 |
 | 卸载服务 | 链路 B | 否 | 否 | elevated 一次性进程执行服务删除。 |

@@ -24,6 +24,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, bool> _winXExpandedStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _refreshSync = new();
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private Task? _refreshTask;
     private Task? _autoRefreshTask;
     private int _refreshGeneration;
@@ -52,6 +53,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         _localization = localization;
         _explorerRestartState = explorerRestartState;
         _placeholderDebug = placeholderDebug;
+        _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
         SearchLabel = _localization.Translate("SearchLabel");
@@ -165,7 +167,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     public partial DocumentIconProvider SelectedDocumentIconProvider { get; set; }
 
     [ObservableProperty]
-    public partial bool IsWpsDocumentIconProviderSelected { get; set; }
+    public partial bool IsDocumentIconProviderBusy { get; private set; }
+
+    public bool IsMicrosoftDocumentIconProviderSelected => SelectedDocumentIconProvider == DocumentIconProvider.MicrosoftOffice;
+
+    public bool IsWpsDocumentIconProviderSelected => SelectedDocumentIconProvider == DocumentIconProvider.WpsOffice;
+
+    public bool CanChangeDocumentIconProvider => ShowDocumentIconProvider && !IsDocumentIconProviderBusy;
+
+    partial void OnIsDocumentIconProviderBusyChanged(bool value) => OnPropertyChanged(nameof(CanChangeDocumentIconProvider));
 
     [ObservableProperty]
     public partial bool ShowDocumentIconProvider { get; set; }
@@ -181,6 +191,9 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsLoading { get; private set; }
+
     public bool ShowShellNewOrderLock => Kind == SpecialMenuKind.ShellNew;
 
     public bool ShowRestoreDefaults => Kind == SpecialMenuKind.SendTo;
@@ -195,13 +208,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     public string EmptyItemsText => _localization.Translate("EmptyItemsText");
 
-    public bool IsListLoading => _placeholderDebug.ForceLoadingState || IsBusy;
+    public bool IsListLoading => _placeholderDebug.ForceLoadingState || _loadingPresentation.IsVisible;
+
+    public bool ShowListContent => !IsListLoading && !IsListEmpty;
 
     public bool IsListEmpty
     {
         get
         {
-            if (IsListLoading)
+            if (IsListLoading || IsLoading)
             {
                 return false;
             }
@@ -234,6 +249,10 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         RefreshListPlaceholderState();
     }
 
+    partial void OnIsLoadingChanged(bool value) => _loadingPresentation.Update(value);
+
+    private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e) => RefreshListPlaceholderState();
+
     partial void OnIsShellNewOrderLockedChanged(bool oldValue, bool newValue)
     {
         if (_suppressShellNewLockSync || oldValue == newValue || Kind != SpecialMenuKind.ShellNew)
@@ -256,29 +275,21 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedDocumentIconProviderChanged(DocumentIconProvider oldValue, DocumentIconProvider newValue)
     {
-        if (_suppressDocumentIconProviderSync || oldValue == newValue)
+        OnPropertyChanged(nameof(IsMicrosoftDocumentIconProviderSelected));
+        OnPropertyChanged(nameof(IsWpsDocumentIconProviderSelected));
+        if (_suppressDocumentIconProviderSync || oldValue == newValue || !ShowDocumentIconProvider || IsDocumentIconProviderBusy)
         {
             return;
         }
 
-        IsWpsDocumentIconProviderSelected = newValue == DocumentIconProvider.WpsOffice;
-    }
-
-    partial void OnIsWpsDocumentIconProviderSelectedChanged(bool oldValue, bool newValue)
-    {
-        if (_suppressDocumentIconProviderSync || oldValue == newValue || !ShowDocumentIconProvider)
-        {
-            return;
-        }
-
-        var oldProvider = oldValue ? DocumentIconProvider.WpsOffice : DocumentIconProvider.MicrosoftOffice;
-        var newProvider = newValue ? DocumentIconProvider.WpsOffice : DocumentIconProvider.MicrosoftOffice;
-        ObserveFireAndForget(SetDocumentIconProviderAsync(oldProvider, newProvider), "SetDocumentIconProviderAsync");
+        IsDocumentIconProviderBusy = true;
+        ObserveFireAndForget(SetDocumentIconProviderAsync(oldValue, newValue), "SetDocumentIconProviderAsync");
     }
 
     partial void OnShowDocumentIconProviderChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowDocumentIconProviderChangedHint));
+        OnPropertyChanged(nameof(CanChangeDocumentIconProvider));
     }
 
     [RelayCommand]
@@ -320,6 +331,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     {
         if (showBusy)
         {
+            await SetLoadingAsync(true);
             await SetBusyAsync(true);
             await YieldToUiAsync();
         }
@@ -352,6 +364,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     StartAutoRefreshLoop();
                 }
             });
+
+            if (showBusy && IsCurrentRefreshGeneration(generation))
+            {
+                await SetLoadingAsync(false);
+            }
 
             await RefreshOfficeCoexistenceStatusAsync(linkedCts.Token);
         }
@@ -391,6 +408,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         {
             if (showBusy && IsCurrentRefreshGeneration(generation))
             {
+                await SetLoadingAsync(false);
                 await SetBusyAsync(false);
             }
         }
@@ -1094,6 +1112,13 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         await dispatcher.InvokeAsync(() => IsBusy = value);
     }
 
+    private async Task SetLoadingAsync(bool value)
+    {
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        if (dispatcher.CheckAccess()) IsLoading = value;
+        else await dispatcher.InvokeAsync(() => IsLoading = value);
+    }
+
     private void ApplyWinXSnapshotIncrementally(IReadOnlyList<SpecialMenuEntry> entries)
     {
         ReconcileItemsIncrementally(entries);
@@ -1371,7 +1396,10 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 try
                 {
                     SelectedDocumentIconProvider = provider;
-                    IsWpsDocumentIconProviderSelected = provider == DocumentIconProvider.WpsOffice;
+                    // The detected value can equal the enum's default, in which
+                    // case the setter does not notify the one-way radio bindings.
+                    OnPropertyChanged(nameof(IsMicrosoftDocumentIconProviderSelected));
+                    OnPropertyChanged(nameof(IsWpsDocumentIconProviderSelected));
                 }
                 finally
                 {
@@ -1398,7 +1426,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             try
             {
                 SelectedDocumentIconProvider = status?.CurrentDocumentIconProvider ?? newValue;
-                IsWpsDocumentIconProviderSelected = SelectedDocumentIconProvider == DocumentIconProvider.WpsOffice;
             }
             finally
             {
@@ -1416,7 +1443,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             try
             {
                 SelectedDocumentIconProvider = oldValue;
-                IsWpsDocumentIconProviderSelected = oldValue == DocumentIconProvider.WpsOffice;
             }
             finally
             {
@@ -1424,6 +1450,10 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
 
             await FrontendMessageBox.ShowErrorAsync(ex.Message, Title);
+        }
+        finally
+        {
+            IsDocumentIconProviderBusy = false;
         }
     }
 
@@ -1530,6 +1560,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private void RefreshListPlaceholderState()
     {
         OnPropertyChanged(nameof(IsListLoading));
+        OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));
         OnPropertyChanged(nameof(ShowListPlaceholder));
     }
@@ -1727,6 +1758,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
+        _loadingPresentation.Dispose();
         _disposeCts.Cancel();
         _backendClient.NotificationReceived -= OnNotificationReceived;
         _localization.LanguageChanged -= OnLanguageChanged;

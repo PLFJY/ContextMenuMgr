@@ -53,6 +53,8 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         ? _localization.Translate(key)
         : Entry.DisplayName;
 
+    public string ToggleLabel => _localization.Translate(IsEnabled ? "ToggleOn" : "ToggleOff");
+
     public string KeyName => Entry.KeyName;
 
     public string Subtitle => IsReadOnlyPackagedShellNew
@@ -160,6 +162,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     public partial bool IsEnabled { get; set; }
 
     [ObservableProperty]
@@ -224,6 +227,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public void RefreshLocalization()
     {
+        OnPropertyChanged(nameof(ToggleLabel));
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(ReadOnlyLabel));
@@ -289,6 +293,12 @@ public partial class SpecialMenuItemViewModel : ObservableObject
             return;
         }
 
+        if (IsBusy)
+        {
+            Revert(oldValue);
+            return;
+        }
+
         IsBusy = true;
         _ = SyncAsync(oldValue, newValue);
     }
@@ -297,6 +307,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     {
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             if (!await _setEnabledAsync(this, newValue))
             {
                 Revert(oldValue);

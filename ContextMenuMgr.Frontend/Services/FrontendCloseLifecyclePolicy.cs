@@ -6,12 +6,11 @@ internal readonly record struct FrontendCloseActions(
 
 internal static class FrontendCloseLifecyclePolicy
 {
-    public static FrontendCloseActions Evaluate(bool keepBackgroundAfterClose, bool autoStartOnLogin)
+    public static FrontendCloseActions Evaluate(bool keepBackgroundAfterClose)
     {
-        // Enabled autostart is a durable user intent. A normal foreground-window
-        // close must not stop the only component that can service the next
-        // session event and launch TrayHost.
-        var stopBackground = !keepBackgroundAfterClose && !autoStartOnLogin;
+        // Autostart controls the next login; this setting controls the current
+        // window close, including when autostart is enabled.
+        var stopBackground = !keepBackgroundAfterClose;
         return new FrontendCloseActions(stopBackground, stopBackground);
     }
 }

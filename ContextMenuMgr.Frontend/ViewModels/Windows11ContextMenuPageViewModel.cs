@@ -22,6 +22,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
     private readonly FrontendSettingsService _settingsService;
+    private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private CancellationTokenSource? _rebuildCts;
 
     /// <summary>
@@ -41,6 +42,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         _placeholderDebug = placeholderDebug;
         _globalSearchFilterService = globalSearchFilterService;
         _settingsService = settingsService;
+        _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
 
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
@@ -113,9 +115,11 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public bool IsSupported => _service.IsSupported;
 
-    public bool IsListLoading => _placeholderDebug.ForceLoadingState || IsLoading;
+    public bool IsListLoading => _placeholderDebug.ForceLoadingState || _loadingPresentation.IsVisible;
 
-    public bool IsListEmpty => !IsListLoading
+    public bool ShowListContent => !IsListLoading && !IsListEmpty;
+
+    public bool IsListEmpty => !IsListLoading && !IsLoading
         && (_placeholderDebug.ForceEmptyState || !ItemsView.Cast<object>().Any());
 
     public bool ShowListPlaceholder => IsListLoading || IsListEmpty;
@@ -198,8 +202,11 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     partial void OnIsLoadingChanged(bool value)
     {
+        _loadingPresentation.Update(value);
         RefreshListPlaceholderState();
     }
+
+    private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e) => RefreshListPlaceholderState();
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
@@ -338,6 +345,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     /// </summary>
     public void Dispose()
     {
+        _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
+        _loadingPresentation.Dispose();
         _rebuildCts?.Cancel();
         _rebuildCts?.Dispose();
         _rebuildCts = null;
@@ -408,6 +417,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     private void RefreshListPlaceholderState()
     {
         OnPropertyChanged(nameof(IsListLoading));
+        OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));
         OnPropertyChanged(nameof(ShowListPlaceholder));
     }

@@ -573,6 +573,12 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (IsToggleBusy)
+        {
+            RevertEnabled(oldValue);
+            return;
+        }
+
         if (!IsPresentInRegistry || IsDeleted)
         {
             RevertEnabled(oldValue);
@@ -706,6 +712,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             var success = await _setEnabledAsync(this, newValue);
             if (!success)
             {

@@ -78,6 +78,39 @@
                         Value="1"/>
             </Style>
 
+            <Style x:Key="ContextMenuItemCardStyle" TargetType="Border">
+                <Setter Property="Margin" Value="0,0,0,10" />
+                <Setter Property="Padding" Value="12" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorSecondaryBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+
+            <Style x:Key="ContextMenuEnabledBadgeStyle" TargetType="Border">
+                <Setter Property="Height" Value="23" />
+                <Setter Property="Padding" Value="8,2" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                        <Setter Property="Background" Value="{DynamicResource SystemFillColorNeutralBackgroundBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="ContextMenuEnabledBadgeTextStyle" BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
             <Style x:Key="ChromeTitleBarButton"
                    BasedOn="{StaticResource {x:Type ui:Button}}"
                    TargetType="{x:Type ui:Button}">

@@ -8,33 +8,38 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 public sealed partial class ShellSubMenuItemViewModel : ObservableObject
 {
     private readonly IBackendClient _backend;
+    private readonly LocalizationService _localization;
     private readonly string _parentId;
     private bool _suppress;
 
-    public ShellSubMenuItemViewModel(ShellSubMenuItem item, string parentId, IBackendClient backend)
+    public ShellSubMenuItemViewModel(ShellSubMenuItem item, string parentId, IBackendClient backend, LocalizationService localization)
     {
-        Item = item; _parentId = parentId; _backend = backend; IsEnabled = item.IsEnabled;
+        Item = item; _parentId = parentId; _backend = backend; _localization = localization; IsEnabled = item.IsEnabled;
     }
     public ShellSubMenuItem Item { get; private set; }
     public string DisplayName => Item.DisplayName;
     public string? CommandText => Item.CommandText;
     public bool IsSeparator => Item.IsSeparator;
     public bool CanToggle => Item.CanToggle && !IsBusy;
+    public string ToggleLabel => _localization.Translate(IsEnabled ? "ToggleOn" : "ToggleOff");
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
     public partial bool IsBusy { get; private set; }
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     public partial bool IsEnabled { get; set; }
     partial void OnIsEnabledChanged(bool oldValue, bool newValue)
     {
         if (_suppress || oldValue == newValue || !Item.CanToggle) return;
+        if (IsBusy) { Revert(oldValue); return; }
+        IsBusy = true;
         _ = SetEnabledAsync(oldValue, newValue);
     }
     private async Task SetEnabledAsync(bool oldValue, bool value)
     {
-        IsBusy = true;
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             var updated = await _backend.SetShellSubMenuItemEnabledAsync(_parentId, Item.Id, value, CancellationToken.None);
             if (updated is null) { Revert(oldValue); return; }
             Item = updated; _suppress = true; IsEnabled = updated.IsEnabled; _suppress = false;
@@ -48,8 +53,9 @@ public sealed partial class ShellSubMenuItemViewModel : ObservableObject
 public sealed partial class ShellSubMenuWindowViewModel : ObservableObject
 {
     private readonly IBackendClient _backend;
+    private readonly LocalizationService _localization;
     public ShellSubMenuWindowViewModel(ContextMenuEntry parent, IBackendClient backend, LocalizationService localization)
-    { Parent = parent; _backend = backend; Title = localization.Translate("ManageSubMenuItems"); LoadingText = localization.Translate("LoadingStatus"); }
+    { Parent = parent; _backend = backend; _localization = localization; Title = localization.Translate("ManageSubMenuItems"); LoadingText = localization.Translate("LoadingStatus"); }
     public ContextMenuEntry Parent { get; }
     public string ParentDisplayName => Parent.DisplayName;
     public string Title { get; }
@@ -59,7 +65,7 @@ public sealed partial class ShellSubMenuWindowViewModel : ObservableObject
     [ObservableProperty] public partial string ErrorMessage { get; private set; } = string.Empty;
     public async Task LoadAsync()
     {
-        try { foreach (var item in await _backend.GetShellSubMenuItemsAsync(Parent.Id, CancellationToken.None)) Items.Add(new ShellSubMenuItemViewModel(item, Parent.Id, _backend)); }
+        try { foreach (var item in await _backend.GetShellSubMenuItemsAsync(Parent.Id, CancellationToken.None)) Items.Add(new ShellSubMenuItemViewModel(item, Parent.Id, _backend, _localization)); }
         catch (Exception ex) { ErrorMessage = ex.Message; }
         finally { IsLoading = false; }
     }

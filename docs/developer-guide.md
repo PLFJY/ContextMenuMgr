@@ -279,7 +279,7 @@ snapshot 和开关都需要 userContext。没有用户 SID 时，`Windows11Conte
 
 TrayHost 是每用户进程，因为托盘图标、通知和通知点击激活必须出现在用户交互式桌面。服务只是负责在正确 Session 中启动它，后端通知仍通过 IPC 交给 TrayHost 后再由 `Shell_NotifyIconW` 显示。开机启动必须带用户 SID，因为服务启动模式是机器级，用户是否希望随 Windows 启动以及是否显示托盘图标是用户级。TrayHost 可以没有可见托盘图标，但进程必须继续运行。
 
-`StartWithWindows` 是用户意图，不等于系统已健康实现该意图。启用操作按以下顺序收敛：验证服务注册与 executable path，设置并回读 startup mode，配置并验证 recovery，必要时启动并等待 SCM `Running`，最后等待 backend pipe 的真实 `Ping`；只有全部成功才写用户 policy。`Running` 但 pipe 不响应不能报告成功。普通关闭前端窗口时，如果 `StartWithWindows=true`，即使 `KeepBackgroundAfterClose=false` 也不停止 Backend Service 或 TrayHost；显式托盘退出、服务停止、卸载等仍是有意停止。
+`StartWithWindows` 是用户意图，不等于系统已健康实现该意图。启用操作按以下顺序收敛：验证服务注册与 executable path，设置并回读 startup mode，配置并验证 recovery，必要时启动并等待 SCM `Running`，最后等待 backend pipe 的真实 `Ping`；只有全部成功才写用户 policy。`Running` 但 pipe 不响应不能报告成功。普通关闭前端窗口时，仅 `KeepBackgroundAfterClose` 决定当前运行的 Backend Service 和 TrayHost 是否继续运行；即使 `StartWithWindows=true`，关闭保留后台选项也会请求两者退出。`StartWithWindows` 仍决定下次登录时的启动行为。
 
 `bootstrap.log` 和 `service-startup.log` 的生命周期诊断应包含 service/executable、实际 system/service drive、start type、delayed-auto、SCM status、recovery 是否配置、当前用户 policy，以及停止原因。原因只能在可证明时写 `FrontendRequest`、`WindowsShutdown`、`Uninstall`、`ForceRepair` 等；无法证明的 SCM stop 使用 `ServiceControlManager`，无回调返回才标记 `UnexpectedProcessExit`。
 

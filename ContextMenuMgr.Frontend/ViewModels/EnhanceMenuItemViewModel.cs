@@ -38,6 +38,7 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
         {
             OnPropertyChanged(nameof(ToggleOnText));
             OnPropertyChanged(nameof(ToggleOffText));
+            OnPropertyChanged(nameof(ToggleLabel));
         };
         localization.LanguageChanged += _languageChangedHandler;
     }
@@ -70,11 +71,14 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
 
     public string ToggleOffText => _localization.Translate("ToggleOff");
 
+    public string ToggleLabel => IsEnabled ? ToggleOnText : ToggleOffText;
+
     /// <summary>
     /// Gets or sets a value indicating whether enabled.
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanToggle))]
+    [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     public partial bool IsEnabled { get; set; }
 
     /// <summary>
@@ -110,6 +114,14 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (IsBusy)
+        {
+            _suppressSync = true;
+            try { IsEnabled = oldValue; }
+            finally { _suppressSync = false; }
+            return;
+        }
+
         IsBusy = true;
         _ = SyncAsync(oldValue, newValue);
     }
@@ -118,6 +130,7 @@ public partial class EnhanceMenuItemViewModel : ObservableObject, IDisposable
     {
         try
         {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await _ruleService.SetEnabledAsync(Definition, newValue, cts.Token);
             if (_refreshAsync is not null)

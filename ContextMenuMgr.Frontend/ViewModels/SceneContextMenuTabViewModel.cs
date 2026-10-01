@@ -687,6 +687,18 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.IsEnabled)
+            or nameof(ContextMenuItemViewModel.IsToggleBusy))
+        {
+            if (_settingsService.Current.HideDisabledItems
+                && sender is ContextMenuItemViewModel { IsToggleBusy: false })
+            {
+                ItemsView.Refresh();
+            }
+
+            return;
+        }
+
         if (e.PropertyName is nameof(ContextMenuItemViewModel.DisplayName)
             or nameof(ContextMenuItemViewModel.KeyName)
             or nameof(ContextMenuItemViewModel.RegistryPath)
@@ -694,8 +706,7 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
             or nameof(ContextMenuItemViewModel.IsDeleted)
             or nameof(ContextMenuItemViewModel.HasDetectedChange)
             or nameof(ContextMenuItemViewModel.IsPendingApproval)
-            or nameof(ContextMenuItemViewModel.HasConsistencyIssue)
-            or nameof(ContextMenuItemViewModel.IsEnabled))
+            or nameof(ContextMenuItemViewModel.HasConsistencyIssue))
         {
             ItemsView.Refresh();
         }
