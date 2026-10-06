@@ -345,6 +345,9 @@
   <data name="RecycleBinPinToQuickAccess" xml:space="preserve">
     <value>Pin to Quick access</value>
   </data>
+  <data name="RecycleBinPinToStart" xml:space="preserve">
+    <value>Pin to Start</value>
+  </data>
   <data name="ExplorerCategoryName" xml:space="preserve">
     <value>Explorer blank space</value>
   </data>

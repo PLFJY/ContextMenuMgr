@@ -290,7 +290,9 @@ public sealed class ContextMenuRegistryMonitor
         // UAC elevation, fast-user switch). This causes mass false-negative
         // disappearances that corrupt the persisted state baseline.
         var userContext = _resolveUserContext();
-        return (await _catalog.GetSnapshotAsync(cancellationToken, userContext), userContext);
+        var snapshot = await _catalog.GetSnapshotAsync(cancellationToken, userContext);
+        return (snapshot.Where(static item =>
+            !string.Equals(item.Id, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase)).ToArray(), userContext);
     }
 
     private void ApplyCommittedSwitches(Dictionary<string, ContextMenuEntry> knownItems, string? baselineSid)
@@ -303,7 +305,8 @@ public sealed class ContextMenuRegistryMonitor
                 continue;
             }
 
-            foreach (var item in committed.Items.Where(static item => item.IsPresentInRegistry && !item.IsDeleted))
+            foreach (var item in committed.Items.Where(static item => item.IsPresentInRegistry && !item.IsDeleted
+                && !string.Equals(item.Id, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase)))
             {
                 knownItems[item.Id] = item;
             }

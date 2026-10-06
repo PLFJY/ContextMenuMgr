@@ -87,6 +87,7 @@ public sealed class ContextMenuRegistryCatalog
     private readonly IRegistryProtectionTargetAccessor _registryProtectionTargetAccessor;
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
     private readonly OfficeSuiteCoexistenceDetector _officeCoexistenceDetector;
+    private readonly RecycleBinPinToStartMutation _recycleBinPinToStart;
     private readonly SemaphoreSlim _persistentStateGate = new(1, 1);
     private readonly AsyncLocal<int> _persistentStateGateDepth = new();
     private readonly SemaphoreSlim _registryProtectionTransitionGate = new(1, 1);
@@ -116,7 +117,8 @@ public sealed class ContextMenuRegistryCatalog
         RegistryBackupService backupService,
         IRegistryProtectionSettingsStore protectionSettingsStore,
         IRegistryProtectionTargetAccessor registryProtectionTargetAccessor,
-        Windows11ContextMenuCatalog? windows11Catalog = null)
+        Windows11ContextMenuCatalog? windows11Catalog = null,
+        IRecycleBinPinToStartRegistry? recycleBinPinToStartRegistry = null)
     {
         _logger = logger;
         _stateStore = stateStore;
@@ -125,6 +127,7 @@ public sealed class ContextMenuRegistryCatalog
         _registryProtectionTargetAccessor = registryProtectionTargetAccessor;
         _windows11Catalog = windows11Catalog ?? new Windows11ContextMenuCatalog(logger);
         _officeCoexistenceDetector = new OfficeSuiteCoexistenceDetector(logger);
+        _recycleBinPinToStart = new RecycleBinPinToStartMutation(recycleBinPinToStartRegistry ?? new WindowsRecycleBinPinToStartRegistry());
     }
 
     /// <summary>
@@ -168,6 +171,14 @@ public sealed class ContextMenuRegistryCatalog
                 var special = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
                     .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
                 return new PipeResponse { Success = true, Item = special, Message = "Item state loaded." };
+            }
+
+            if (string.Equals(itemId, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                var states = await _stateStore.LoadAsync(cancellationToken);
+                var special = TryCreateRecycleBinPinToStartEntry(userContext, states.GetValueOrDefault(itemId));
+                return new PipeResponse { Success = true, Item = special,
+                    Message = special is null ? "The frontend user or machine registration is unavailable." : "Item state loaded." };
             }
 
             if (original.IsWindows11ContextMenu)
@@ -595,8 +606,9 @@ public sealed class ContextMenuRegistryCatalog
             // separate compatibility warning instead of claiming this physical
             // registration is effectively enabled.
             var hasLegacyGlobalShellExtensionBlock = HasLegacyGlobalShellExtensionBlock(entry);
-            var issue = GetConsistencyIssue(entry, state, hasLegacyGlobalShellExtensionBlock);
-            var changeKind = IsWpsOfficeSyntheticId(entry.Id)
+            var isPinToStart = string.Equals(entry.Id, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase);
+            var issue = isPinToStart ? null : GetConsistencyIssue(entry, state, hasLegacyGlobalShellExtensionBlock);
+            var changeKind = isPinToStart ? ContextMenuChangeKind.None : IsWpsOfficeSyntheticId(entry.Id)
                 ? state?.IsPendingApproval == true
                     ? entry.DetectedChangeKind
                     : ContextMenuChangeKind.None
@@ -625,7 +637,7 @@ public sealed class ContextMenuRegistryCatalog
 
             if (state is null)
             {
-                if (isInitializingBaseline)
+                if (isInitializingBaseline && !isPinToStart)
                 {
                     // The first persisted snapshot becomes the baseline that later
                     // runs compare against for change detection and approvals. Once
@@ -778,6 +790,8 @@ public sealed class ContextMenuRegistryCatalog
         {
             return await ApplyRecycleBinPinToHomeStateAsync(enable, cancellationToken, userContext);
         }
+        if (string.Equals(itemId, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase))
+            return await ApplyRecycleBinPinToStartStateAsync(enable, cancellationToken, userContext);
 
         preSnapshotStates ??= enable ? await _stateStore.LoadAsync(cancellationToken) : null;
         var isWindows11Target = fallbackItem?.IsWindows11ContextMenu == true
@@ -2160,6 +2174,8 @@ public sealed class ContextMenuRegistryCatalog
         ContextMenuEntry? fallbackItem,
         ContextMenuEntry? resolvedItem = null)
     {
+        if (string.Equals(itemId, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase))
+            return CreateFailure("The synthetic Pin to Start item only supports the enabled switch.");
         var item = resolvedItem;
         if (item is null)
         {
@@ -3063,6 +3079,24 @@ public sealed class ContextMenuRegistryCatalog
             results.Add(recycleBinPinToHomeEntry);
         }
 
+        if (userContext is not null)
+        {
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            var handler = _recycleBinPinToStart.GetMachineHandler();
+            if (handler is not null && TryGetFrontendSid(userContext, out var sid)
+                && _recycleBinPinToStart.IsManagedDisabled(sid, handler,
+                    FindRecycleBinPinToStartProvenance(states.GetValueOrDefault(RecycleBinPinToStartMutation.Id), sid)))
+            {
+                // These two physical keys are an implementation of one synthetic
+                // projection, not two newly discovered ordinary menu items.
+                results.RemoveAll(entry =>
+                    string.Equals(entry.BackendRegistryPath, RecycleBinPinToStartMutation.FolderPath(sid), StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(entry.BackendRegistryPath, RecycleBinPinToStartMutation.DirectoryPath(sid), StringComparison.OrdinalIgnoreCase));
+            }
+            if (TryCreateRecycleBinPinToStartEntry(userContext, states.GetValueOrDefault(RecycleBinPinToStartMutation.Id)) is { } pinToStart)
+                results.Add(pinToStart);
+        }
+
         if (includeWindows11 && _windows11Catalog.IsSupported)
         {
             results.AddRange(await _windows11Catalog.EnumerateEntriesAsync(cancellationToken, userContext));
@@ -3716,6 +3750,93 @@ public sealed class ContextMenuRegistryCatalog
             IsPresentInRegistry = true,
             Notes = "Controls whether the Recycle Bin exposes the Folder\\shell\\pintohome verb."
         };
+    }
+
+    private ContextMenuEntry? TryCreateRecycleBinPinToStartEntry(
+        BackendUserContext? userContext, PersistedContextMenuState? state)
+    {
+        if (userContext is null || !TryGetFrontendSid(userContext, out var sid)) return null;
+        var handler = _recycleBinPinToStart.GetMachineHandler();
+        if (handler is null) return null;
+        return new ContextMenuEntry
+        {
+            Id = RecycleBinPinToStartMutation.Id,
+            Category = ContextMenuCategory.RecycleBin,
+            EntryKind = ContextMenuEntryKind.ShellExtension,
+            KeyName = "PintoStartScreen",
+            DisplayName = "RecycleBinPinToStart",
+            SourceRootPath = RecycleBinPinToStartMutation.SourceRoot,
+            IsEnabled = !_recycleBinPinToStart.IsManagedDisabled(sid, handler, FindRecycleBinPinToStartProvenance(state, sid)),
+            IsPresentInRegistry = true,
+            Notes = "Synthetic Recycle Bin projection: frontend-user Folder shadow and Directory re-registration; machine Folder handler is the source."
+        };
+    }
+
+    private static bool TryGetFrontendSid(BackendUserContext userContext, out string sid)
+    {
+        sid = userContext.Sid;
+        try
+        {
+            return !string.IsNullOrWhiteSpace(sid)
+                   && string.Equals(new SecurityIdentifier(sid).Value, sid, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException) { return false; }
+    }
+
+    private static PersistedRecycleBinPinToStartProvenance? FindRecycleBinPinToStartProvenance(
+        PersistedContextMenuState? state, string sid)
+        => state?.RecycleBinPinToStartProvenances?.FirstOrDefault(record =>
+            string.Equals(record.UserSid, sid, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<PipeResponse> ApplyRecycleBinPinToStartStateAsync(
+        bool enable, CancellationToken cancellationToken, BackendUserContext? userContext)
+    {
+        if (userContext is null || !TryGetFrontendSid(userContext, out var sid))
+            return CreateFailure("The frontend user SID is required for Pin to Start.");
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        var item = TryCreateRecycleBinPinToStartEntry(userContext, states.GetValueOrDefault(RecycleBinPinToStartMutation.Id));
+        var handler = _recycleBinPinToStart.GetMachineHandler();
+        if (item is null || handler is null)
+            return CreateFailure("The machine PintoStartScreen handler is unavailable or invalid.");
+
+        var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync("RecycleBinPinToStart",
+            [RecycleBinPinToStartMutation.FolderPath(sid), RecycleBinPinToStartMutation.DirectoryPath(sid)], cancellationToken);
+        if (preflight is not null) return preflight;
+
+        var existing = FindRecycleBinPinToStartProvenance(states.GetValueOrDefault(item.Id), sid);
+        try
+        {
+            await _recycleBinPinToStart.ExecuteAsync(enable, sid, handler, existing, async provenance =>
+            {
+                if (!string.Equals(_recycleBinPinToStart.GetMachineHandler(), handler, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The machine PintoStartScreen handler changed during the mutation.");
+                var state = GetOrCreateState(states, item);
+                state.RecycleBinPinToStartProvenances ??= [];
+                state.RecycleBinPinToStartProvenances.RemoveAll(record =>
+                    string.Equals(record.UserSid, sid, StringComparison.OrdinalIgnoreCase));
+                if (provenance is not null) state.RecycleBinPinToStartProvenances.Add(provenance);
+                state.DesiredEnabled = enable;
+                state.ObservedEnabled = enable;
+                state.IsDeleted = false;
+                state.IsPendingApproval = false;
+                state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                await _stateStore.SaveAsync(states, cancellationToken);
+            });
+            var refreshed = TryCreateRecycleBinPinToStartEntry(userContext, states.GetValueOrDefault(item.Id))
+                ?? item with { IsEnabled = enable };
+            VerifiedSwitchCommitted?.Invoke(userContext, [refreshed]);
+            NotifyAssociationsChangedBestEffort("RecycleBinPinToStart");
+            return new PipeResponse { Success = true, Item = refreshed,
+                Message = $"{(enable ? "Enabled" : "Disabled")} Pin to Start." };
+        }
+        catch (Exception ex)
+        {
+            await _logger.LogAsync($"RecycleBinPinToStart failed: {ex}", CancellationToken.None);
+            return CreateFailure(ex.Message, item,
+                ex is RecycleBinPinToStartMutationException mutation
+                    ? mutation.RollbackConflict ? PipeErrorCodes.RegistryMutationRollbackConflict : PipeErrorCodes.RegistryMutationRolledBack
+                    : null);
+        }
     }
 
     private async Task<PipeResponse> ApplyRecycleBinPinToHomeStateAsync(

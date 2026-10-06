@@ -397,6 +397,8 @@ Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说�
 
 ## 14. 本地化
 
+回收站 `special:recyclebin:pintostart` 是 Windows 系统菜单项；其显示名称通过 `LocalizationService.TranslateSystem` 按交互用户的 Windows UI 语言选择资源，与应用内手动选择的语言无关。前端进程读取 Windows 用户 UI 语言，不能用 LocalSystem 服务的语言替代。
+
 `App.xaml` 中通过 `CurrentLanguage` 资源和全局 Style 给 `Window` / `Page` / `Label` / `TextBlock` 设置 `Language`。
 
 新增用户可见文本时应：

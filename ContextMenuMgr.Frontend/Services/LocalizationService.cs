@@ -65,6 +65,20 @@ public sealed class LocalizationService
     }
 
     /// <summary>
+    /// Resolves a Windows-owned label using the interactive user's Windows UI
+    /// language, independently of the application's selected language.
+    /// </summary>
+    public string TranslateSystem(string key)
+    {
+        return TranslateForSystemCulture(key, GetSystemCulture());
+    }
+
+    internal static string TranslateForSystemCulture(string key, CultureInfo systemCulture)
+    {
+        return Strings.ResourceManager.GetString(key, GetSupportedCulture(systemCulture)) ?? key;
+    }
+
+    /// <summary>
     /// Executes format.
     /// </summary>
     public string Format(string key, params object[] args)

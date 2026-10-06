@@ -345,6 +345,9 @@
   <data name="RecycleBinPinToQuickAccess" xml:space="preserve">
     <value>固定到快速访问</value>
   </data>
+  <data name="RecycleBinPinToStart" xml:space="preserve">
+    <value>固定到“开始”</value>
+  </data>
   <data name="ExplorerCategoryName" xml:space="preserve">
     <value>资源管理器空白区域</value>
   </data>

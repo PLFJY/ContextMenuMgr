@@ -81,14 +81,11 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     {
         get
         {
-            if (string.Equals(Entry.Id, "special:recyclebin:pintohome", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(Entry.DisplayName, "RecycleBinPinToQuickAccess", StringComparison.Ordinal))
-            {
-                return _localization.Translate("RecycleBinPinToQuickAccess");
-            }
-
             return Entry.Id switch
             {
+                "special:recyclebin:pintohome" when Entry.DisplayName == "RecycleBinPinToQuickAccess"
+                    => _localization.Translate("RecycleBinPinToQuickAccess"),
+                "special:recyclebin:pintostart" => _localization.TranslateSystem("RecycleBinPinToStart"),
                 "special:wps-office-association:document-formats" => _localization.Translate("WpsOfficeAssociationHijackTitle"),
                 "special:wps-office-icon:document-icons" => _localization.Translate("WpsOfficeIconHijackTitle"),
                 _ when IsWpsShellNewInjection => GetWpsShellNewInjectionTitle(),
@@ -191,12 +188,16 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanEditShellAttributes => HasOtherAttributesSection && !IsAttributesBusy;
 
-    public bool HasActionFlyout => HasOtherAttributesSection
+    public bool HasActionFlyout => !IsPinToStartSynthetic && (HasOtherAttributesSection
         || HasDetailsActions
         || CanOpenFileTypeBatchManagement
         || CanPrimaryAction
         || CanPermanentlyDelete
-        || CanDeepAnalyzeMenuItem;
+        || CanDeepAnalyzeMenuItem);
+
+    public bool IsPinToStartSynthetic => string.Equals(Entry.Id, "special:recyclebin:pintostart", StringComparison.OrdinalIgnoreCase);
+
+    public bool CanDelete => !IsPinToStartSynthetic && !IsDeleted;
 
     public bool CanEditText => Entry.EntryKind == ContextMenuEntryKind.ShellVerb
         && IsPresentInRegistry
@@ -456,7 +457,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanManageSubMenuItems))]
     public partial bool IsSubMenuLoading { get; private set; }
 
-    public bool CanPrimaryAction => IsDeleted || IsPresentInRegistry;
+    public bool CanPrimaryAction => !IsPinToStartSynthetic && (IsDeleted || IsPresentInRegistry);
 
     public bool CanPermanentlyDelete => IsDeleted && HasBackup;
 
@@ -648,6 +649,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanEditShellAttributes));
         OnPropertyChanged(nameof(HasDetailsActions));
         OnPropertyChanged(nameof(HasActionFlyout));
+        OnPropertyChanged(nameof(CanDelete));
         OnPropertyChanged(nameof(CanSearchOnline));
         OnPropertyChanged(nameof(CanToggle));
         OnPropertyChanged(nameof(ShowToggle));

@@ -15,6 +15,9 @@ public sealed class PersistedContextMenuState
     /// </summary>
     public List<PersistedShellVerbVisibilityProvenance> ShellVerbVisibilityProvenance { get; set; } = [];
 
+    /// <summary>Ownership of the two frontend-user keys used by the Recycle Bin Pin to Start projection.</summary>
+    public List<PersistedRecycleBinPinToStartProvenance> RecycleBinPinToStartProvenances { get; set; } = [];
+
     /// <summary>
     /// Per-parent disabled CommandStore references. The physical CommandStore
     /// command is intentionally not changed: the parent SubCommands value is
@@ -332,4 +335,25 @@ public sealed class PersistedRegistryValueSnapshot
     public long? IntegerValue { get; set; }
     public string? BinaryBase64 { get; set; }
     public string[]? StringArrayValue { get; set; }
+}
+
+public sealed class PersistedRecycleBinPinToStartProvenance
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string UserSid { get; set; } = string.Empty;
+    public string MachineHandlerClsid { get; set; } = string.Empty;
+    public PersistedRecycleBinRegistryKeySnapshot FolderBefore { get; set; } = new();
+    public PersistedRecycleBinRegistryKeySnapshot DirectoryBefore { get; set; } = new();
+    public PersistedRecycleBinRegistryKeySnapshot FolderManaged { get; set; } = new();
+    public PersistedRecycleBinRegistryKeySnapshot DirectoryManaged { get; set; } = new();
+    public DateTimeOffset CapturedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PersistedRecycleBinRegistryKeySnapshot
+{
+    public bool Existed { get; set; }
+    public DateTimeOffset? LastWriteUtc { get; set; }
+    public PersistedRegistryValueSnapshot DefaultValue { get; set; } = new();
+    public List<PersistedRegistryValueSnapshot> OtherValues { get; set; } = [];
+    public List<string> SubKeyNames { get; set; } = [];
 }

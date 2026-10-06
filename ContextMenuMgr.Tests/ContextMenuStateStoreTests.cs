@@ -179,6 +179,33 @@ public sealed class ContextMenuStateStoreTests
     }
 
     [Fact]
+    public async Task RecycleBinPinToStartProvenance_RoundTripsAcrossStoreReload()
+    {
+        using var fixture = new StateStoreFixture();
+        var states = CreateStates("pin-to-start", isDeleted: false);
+        states["entry"].RecycleBinPinToStartProvenances.Add(new PersistedRecycleBinPinToStartProvenance
+        {
+            UserSid = "S-1-5-21-1-2-3-1001",
+            MachineHandlerClsid = "{470C0EBD-5D73-4D58-9CED-E91E22E23282}",
+            FolderBefore = new PersistedRecycleBinRegistryKeySnapshot
+            {
+                Existed = true,
+                DefaultValue = new PersistedRegistryValueSnapshot
+                { Existed = true, Kind = (int)RegistryValueKind.ExpandString, StringValue = "%TEST%" }
+            },
+            DirectoryBefore = new PersistedRecycleBinRegistryKeySnapshot(),
+            FolderManaged = new PersistedRecycleBinRegistryKeySnapshot { Existed = true },
+            DirectoryManaged = new PersistedRecycleBinRegistryKeySnapshot { Existed = true }
+        });
+        await fixture.CreateStore().SaveAsync(states, CancellationToken.None);
+        var loaded = Assert.Single((await fixture.CreateStore().LoadAsync(CancellationToken.None))["entry"].RecycleBinPinToStartProvenances);
+        Assert.True(loaded.FolderBefore.Existed);
+        Assert.Equal((int)RegistryValueKind.ExpandString, loaded.FolderBefore.DefaultValue.Kind);
+        Assert.Equal("%TEST%", loaded.FolderBefore.DefaultValue.StringValue);
+        Assert.False(loaded.DirectoryBefore.Existed);
+    }
+
+    [Fact]
     public async Task ShellVerbVisibilityProvenance_ReloadedAfterRestart_RestoresExactRegistryState()
     {
         using var fixture = new StateStoreFixture();
@@ -243,6 +270,7 @@ public sealed class ContextMenuStateStoreTests
         var loaded = await fixture.CreateStore().LoadAsync(CancellationToken.None);
 
         Assert.Empty(loaded["entry"].ShellVerbVisibilityProvenance);
+        Assert.Empty(loaded["entry"].RecycleBinPinToStartProvenances);
     }
 
     [Fact]

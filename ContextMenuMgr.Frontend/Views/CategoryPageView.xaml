@@ -329,7 +329,7 @@
                                             CommandParameter="{Binding}"
                                             Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType=Page}}"
                                             Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                            Visibility="{Binding IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                            Visibility="{Binding CanDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <ui:Button
                                             MinWidth="88"
                                             Padding="12,5"

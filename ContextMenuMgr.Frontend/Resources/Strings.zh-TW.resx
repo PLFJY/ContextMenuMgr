@@ -345,6 +345,9 @@
   <data name="RecycleBinPinToQuickAccess" xml:space="preserve">
     <value>釘選到快速存取</value>
   </data>
+  <data name="RecycleBinPinToStart" xml:space="preserve">
+    <value>釘選到「開始」</value>
+  </data>
   <data name="ExplorerCategoryName" xml:space="preserve">
     <value>檔案總管空白區域</value>
   </data>
