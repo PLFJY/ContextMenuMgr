@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Xml.Linq;
 using ContextMenuMgr.Backend.Services;
 using Xunit;
@@ -40,6 +41,45 @@ public sealed class EnhanceMenuCommandCompilationTests
 
         Assert.Contains("Start-Process powershell.exe -Verb RunAs -Wait -PassThru", command, StringComparison.Ordinal);
         Assert.Contains("exit $process.ExitCode", command, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CopyAsPath_UsesLiteralHereStringForSelectedPath()
+    {
+        var command = CompileCommand("HKEY_CLASSES_ROOT\\AllFilesystemObjects", "CopyAsPath");
+
+        Assert.Contains("[Windows.Clipboard]::SetText(@'\n%1\n'@)", command, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"%1\"", command, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(@"D:\Downloads\Project Plan v2.docx")]
+    [InlineData(@"D:\资料\年度 总结 2026.pdf")]
+    [InlineData("D:\\test\\a'b $c `d; & (x) %y%,=#[].txt")]
+    public void CopyAsPath_PowerShellReceivesCompleteLiteralPath(string path)
+    {
+        var command = CompileCommand("HKEY_CLASSES_ROOT\\AllFilesystemObjects", "CopyAsPath");
+        const string clipboardCall = "[Windows.Clipboard]::SetText(";
+        Assert.Contains(clipboardCall, command, StringComparison.Ordinal);
+
+        // Exercise the actual command-line parsing without changing the test runner's clipboard.
+        var testCommand = command.Replace(clipboardCall, "[Console]::Write(", StringComparison.Ordinal)
+            .Replace("%1", path, StringComparison.Ordinal);
+        using var process = Process.Start(new ProcessStartInfo("powershell.exe")
+        {
+            Arguments = testCommand["powershell.exe ".Length..],
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        });
+
+        Assert.NotNull(process);
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        Assert.True(process.ExitCode == 0, error);
+        Assert.Equal(path, output);
     }
 
     [Fact]
@@ -96,7 +136,8 @@ public sealed class EnhanceMenuCommandCompilationTests
             .Descendants("Command")
             .Single();
 
-        return ContextMenuRegistryCatalog.CompileEnhanceCommandForValidation(command, "en-US");
+        return command.Attribute("Default")?.Value
+            ?? ContextMenuRegistryCatalog.CompileEnhanceCommandForValidation(command, "en-US");
     }
 
     private static string DictionaryPath => FindRepositoryFile(Path.Combine("ContextMenuMgr.Frontend", "Resources", "EnhanceMenusDic.xml"));

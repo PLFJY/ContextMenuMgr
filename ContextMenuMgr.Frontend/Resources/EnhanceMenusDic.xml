@@ -840,7 +840,7 @@ Tip属性为鼠标悬浮在开关上时的提示信息，从每个Item节点开�
           <REG_SZ MUIVerb="@shell32.dll,-30329" Icon="imageres.dll,-5302" />
         </Value>
         <SubKey>
-          <Command Default="powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command &quot;&amp; { param($p); Add-Type -AssemblyName PresentationCore; [Windows.Clipboard]::SetText($p) }&quot; &quot;%1&quot;" />
+          <Command Default="powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -Command &quot;Add-Type -AssemblyName PresentationCore; [Windows.Clipboard]::SetText(@'&#xA;%1&#xA;'@)&quot;" />
         </SubKey>
         <Tip Value="系統原生功能表項目需按住Shift顯示,&#xA;此項可以直接顯示, 路徑不帶雙引號">
           <Culture>zh-TW</Culture>
