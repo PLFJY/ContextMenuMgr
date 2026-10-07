@@ -1,0 +1,12 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling">
+    <!-- Pixel offsets retain VirtualizingStackPanel virtualization and delta-aware wheels. -->
+    <Style x:Key="ModernScrollableListBoxStyle" TargetType="ListBox"
+           BasedOn="{StaticResource {x:Type ListBox}}">
+        <Setter Property="ScrollViewer.PanningMode" Value="VerticalOnly" />
+        <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+        <Setter Property="modernScroll:ModernListScroll.IsEnabled" Value="True" />
+    </Style>
+</ResourceDictionary>

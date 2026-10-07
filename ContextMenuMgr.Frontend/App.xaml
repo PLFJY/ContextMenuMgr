@@ -12,6 +12,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <ui:ThemesDictionary Theme="Light"/>
                 <ui:ControlsDictionary/>
+                <ResourceDictionary Source="Controls/Modern/Scrolling/ModernScrollingStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <SolidColorBrush

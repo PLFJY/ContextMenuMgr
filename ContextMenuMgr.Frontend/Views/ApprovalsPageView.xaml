@@ -38,7 +38,7 @@
             </StackPanel>
         </Border>
 
-        <ListBox
+        <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
             Grid.Row="1"
             Background="Transparent"
             BorderThickness="0"

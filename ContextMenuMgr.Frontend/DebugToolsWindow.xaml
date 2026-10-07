@@ -68,7 +68,7 @@
             </StackPanel>
         </Grid>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer PanningMode="VerticalOnly" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="16">
                 <Border Style="{StaticResource CardBorderStyle}">
                     <StackPanel>

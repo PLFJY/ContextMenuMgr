@@ -103,7 +103,7 @@
                     TextElement.Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <ListBox
+            <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
                 x:Name="PART_ListBox"
                 Grid.Row="1"
                 Padding="0,0,0,6"

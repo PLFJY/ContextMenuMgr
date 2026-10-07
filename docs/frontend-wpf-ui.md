@@ -172,9 +172,43 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 当前实现的规则是：
 
 - `ModernFrame` 在内容实际呈现后重置自己的外层 `ContentScrollHost`；
-- `ModernScrollViewer` 使用可重定向的垂直偏移动画实现平滑滚轮滚动；连续滚轮输入会更新当前动画目标，而不是堆积动画；
+- `ModernScrollViewer` 与启用了 `ModernListScroll` 的模板列表共用 `WheelScrollController` / `WheelScrollPolicy`；目标始终相对实际可见 `VerticalOffset` 有界，不能无限累加旧动画目标；
 - 滚轮位于可继续滚动的页面内层 `ScrollViewer`、打开的 ComboBox 或 Popup 时，外层必须让渡输入；内层到达边界后才允许外层接管；
-- 避免触碰页面内部自己的 `ListBox`、`ListView`、`ScrollViewer`。
+- 导航 reset 只重置共享外层，不重置页面内部自己的 `ListBox`、`ListView`、`ScrollViewer`。
+
+### 7.1 三种输入路径（#131）
+
+- **触摸屏**：`ModernScrollViewer` 通过 `PanningModeProperty.OverrideMetadata` 默认使用 `VerticalOnly`，仍允许 Style / XAML 覆盖。模板列表使用共用 `ModernScrollableListBoxStyle` 设置 `ScrollViewer.PanningMode="VerticalOnly"`；独立窗口的普通 ScrollViewer 显式设置同一属性。保留 WPF 自带的手势阈值、触摸提升、惯性、`PanningRatio` 和 `PanningDeceleration`，不添加 TouchMove、不把手指移动变成滚轮事件。原生 manipulation 开始时只取消旧滚轮动画，不修改事件 Handled。
+- **Precision Touchpad / 高分辨率滚轮流**：保留 `Delta / 120.0` 的小数，不把小 delta 当一整格。非 120 整数倍 delta，或相邻事件间隔不超过 40ms 时，进入连续模式；连续模式在间隔超过 120ms 后退出。时间使用 WPF event timestamp，处理 signed tick wrap。该规则只描述输入流，不检测设备厂商；快速普通滚轮也可能进入连续模式。连续模式的未完成目标最多领先实际 viewport 一格配置距离，动画时长不超过 60ms。
+- **普通离散鼠标滚轮**：保留默认 220ms EaseOut 和可配置 multiplier / duration / easing。同向 pending movement 可以累加，但最多领先三格配置距离；一般也不超过一屏（至少保留系统配置的一格距离）。反向输入舍弃旧方向 pending target，直接从可见 offset 反向。动画目标相同时不重新启动计时，结束/卸载后解除 Rendering handler；计时使用单调 Stopwatch。
+
+一格距离使用 Windows `SystemParameters.WheelScrollLines`：正数按现有 16 DIP/line 换算，0 表示不滚动，`WHEEL_PAGESCROLL` 在 WPF int API 中为 -1，按 `ViewportHeight` 换算。page-scroll 模式的 lead 上限为一格屏幕距离，multiplier 仍生效。全部目标同时限制在 `[0, ScrollableHeight]`。`ClientAreaAnimation` 关闭、render tier 0 或 duration 0 时仍走已有立即偏移 fallback；`IsSmoothScrollingEnabled=False` 保留原生滚轮处理并取消旧动画。Ctrl / Shift 输入不被自定义滚轮路径接管。
+
+左侧导航 `PART_MenuList`、`ModernNavigationSelector`、Category / Win11 / Approvals 列表使用同一 opt-in Style。它设置 `VirtualizingPanel.ScrollUnit="Pixel"`，保留 `CanContentScroll=True` 与虚拟化，**不**全局改成 CanContentScroll=False。`ModernListScroll` 沿事件来源的 ancestor path 找到该列表模板中的 ScrollViewer，共用有界策略，不在每个滚轮事件扫描整棵视觉树，也不缓存过期模板的 viewer。File Types 的 Scene / 批量管理和 Other Rules 详情 / SpecialMenu 已使用 ModernScrollViewer，无需改页面结构。
+
+### 7.2 内外层 ownership 与 Popup
+
+`Auto / Frame / Self` 的 Frame 选择、导航 reset 和页面声明不变。`WheelScrollEventGuard` 只把实际声明的 ownership 节点当成边界；继承值不能在每个子元素上提前截断 ancestor 查找。否则 File Types / Other Rules 的 Self 会阻止自身 ModernScrollViewer 的 delta-aware 路径，而继承的 Frame 会抢走内层输入。
+
+内层能向当前方向滚动时外层跳过；到达**实际**偏移边界后，外层可在同一个 PreviewMouseWheel 路由中处理一次，不重放事件。未到边界的动画目标不能提前触发交接。反向输入在实际边界交接时，guard 取消内层旧方向动画，避免外层处理后内层还在追赶旧目标。显式 Self 边界仍隔离共享 Frame，打开的 ComboBox、Popup、ContextMenu / PopupRoot 仍独占其输入。触摸路由和惯性由 WPF 自己处理，与这些 mouse-wheel 判断独立。
+
+### 7.3 验证 #131（硬件验证待执行）
+
+自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。`ScrollingWpfTests` 在 STA 上加载生产资源与导航模板，检查 panning 默认和可覆盖性、虚拟化/pixel offset、实际 ListBox wheel 路径、Auto / Self / Frame、内外层同一事件交接、Popup / ComboBox、Ctrl / Shift、disabled smooth mode 和 unload 动画清理。测试无需真实触摸设备，不启动前端业务服务。
+
+在 Windows 11 25H2 笔记本上，用 Precision Touchpad、触摸屏（如有）和普通鼠标分别执行以下步骤，并记录 OS、缩放比例、Windows wheel lines/page 设置与结果。自动测试通过不能替代这层验证。
+
+| 区域 | 手动操作与预期 |
+| --- | --- |
+| 左侧导航（缩小窗口使列表溢出） | 慢速/小幅、快速连续双指滑动；立即反向；抬指后应迅速停下且没有远目标追赶。单指上下滑动和惯性；轻点/点击条目、展开分组应正常，轻微移动不能误导航。 |
+| File Types | 各 Scene tab 的列表及隐藏批量管理视图分别执行三种输入；反向、顶部/底部、刷新后滚动和返回。内层有空间时外层不动；在存在可滚动外层的嵌套区域检查边界交接无重复跳动。 |
+| Other Rules | Enhance / Detailed Edit 左侧 selector 与右侧详情、复用 SpecialMenuContentView、CommandStore / GuidBlock / DragDrop 分别执行三种输入；触摸轻点 ToggleSwitch / Button 与滑动必须区分。 |
+| 普通导航页 | 使用 ModernFrame.ContentScrollHost 的 Settings / Application Groups 等页面验证离散 ±120 和多格滚轮平滑、切页 reset；Category / Win11 / Approvals 验证模板列表与大列表虚拟化布局。 |
+| 嵌套触摸 | 在内层开始单指滑动，父层不能提前抢走；抵达边界后检查原生 WPF panning / boundary feedback 的实际交接表现（含新手势和惯性）。 |
+| 可交互内容 | TextBox caret、选择文本、Button / AsyncToggleSwitch 点击与触摸轻点正常；水平拖动不滚动竖直内容；已打开 ComboBox 下拉、ContextMenu、带滚动内容 flyout 只操作自身，底层页面不滚动。 |
+| 设置与 fallback | wheel lines=1/3、one screen at a time、Ctrl / Shift；关闭 Windows client-area animations、duration=0 / disabled smooth mode 时检查既有 fallback。滚动中切页/关闭窗口后不能继续滚动或保留动画。 |
+
+尚未证明实际设备上的 tap 阈值、触摸文本选择、nested touch boundary feedback 和各 touchpad 驱动所发送的 delta/timing 行为；这些必须由上述硬件测试确认。此实现不添加自定义 touch inertia，也不提供设备识别。
 
 需要在导航后定位共享外层滚动区域的页面应实现 `INavigationScrollTarget`。内容真正呈现后，`ModernFrame` 先 reset 外层 `ContentScrollHost`，再把该 `ScrollViewer` 传给当前内容或其可视树中的定位目标。定位回调执行完毕后才触发 `ModernFrame.NavigationCompleted`，`ModernNavigationView` 会转发该事件；需要等待页面就位的功能应订阅事件，不要使用固定 `Task.Delay`。`MainWindow` 不再查找 WPF-UI `NavigationViewContentPresenter`。
 
@@ -208,7 +242,7 @@ Win11 菜单页（`Windows11ContextMenuItemViewModel`）的卡顿来自**分组�
 - Logo 改为后台加载（`Task.Run` + 静态 `ConcurrentDictionary` 按 LogoPath 缓存），`LogoSource` 任务未完成返回 null、完成后 `OnPropertyChanged` 刷新，占位图标与真图标正常切换；
 - `RebuildItems` 的触发源 `ItemsChanged` 事件走 ~120ms 防抖，避免扫描期间反复全量重建分组项（`Dispose` + 清空 + 重建）造成卡顿与 `CollectionChanged(Reset)` 引起的滚动跳动。
 
-### 7.1 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
+### 7.4 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
 
 绑定到 `ListCollectionView`（`ItemsView`）的 ListBox 在运行时调用 `ItemsView.Refresh()`（例如传统菜单页开关菜单项、Win11 页 `RebuildItems`）会触发 `CollectionChanged(Reset)`，导致 ListBox 重新生成所有 item 容器。容器重新生成期间，WPF 框架的焦点恢复 / 选中项恢复逻辑会引发 `FrameworkElement.RequestBringIntoView` 路由事件。此时 ListBox 内部 ScrollViewer 因容器尚未完成布局无法正确处理该事件，事件会继续**冒泡**到外层 `ModernScrollViewer`，外层滚动到让 ListBox 顶部可见——表现为页头标题与筛选框被滚出视野、列表顶部对齐窗口顶部。
 

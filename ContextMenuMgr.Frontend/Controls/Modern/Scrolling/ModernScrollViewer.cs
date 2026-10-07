@@ -6,8 +6,8 @@ using System.Windows.Media.Animation;
 namespace ContextMenuMgr.Frontend.Controls.Modern.Scrolling;
 
 /// <summary>
-/// The navigation frame's single outer scrolling surface. Wheel input is animated
-/// only when no nested scroll owner can consume it.
+/// Pixel scrolling surface for the shared frame and Self pages. Native WPF touch
+/// panning is independent of bounded wheel animation and nested wheel ownership.
 /// </summary>
 public sealed class ModernScrollViewer : ScrollViewer
 {
@@ -24,10 +24,21 @@ public sealed class ModernScrollViewer : ScrollViewer
     public static readonly DependencyProperty ScrollEasingFunctionProperty = DependencyProperty.Register(
         nameof(ScrollEasingFunction), typeof(IEasingFunction), typeof(ModernScrollViewer), new PropertyMetadata(null));
 
+    private readonly WheelScrollController _wheel;
+
+    static ModernScrollViewer()
+    {
+        PanningModeProperty.OverrideMetadata(typeof(ModernScrollViewer),
+            new FrameworkPropertyMetadata(PanningMode.VerticalOnly));
+    }
+
     public ModernScrollViewer()
     {
+        _wheel = new WheelScrollController(this);
         PreviewMouseWheel += OnPreviewMouseWheel;
-        Unloaded += (_, _) => ScrollAnimationHelper.CancelVerticalAnimation(this);
+        // Observe native manipulation without claiming it or changing WPF's tap threshold/inertia.
+        AddHandler(ManipulationStartingEvent, new EventHandler<ManipulationStartingEventArgs>(
+            (_, _) => _wheel.Reset()), handledEventsToo: true);
     }
 
     public bool IsSmoothScrollingEnabled
@@ -54,46 +65,9 @@ public sealed class ModernScrollViewer : ScrollViewer
         set => SetValue(ScrollEasingFunctionProperty, value);
     }
 
-    private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (!IsSmoothScrollingEnabled
-            || WheelScrollEventGuard.ShouldSkipSmoothScroll(this, e, e.OriginalSource as DependencyObject))
-        {
-            return;
-        }
+    private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
+        _wheel.Handle(e, IsSmoothScrollingEnabled, WheelScrollMultiplier, ScrollAnimationDuration, ScrollEasingFunction);
 
-        ScrollVerticalWheel(e);
-    }
-
-    private void ScrollVerticalWheel(MouseWheelEventArgs e)
-    {
-        if (e.Handled || ScrollableHeight <= 0 || !CanScrollInDirection(e.Delta))
-        {
-            return;
-        }
-
-        var notches = e.Delta / (double)Mouse.MouseWheelDeltaForOneLine;
-        var wheelLines = Math.Max(1, SystemParameters.WheelScrollLines);
-        var change = notches * wheelLines * 16 * Math.Max(0.1, WheelScrollMultiplier);
-        var currentTarget = ScrollAnimationHelper.GetCurrentVerticalAnimationTarget(this) ?? VerticalOffset;
-
-        ScrollAnimationHelper.SmoothScrollToVerticalOffset(
-            this,
-            currentTarget - change,
-            TimeSpan.FromMilliseconds(Math.Max(0, ScrollAnimationDuration)),
-            ScrollAnimationDuration > 0,
-            ScrollEasingFunction);
-        e.Handled = true;
-    }
-
-    internal bool CanScrollInDirection(int wheelDelta)
-    {
-        var offset = ScrollAnimationHelper.GetCurrentVerticalAnimationTarget(this) ?? VerticalOffset;
-        return wheelDelta switch
-        {
-            < 0 => offset < ScrollableHeight,
-            > 0 => offset > 0,
-            _ => false
-        };
-    }
+    internal bool CanScrollInDirection(int wheelDelta) =>
+        WheelScrollEventGuard.CanNestedViewerScroll(this, wheelDelta);
 }

@@ -58,7 +58,7 @@
             Grid.Row="0"
             Title="{Binding Title}" />
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer PanningMode="VerticalOnly" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="18">
                 <TextBlock
                     FontSize="22"

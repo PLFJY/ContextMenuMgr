@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,6 +11,14 @@ public static class ScrollAnimationHelper
 {
     public static readonly TimeSpan DefaultDuration = TimeSpan.FromMilliseconds(220);
     private static readonly ConditionalWeakTable<ScrollViewer, VerticalAnimation> Animations = new();
+    private static readonly IEasingFunction DefaultEasing = CreateDefaultEasing();
+
+    private static IEasingFunction CreateDefaultEasing()
+    {
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+        easing.Freeze();
+        return easing;
+    }
 
     public static double? GetCurrentVerticalAnimationTarget(ScrollViewer viewer) =>
         Animations.TryGetValue(viewer, out var animation) && animation.IsActive ? animation.TargetOffset : null;
@@ -57,10 +66,14 @@ public static class ScrollAnimationHelper
             return;
         }
 
-        var easing = easingFunction ?? new CubicEase { EasingMode = EasingMode.EaseOut };
+        var easing = easingFunction ?? DefaultEasing;
         if (Animations.TryGetValue(viewer, out var existing))
         {
-            existing.Retarget(target, effectiveDuration, easing);
+            // A saturated lead must not restart the same animation on every event.
+            if (!existing.Matches(target, effectiveDuration, easing))
+            {
+                existing.Retarget(target, effectiveDuration, easing);
+            }
             return;
         }
 
@@ -79,13 +92,16 @@ public static class ScrollAnimationHelper
         Action<ScrollViewer> remove)
     {
         private readonly WeakReference<ScrollViewer> _viewer = new(viewer);
-        private DateTime _startedAt;
+        private long _startedAt;
         private double _startOffset;
         private TimeSpan _duration = duration;
         private IEasingFunction _easing = easing;
 
         public bool IsActive { get; private set; }
         public double TargetOffset { get; private set; } = targetOffset;
+
+        public bool Matches(double offset, TimeSpan requestedDuration, IEasingFunction requestedEasing) =>
+            TargetOffset == offset && _duration == requestedDuration && ReferenceEquals(_easing, requestedEasing);
 
         public void Start()
         {
@@ -95,7 +111,7 @@ public static class ScrollAnimationHelper
             }
 
             _startOffset = target.VerticalOffset;
-            _startedAt = DateTime.UtcNow;
+            _startedAt = Stopwatch.GetTimestamp();
             IsActive = true;
             CompositionTarget.Rendering += OnRendering;
         }
@@ -112,7 +128,7 @@ public static class ScrollAnimationHelper
             _duration = newDuration;
             _easing = newEasing;
             _startOffset = target.VerticalOffset;
-            _startedAt = DateTime.UtcNow;
+            _startedAt = Stopwatch.GetTimestamp();
         }
 
         public void Stop()
@@ -134,7 +150,7 @@ public static class ScrollAnimationHelper
                 return;
             }
 
-            var progress = Math.Clamp((DateTime.UtcNow - _startedAt).TotalMilliseconds / _duration.TotalMilliseconds, 0, 1);
+            var progress = Math.Clamp(Stopwatch.GetElapsedTime(_startedAt).TotalMilliseconds / _duration.TotalMilliseconds, 0, 1);
             var offset = _startOffset + ((TargetOffset - _startOffset) * _easing.Ease(progress));
             target.ScrollToVerticalOffset(Math.Clamp(offset, 0, Math.Max(0, target.ScrollableHeight)));
             if (progress < 1)

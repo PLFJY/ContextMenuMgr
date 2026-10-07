@@ -31,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <ProjectReference Include="..\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj" />
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
     <ProjectReference Include="..\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj" />

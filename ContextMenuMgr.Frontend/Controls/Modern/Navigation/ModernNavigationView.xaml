@@ -172,7 +172,7 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <ListBox
+                <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
                     x:Name="PART_MenuList"
                     Grid.Row="0"
                     Background="Transparent"
@@ -201,7 +201,7 @@
 
                 <ContentPresenter Grid.Row="1" Content="{Binding PaneFooter, ElementName=Root}" />
 
-                <ListBox
+                <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
                     Grid.Row="2"
                     Margin="0,4"
                     Background="Transparent"

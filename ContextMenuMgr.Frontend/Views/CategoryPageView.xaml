@@ -80,7 +80,7 @@
         </Border>
 
         <Grid Grid.Row="1">
-            <ListBox
+            <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
                 behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
                 Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}"
                 Background="Transparent"
