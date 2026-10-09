@@ -174,3 +174,6 @@ OpenWith 需要 SID，但不需要 SessionId。服务不能用 LocalSystem 的 `
 | 把 SendTo / WinX 当 registry-only 功能 | 它们主要是用户文件系统目录。 |
 | 用服务 `HKCU` 写 OpenWith Applications | 新增和用户 policy 写 `HKEY_USERS\<sid>`；机器级项才写 HKLM。 |
 | 把 ShellNew ACL Lock 和 Registry Write Protection 混用 | 两者保护范围、代码路径和用户提示都不同。 |
+
+
+`GuidBlockMenuService` 独立持有机器级 GUID Block 路径，负责其枚举、创建、开关和删除；`SpecialMenuService` 只在现有分派与响应/日志边界调用它。该列表与 classic per-registration 开关、Windows 11 用户 blocked list 均有不同语义，不能互相替代。

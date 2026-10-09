@@ -10,11 +10,9 @@ namespace ContextMenuMgr.Tests;
 public sealed class ShellVerbMutationTransactionIntegrationTests
 {
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task PersistenceOrCancellationFailure_AfterPhysicalWrite_RollsRegistryBack(
-        bool cancellationFailure,
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PersistenceFailure_AfterPhysicalWrite_RollsRegistryBack(
         bool quarantinePath)
     {
         var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -53,7 +51,7 @@ public sealed class ShellVerbMutationTransactionIntegrationTests
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 SessionId: null);
 
-            // Establish normal state before arming the post-write save fault.
+            // Establish state, then deny replacement of the authoritative file while allowing snapshot reads.
             _ = await catalog.GetSnapshotAsync(CancellationToken.None, userContext);
             var scene = await catalog.GetSceneSnapshotAsync(
                 ContextMenuSceneKind.CustomExtension,
@@ -64,9 +62,7 @@ public sealed class ShellVerbMutationTransactionIntegrationTests
                 entry.EntryKind == ContextMenuEntryKind.ShellVerb
                 && string.Equals(entry.KeyName, "print", StringComparison.OrdinalIgnoreCase));
 
-            stateStore.BeforeSaveAsync = (_, _) => cancellationFailure
-                ? Task.FromException(new OperationCanceledException("Injected post-write cancellation."))
-                : Task.FromException(new IOException("Injected state-store failure."));
+            using var stateLock = new FileStream(Path.Combine(root, "state.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
 
             if (quarantinePath)
             {

@@ -94,6 +94,7 @@ public sealed class UpdateCheckService : IDisposable
         }
     }
 
+#if DEBUG
     public void ShowDebugUpdatePrompt()
     {
         var title = _localization.Translate("UpdateAvailableTitle");
@@ -101,6 +102,7 @@ public sealed class UpdateCheckService : IDisposable
         _infoBarService.ShowInformationalInfoBar(title, message, ReleasePageUrl, ReleasePageUrl);
         FrontendDebugLog.Info(SourceName, "Forced debug update prompt.");
     }
+#endif
 
     public void Dispose()
     {

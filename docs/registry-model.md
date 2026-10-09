@@ -304,3 +304,8 @@ Ordinary classic `SetEnabled` resolves and verifies ShellVerb/ShellExtension cha
 The two user keys are one logical transaction: pre-change snapshots and managed-generation readback are saved as dedicated, per-SID provenance after both writes verify. Enabling restores the original two-key state for that SID without changing another user's record. Existing user keys are never adopted or overwritten, and a reset state database cannot claim an existing shadow. Failure before state commit rolls back only keys still matching this transaction's writes; external changes produce a rollback conflict. These managed implementation keys and the synthetic ID do not enter ordinary monitoring and approval identities. The service uses the frontend SID, never its own HKCU. Other virtual namespaces that inherit `Folder` but not `Directory` require separate Explorer validation.
 
 If the service process crashes between the two registry writes, no final ownership record exists. The next run leaves any surviving user key untouched and reports an override conflict when toggled. Recovery requires inspecting both `HKEY_USERS\<SID>` keys and the state file before manually removing only a key confirmed to have been created by the interrupted operation.
+
+
+增强菜单字典的条件/语言选择、命令编译与 CLI 校验统一在 `EnhanceMenuDictionary`；catalog 只调用该实现执行注册表写入与事务。CLI 校验不通过测试专用编译入口访问生产代码。
+
+维护决定：保留上文 v1.7.5 可见性签名恢复，直至明确停止支持所有仍带该签名、且没有物理 provenance 的持久状态升级；不能仅因项目已经生成新版 provenance 就移除它。迁移成功的单项自然转入当前事务格式，不引入永久兼容开关。

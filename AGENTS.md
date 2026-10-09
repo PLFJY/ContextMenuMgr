@@ -172,6 +172,7 @@ Before editing code, verify:
 - [ ] I have checked relevant logs, or I can explain why logs are unavailable.
 - [ ] I can explain which files need changes and why.
 - [ ] I can provide manual verification steps.
+- [ ] I have read the Code Hygiene, Refactoring, and Test Retention rules below and identified the implementations this change replaces.
 
 ---
 
@@ -229,3 +230,45 @@ Then list the files, logs, registry paths, or reproduction steps that still need
 
 Do not invent causes.
 Do not expand the patch scope just to make progress.
+
+---
+
+## 9. Code Hygiene, Refactoring, and Test Retention
+
+These rules bind all Codex/AI development in this repository. Favor less code to maintain while preserving behavior and state safety.
+
+### Refactoring means replacement
+
+- A completed refactor must remove the implementation it replaces and update all active callers, resources, configuration, and documentation.
+- Do not retain parallel Old/New/V1/V2/Legacy/Compat/Backup implementations, commented-out code, reference copies, fallbacks, or pass-through wrappers without a demonstrated compatibility requirement. Use Git history as the archive.
+- Reuse or replace existing implementations instead of copying them. Search for the replaced types, methods, paths, and terminology before finishing.
+- Windows terminology such as Legacy Context Menu is legitimate; released persisted-state compatibility must be assessed by behavior, not naming.
+
+### Temporary tests must be removed
+
+Tests are development tools, not automatically permanent deliverables. Temporary tests may be created freely, but classify every new test before completion:
+
+- Permanent: protects an important, nontrivial invariant against realistic future regressions.
+- Temporary: validates an implementation or reproduces an incident; delete it before completing the task.
+
+Passing, effort invested, or being generated alongside a feature is not a retention reason. Do not default to one permanent test class per Issue. Prefer a few meaningful regressions over repetitive assertions. Remove tests of framework behavior, trivial accessors/constructors/enums, ordinary localization, simple GUID/string comparisons, private implementation structure, repeated UI Busy/Loading/Toggle properties, and historical reproductions already covered by an invariant. WPF experiments requiring real hardware belong in manual verification.
+
+### Permanent tests require justification
+
+Retain meaningful coverage for registry mutation/read-back, rollback/conflicts/provenance/recovery, ACL preservation, SID/hive isolation, persistence corruption/migration, mutation concurrency/IPC/timeouts/late notifications, malformed external inputs, and release/artifact/publishing safety. These are examples, not a checklist requiring new tests. Do not add tests merely to satisfy this list.
+
+### Tests must not distort production architecture
+
+Do not add test-only properties, fault callbacks, simulation services, DI registrations, exposed internal/public methods, or alternate execution paths to production. A production-useful abstraction may also be tested; otherwise temporary infrastructure stays outside production and is removed afterward. Debug tools must not affect Beta/Release behavior.
+
+### Verify actual behavior
+
+Logs, no exception, process launch, a successful write API, fabricated snapshots, and mock call counts alone do not prove functional success. For critical mutations distinguish request success, physical state, authoritative read-back, persistence, and user-visible results. For workflows distinguish execution, artifact creation, validation, publication, and platform acceptance. Local tests are not end-to-end verification.
+
+### Compatibility retirement
+
+For necessary bridges document the released version or persisted format, supported historical data/behavior, observable safe-removal condition, and tracking Issue or defined maintenance decision. Do not invent removal versions or create a tracking document per helper. Preserve uncertain upgrade paths until their requirements are verified.
+
+### Required completion cleanup
+
+Every Codex task must finish by removing temporary tests, superseded paths, unused helpers/imports/resources/scaffolding, and test-only production hooks; searching for abandoned debug/compatibility code and replaced names; consolidating repeated logic; updating relevant docs; reviewing the diff for unrelated changes; and reporting what was deleted and why. Complete applicable builds/checks and provide manual verification steps, clearly separating executed tests from runtime or hardware checks still pending.

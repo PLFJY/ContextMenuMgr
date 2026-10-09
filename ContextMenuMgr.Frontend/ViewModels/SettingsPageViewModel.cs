@@ -25,7 +25,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     private readonly LocalizationService _localization;
     private readonly FrontendThemeService _themeService;
     private readonly ContextMenuItemActionsService _actionsService;
-    private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly ExplorerRestartStateService _explorerRestartState;
     private readonly PortablePackageTrustService _portablePackageTrustService;
     private bool _suppressProtectionSync;
@@ -46,7 +45,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         LocalizationService localization,
         FrontendThemeService themeService,
         ContextMenuItemActionsService actionsService,
-        ListPlaceholderDebugStateService placeholderDebug,
         ExplorerRestartStateService explorerRestartState,
         PortablePackageTrustService portablePackageTrustService)
     {
@@ -57,7 +55,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         _localization = localization;
         _themeService = themeService;
         _actionsService = actionsService;
-        _placeholderDebug = placeholderDebug;
         _explorerRestartState = explorerRestartState;
         _portablePackageTrustService = portablePackageTrustService;
 
@@ -275,14 +272,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     public string ResetSettingsText => _localization.Translate("ResetSettings");
 
     public string ClearAllLogsText => _localization.Translate("ClearAllLogs");
-
-    public string ListPlaceholderDebugTitle => _localization.Translate("ListPlaceholderDebugTitle");
-
-    public string DebugSimulateLoadingText => _localization.Translate("DebugSimulateLoadingText");
-
-    public string DebugSimulateEmptyText => _localization.Translate("DebugSimulateEmptyText");
-
-    public string DebugClearSimulatedStateText => _localization.Translate("DebugClearSimulatedStateText");
 
     public string CancelText => _localization.Translate("DialogCancel");
 
@@ -770,24 +759,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
-    private void SimulateListLoadingState()
-    {
-        _placeholderDebug.SimulateLoading();
-    }
-
-    [RelayCommand]
-    private void SimulateListEmptyState()
-    {
-        _placeholderDebug.SimulateEmpty();
-    }
-
-    [RelayCommand]
-    private void ClearListPlaceholderDebugState()
-    {
-        _placeholderDebug.Clear();
-    }
-
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLocalizedText();
@@ -833,10 +804,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ResetStateDatabaseText));
         OnPropertyChanged(nameof(ResetSettingsText));
         OnPropertyChanged(nameof(ClearAllLogsText));
-        OnPropertyChanged(nameof(ListPlaceholderDebugTitle));
-        OnPropertyChanged(nameof(DebugSimulateLoadingText));
-        OnPropertyChanged(nameof(DebugSimulateEmptyText));
-        OnPropertyChanged(nameof(DebugClearSimulatedStateText));
         OnPropertyChanged(nameof(CancelText));
         OnPropertyChanged(nameof(ConfirmUninstallText));
         OnPropertyChanged(nameof(UninstallFlyoutText));
@@ -1020,20 +987,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static void TryDeleteFile(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-        }
-    }
-
     private static void TryDeleteDirectory(string path)
     {
         try
@@ -1150,7 +1103,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             FrontendDebugLog.Warning("SettingsPageViewModel", $"Failed to scan portable runtime file trust state: {ex.Message}");
         }
     }
-
 
     private async Task ApplyShowTrayIconAsync(bool value)
     {

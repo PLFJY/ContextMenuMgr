@@ -50,8 +50,4 @@
     <FrameworkReference Include="Microsoft.Windows.SDK.NET.Ref" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="ContextMenuMgr.Tests" />
-  </ItemGroup>
-
 </Project>

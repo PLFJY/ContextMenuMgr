@@ -1514,18 +1514,6 @@ Continue anyway? (Not recommended)</value>
   <data name="EmptyItemsText" xml:space="preserve">
     <value>Nothing here yet (；′⌒`)</value>
   </data>
-  <data name="DebugSimulateLoadingText" xml:space="preserve">
-    <value>Simulate loading</value>
-  </data>
-  <data name="DebugSimulateEmptyText" xml:space="preserve">
-    <value>Simulate empty</value>
-  </data>
-  <data name="DebugClearSimulatedStateText" xml:space="preserve">
-    <value>Clear simulated state</value>
-  </data>
-  <data name="ListPlaceholderDebugTitle" xml:space="preserve">
-    <value>List placeholder debug</value>
-  </data>
   <data name="RegistryProtectionBlocksEditTitle" xml:space="preserve">
     <value>Registry write protection is enabled</value>
   </data>

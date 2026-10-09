@@ -55,6 +55,11 @@
     <Resource Include="Assets\AppIcon.png" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(Configuration)' != 'Debug'">
+    <Page Remove="DebugToolsWindow.xaml" />
+    <Compile Remove="DebugToolsWindow.xaml.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'">
     <NativeProbeHostIncrementalInput Include="$(NativeProbeHostProject)" />
     <NativeProbeHostIncrementalInput Include="$(MSBuildThisFileDirectory)..\ContextMenuMgr.ProbeHost\src\**\*.cpp" />

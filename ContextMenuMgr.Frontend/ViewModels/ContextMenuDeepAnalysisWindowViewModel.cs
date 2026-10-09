@@ -347,14 +347,6 @@ public sealed partial class ContextMenuDeepAnalysisWindowViewModel : ObservableO
         };
     }
 
-    private string TranslateOrDefault(string key, string? fallback)
-    {
-        var translated = _localization.Translate(key);
-        return string.Equals(translated, key, StringComparison.Ordinal)
-            ? fallback ?? string.Empty
-            : translated;
-    }
-
     private string GetProbeModeText(ContextMenuDeepAnalysisProbeMode mode)
     {
         return _localization.Translate(mode == ContextMenuDeepAnalysisProbeMode.WholeContextMenu

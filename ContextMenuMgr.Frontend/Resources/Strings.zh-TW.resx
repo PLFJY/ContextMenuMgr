@@ -1514,18 +1514,6 @@
   <data name="EmptyItemsText" xml:space="preserve">
     <value>這裡空空如也(；′⌒`)</value>
   </data>
-  <data name="DebugSimulateLoadingText" xml:space="preserve">
-    <value>模擬載入中</value>
-  </data>
-  <data name="DebugSimulateEmptyText" xml:space="preserve">
-    <value>模擬空狀態</value>
-  </data>
-  <data name="DebugClearSimulatedStateText" xml:space="preserve">
-    <value>清除模擬狀態</value>
-  </data>
-  <data name="ListPlaceholderDebugTitle" xml:space="preserve">
-    <value>清單占位偵錯</value>
-  </data>
   <data name="RegistryProtectionBlocksEditTitle" xml:space="preserve">
     <value>登錄檔寫入保護已開啟</value>
   </data>

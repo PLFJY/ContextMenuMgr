@@ -86,35 +86,6 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource CardBorderStyle}">
-                    <StackPanel>
-                        <TextBlock
-                            x:Name="ListPlaceholderTitleText"
-                            FontSize="18"
-                            FontWeight="SemiBold" />
-                        <WrapPanel Margin="0,14,0,0">
-                            <ui:Button
-                                x:Name="SimulateLoadingButton"
-                                Margin="0,0,12,12"
-                                Padding="16,8"
-                                Click="OnSimulateLoadingClick"
-                                Icon="{ui:SymbolIcon Symbol=ArrowSync24}" />
-                            <ui:Button
-                                x:Name="SimulateEmptyButton"
-                                Margin="0,0,12,12"
-                                Padding="16,8"
-                                Click="OnSimulateEmptyClick"
-                                Icon="{ui:SymbolIcon Symbol=FolderOpen24}" />
-                            <ui:Button
-                                x:Name="ClearSimulatedStateButton"
-                                Margin="0,0,12,12"
-                                Padding="16,8"
-                                Appearance="Secondary"
-                                Click="OnClearSimulatedStateClick"
-                                Icon="{ui:SymbolIcon Symbol=Dismiss24}" />
-                        </WrapPanel>
-                    </StackPanel>
-                </Border>
             </StackPanel>
         </ScrollViewer>
     </Grid>

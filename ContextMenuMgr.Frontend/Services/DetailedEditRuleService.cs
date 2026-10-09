@@ -251,14 +251,6 @@ public sealed class DetailedEditRuleService
             value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
-    private static byte[] ParseBinary(string value)
-    {
-        return value
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(static part => Convert.ToByte(part, 16))
-            .ToArray();
-    }
-
     private static (RegistryKey? BaseKey, string SubPath) OpenRegistryBaseKey(string fullPath)
     {
         var normalized = fullPath.Replace('/', '\\');

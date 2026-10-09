@@ -70,7 +70,7 @@ internal static class Program
             ?? Path.Combine(AppContext.BaseDirectory, "Resources", "EnhanceMenusDic.xml");
         var cultureName = TryGetArgumentValue(args, "--culture");
 
-        exitCode = ContextMenuRegistryCatalog.ValidateEnhanceMenuDictionary(dictionaryPath, cultureName, Console.Out);
+        exitCode = EnhanceMenuDictionary.ValidateEnhanceMenuDictionary(dictionaryPath, cultureName, Console.Out);
         return true;
     }
 
@@ -82,7 +82,7 @@ internal static class Program
             return false;
         }
 
-        exitCode = ContextMenuRegistryCatalog.ValidateEnhanceLocalizationSelection(Console.Out);
+        exitCode = EnhanceMenuDictionary.ValidateEnhanceLocalizationSelection(Console.Out);
         return true;
     }
 

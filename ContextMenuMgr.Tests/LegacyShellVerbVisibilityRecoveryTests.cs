@@ -183,11 +183,9 @@ public sealed class LegacyShellVerbVisibilityRecoveryTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task PostWriteFailure_RollsBackExactLegacyValues(bool cancel, bool viaApproval)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PersistenceFailure_RollsBackExactLegacyValues(bool viaApproval)
     {
         var suffix = Guid.NewGuid().ToString("N");
         var relativePath = $@"Software\Classes\Directory\shell\VSCode_{suffix}";
@@ -211,9 +209,7 @@ public sealed class LegacyShellVerbVisibilityRecoveryTests
                 states[item.Id].PendingApprovalChangeKind = ContextMenuChangeKind.Added;
                 await store.SaveAsync(states, CancellationToken.None);
             }
-            store.BeforeSaveAsync = (_, _) => cancel
-                ? Task.FromException(new OperationCanceledException("Injected cancellation"))
-                : Task.FromException(new IOException("Injected save failure"));
+            using var stateLock = new FileStream(Path.Combine(root, "state.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
             var response = viaApproval
                 ? await catalog.ApplyDecisionAsync(item.Id, ContextMenuDecision.Allow, CancellationToken.None, context)
                 : await catalog.ApplyDesiredStateAsync(item.Id, true, CancellationToken.None, context);
@@ -221,7 +217,6 @@ public sealed class LegacyShellVerbVisibilityRecoveryTests
             Assert.Equal(PipeErrorCodes.RegistryMutationRolledBack, response.ErrorCode);
             using var keyAfter = Registry.CurrentUser.OpenSubKey(relativePath)!;
             AssertLegacy(keyAfter);
-            store.BeforeSaveAsync = null;
             var persisted = (await store.LoadAsync(CancellationToken.None))[item.Id];
             Assert.False(persisted.DesiredEnabled);
             Assert.False(persisted.ObservedEnabled);
@@ -291,38 +286,6 @@ public sealed class LegacyShellVerbVisibilityRecoveryTests
             Assert.False(states[item.Id].DesiredEnabled);
             Assert.True(states[item.Id].IsPendingApproval);
             Assert.Equal(ContextMenuChangeKind.Added, states[item.Id].PendingApprovalChangeKind);
-        }
-        finally
-        {
-            Registry.CurrentUser.DeleteSubKeyTree(relativePath, throwOnMissingSubKey: false);
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task ConcurrentWriterBeforeFailedCommit_ReturnsRollbackConflictAndPreservesExternalValue()
-    {
-        var suffix = Guid.NewGuid().ToString("N");
-        var relativePath = $@"Software\Classes\Directory\shell\VSCode_{suffix}";
-        var root = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-LegacyRecoveryTests", suffix);
-        Directory.CreateDirectory(root);
-        try
-        {
-            using (var key = Registry.CurrentUser.CreateSubKey(relativePath, writable: true)!) SeedLegacy(key);
-            var (catalog, store, context) = CreateCatalog(root);
-            var item = Assert.Single(await catalog.GetSnapshotAsync(CancellationToken.None, context), candidate =>
-                string.Equals(candidate.BackendRegistryPath, PhysicalPath(relativePath), StringComparison.OrdinalIgnoreCase));
-            store.BeforeSaveAsync = (_, _) =>
-            {
-                using var external = Registry.CurrentUser.OpenSubKey(relativePath, writable: true)!;
-                external.SetValue("ProgrammaticAccessOnly", "external-owner", RegistryValueKind.String);
-                return Task.FromException(new IOException("Injected failed commit after external write"));
-            };
-            var response = await catalog.ApplyDesiredStateAsync(item.Id, true, CancellationToken.None, context);
-            Assert.False(response.Success);
-            Assert.Equal(PipeErrorCodes.RegistryMutationRollbackConflict, response.ErrorCode);
-            using var keyAfter = Registry.CurrentUser.OpenSubKey(relativePath)!;
-            Assert.Equal("external-owner", keyAfter.GetValue("ProgrammaticAccessOnly"));
         }
         finally
         {

@@ -89,7 +89,7 @@ artifacts\probehost-native\<Configuration>\obj\x64\
 artifacts\probehost-native\<Configuration>\obj\arm64\
 ```
 
-`Build-NativeProbeHostArtifacts.ps1` 会把 MSBuild Platform 映射到 label：`Win32 -> x86`、`x64 -> x64`、`ARM64 -> arm64`。每个 label 构建或增量跳过后都会立即读取目标 exe 的 PE Machine 并验证：`x86 -> 0x014C`、`x64 -> 0x8664`、`arm64 -> 0xAA64`。`Build-NativeProbeHost.ps1` 保留为单架构 helper。
+`Build-NativeProbeHostArtifacts.ps1` 会把 MSBuild Platform 映射到 label：`Win32 -> x86`、`x64 -> x64`、`ARM64 -> arm64`。每个 label 构建或增量跳过后都会立即读取目标 exe 的 PE Machine 并验证：`x86 -> 0x014C`、`x64 -> 0x8664`、`arm64 -> 0xAA64`。单架构构建也使用此脚本，通过 `-Platforms x64`（或 `Win32` / `ARM64`）选择平台；不保留另一套单架构实现。
 
 ## 5. Release 发布
 

@@ -11,20 +11,10 @@ public sealed class DelayedLoadingPresentation : INotifyPropertyChanged, IDispos
     public static readonly TimeSpan ShowDelay = TimeSpan.FromMilliseconds(140);
     public static readonly TimeSpan MinimumVisible = TimeSpan.FromMilliseconds(250);
 
-    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
-    private readonly Func<DateTimeOffset> _now;
     private CancellationTokenSource? _transition;
     private DateTimeOffset _shownAt;
     private bool _isVisible;
     private bool _disposed;
-
-    public DelayedLoadingPresentation(
-        Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Func<DateTimeOffset>? now = null)
-    {
-        _delay = delay ?? ((duration, token) => Task.Delay(duration, token));
-        _now = now ?? (() => DateTimeOffset.UtcNow);
-    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -55,15 +45,15 @@ public sealed class DelayedLoadingPresentation : INotifyPropertyChanged, IDispos
             if (isLoading)
             {
                 if (IsVisible) return;
-                await _delay(ShowDelay, token);
+                await Task.Delay(ShowDelay, token);
                 token.ThrowIfCancellationRequested();
-                _shownAt = _now();
+                _shownAt = DateTimeOffset.UtcNow;
                 IsVisible = true;
             }
             else if (IsVisible)
             {
-                var remaining = MinimumVisible - (_now() - _shownAt);
-                if (remaining > TimeSpan.Zero) await _delay(remaining, token);
+                var remaining = MinimumVisible - (DateTimeOffset.UtcNow - _shownAt);
+                if (remaining > TimeSpan.Zero) await Task.Delay(remaining, token);
                 token.ThrowIfCancellationRequested();
                 IsVisible = false;
             }

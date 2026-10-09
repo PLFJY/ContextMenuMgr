@@ -472,19 +472,6 @@ public sealed class RuleDictionaryCatalogService
         return string.IsNullOrWhiteSpace(resolved) ? source : resolved;
     }
 
-    private bool JudgeCulture(XElement element)
-    {
-        var culture = element.Element("Culture")?.Value?.Trim();
-        if (string.IsNullOrWhiteSpace(culture))
-        {
-            return true;
-        }
-
-        return string.Equals(culture, "en-US", StringComparison.OrdinalIgnoreCase)
-            ? !_localization.UsesChinese()
-            : string.Equals(culture, GetPreferredDictionaryCulture(), StringComparison.OrdinalIgnoreCase);
-    }
-
     private string GetPreferredDictionaryCulture()
     {
         return _localization.CurrentCultureName;

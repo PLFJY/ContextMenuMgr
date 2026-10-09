@@ -18,7 +18,6 @@ public sealed class SpecialMenuService
     private const string ShellNewOrderPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew";
     private const string ShellNewLegacyBroadLockMessage = "The ShellNew order key is locked by a legacy broad ACL rule and cannot be safely unlocked without ownership repair. Use BluePointLilac/ContextMenuManager once to unlock it, then retry.";
     private const string CommandStorePath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell";
-    private const string GuidBlockedPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     private const string ApplicationsPath = @"Applications";
     private const string OpenWithPolicyPath = @"Software\Policies\Microsoft\Windows\Explorer";
     private const string IeRootPath = @"Software\Microsoft\Internet Explorer";
@@ -62,7 +61,7 @@ public sealed class SpecialMenuService
             SpecialMenuKind.OpenWith => GetOpenWithItems(RequireUserContext(userContext)),
             SpecialMenuKind.DragDrop => GetDragDropItems(),
             SpecialMenuKind.CommandStore => GetCommandStoreItems(),
-            SpecialMenuKind.GuidBlock => GetGuidBlockItems(),
+            SpecialMenuKind.GuidBlock => GuidBlockMenuService.GetSnapshot(),
             SpecialMenuKind.InternetExplorer => GetIeItems(),
             _ => []
         };
@@ -100,7 +99,7 @@ public sealed class SpecialMenuService
                     SpecialMenuKind.DragDrop => SetDragDropEnabled(item, enabled),
                     SpecialMenuKind.InternetExplorer => SetRenameBackedRegistryItemEnabled(item, enabled, "MenuExt", "-MenuExt"),
                     SpecialMenuKind.CommandStore => SetCommandStoreEnabled(item, enabled),
-                    SpecialMenuKind.GuidBlock => SetGuidBlockEnabled(item, enabled),
+                    SpecialMenuKind.GuidBlock => GuidBlockMenuService.SetEnabled(item, enabled),
                     _ => throw new InvalidOperationException("This special menu item cannot be toggled.")
                 };
             }
@@ -156,7 +155,7 @@ public sealed class SpecialMenuService
                 SpecialMenuKind.OpenWith when request.OpenWithCreate is not null => CreateOpenWith(request.OpenWithCreate, RequireUserContext(userContext)),
                 SpecialMenuKind.DragDrop when request.DragDropCreate is not null => CreateDragDrop(request.DragDropCreate),
                 SpecialMenuKind.CommandStore when request.SpecialItem is not null => CreateCommandStore(request.SpecialItem),
-                SpecialMenuKind.GuidBlock when request.GuidBlockCreate is not null => CreateGuidBlock(request.GuidBlockCreate),
+                SpecialMenuKind.GuidBlock when request.GuidBlockCreate is not null => GuidBlockMenuService.Create(request.GuidBlockCreate),
                 SpecialMenuKind.InternetExplorer when request.IeMenuCreate is not null => CreateIe(request.IeMenuCreate),
                 _ => throw new InvalidOperationException("The create request was missing required data.")
             };
@@ -247,7 +246,7 @@ public sealed class SpecialMenuService
                     deletedPath = SoftDeleteRegistryTree(GetOpenWithItemAppPath(item), RequireUserContext(userContext), _logger);
                     break;
                 case SpecialMenuKind.GuidBlock:
-                    DeleteRegistryValue(Registry.LocalMachine, GuidBlockedPath, item.KeyName, _logger);
+                    GuidBlockMenuService.Delete(item.KeyName, _logger);
                     break;
                 case SpecialMenuKind.SendTo:
                 {
@@ -2735,67 +2734,6 @@ public sealed class SpecialMenuService
         return item with { IsEnabled = ShellVerbVisibility.IsEnabled(key) };
     }
 
-    private static IReadOnlyList<SpecialMenuEntry> GetGuidBlockItems()
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(GuidBlockedPath, writable: false);
-        if (key is null)
-        {
-            return [];
-        }
-
-        return key.GetValueNames()
-            .Where(static name => Guid.TryParse(name, out _))
-            .Select(name =>
-            {
-                var guid = Guid.Parse(name);
-                var icon = GuidMetadataCatalog.GetIconLocation(guid);
-                return new SpecialMenuEntry
-                {
-                    Id = EncodeId(SpecialMenuKind.GuidBlock, name),
-                    Kind = SpecialMenuKind.GuidBlock,
-                    DisplayName = GuidMetadataCatalog.GetDisplayName(guid) ?? key.GetValue(name)?.ToString() ?? name,
-                    KeyName = name,
-                    IsEnabled = true,
-                    IconPath = icon.IconPath,
-                    IconIndex = icon.IconIndex,
-                    RegistryPath = $@"HKEY_LOCAL_MACHINE\{GuidBlockedPath}",
-                    TargetPath = GuidMetadataCatalog.GetFilePath(guid),
-                    Metadata = new Dictionary<string, string> { ["Guid"] = name }
-                };
-            })
-            .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static SpecialMenuEntry CreateGuidBlock(GuidBlockCreateRequest request)
-    {
-        if (!Guid.TryParse(request.GuidText, out var guid))
-        {
-            throw new InvalidOperationException("The GUID format is invalid.");
-        }
-
-        using var key = Registry.LocalMachine.CreateSubKey(GuidBlockedPath, writable: true)
-            ?? throw new InvalidOperationException("Unable to open Blocked shell extensions key.");
-        key.SetValue(guid.ToString("B"), request.DisplayName ?? string.Empty, RegistryValueKind.String);
-        return GetGuidBlockItems().First(item => string.Equals(item.KeyName, guid.ToString("B"), StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static SpecialMenuEntry SetGuidBlockEnabled(SpecialMenuEntry item, bool enabled)
-    {
-        if (enabled)
-        {
-            using var key = Registry.LocalMachine.CreateSubKey(GuidBlockedPath, writable: true)
-                ?? throw new InvalidOperationException("Unable to open Blocked shell extensions key.");
-            key.SetValue(item.KeyName, item.DisplayName ?? string.Empty, RegistryValueKind.String);
-        }
-        else
-        {
-            DeleteRegistryValue(Registry.LocalMachine, GuidBlockedPath, item.KeyName);
-        }
-
-        return item with { IsEnabled = enabled };
-    }
-
     private static IReadOnlyList<SpecialMenuEntry> GetIeItems()
     {
         var result = new List<SpecialMenuEntry>();
@@ -3518,9 +3456,6 @@ public sealed class SpecialMenuService
             && (IsShellNewLegacyWorldLockRule(rule) || IsShellNewV2WorldDenyRule(rule));
     }
 
-    private static bool IsShellNewWorldLockRule(RegistryAccessRule rule)
-        => IsShellNewLegacyWorldLockRule(rule) || IsShellNewV2WorldLockRule(rule);
-
     private static bool IsShellNewLegacyWorldLockRule(RegistryAccessRule rule)
     {
         return !rule.IsInherited
@@ -3732,31 +3667,6 @@ public sealed class SpecialMenuService
         }
     }
 
-    private static bool CanWriteShellNewOrder(BackendUserContext context)
-    {
-        try
-        {
-            using var userRoot = GetUserRegistryRoot(context, writable: false);
-            using var key = userRoot.OpenSubKey(ShellNewOrderPath, writable: true);
-            if (key is not null)
-            {
-                return true;
-            }
-
-            var parentPath = ShellNewOrderPath[..ShellNewOrderPath.LastIndexOf('\\')];
-            using var parent = userRoot.OpenSubKey(parentPath, writable: true);
-            return parent is not null;
-        }
-        catch (SecurityException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     private static RegistryKey GetWritableUserClassesRoot(BackendUserContext context)
     {
         using var userRoot = GetUserRegistryRoot(context, writable: true);
@@ -3861,11 +3771,6 @@ public sealed class SpecialMenuService
         return specs;
     }
 
-    private static IReadOnlyList<ClassesRootSpec> GetClassesRootSpecsSafe(BackendUserContext context)
-    {
-        return GetClassesRootSpecs(context);
-    }
-
     private static ClassesRootSpec GetUserClassesRootSpec(BackendUserContext context)
     {
         var userBaseKey = GetUserRegistryRoot(context, writable: true);
@@ -3874,19 +3779,6 @@ public sealed class SpecialMenuService
             ?? throw new InvalidOperationException("Unable to open caller user classes.");
 
         return new ClassesRootSpec(root, $@"HKEY_USERS\{context.Sid}\Software\Classes", "User");
-    }
-
-    private static ClassesRootSpec GetClassesRootSpecForPath(string registryPath, BackendUserContext context)
-    {
-        foreach (var spec in GetClassesRootSpecs(context))
-        {
-            if (registryPath.StartsWith(spec.RegistryPrefix + "\\", StringComparison.OrdinalIgnoreCase))
-            {
-                return spec;
-            }
-        }
-
-        return new ClassesRootSpec(Registry.ClassesRoot, "HKEY_CLASSES_ROOT", "Merged");
     }
 
     private static BackendUserContext RequireUserContext(BackendUserContext? context) =>
@@ -4227,13 +4119,6 @@ public sealed class SpecialMenuService
         using var parent = root.OpenSubKey(parentPath, writable: true);
         parent?.DeleteSubKeyTree(keyName, throwOnMissingSubKey: false);
         logger?.LogFireAndForget($"DeleteRegistryTreeEnd: FullPath={fullPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}, Root={root.Name}, SubPath={subPath}, Result=Success.");
-    }
-
-    private static void DeleteRegistryValue(RegistryKey root, string subPath, string valueName, FileLogger? logger = null)
-    {
-        using var key = root.OpenSubKey(subPath, writable: true);
-        key?.DeleteValue(valueName, throwOnMissingValue: false);
-        logger?.LogFireAndForget(DiagnosticLogFormatter.BuildRegistryOperationLog("DeleteRegistryValue", $@"{root.Name}\{subPath}", valueName, null, null, writable: true, result: key is null ? "MissingKey" : "Success"));
     }
 
     private static RegistryKey? OpenRegistryKey(string? fullPath, bool writable, BackendUserContext? context = null)

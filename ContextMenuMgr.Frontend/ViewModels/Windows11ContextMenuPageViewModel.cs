@@ -19,7 +19,6 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
     private readonly ContextMenuWorkspaceService _workspace;
-    private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
     private readonly FrontendSettingsService _settingsService;
     private readonly DelayedLoadingPresentation _loadingPresentation = new();
@@ -32,14 +31,12 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         Windows11ContextMenuService service,
         LocalizationService localization,
         ContextMenuWorkspaceService workspace,
-        ListPlaceholderDebugStateService placeholderDebug,
         GlobalSearchNavigationFilterService globalSearchFilterService,
         FrontendSettingsService settingsService)
     {
         _service = service;
         _localization = localization;
         _workspace = workspace;
-        _placeholderDebug = placeholderDebug;
         _globalSearchFilterService = globalSearchFilterService;
         _settingsService = settingsService;
         _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
@@ -50,7 +47,6 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
         _localization.LanguageChanged += OnLanguageChanged;
         _service.ItemsChanged += OnItemsChanged;
-        _placeholderDebug.PropertyChanged += OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested += OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged += OnWorkspaceItemsChanged;
         foreach (var item in _workspace.Items)
@@ -115,12 +111,12 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public bool IsSupported => _service.IsSupported;
 
-    public bool IsListLoading => _placeholderDebug.ForceLoadingState || _loadingPresentation.IsVisible;
+    public bool IsListLoading => _loadingPresentation.IsVisible;
 
     public bool ShowListContent => !IsListLoading && !IsListEmpty;
 
     public bool IsListEmpty => !IsListLoading && !IsLoading
-        && (_placeholderDebug.ForceEmptyState || !ItemsView.Cast<object>().Any());
+        && !ItemsView.Cast<object>().Any();
 
     public bool ShowListPlaceholder => IsListLoading || IsListEmpty;
 
@@ -221,17 +217,6 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         OnPropertyChanged(nameof(ContextTypesLabel));
         ItemsView.Refresh();
         RefreshListPlaceholderState();
-    }
-
-    private void OnPlaceholderDebugPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(ListPlaceholderDebugStateService.Mode)
-            or nameof(ListPlaceholderDebugStateService.ForceLoadingState)
-            or nameof(ListPlaceholderDebugStateService.ForceEmptyState)
-            or nameof(ListPlaceholderDebugStateService.HasForcedState))
-        {
-            RefreshListPlaceholderState();
-        }
     }
 
     private async Task EnsureLoadedAsync()
@@ -352,7 +337,6 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         _rebuildCts = null;
         _localization.LanguageChanged -= OnLanguageChanged;
         _service.ItemsChanged -= OnItemsChanged;
-        _placeholderDebug.PropertyChanged -= OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested -= OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged -= OnWorkspaceItemsChanged;
         foreach (var item in _workspace.Items)

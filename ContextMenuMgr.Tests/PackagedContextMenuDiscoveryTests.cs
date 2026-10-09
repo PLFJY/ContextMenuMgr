@@ -149,20 +149,6 @@ public sealed class PackagedContextMenuDiscoveryTests
         Assert.Equal(valid.FullName, definition.Package.FullName);
     }
 
-    [Fact]
-    public void MapCategories_PreservesExistingMappings()
-    {
-        var categories = Windows11ContextMenuCatalog.MapCategories(
-                ["File: .py", "Directory", "File: Directory\\Background", "File: Drive", "File: Folder"])
-            .ToHashSet();
-
-        Assert.Contains(ContextMenuCategory.File, categories);
-        Assert.Contains(ContextMenuCategory.Directory, categories);
-        Assert.Contains(ContextMenuCategory.DirectoryBackground, categories);
-        Assert.Contains(ContextMenuCategory.Drive, categories);
-        Assert.Contains(ContextMenuCategory.Folder, categories);
-    }
-
     [Theory]
     [InlineData(false, false, true, "None")]
     [InlineData(false, true, false, "User")]

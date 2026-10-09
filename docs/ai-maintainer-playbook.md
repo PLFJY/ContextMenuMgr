@@ -216,3 +216,15 @@ Registry Write Protection 自身也属于链路 A，但同时覆盖 HKLM 与 fro
 - 修改 build/release
 - 修改 `RuntimePaths`
 - 修改全局搜索范围
+
+
+## 11. 兼容路径的维护决定
+
+| 路径 / 格式 | 当前决定及退出条件 |
+| --- | --- |
+| `TryMigrateLegacyRuntimeFiles` / `TryMigrateLegacySettings` / 被调用的 `RuntimePaths.Legacy*` | 保留旧 LocalAppData、ProgramData 与 ProgramData/Data 布局的 copy-only 升级；实际引用仍可达。历史发布与支持下限尚未完整对应，属于待核实项，不能按命名或年龄删除。只有维护者明确停止支持这些源布局、并验证目标状态与备份不丢失后才可退休。 |
+| v1.7.5 `LegacyShellVerbVisibilityRecoveryTransaction` | 保留严格签名、物理来源与事务恢复；退出条件见 `registry-model.md`。 |
+| `ServiceMetadata.LegacyServiceName` / installer cleanup | 保留 `ContextMenuManagerService` 的旧安装清理；bootstrapper 与 installer 都有实际调用。具体历史发布范围仍待核实，只有旧服务名安装明确不再受支持时才移除。 |
+| 无调用的旧 Frontend PowerShell 生命周期脚本生成器 | 已被 bootstrapper 完全替代，删除；不是升级数据迁移。 |
+
+完成任务时执行 `AGENTS.md` 的清理规则：移除临时测试与被替换实现、搜索旧名称/资源/生成命令、审阅 diff，并分别报告自动验证和人工运行验证。无需为每个兼容 helper 新建追踪文档或捏造退休版本。

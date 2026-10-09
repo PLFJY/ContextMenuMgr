@@ -339,7 +339,7 @@ ProbeHost 不写注册表、不执行菜单命令、不提权。不要在前端�
 
 `RuntimePaths` 通过 `AppContext.BaseDirectory` 下的 `ContextMenuMgr.package.json` 显式识别包类型，不根据安装路径猜测。缺失或无效时默认为 Installer。Installer 根目录是 `%ProgramData%\ContextMenuMgr`；Portable 根目录是 `<应用目录>\Data`。`FrontendSettingsService`、日志、状态库、后端保护设置和删除备份都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；Portable 迁移不会移动或删除 ProgramData 数据，也不会覆盖已有 portable 数据。
 
-`ContextMenuWorkspaceService` treats service/pipe reachability and an individual backend operation as separate health signals. A successful `Ping` followed by a failed `GetSnapshot` shows a data-load error and must not start UAC service repair or recommend Install/Repair. StateStore automatic recovery emits one localized `ServiceMessage` through the existing notification connection; repeated WPS approval refresh failures back off from the normal five-second interval up to one minute and reset to the normal interval after success.
+`ContextMenuWorkspaceService` treats service/pipe reachability and an individual backend operation as separate health signals. A successful `Ping` followed by a failed `GetSnapshot` shows a data-load error and must not start UAC service repair or recommend Install/Repair. StateStore automatic recovery emits one localized `ServiceMessage` through the existing notification connection; the WPS approval loop starts after five seconds, uses a fifteen-second interval after success, and backs off repeated failures up to one minute.
 
 Portable 包的运行时数据分为两类：纯 UI 偏好可以随包移动，但注册表运行时状态必须绑定当前 Windows 安装和前端用户。`ContextMenuStateStore` 使用 schemaVersion=2 envelope 保存 `hostIdentity`，其中只包含 `MachineGuid + frontend user SID` 的 SHA-256 指纹、短前缀、schema version 和创建时间，不保存原始 MachineGuid 或 SID。Portable 模式下如果 `context-menu-state.json` 的指纹与当前主机不匹配，后端不会加载旧状态，而是把旧文件移动到 `RuntimePaths.QuarantineDirectory` 下的 `foreign-host-...` 目录，并创建带当前指纹的新空状态库；legacy raw dictionary 只在能验证当前 host identity 时迁移一次。
 
@@ -434,3 +434,14 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 ## Ordinary toggle timeout behavior
 
 `NamedPipeBackendClient` opens an independent pipe per request; slow WPS approval refreshes do not queue user toggles in the frontend. Ordinary `SetEnabled` has a 20-second response budget. A timeout means the outcome needs verification, not that the registry write failed: the frontend queries `GetContextMenuItemState` for the original physical source and uses the returned authoritative item. A confirmed old state reverts the toggle; a confirmed requested state succeeds; an unavailable result is shown as uncertain and prevents another toggle until a notification or refresh updates that item. `RecentClientOperationCache` keeps local requests in flight without time expiry, retains completed requests for 10 seconds, and removes timed-out or failed requests so late success notifications are delivered.
+
+
+## 代码维护与验证边界
+
+代码清理与测试留存遵循 `AGENTS.md` 的 **Code Hygiene, Refactoring, and Test Retention**。重构必须删除替代实现，临时测试结束即删除；不向生产注入故障回调。保存失败的集成验证通过锁住真实状态文件、允许读取但禁止替换触发，并检查注册表回滚。
+
+`EnhanceMenuDictionary` 统一负责增强菜单 XML 的语言/条件选择、命令编译、生成文件和 CLI 校验；`ContextMenuRegistryCatalog` 保留注册表写入与状态事务。字典资源的唯一运行时来源是 Frontend 的 `Resources`，Backend 不保留重复的 Detailed Edit XML。`WorkspaceNotificationState` 持有通知集合与普通/WPS 两套独立去重基线，工作区保持原有公共事件与生命周期。
+
+IPC 超时、不重试不确定写入、迟到权威状态、响应失败仍广播、操作关联及独立 pipe 并发集中在 `MutationOutcomeTests`。注册表事务、legacy provenance、状态损坏/迁移、ACL、SID、Packaged COM、服务生命周期与发布脚本仍保留独立覆盖。UI 字符串、模板和重复 Busy 状态不以一次性测试永久保留。
+
+服务生命周期唯一提升入口仍是 `BackendServiceBootstrapper`；Frontend 不再保留无人调用的旧 PowerShell 安装/卸载/停止脚本生成器。运行时菜单操作仍使用 Backend Pipe。

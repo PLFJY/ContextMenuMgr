@@ -20,7 +20,6 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private readonly IBackendClient _backendClient;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
-    private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly GlobalSearchNavigationFilterService _globalSearchFilterService;
     private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private readonly HashSet<string> _loggedDesktopCompatibilityItemIds = new(StringComparer.OrdinalIgnoreCase);
@@ -35,7 +34,6 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         IBackendClient backendClient,
         LocalizationService localization,
         FrontendSettingsService settingsService,
-        ListPlaceholderDebugStateService placeholderDebug,
         GlobalSearchNavigationFilterService globalSearchFilterService)
     {
         Category = category;
@@ -43,14 +41,12 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         _backendClient = backendClient;
         _localization = localization;
         _settingsService = settingsService;
-        _placeholderDebug = placeholderDebug;
         _globalSearchFilterService = globalSearchFilterService;
         _lastHideDisabledItems = settingsService.Current.HideDisabledItems;
         _localization.LanguageChanged += OnLanguageChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _workspace.PropertyChanged += OnWorkspacePropertyChanged;
         _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
-        _placeholderDebug.PropertyChanged += OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested += OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged += OnItemsCollectionChanged;
         foreach (var item in _workspace.Items)
@@ -156,8 +152,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     public string EmptyItemsText => _localization.Translate("EmptyItemsText");
 
     public bool IsListLoading =>
-        _placeholderDebug.ForceLoadingState
-        || _loadingPresentation.IsVisible;
+        _loadingPresentation.IsVisible;
 
     public bool ShowListContent => !IsListLoading && !HasListLoadFailure && !IsListEmpty;
 
@@ -188,11 +183,6 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
             if (IsListLoading || _workspace.IsLoading || _workspace.IsServiceBootstrapInProgress || HasListLoadFailure)
             {
                 return false;
-            }
-
-            if (_placeholderDebug.ForceEmptyState)
-            {
-                return true;
             }
 
             return !ItemsView.Cast<object>().Any();
@@ -469,17 +459,6 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e) => RefreshListPlaceholderState();
 
-    private void OnPlaceholderDebugPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(ListPlaceholderDebugStateService.Mode)
-            or nameof(ListPlaceholderDebugStateService.ForceLoadingState)
-            or nameof(ListPlaceholderDebugStateService.ForceEmptyState)
-            or nameof(ListPlaceholderDebugStateService.HasForcedState))
-        {
-            RefreshListPlaceholderState();
-        }
-    }
-
     private void RefreshLocalizedText()
     {
         var (nameKey, descriptionKey) = ContextMenuCategoryText.GetResourceKeys(Category);
@@ -647,7 +626,6 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
         _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
         _loadingPresentation.Dispose();
-        _placeholderDebug.PropertyChanged -= OnPlaceholderDebugPropertyChanged;
         _globalSearchFilterService.FilterRequested -= OnGlobalSearchFilterRequested;
         _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;
         foreach (var item in _workspace.Items)

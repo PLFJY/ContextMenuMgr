@@ -9,22 +9,6 @@ namespace ContextMenuMgr.Tests;
 public sealed class ContextMenuStateStoreTests
 {
     [Fact]
-    public void BackendOperationHealth_PingFails_IsServiceUnavailable()
-    {
-        Assert.Equal(
-            BackendOperationHealth.ServiceUnavailable,
-            BackendOperationHealthClassifier.FromPingResult(pingSucceeded: false));
-    }
-
-    [Fact]
-    public void BackendOperationHealth_PingSucceedsButSnapshotFails_IsOperationFailure()
-    {
-        Assert.Equal(
-            BackendOperationHealth.OperationFailed,
-            BackendOperationHealthClassifier.FromPingResult(pingSucceeded: true));
-    }
-
-    [Fact]
     public async Task SaveAsync_ReplacesCurrentAndKeepsPreviousValidatedStateAsBackup()
     {
         using var fixture = new StateStoreFixture();

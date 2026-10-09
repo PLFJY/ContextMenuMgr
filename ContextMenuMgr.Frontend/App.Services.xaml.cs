@@ -40,7 +40,6 @@ public partial class App
         services.AddSingleton<ContextMenuDeepAnalysisService>();
         services.AddSingleton<ShellSubMenuDialogService>();
         services.AddSingleton<DetailedEditMenuDialogService>();
-        services.AddSingleton<ListPlaceholderDebugStateService>();
         services.AddSingleton<IBackendClient, NamedPipeBackendClient>();
         services.AddSingleton<IBackendServiceManager, BackendServiceManager>();
         services.AddSingleton<ContextMenuWorkspaceService>();

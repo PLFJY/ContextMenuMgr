@@ -92,14 +92,6 @@ public static class RuntimePaths
         "Data");
 
     /// <summary>
-    /// Gets the legacy Frontend Logs Directory.
-    /// </summary>
-    public static string LegacyFrontendLogsDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ContextMenuMgr",
-        "Logs");
-
-    /// <summary>
     /// Gets the legacy State Database Path.
     /// </summary>
     public static string LegacyStateDatabasePath { get; } = Path.Combine(

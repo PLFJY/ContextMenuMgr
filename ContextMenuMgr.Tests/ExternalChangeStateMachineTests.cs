@@ -5,7 +5,7 @@ using Xunit;
 namespace ContextMenuMgr.Tests;
 
 /// <summary>
-/// Focused tests for the external context-menu change state machine (issue #11).
+/// Focused tests for the external context-menu change state machine.
 ///
 /// These tests exercise the pure, deterministic classifier helpers extracted from
 /// <see cref="ContextMenuRegistryCatalog"/>. They never touch the real registry or
@@ -77,8 +77,6 @@ public sealed class ExternalChangeStateMachineTests
         Assert.Contains(linked, item => item.Id == second.Id);
     }
 
-    // ---- helpers for building test fixtures ---------------------------------
-
     private static ContextMenuEntry BuildPresentEntry(
         bool isEnabled = true,
         string displayName = "Test Verb",
@@ -137,8 +135,6 @@ public sealed class ExternalChangeStateMachineTests
             DeletedAtUtc = deletedAtUtc
         };
 
-    // ---- Scenario 1: first run, empty state database -----------------------
-
     /// <summary>
     /// Scenario 1: On the first-ever run with an empty persisted state database,
     /// existing items must be adopted as the initial baseline. No quarantine,
@@ -169,237 +165,6 @@ public sealed class ExternalChangeStateMachineTests
         Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
-    // ---- Scenario 2: runtime unknown Added --------------------------------
-
-    /// <summary>
-    /// Scenario 2: At runtime, when a completely unknown item appears (no
-    /// persisted state exists and the monitor has an established baseline),
-    /// the item must be quarantined and sent through the approval flow.
-    /// </summary>
-    [Fact]
-    public void Runtime_UnknownAdded_Quarantined()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        PersistedContextMenuState? state = null;
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = false;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.QuarantineAdded, action);
-
-        var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
-
-        var details = ContextMenuChangeClassifier.GetDetectedChangeDetails(entry, state, changeKind);
-        Assert.NotNull(details);
-        Assert.Contains("new", details!, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // ---- Scenario 3: startup/offline unknown Added ------------------------
-
-    /// <summary>
-    /// Scenario 3: When the monitor was not running and an unknown item
-    /// appeared, it must be exposed as an Added highlight only. No quarantine,
-    /// no approval notification. The user decides what to do.
-    /// </summary>
-    [Fact]
-    public void Startup_UnknownAdded_HighlightOnly_NoQuarantine()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        PersistedContextMenuState? state = null;
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = true;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.OfflineAddedHighlight, action);
-
-        // The change kind is still Added so the frontend can show the badge.
-        var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
-    }
-
-    // ---- Scenario 4: deleted recovery identity is not monitored -----------
-
-    /// <summary>
-    /// Deleted state is recovery-only. A live key with the same Id follows the
-    /// ordinary runtime Added path.
-    /// </summary>
-    [Fact]
-    public void Runtime_DeletedRecoveryIdAppears_TreatedAsAdded()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        var state = BuildState(
-            isDeleted: true,
-            desiredEnabled: null,
-            observedEnabled: false,
-            backupFilePath: "C:\\Backups\\old-item.reg",
-            deletedAtUtc: DateTimeOffset.UtcNow.AddDays(-1));
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = false;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.QuarantineAdded, action);
-
-        var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
-
-        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
-    }
-
-    // ---- Scenario 5: offline deleted recovery identity is Added ------------
-
-    /// <summary>
-    /// The same recovery-only identity is an ordinary offline Added item and is
-    /// not quarantined during startup baseline establishment.
-    /// </summary>
-    [Fact]
-    public void Startup_DeletedRecoveryIdAppears_AddedHighlightOnly()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        var state = BuildState(
-            isDeleted: true,
-            observedEnabled: false,
-            backupFilePath: "C:\\Backups\\old-item.reg",
-            deletedAtUtc: DateTimeOffset.UtcNow.AddDays(-1));
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = true;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.OfflineAddedHighlight, action);
-
-        var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline);
-        Assert.Equal(ContextMenuChangeKind.Added, changeKind);
-
-        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
-    }
-
-    // ---- Scenario 6: runtime DesiredEnabled=false and actual enabled ------
-
-    /// <summary>
-    /// Scenario 6: At runtime, when a previously explicitly disabled item
-    /// (DesiredEnabled=false, not deleted, not pending approval) is found to
-    /// be enabled in the registry (e.g. a third-party app recreated it), it
-    /// must be automatically re-disabled. No pending approval, no approval
-    /// notification.
-    /// </summary>
-    [Fact]
-    public void Runtime_DesiredDisabled_ActualEnabled_AutoReconciled()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        var state = BuildState(
-            isDeleted: false,
-            desiredEnabled: false,
-            observedEnabled: false,
-            isPendingApproval: false);
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = false;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.ReconcileDisabledState, action);
-
-        // The classifier must confirm the drift is real.
-        Assert.True(ContextMenuChangeClassifier.ShouldReconcileDisabledState(entry, state));
-
-        // No pending approval should be triggered by this action.
-        Assert.False(state.IsPendingApproval);
-    }
-
-    // ---- Scenario 7: offline and runtime disabled-to-enabled boundaries ---
-
-    /// <summary>
-    /// At startup, a disabled-to-enabled change happened while monitoring was
-    /// stopped and must therefore remain Modified. The same physical state is
-    /// silently corrected only when observed as a runtime transition.
-    /// </summary>
-    [Fact]
-    public void DesiredDisabled_ActualEnabled_UsesOfflineOrRuntimeRule()
-    {
-        var entry = BuildPresentEntry(isEnabled: true);
-        var state = BuildState(
-            isDeleted: false,
-            desiredEnabled: false,
-            observedEnabled: false,
-            isPendingApproval: false);
-
-        const bool hasBaseline = true;
-        const bool isBaselineEstablishment = true;
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment);
-
-        Assert.Equal(ItemMonitorAction.MetadataModifiedHighlight, action);
-
-        var runtimeAction = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline, isBaselineEstablishment: false);
-        Assert.Equal(ItemMonitorAction.ReconcileDisabledState, runtimeAction);
-    }
-
-    // ---- Scenario 8: missing active state leaves the baseline -------------
-
-    /// <summary>
-    /// A real registry deletion ends the monitored identity even when the item
-    /// used to be disabled. A later recreation is handled as a new item.
-    /// </summary>
-    [Fact]
-    public void ExplicitDisabledState_WhenMissing_IsRemovedFromBaseline()
-    {
-        var state = BuildState(
-            isDeleted: false,
-            desiredEnabled: false,
-            observedEnabled: false);
-
-        Assert.True(ContextMenuChangeClassifier.ShouldRemoveMissingState(state));
-    }
-
-    /// <summary>
-    /// Verifies that an ordinary neutral baseline state (DesiredEnabled=null)
-    /// is NOT considered an explicit disabled policy and therefore MAY be
-    /// pruned by missing-state cleanup. Only DesiredEnabled=false is enforced.
-    /// </summary>
-    [Fact]
-    public void NeutralBaselineState_NotPreserved_CanBePruned()
-    {
-        var neutralState = BuildState(
-            isDeleted: false,
-            desiredEnabled: null,
-            observedEnabled: true);
-
-        Assert.True(ContextMenuChangeClassifier.ShouldRemoveMissingState(neutralState));
-    }
-
-    /// <summary>
-    /// Verifies that a deleted state is NOT treated as an explicit disabled
-    /// policy for pruning-preservation purposes. Deleted states have their
-    /// own lifecycle (backup files, DeletedAtUtc) managed separately.
-    /// </summary>
-    [Fact]
-    public void DeletedState_NotPreservedAsExplicitDisabled()
-    {
-        var deletedState = BuildState(
-            isDeleted: true,
-            desiredEnabled: false,
-            observedEnabled: false);
-
-        Assert.False(ContextMenuChangeClassifier.ShouldRemoveMissingState(deletedState));
-    }
-
-    // ---- Scenario 9: DesiredEnabled=true and actual disabled --------------
-
     /// <summary>
     /// Scenario 9: When DesiredEnabled=true (user explicitly enabled the item)
     /// but the actual registry reports it as disabled, the classifier must NOT
@@ -428,8 +193,6 @@ public sealed class ExternalChangeStateMachineTests
 
         Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
-
-    // ---- Scenario 10: known metadata-only modification --------------------
 
     /// <summary>
     /// Scenario 10: When a known item (state exists, not deleted, not pending
@@ -468,97 +231,6 @@ public sealed class ExternalChangeStateMachineTests
         // No enabled-state drift, so no consistency issue from that.
         Assert.False(ContextMenuChangeClassifier.HasExternalEnabledStateChange(entry, state));
     }
-
-    // ---- Scenario 11: failed corrective write leaves consistency visible ---
-
-    /// <summary>
-    /// Scenario 11: When a corrective disable write fails (e.g. access denied,
-    /// registry key disappeared mid-write), the persisted DesiredEnabled must
-    /// remain false, ObservedEnabled must NOT be falsely changed to false,
-    /// and the consistency warning must remain visible. The classifier must
-    /// keep returning ReconcileDisabledState on the next poll so a natural
-    /// retry occurs. The failure must NOT be converted into a pending
-    /// approval.
-    /// </summary>
-    [Fact]
-    public void FailedCorrectiveWrite_KeepsDesiredDisabled_LeavesConsistencyVisible()
-    {
-        // Simulate the post-failure state: DesiredEnabled=false (policy intact),
-        // ObservedEnabled=true (NOT falsely flipped to false because the write
-        // failed), actual entry still enabled in the registry.
-        var entry = BuildPresentEntry(isEnabled: true);
-        var state = BuildState(
-            isDeleted: false,
-            desiredEnabled: false,
-            observedEnabled: true, // write failed, so observed stays as actual
-            isPendingApproval: false);
-
-        // The drift is still detected -> reconciliation will be retried.
-        Assert.True(ContextMenuChangeClassifier.ShouldReconcileDisabledState(entry, state));
-
-        var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline: true, isBaselineEstablishment: false);
-        Assert.Equal(ItemMonitorAction.ReconcileDisabledState, action);
-
-        // Must NOT be converted into a pending approval.
-        Assert.False(state.IsPendingApproval);
-
-        // Reconciliation is retried by later snapshots; this is not represented
-        // as an unrelated generic consistency warning.
-        Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
-    }
-
-    // ---- Legacy serialized-state compatibility ---------------------------
-
-    /// <summary>
-    /// Verifies that an old state file containing the retired Reappeared value
-    /// still preserves the PendingApprovalChangeKind/IsPendingApproval invariant.
-    /// The active catalog no longer creates this value.
-    /// </summary>
-    [Fact]
-    public void PendingApprovalChangeKind_TracksReappearedOrigin_AutoClearsOnApprovalCleared()
-    {
-        var state = BuildState(isPendingApproval: false);
-
-        // Initially no pending approval.
-        Assert.False(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-
-        // Simulate deserializing the value from a state file created by an
-        // older release.
-        state.PendingApprovalChangeKind = ContextMenuChangeKind.Reappeared;
-
-        // Auto-flip: setting a non-null change kind must flip IsPendingApproval
-        // to true even if the caller forgot to set it explicitly.
-        Assert.True(state.IsPendingApproval);
-        Assert.Equal(ContextMenuChangeKind.Reappeared, state.PendingApprovalChangeKind);
-
-        // Clearing pending state must also clear the legacy origin so it does
-        // not leak into later decisions.
-        state.IsPendingApproval = false;
-        Assert.False(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
-    /// <summary>
-    /// Scenario 12 (Added origin): Verifies the same auto-clearing logic for
-    /// the Added origin, ensuring both approval paths maintain consistency.
-    /// </summary>
-    [Fact]
-    public void PendingApprovalChangeKind_TracksAddedOrigin_AutoClearsOnApprovalCleared()
-    {
-        var state = BuildState(isPendingApproval: false);
-
-        state.PendingApprovalChangeKind = ContextMenuChangeKind.Added;
-        Assert.True(state.IsPendingApproval);
-        Assert.Equal(ContextMenuChangeKind.Added, state.PendingApprovalChangeKind);
-
-        state.IsPendingApproval = false;
-        Assert.False(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
-    // ---- Additional state-machine invariants -------------------------------
 
     /// <summary>
     /// When an item is already pending approval, the classifier must return
@@ -649,7 +321,7 @@ public sealed class ExternalChangeStateMachineTests
     /// Verifies the full classification matrix for cases where persisted state
     /// exists, so the runtime-vs-startup behavior difference is auditable at
     /// a glance. The null-state cases (QuarantineAdded / OfflineAddedHighlight)
-    /// are covered by dedicated tests above.
+    /// are covered by ContextMenuMonitoringRulesTests.
     /// </summary>
     [Theory]
     [InlineData(true, false, false, true, false, ItemMonitorAction.QuarantineAdded)]
@@ -727,125 +399,6 @@ public sealed class ExternalChangeStateMachineTests
 /// </summary>
 public sealed class PersistedContextMenuStateTests
 {
-    /// <summary>
-    /// Old state files (saved before PendingApprovalChangeKind existed) must
-    /// deserialize safely with the field defaulting to null. This verifies
-    /// backward-compatible JSON migration.
-    /// </summary>
-    [Fact]
-    public void PendingApprovalChangeKind_DefaultsToNull_ForOldStateFiles()
-    {
-        // Simulate an old state object that was created before the field existed.
-        // The default value of a nullable enum is null.
-        var state = new PersistedContextMenuState
-        {
-            Id = "test",
-            IsPendingApproval = false
-        };
-
-        Assert.Null(state.PendingApprovalChangeKind);
-        Assert.False(state.IsPendingApproval);
-    }
-
-    /// <summary>
-    /// Setting IsPendingApproval to true does NOT automatically set
-    /// PendingApprovalChangeKind. The catalog must explicitly assign the
-    /// origin. This prevents false origins from leaking when the catalog
-    /// uses the simple boolean setter for Added-item quarantine.
-    /// </summary>
-    [Fact]
-    public void SettingIsPendingApprovalTrue_DoesNotAutoSetChangeKind()
-    {
-        var state = new PersistedContextMenuState { IsPendingApproval = false };
-
-        state.IsPendingApproval = true;
-
-        Assert.True(state.IsPendingApproval);
-        // Change kind remains null until the catalog explicitly assigns it.
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
-    /// <summary>
-    /// Setting IsPendingApproval to false MUST automatically clear
-    /// PendingApprovalChangeKind so no stale origin leaks after an approval
-    /// decision resolves.
-    /// </summary>
-    [Fact]
-    public void SettingIsPendingApprovalFalse_AutoClearsChangeKind()
-    {
-        var state = new PersistedContextMenuState
-        {
-            IsPendingApproval = true,
-            PendingApprovalChangeKind = ContextMenuChangeKind.Reappeared
-        };
-
-        state.IsPendingApproval = false;
-
-        Assert.False(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
-    /// <summary>
-    /// Setting PendingApprovalChangeKind to a non-null value while
-    /// IsPendingApproval is false MUST automatically flip IsPendingApproval
-    /// to true. This protects against call sites that assign the origin but
-    /// forget to set the boolean flag.
-    /// </summary>
-    [Fact]
-    public void SettingChangeKind_WhileNotPending_AutoFlipsPendingTrue()
-    {
-        var state = new PersistedContextMenuState { IsPendingApproval = false };
-
-        state.PendingApprovalChangeKind = ContextMenuChangeKind.Added;
-
-        Assert.True(state.IsPendingApproval);
-        Assert.Equal(ContextMenuChangeKind.Added, state.PendingApprovalChangeKind);
-    }
-
-    /// <summary>
-    /// Setting PendingApprovalChangeKind back to null does NOT automatically
-    /// clear IsPendingApproval. The boolean flag is the authoritative
-    /// approval-state guard; only setting it to false clears the origin.
-    /// </summary>
-    [Fact]
-    public void SettingChangeKindToNull_DoesNotClearPendingApproval()
-    {
-        var state = new PersistedContextMenuState
-        {
-            IsPendingApproval = true,
-            PendingApprovalChangeKind = ContextMenuChangeKind.Reappeared
-        };
-
-        state.PendingApprovalChangeKind = null;
-
-        // IsPendingApproval stays true; the origin is just cleared.
-        Assert.True(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
-    /// <summary>
-    /// FromEntry must not carry over PendingApprovalChangeKind from an entry
-    /// that was constructed without it (the entry contract does not expose
-    /// this field). The catalog assigns it explicitly after creating the
-    /// state.
-    /// </summary>
-    [Fact]
-    public void FromEntry_DoesNotCarryOverPendingApprovalChangeKind()
-    {
-        var entry = new ContextMenuEntry
-        {
-            Id = "test",
-            IsPendingApproval = true,
-            IsEnabled = true,
-            IsPresentInRegistry = true
-        };
-
-        var state = PersistedContextMenuState.FromEntry(entry);
-
-        Assert.True(state.IsPendingApproval);
-        Assert.Null(state.PendingApprovalChangeKind);
-    }
-
     /// <summary>
     /// A deleted record is recovery metadata only and must never remain in the
     /// pending-approval workflow, including when loaded from an old state file.

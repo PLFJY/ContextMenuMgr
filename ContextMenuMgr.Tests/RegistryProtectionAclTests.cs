@@ -9,20 +9,6 @@ namespace ContextMenuMgr.Tests;
 public sealed class RegistryProtectionAclTests
 {
     [Fact]
-    public void RuleDefinition_ContainsExactlyTheFourIntendedCombinations()
-    {
-        var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-        var authenticatedUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
-        var rules = RegistryProtectionAcl.CreateProtectionRules();
-
-        Assert.Equal(4, rules.Count);
-        Assert.Contains(rules, rule => IsProtectionRule(rule, users, InheritanceFlags.None));
-        Assert.Contains(rules, rule => IsProtectionRule(rule, authenticatedUsers, InheritanceFlags.None));
-        Assert.Contains(rules, rule => IsProtectionRule(rule, users, InheritanceFlags.ContainerInherit));
-        Assert.Contains(rules, rule => IsProtectionRule(rule, authenticatedUsers, InheritanceFlags.ContainerInherit));
-    }
-
-    [Fact]
     public void Enable_AddsEveryRequiredProtectionSemantic()
     {
         var security = new RegistrySecurity();

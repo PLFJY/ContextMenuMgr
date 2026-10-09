@@ -12,6 +12,7 @@ namespace ContextMenuMgr.Frontend.Services;
 /// </summary>
 public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDisposable
 {
+    private readonly WorkspaceNotificationState _notificationState;
     private readonly IBackendClient _backendClient;
     private readonly IBackendServiceManager _backendServiceManager;
     private readonly ContextMenuItemActionsService _itemActionsService;
@@ -23,9 +24,6 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly FrontendSettingsService _settingsService;
     private readonly TrayHostProcessService _trayHostProcessService;
     private readonly PortablePackageTrustService _portablePackageTrustService;
-    private readonly HashSet<string> _seenPendingApprovalIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _seenChangedItemIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _seenWpsOfficeApprovalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (ContextMenuDecision Decision, DateTimeOffset RetryAfterUtc)> _uncertainDecisions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _decisionsInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _decisionSync = new();
@@ -34,8 +32,6 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly CancellationTokenSource _shutdownCts = new();
     private CancellationTokenSource? _wpsOfficeApprovalRefreshCts;
     private Task? _wpsOfficeApprovalRefreshTask;
-    private bool _pendingApprovalBaselineInitialized;
-    private bool _wpsOfficeApprovalBaselineInitialized;
     private bool _notificationsInitialized;
     private bool _fullyInitialized;
     private bool _uiStateActive;
@@ -66,6 +62,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _detailedEditMenuDialogService = detailedEditMenuDialogService;
         _iconPreviewService = iconPreviewService;
         _localization = localization;
+        _notificationState = new WorkspaceNotificationState(localization);
+        _notificationState.PendingApprovalDetected += (_, item) => PendingApprovalDetected?.Invoke(this, item);
         _settingsService = settingsService;
         _trayHostProcessService = trayHostProcessService;
         _portablePackageTrustService = portablePackageTrustService;
@@ -85,7 +83,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// <summary>
     /// Gets the notifications.
     /// </summary>
-    public ObservableCollection<ToastNotificationViewModel> Notifications { get; } = [];
+    public ObservableCollection<ToastNotificationViewModel> Notifications => _notificationState.Notifications;
 
     /// <summary>
     /// Gets or sets the connection Status.
@@ -497,14 +495,14 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                     UpsertItem(updated);
                 }
 
-                RemoveApprovalNotifications(itemId);
+                _notificationState.RemoveApproval(itemId);
             }
             else
             {
                 if (decision == ContextMenuDecision.Remove)
                 {
                     RemoveItem(itemId);
-                    RemoveApprovalNotifications(itemId);
+                    _notificationState.RemoveApproval(itemId);
                 }
 
                 await RefreshAsync();
@@ -1142,7 +1140,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             Items.Remove(removed);
         }
 
-        UpdateNotifications(snapshot);
+        _notificationState.UpdateRegular(snapshot);
     }
 
     private void ClearResolvedDecisions(IReadOnlyList<ContextMenuEntry> snapshot)
@@ -1174,10 +1172,6 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
         var existing = WpsOfficeApprovalItems.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
         var pendingItems = snapshot.Where(static entry => entry.IsPendingApproval).ToArray();
-        var currentPendingIds = pendingItems
-            .Select(static item => item.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
         foreach (var entry in pendingItems)
         {
             if (existing.Remove(entry.Id, out var item))
@@ -1196,100 +1190,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             WpsOfficeApprovalItems.Remove(removed);
         }
 
-        if (!_wpsOfficeApprovalBaselineInitialized)
-        {
-            foreach (var itemId in currentPendingIds)
-            {
-                _seenWpsOfficeApprovalIds.Add(itemId);
-            }
-
-            _wpsOfficeApprovalBaselineInitialized = true;
-        }
-        else
-        {
-            foreach (var item in pendingItems)
-            {
-                if (_seenWpsOfficeApprovalIds.Add(item.Id))
-                {
-                    PendingApprovalDetected?.Invoke(this, item);
-                }
-            }
-        }
-
-        foreach (var staleId in _seenWpsOfficeApprovalIds.Where(id => !currentPendingIds.Contains(id)).ToList())
-        {
-            _seenWpsOfficeApprovalIds.Remove(staleId);
-        }
-    }
-
-    private void UpdateNotifications(IEnumerable<ContextMenuEntry> snapshot)
-    {
-        var currentPendingIds = snapshot
-            .Where(static item => item.IsPendingApproval)
-            .Select(static item => item.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (!_pendingApprovalBaselineInitialized)
-        {
-            foreach (var itemId in currentPendingIds)
-            {
-                _seenPendingApprovalIds.Add(itemId);
-            }
-
-            _pendingApprovalBaselineInitialized = true;
-        }
-        else
-        {
-            foreach (var item in snapshot.Where(static item => item.IsPendingApproval))
-            {
-                if (_seenPendingApprovalIds.Add(item.Id))
-                {
-                    PendingApprovalDetected?.Invoke(this, item);
-                }
-            }
-        }
-
-        foreach (var item in snapshot.Where(static item => item.DetectedChangeKind != ContextMenuChangeKind.None))
-        {
-            if (_seenChangedItemIds.Add(item.Id))
-            {
-                Notifications.Insert(0, new ToastNotificationViewModel(
-                    new BackendNotification
-                    {
-                        Kind = PipeNotificationKind.ItemStateChanged,
-                        Item = item,
-                        Message = _localization.Format(
-                            "StartupChangeNotificationFormat",
-                            ContextMenuCategoryText.GetLocalizedName(item.Category, _localization),
-                            item.DisplayName)
-                    },
-                    _localization));
-            }
-        }
-
-        foreach (var staleId in _seenPendingApprovalIds.Where(id => !currentPendingIds.Contains(id)).ToList())
-        {
-            _seenPendingApprovalIds.Remove(staleId);
-        }
-
-        var currentChangedIds = snapshot
-            .Where(static item => item.DetectedChangeKind != ContextMenuChangeKind.None)
-            .Select(static item => item.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var staleId in _seenChangedItemIds.Where(id => !currentChangedIds.Contains(id)).ToList())
-        {
-            _seenChangedItemIds.Remove(staleId);
-        }
-
-        foreach (var staleNotification in Notifications
-                     .Where(notification =>
-                         !currentPendingIds.Contains(notification.ItemId)
-                         && !currentChangedIds.Contains(notification.ItemId))
-                     .ToList())
-        {
-            Notifications.Remove(staleNotification);
-        }
+        _notificationState.UpdateWpsOffice(snapshot);
     }
 
     private void UpsertItem(ContextMenuEntry entry)
@@ -1300,7 +1201,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             existing.Update(entry);
             if (!entry.IsPendingApproval)
             {
-                RemoveApprovalNotifications(entry.Id);
+                _notificationState.RemoveApproval(entry.Id);
             }
 
             return;
@@ -1340,32 +1241,6 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             existingWpsApproval.Dispose();
             WpsOfficeApprovalItems.Remove(existingWpsApproval);
-        }
-    }
-
-    private ToastNotificationViewModel CreateApprovalNotification(ContextMenuEntry item)
-    {
-        return new ToastNotificationViewModel(
-            new BackendNotification
-            {
-                Kind = PipeNotificationKind.ItemDetected,
-                Item = item,
-                Message = _localization.Format("ApprovalNeededMessage", item.DisplayName)
-            },
-            _localization);
-    }
-
-    private void RemoveApprovalNotifications(string itemId)
-    {
-        _seenPendingApprovalIds.Remove(itemId);
-
-        foreach (var toast in Notifications
-                     .Where(notification =>
-                         notification.IsApprovalRequest
-                         && string.Equals(notification.ItemId, itemId, StringComparison.OrdinalIgnoreCase))
-                     .ToList())
-        {
-            Notifications.Remove(toast);
         }
     }
 
@@ -1431,12 +1306,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
             if (notification.Item is not null)
             {
-                if (notification.Kind == PipeNotificationKind.ItemDetected
-                    && notification.Item.IsPendingApproval
-                    && _seenPendingApprovalIds.Add(notification.Item.Id))
-                {
-                    PendingApprovalDetected?.Invoke(this, notification.Item);
-                }
+                _notificationState.Observe(notification);
 
                 if (_uiStateActive
                     && ShouldUpsertNotificationItem(

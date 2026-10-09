@@ -194,7 +194,7 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 ### 7.3 验证 #131（硬件验证待执行）
 
-自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。`ScrollingWpfTests` 在 STA 上加载生产资源与导航模板，检查 panning 默认和可覆盖性、虚拟化/pixel offset、实际 ListBox wheel 路径、Auto / Self / Frame、内外层同一事件交接、Popup / ComboBox、Ctrl / Shift、disabled smooth mode 和 unload 动画清理。测试无需真实触摸设备，不启动前端业务服务。
+自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。导航模板、panning、虚拟化及嵌套路由直接按下表进行人工验证；不保留一次性 STA 模板实验。
 
 在 Windows 11 25H2 笔记本上，用 Precision Touchpad、触摸屏（如有）和普通鼠标分别执行以下步骤，并记录 OS、缩放比例、Windows wheel lines/page 设置与结果。自动测试通过不能替代这层验证。
 
@@ -501,3 +501,5 @@ Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说�
 ## Ordinary toggle outcome verification
 
 The per-item `AsyncToggleSwitch` ProgressRing stays active throughout a `SetEnabled` request and any timeout verification. A timed-out direct response is reconciled against the original physical source before the ViewModel receives a definitive failure. An uncertain result keeps the optimistic value and disables a second toggle until a notification or refresh supplies an authoritative item. A late authoritative `Update` increments the item version so an older failed task cannot roll it back.
+
+列表占位只由真实加载状态、延迟加载呈现和当前筛选结果决定，不提供全局 Loading/Empty 模拟服务或命令。DebugToolsWindow 及强制更新提示入口仅编译进 Debug；Beta/Release 不包含此窗口。WorkspaceNotificationState 独立保存普通菜单与 WPS/Office 的通知基线，工作区仍负责菜单项与后端操作。

@@ -9,16 +9,13 @@ namespace ContextMenuMgr.Frontend;
 public partial class DebugToolsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly UpdateCheckService _updateCheckService;
-    private readonly ListPlaceholderDebugStateService _placeholderDebug;
     private readonly LocalizationService _localization;
 
     public DebugToolsWindow(
         UpdateCheckService updateCheckService,
-        ListPlaceholderDebugStateService placeholderDebug,
         LocalizationService localization)
     {
         _updateCheckService = updateCheckService;
-        _placeholderDebug = placeholderDebug;
         _localization = localization;
 
         InitializeComponent();
@@ -36,21 +33,6 @@ public partial class DebugToolsWindow : Wpf.Ui.Controls.FluentWindow
         _updateCheckService.ShowDebugUpdatePrompt();
     }
 
-    private void OnSimulateLoadingClick(object sender, RoutedEventArgs e)
-    {
-        _placeholderDebug.SimulateLoading();
-    }
-
-    private void OnSimulateEmptyClick(object sender, RoutedEventArgs e)
-    {
-        _placeholderDebug.SimulateEmpty();
-    }
-
-    private void OnClearSimulatedStateClick(object sender, RoutedEventArgs e)
-    {
-        _placeholderDebug.Clear();
-    }
-
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLocalizedText();
@@ -62,10 +44,6 @@ public partial class DebugToolsWindow : Wpf.Ui.Controls.FluentWindow
         DebugTitleText.Text = Title;
         UpdatePromptTitleText.Text = _localization.Translate("DebugUpdatePromptTitle");
         ForceUpdatePromptButton.Content = _localization.Translate("DebugForceUpdatePromptText");
-        ListPlaceholderTitleText.Text = _localization.Translate("ListPlaceholderDebugTitle");
-        SimulateLoadingButton.Content = _localization.Translate("DebugSimulateLoadingText");
-        SimulateEmptyButton.Content = _localization.Translate("DebugSimulateEmptyText");
-        ClearSimulatedStateButton.Content = _localization.Translate("DebugClearSimulatedStateText");
     }
 
     private void ApplyWindowIcon()
