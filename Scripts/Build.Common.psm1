@@ -805,6 +805,10 @@ function Publish-Application {
     Invoke-External -FilePath "dotnet" -Arguments $trayHostRestoreArguments -ErrorMessage "dotnet restore failed for tray host ($platformLabel, $DistributionMode)"
     Invoke-External -FilePath "dotnet" -Arguments $trayHostPublishArguments -ErrorMessage "dotnet publish failed for tray host ($platformLabel, $DistributionMode)"
 
+    if ($distributionOptions.SelfContained -eq 'false') {
+        Remove-AppLocalHostComponents -PublishDir $publishDir
+    }
+
     $msBuildPath = $null
     $probeHostLicense = Get-NlohmannJsonLicensePath -NativeProbeHostProject $ProbeHostProject
     Ensure-FileExists -Path $probeHostLicense -Description "nlohmann/json license notice"
@@ -865,6 +869,29 @@ function Publish-Application {
     Write-PackageManifest -PublishDir $publishDir -PackageKind $PackageKind
 
     return $publishDir
+}
+
+function Remove-AppLocalHostComponents {
+    param([Parameter(Mandatory)] [string] $PublishDir)
+
+    # Framework-dependent deployments must never ship app-local hosting components
+    # (hostfxr.dll / hostpolicy.dll). When present next to the apphost, the .NET
+    # runtime resolver treats the application directory as the dotnet root and looks
+    # for the shared framework there instead of the globally installed runtime. On a
+    # machine that already has the required .NET runtime (exactly the framework-dependent
+    # scenario), this produces a "No frameworks were found" launch failure because the
+    # application folder does not contain the runtime. Stripping these files forces the
+    # apphost to fall back to the system-wide dotnet installation, which is the correct
+    # behavior for framework-dependent distributions. Self-contained deployments keep
+    # these files because the runtime is bundled with the app.
+    $hostComponents = @('hostfxr.dll', 'hostpolicy.dll', 'dotnet.exe')
+    foreach ($component in $hostComponents) {
+        $componentPath = Join-Path $PublishDir $component
+        if (Test-Path -LiteralPath $componentPath -PathType Leaf) {
+            Write-Host "Removing app-local host component '$component' from framework-dependent output." -ForegroundColor DarkGray
+            Remove-Item -LiteralPath $componentPath -Force -Confirm:$false
+        }
+    }
 }
 
 function Test-BinaryContainsUtf8String {
