@@ -735,16 +735,20 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     {
         try
         {
-            Directory.CreateDirectory(RuntimePaths.LogsDirectory);
-            foreach (var path in new[]
-                     {
-                         RuntimePaths.FrontendDebugLogPath,
-                         RuntimePaths.FrontendCrashLogPath,
-                         RuntimePaths.BackendLogPath,
-                         RuntimePaths.TrayHostLogPath
-                     })
+            var failures = await Task.Run(async () =>
             {
-                TryTruncateFile(path);
+                var results = new List<string>();
+                results.AddRange(await RuntimeLogFiles.ClearAsync(RuntimePaths.LogsDirectory));
+                foreach (var directory in RuntimeLogFiles.EmergencyDirectoriesForCleanup())
+                    results.AddRange(await RuntimeLogFiles.ClearAsync(directory));
+                return results;
+            });
+            if (failures.Count > 0)
+            {
+                await FrontendMessageBox.ShowErrorAsync(
+                    _localization.Translate("MaintenanceClearLogsPartialFailure") + Environment.NewLine + string.Join(Environment.NewLine, failures),
+                    _localization.Translate("DebugToolsTitle"));
+                return;
             }
 
             await FrontendMessageBox.ShowInfoAsync(
@@ -995,17 +999,6 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             {
                 Directory.Delete(path, recursive: true);
             }
-        }
-        catch
-        {
-        }
-    }
-
-    private static void TryTruncateFile(string path)
-    {
-        try
-        {
-            File.WriteAllText(path, string.Empty);
         }
         catch
         {

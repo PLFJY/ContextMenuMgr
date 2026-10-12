@@ -1,5 +1,3 @@
-﻿using System.Diagnostics;
-using System.IO;
 using System.Text;
 using ContextMenuMgr.Contracts;
 
@@ -10,10 +8,9 @@ namespace ContextMenuMgr.Frontend.Services;
 /// </summary>
 internal static class FrontendDebugLog
 {
-    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(14);
-    private static readonly Lock SyncRoot = new();
-    private static AppLogLevel _currentLevel = AppLogLevel.Warning;
-    private static bool _retentionChecked;
+    private static readonly RollingLogFile Writer = RuntimeLogFiles.Create(RuntimePaths.FrontendDebugLogPath);
+    private static volatile AppLogLevel _currentLevel = AppLogLevel.Warning;
+    private static volatile bool _sessionStarted;
 
     /// <summary>
     /// Executes configure.
@@ -21,7 +18,6 @@ internal static class FrontendDebugLog
     public static void Configure(AppLogLevel logLevel)
     {
         _currentLevel = logLevel;
-        EnsureRetention();
     }
 
     /// <summary>
@@ -34,7 +30,16 @@ internal static class FrontendDebugLog
     /// </summary>
     public static void StartSession(string reason)
     {
-        Write(AppLogLevel.Information, "SESSION", $"========== {reason} | PID={Environment.ProcessId} ==========");
+        Writer.BeginSession(reason);
+        _sessionStarted = true;
+    }
+
+    public static void EndSession(bool normalShutdown) => Writer.EndSession(normalShutdown);
+
+    public static void RequestOperation(PipeCommand command, string message, bool failed = false)
+    {
+        if (PipeOperationLogging.ShouldWrite(command, _currentLevel.ToRuntimeLogLevel(), failed))
+            Write(AppLogLevel.Information, "FrontendOperation", message, force: true);
     }
 
     /// <summary>
@@ -71,60 +76,9 @@ internal static class FrontendDebugLog
             return;
         }
 
-        try
-        {
-            var directory = Path.GetDirectoryName(LogFilePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [{source}] [T{Environment.CurrentManagedThreadId}] {message}{Environment.NewLine}";
-            lock (SyncRoot)
-            {
-                File.AppendAllText(LogFilePath, line, Encoding.UTF8);
-            }
-        }
-        catch
-        {
-        }
-    }
-
-    private static void EnsureRetention()
-    {
-        if (_retentionChecked)
-        {
-            return;
-        }
-
-        _retentionChecked = true;
-
-        try
-        {
-            var directory = Path.GetDirectoryName(LogFilePath);
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            {
-                return;
-            }
-
-            var cutoff = DateTimeOffset.Now.Subtract(LogRetention);
-            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
-                    if (lastWriteTime < cutoff.UtcDateTime)
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-        catch
-        {
-        }
+        if (!_sessionStarted) return;
+        var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [{source}] [PID={Environment.ProcessId}] [T{Environment.CurrentManagedThreadId}] {message}{Environment.NewLine}";
+        if (!Writer.Append(line) && (force || level >= AppLogLevel.Error))
+            RuntimeLogFiles.WriteEmergency("frontend-crash.log", line);
     }
 }

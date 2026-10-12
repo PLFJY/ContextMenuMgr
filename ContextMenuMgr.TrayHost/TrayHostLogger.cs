@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
 
@@ -10,17 +9,14 @@ namespace ContextMenuMgr.TrayHost;
 /// </summary>
 internal sealed class TrayHostLogger
 {
-    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(7);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly string _logFilePath = RuntimePaths.TrayHostLogPath;
-    private RuntimeLogLevel _currentLevel = RuntimeLogLevel.Warning;
+    private readonly RollingLogFile _writer = RuntimeLogFiles.Create(RuntimePaths.TrayHostLogPath);
+    private volatile RuntimeLogLevel _currentLevel = RuntimeLogLevel.Warning;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TrayHostLogger"/> class.
     /// </summary>
     public TrayHostLogger()
     {
-        PruneOldLogs();
         Configure(TryLoadPersistedLogLevel());
     }
 
@@ -42,20 +38,8 @@ internal sealed class TrayHostLogger
             return;
         }
 
-        try
-        {
-            var directory = Path.GetDirectoryName(_logFilePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}{Environment.NewLine}";
-            await File.AppendAllTextAsync(_logFilePath, line, Encoding.UTF8);
-        }
-        catch
-        {
-        }
+        var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [PID={Environment.ProcessId}] {message}{Environment.NewLine}";
+        await _writer.AppendAsync(line).ConfigureAwait(false);
     }
 
     private static RuntimeLogLevel TryLoadPersistedLogLevel()
@@ -88,34 +72,4 @@ internal sealed class TrayHostLogger
         }
     }
 
-    private void PruneOldLogs()
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(_logFilePath);
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            {
-                return;
-            }
-
-            var cutoff = DateTimeOffset.Now.Subtract(LogRetention);
-            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
-                    if (lastWriteTime < cutoff.UtcDateTime)
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-        catch
-        {
-        }
-    }
 }

@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
@@ -17,7 +16,6 @@ public partial class App : Application
 {
     private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.SingleInstance";
     private const string ProtocolScheme = "contextmenumgrplus";
-    private static readonly TimeSpan CrashLogRetention = TimeSpan.FromDays(7);
     private static readonly string LogFilePath = RuntimePaths.FrontendCrashLogPath;
 
     private ServiceProvider? _serviceProvider;
@@ -42,7 +40,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        PruneOldCrashLogs();
+        RuntimeLogFiles.RecoverEmergency("frontend-crash.log");
         RegisterGlobalExceptionHandlers();
         StartupArguments = e.Args ?? [];
 
@@ -55,6 +53,7 @@ public partial class App : Application
                 return;
             }
 
+            FrontendDebugLog.StartSession("App startup");
             _serviceProvider = BuildServiceProvider();
             var settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
             _frontendSettingsService = settingsService;
@@ -63,7 +62,6 @@ public partial class App : Application
             _trayHostProcessService = _serviceProvider.GetRequiredService<TrayHostProcessService>();
 
             FrontendDebugLog.Configure(settingsService.Current.LogLevel);
-            FrontendDebugLog.StartSession("App startup");
             _localization.ApplyPersistedLanguage();
 
             _controlServerCts = new CancellationTokenSource();
@@ -112,6 +110,7 @@ public partial class App : Application
             _serviceProvider = null;
             if (_ownsSingleInstanceMutex)
             {
+                FrontendDebugLog.EndSession(e.ApplicationExitCode == 0);
                 _singleInstanceMutex?.ReleaseMutex();
             }
 
@@ -466,6 +465,7 @@ public partial class App : Application
 
     private static void HandleFatalException(string source, Exception exception)
     {
+        FrontendDebugLog.Error(source, exception, "Unhandled exception recorded.");
         var builder = new StringBuilder()
             .AppendLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {source}")
             .AppendLine(exception.ToString())
@@ -487,50 +487,5 @@ public partial class App : Application
     }
 
     private static void WriteLog(string text)
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(LogFilePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            File.AppendAllText(LogFilePath, text, Encoding.UTF8);
-        }
-        catch
-        {
-        }
-    }
-
-    private static void PruneOldCrashLogs()
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(LogFilePath);
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            {
-                return;
-            }
-
-            var cutoff = DateTimeOffset.Now.Subtract(CrashLogRetention);
-            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
-                    if (lastWriteTime < cutoff.UtcDateTime)
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-        catch
-        {
-        }
-    }
+        => RuntimeLogFiles.WriteEmergency("frontend-crash.log", $"[PID={Environment.ProcessId}] {text}");
 }

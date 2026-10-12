@@ -241,10 +241,13 @@ ProbeHost 的边界：
 | `trayhost.log` | `RuntimePaths.LogsDirectory\trayhost.log` | TrayHost 启动、托盘通知、托盘到前端控制。 |
 | `bootstrap.log` | `RuntimePaths.LogsDirectory\bootstrap.log` | `BackendServiceBootstrapper` 的 elevated 服务维护操作。 |
 | `service-startup.log` | `RuntimePaths.LogsDirectory\service-startup.log` | 服务早期启动失败，尤其是 `FileLogger` 尚未可用前。 |
+| `backend-fallback.log` | `RuntimePaths.LogsDirectory\backend-fallback.log` | 普通 Backend 日志写入失败后的独立有界日志。 |
 | bootstrap result file | `%TEMP%\ContextMenuMgr-*.json` | `BackendServiceManager` 临时读取，通常操作后删除。 |
 | ProbeHost stderr / result diagnostics | 前端捕获并写入 `frontend-debug.log`，结果对象含 `DiagnosticDetails` | Deep Analysis 的架构、依赖、COM、崩溃和 JSON 解析问题。 |
 
 排查优先级：
+
+活动文件保持上述命名；各流归档、大小/数量预算和独立 TEMP emergency fallback 见 [日志轮转与收集](./troubleshooting.md#日志轮转与收集134)。Frontend 正常退出后活动文件归档，下次启动重新创建。收集诊断应包含归档。
 
 | 问题类型 | 优先看 |
 | --- | --- |

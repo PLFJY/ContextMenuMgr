@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -197,7 +197,8 @@ public sealed class NamedPipeBackendServer
                 PipeResponse response;
                 var stopwatch = Stopwatch.StartNew();
                 await _logger.LogAsync(BuildRequestStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken);
-                await _logger.LogOperationAsync(BuildOperationStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken);
+                await _logger.LogRequestOperationAsync(envelope.Request.Command,
+                    BuildOperationStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken: cancellationToken);
                 try
                 {
                     // Request handlers are allowed to fail independently; the pipe
@@ -224,7 +225,9 @@ public sealed class NamedPipeBackendServer
                 response = CorrelateResponseWithRequest(envelope.Request, response);
 
                 await _logger.LogAsync(BuildRequestEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
-                await _logger.LogOperationAsync(BuildOperationEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
+                await _logger.LogRequestOperationAsync(envelope.Request.Command,
+                    BuildOperationEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds),
+                    failed: !response.Success, cancellationToken: CancellationToken.None);
 
                 var deliveryFailure = await PublishAndDeliverResponseAsync(
                     envelope.Request, response,

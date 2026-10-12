@@ -34,7 +34,6 @@ internal static class BackendServiceBootstrapper
     private static readonly string StopReasonMarkerPath = Path.Combine(
         DataDirectory,
         ServiceMetadata.StopReasonMarkerFileName);
-    private static readonly string BootstrapLogPath = Path.Combine(RuntimePaths.LogsDirectory, "bootstrap.log");
     private const int RecoveryResetPeriodSeconds = 24 * 60 * 60;
     private const string RecoveryActions = "restart/5000/restart/15000/restart/60000";
 
@@ -1307,16 +1306,8 @@ internal static class BackendServiceBootstrapper
     }
 
     private static void AppendBootstrapLog(string message)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(BootstrapLogPath) ?? Path.GetTempPath());
-            File.AppendAllText(BootstrapLogPath, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
-        }
-        catch
-        {
-        }
-    }
+        => RuntimeLogFiles.WriteEmergency("bootstrap.log",
+            $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [PID={Environment.ProcessId}] {message}{Environment.NewLine}");
 
     private sealed record BootstrapResult(bool Success, string Code, string Detail);
 

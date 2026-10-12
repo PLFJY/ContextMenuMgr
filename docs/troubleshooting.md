@@ -14,6 +14,31 @@
 | `trayhost.log` | 托盘进程、通知、打开前端、后端断开。 |
 | ProbeHost stderr / result diagnostics | Deep Analysis 结果窗口和 `frontend-debug.log` 中的 ProbeHost 输出摘要。 |
 
+### 日志轮转与收集（#134）
+
+活动文件名保持不变；归档为 `<stream>.archive-<UTC yyyyMMddTHHmmssfffffffZ>-<reason>-<guid>.log`。GUID 防止时间戳碰撞覆盖；每个流只清理自己的精确归档名。
+
+| 流 | 每卷上限 | 归档数（活动文件另计） |
+| --- | ---: | ---: |
+| `frontend-debug.log`、`backend.log` | 5 MiB | 各 10 |
+| `trayhost.log`、`frontend-crash.log`、`service-startup.log`、`backend-fallback.log`、`bootstrap.log` | 2 MiB | 各 5 |
+
+Frontend 在取得单实例 ownership 后开始会话；每卷头部记录启动时间、PID、SessionId。正常退出写 shutdown 记录并归档；崩溃/强制终止保留当前卷，下次主实例启动先归档为 `recovered`。会话中达到大小限制仍会分卷，各卷共享会话标识。正常退出后没有活动 Frontend 文件是预期行为。Backend/TrayHost 在写入时轮转，不依赖进程重启；重启继续保留当前卷证据。
+
+写入前按 UTF-8 字节数检查上限。单条超大事件保留开头和结尾（含异常栈尾部），中间用 `LogEntryTruncated` 标明省略；不会生成无限大卷。升级遇到旧巨型活动日志时，只读取至多一卷最近尾部，写 `LegacyOversizedLog` 原大小/尾部保留标记并 flush，再移除旧文件；不永久保留巨型旧卷。此前更早内容按这项明确的大小保留策略淘汰。迁移失败保留原文件、不向巨型文件追加；以后重试。
+
+跨进程写入、归档和清理通过 `<active>.lock` 的独占文件 lease 串行；这些零字节协调文件不删除。数据句柄每条事件后关闭，避免阻塞维护。普通 append 不扫描目录。归档/删除被锁住或 ACL 拒绝时不突破大小/数量上限，不继续产生更多归档；失败后 30 秒再试，清空活动文件会立即解除等待。异步获取写锁/lease 各最多等 1 秒；同步 best-effort 各最多 250 ms，无后台日志队列或每条 `Task.Run`。两处磁盘都失败/等待耗尽时会丢弃该诊断记录，业务异常仍按原路径传播。
+
+早期服务启动、bootstrap、Frontend crash 和 Backend fallback 不依赖普通 Logger/DI。正常目的地不可用时独立尝试该进程的 `%TEMP%\ContextMenuMgr\Logs`，同样为 2 MiB/5 卷；LocalSystem 的 TEMP 可能位于 Windows 系统临时目录。双方均失败时不递归记录日志失败。TrayHost 磁盘写入失败采用 best-effort 丢弃，不干扰通知。
+
+默认 Warning 不再强制记录成功的 Ping、快照、WPS 待审核等 routine query Start/End；Information 可恢复这些记录。mutation/进程维护操作的 Start/End、失败、超时、不确定结果保持关联 ID、命令、目标及耗时证据，即使配置 Error 也保留 request 失败。内部 Backend Warning/Error 独立按级别处理，不能被 query 分类吞掉。
+
+Package discovery 按 SID 和 metadata/enumeration/manifest 阶段聚合：首个条件立即 Warning；全部失败的 package/stage/异常/HRESULT/消息与数量参与签名，前三个样本用于定位。相同条件每 15 分钟输出 `PackageDiscoveryWarningSummary` 和 `SuppressedOccurrences`；变化、恢复或容量淘汰时汇总已抑制次数。最多保留 32 个 SID/阶段条件，每条件最多 8192 字符样本；部分 enumeration 失败不会宣称其它阶段已恢复。不全局忽略任何 HRESULT，也不改变 package 枚举或 registry 行为。
+
+“清除全部日志”在后台执行一次维护：逐流取得相同 lease，删除归档、截断活动文件，涵盖上述七种旧固定文件名、当前用户 emergency TEMP，以及机器 `SystemTemp`（默认 Windows `SystemTemp`）和旧机器 TMP/TEMP（默认 Windows `Temp`）内的应用日志子目录。未知 `.log`、状态库、设置、备份和 reparse-point 文件不处理；不搜索其它用户 profile 或自定义 service-process-only TEMP。锁住/保护或无法检查的目录/文件显示部分失败及具体路径；SYSTEM TEMP 的 ACL 可能拒绝普通前端访问，需管理员单独清理。已清理的文件不会被误报为全部成功；不停止服务，继续记录，Frontend 自动补回会话头。原 `.lock` 文件必须保留以避免竞争。
+
+报错前请收集整个 Logs 文件夹中的活动和归档日志，而非只发送 `backend.log`。复制时若遇到轮转占用可重试；不需要停止服务。正常目录不可用时也收集对应进程 TEMP 中的日志。排查超时应切换 Information 后复现，以获得成功查询的完整关联时间线；涉及未确认 mutation 的证据默认仍保留。
+
 `RuntimePaths` 通过应用目录中的 `ContextMenuMgr.package.json` 明确识别包类型，缺失或无效时按 Installer 处理。Installer 根目录为 `%ProgramData%\ContextMenuMgr`；Portable 根目录为 `<应用目录>\Data`。`frontend-settings.json`、`context-menu-state.json`、`backend-protection-settings.json`、`DeletedBackups` 和 `Logs` 都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；排查历史安装时可以同时检查这些旧位置。
 
 `context-menu-state.json` 使用 `context-menu-state.json.bak` 保存一份最后已知正常状态。正常保存先写入同目录唯一 `.tmp-<guid>` 文件、flush/关闭并按生产格式重新验证，再替换 current；不要手工把临时文件当作 current。current JSON/结构损坏时，后端会将原始文件保存到 `Quarantine\corrupt-state-...`，验证 `.bak` 后自动恢复；没有有效 backup 时则从当前注册表重新采纳 baseline。恢复旧 backup 可能丢失非常新的本地状态更改，但不会直接修改注册表内容。

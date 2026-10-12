@@ -449,3 +449,13 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 IPC 超时、不重试不确定写入、迟到权威状态、响应失败仍广播、操作关联及独立 pipe 并发集中在 `MutationOutcomeTests`。注册表事务、legacy provenance、状态损坏/迁移、ACL、SID、Packaged COM、服务生命周期与发布脚本仍保留独立覆盖。UI 字符串、模板和重复 Busy 状态不以一次性测试永久保留。
 
 服务生命周期唯一提升入口仍是 `BackendServiceBootstrapper`；Frontend 不再保留无人调用的旧 PowerShell 安装/卸载/停止脚本生成器。运行时菜单操作仍使用 Backend Pipe。
+
+## 共享日志实现
+
+`Contracts/RollingLogFile` 是唯一 append/rotation/retention 实现；`RuntimeLogFiles` 定义七个 stream 的预算和维护 ownership，保留既有 Installer/Portable 根与活动文件名。Frontend debug/Backend 为 5 MiB + 10 归档；TrayHost/crash/service-startup/fallback/bootstrap 为 2 MiB + 5 归档。仅启动和 rotation 枚举本流归档，逐条按字节大小滚动，使用 GUID 防碰撞和跨进程文件 lease；日志失败不得阻止业务或服务启动。
+
+Frontend 在单实例 ownership 成立后、DI 前启动 session，正常 OnExit 归档；fatal/kill 留存后由下次启动恢复。每卷都有相同启动时间/PID/session id。超大单条保留两端并标记截断；旧巨型活动文件保存最近有界尾部后退休，迁移失败不覆盖原件。Backend 保留 async API；既有非 await 调用用有界同步 best-effort，不累积 fire-and-forget Tasks。startup/crash/bootstrap/fallback 使用独立 writer，正常根失败后尝试有界 TEMP 日志，不递归调用 normal logger。
+
+`PipeOperationLogging` 的显式 allow-list 只决定 routine request 成功日志，不决定业务 mutation routing。snapshot/WPS 查询保留既有 baseline/reconciliation 行为；这些内部错误不能通过请求分类过滤。双方统一抑制 Warning 下成功查询，保留 mutation 和所有失败/timeout 关联证据。新增命令应审查语义；未知命令默认保留 operation evidence。`PackageDiscoveryWarningAggregator` 按用户/阶段有界保存 signature 与样本，15 分钟重复汇总，变化/恢复/淘汰汇总 suppressed count。
+
+维护 UI 用 `RuntimeLogFiles.ClearAsync` 同 lease 清归档/截断活动文件；后台任务仅用于一次维护，不用于每条日志。准确报告部分失败，不触碰未知文件/数据/备份、不删除 lease 文件、不停止 Backend/TrayHost。完整命名、失败/丢弃策略和日志收集见 [排错指南](./troubleshooting.md#日志轮转与收集134)。永久日志测试只保留 rolling/ownership/concurrency/recovery 与 bounded warning aggregation 的非平凡不变量；实际 SCM、WPF OnExit 和多账号 ACL 仍需 Windows 场景验证。

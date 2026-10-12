@@ -635,6 +635,9 @@
   <data name="MaintenanceResetRegistryProtectionFailed" xml:space="preserve">
     <value>無法停用並驗證登錄寫入保護。其餘設定未重設。</value>
   </data>
+  <data name="MaintenanceClearLogsPartialFailure" xml:space="preserve">
+    <value>部分日誌無法清除。其他日誌已清除，日誌記錄將繼續。</value>
+  </data>
   <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
     <value>前端、後端和系統匣記錄檔已清除。</value>
   </data>

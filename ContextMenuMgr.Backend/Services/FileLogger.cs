@@ -9,27 +9,16 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class FileLogger
 {
-    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(3);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly string _logPath;
-    private readonly string _fallbackLogPath;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private RuntimeLogLevel _currentLevel = RuntimeLogLevel.Warning;
+    private readonly RollingLogFile _writer;
+    private volatile RuntimeLogLevel _currentLevel = RuntimeLogLevel.Warning;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileLogger"/> class.
     /// </summary>
     public FileLogger(string logPath)
     {
-        _logPath = logPath;
-        _fallbackLogPath = Path.Combine(
-            RuntimePaths.LogsDirectory,
-            "backend-fallback.log");
-
-        EnsureDirectoryExists(_logPath);
-        EnsureDirectoryExists(_fallbackLogPath);
-        PruneOldLogs(_logPath);
-        PruneOldLogs(_fallbackLogPath);
+        _writer = RuntimeLogFiles.Create(logPath);
+        RuntimeLogFiles.RecoverEmergency("backend-fallback.log");
         Configure(TryLoadPersistedLogLevel());
     }
 
@@ -59,34 +48,20 @@ public sealed class FileLogger
     public Task LogOperationAsync(string message, CancellationToken cancellationToken = default)
         => WriteLineAsync(message, cancellationToken);
 
+    public Task LogRequestOperationAsync(PipeCommand command, string message, bool failed = false,
+        CancellationToken cancellationToken = default)
+        => PipeOperationLogging.ShouldWrite(command, _currentLevel, failed)
+            ? WriteLineAsync(message, cancellationToken) : Task.CompletedTask;
+
     private async Task WriteLineAsync(string message, CancellationToken cancellationToken = default)
     {
-        var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}";
-
-        await _writeLock.WaitAsync(cancellationToken);
-        try
-        {
-            try
-            {
-                await File.AppendAllTextAsync(_logPath, line, cancellationToken);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
-            {
-                try
-                {
-                    await File.AppendAllTextAsync(_fallbackLogPath, line, cancellationToken);
-                }
-                catch
-                {
-                    // 静默处理 - 日志不应该导致功能失败
-                }
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        var line = FormatLine(message);
+        if (!await _writer.AppendAsync(line, cancellationToken).ConfigureAwait(false))
+            RuntimeLogFiles.WriteEmergency("backend-fallback.log", line);
     }
+
+    private static string FormatLine(string message)
+        => $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [PID={Environment.ProcessId}] {message}{Environment.NewLine}";
 
     public Task LogInformationAsync(string message, CancellationToken cancellationToken = default)
         => LogAsync(RuntimeLogLevel.Information, message, cancellationToken);
@@ -103,12 +78,18 @@ public sealed class FileLogger
     /// <summary>
     /// Executes log Fire And Forget.
     /// </summary>
-    public void LogFireAndForget(string message) => _ = LogAsync(message);
+    public void LogFireAndForget(string message) => LogFireAndForget(RuntimeLogLevel.Information, message);
 
-    public void LogFireAndForget(RuntimeLogLevel level, string message) => _ = LogAsync(level, message);
+    public void LogFireAndForget(RuntimeLogLevel level, string message)
+    {
+        // Existing non-awaited callers use bounded synchronous best effort, never accumulating Tasks.
+        if (level < _currentLevel) return;
+        var line = FormatLine(message);
+        if (!_writer.Append(line)) RuntimeLogFiles.WriteEmergency("backend-fallback.log", line);
+    }
 
     public void LogFireAndForget(RuntimeLogLevel level, string message, Exception exception)
-        => _ = LogAsync(level, $"{message}{Environment.NewLine}{exception}");
+        => LogFireAndForget(level, $"{message}{Environment.NewLine}{exception}");
 
     private static RuntimeLogLevel TryLoadPersistedLogLevel()
     {
@@ -140,43 +121,4 @@ public sealed class FileLogger
         }
     }
 
-    private static void EnsureDirectoryExists(string path)
-    {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-    }
-
-    private static void PruneOldLogs(string path)
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            {
-                return;
-            }
-
-            var cutoff = DateTimeOffset.Now.Subtract(LogRetention);
-            foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var lastWriteTime = File.GetLastWriteTimeUtc(file);
-                    if (lastWriteTime < cutoff.UtcDateTime)
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-        catch
-        {
-        }
-    }
 }

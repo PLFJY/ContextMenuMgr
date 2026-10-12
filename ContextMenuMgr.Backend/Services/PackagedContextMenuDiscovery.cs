@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 using ContextMenuMgr.Contracts;
 using Windows.Management.Deployment;
@@ -10,6 +12,8 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 internal static class PackagedContextMenuDiscovery
 {
+    private static readonly PackageDiscoveryWarningAggregator Warnings = new(TimeSpan.FromMinutes(15), 32);
+
     private const string AppxManifestNamespacePrefix = "http://schemas.microsoft.com/appx/manifest/";
     private const string FileExplorerContextMenusCategory = "windows.fileExplorerContextMenus";
     private const string ComServerCategory = "windows.comServer";
@@ -27,6 +31,8 @@ internal static class PackagedContextMenuDiscovery
         var packages = new List<PackagedContextMenuPackage>();
         var skippedPackageCount = 0;
         var skippedPackageSamples = new List<string>(3);
+        var failureFingerprint = new byte[32];
+        string? enumerationFailure = null;
         try
         {
             var packageManager = new PackageManager();
@@ -65,10 +71,11 @@ internal static class PackagedContextMenuDiscovery
                 catch (Exception ex)
                 {
                     skippedPackageCount++;
+                    var failure = $"Package={packageName}, Stage={stage}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}";
+                    AddFailureFingerprint(failureFingerprint, failure + ex.Message);
                     if (skippedPackageSamples.Count < 3)
                     {
-                        skippedPackageSamples.Add(
-                            $"Package={packageName}, Stage={stage}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}");
+                        skippedPackageSamples.Add(failure);
                     }
                 }
             }
@@ -79,31 +86,34 @@ internal static class PackagedContextMenuDiscovery
         }
         catch (Exception ex)
         {
-            logger?.LogFireAndForget(
-                RuntimeLogLevel.Warning,
-                $"PackagedContextMenuDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}");
+            enumerationFailure = $"PackagedContextMenuDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}";
         }
 
-        if (skippedPackageCount > 0)
-        {
-            logger?.LogFireAndForget(
-                RuntimeLogLevel.Warning,
-                $"PackagedContextMenuPackagesSkipped: Sid={userSid}, Count={skippedPackageCount}, Samples=[{string.Join("; ", skippedPackageSamples)}].");
-        }
+        ReportWarning(userSid + "|enumeration", enumerationFailure is null ? null : Fingerprint(enumerationFailure), enumerationFailure, logger);
+        if (skippedPackageCount > 0 || enumerationFailure is null)
+            ReportWarning(userSid + "|metadata", skippedPackageCount == 0 ? null : $"{skippedPackageCount}:{Convert.ToHexString(failureFingerprint)}",
+                skippedPackageCount == 0 ? null : $"PackagedContextMenuPackagesSkipped: Sid={userSid}, Count={skippedPackageCount}, Signature={Convert.ToHexString(failureFingerprint)}, Samples=[{string.Join("; ", skippedPackageSamples)}].", logger);
 
         return Discover(
             packages,
             static package => File.ReadAllText(package.ManifestPath),
             logger,
-            cancellationToken);
+            cancellationToken,
+            userSid,
+            enumerationComplete: enumerationFailure is null);
     }
 
     internal static IReadOnlyList<PackagedContextMenuDefinition> Discover(
         IEnumerable<PackagedContextMenuPackage> packages,
         Func<PackagedContextMenuPackage, string> manifestLoader,
         FileLogger? logger = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? userSid = null,
+        bool enumerationComplete = true)
     {
+        var skippedManifestCount = 0;
+        var skippedManifestSamples = new List<string>(3);
+        var failureFingerprint = new byte[32];
         var definitions = new List<PackagedContextMenuDefinition>();
         foreach (var package in packages
                      .Where(static package => !string.IsNullOrWhiteSpace(package.FullName))
@@ -120,16 +130,44 @@ internal static class PackagedContextMenuDiscovery
             }
             catch (Exception ex)
             {
-                logger?.LogFireAndForget(
-                    RuntimeLogLevel.Warning,
-                    $"PackagedContextMenuManifestSkipped: PackageFullName={package.FullName}, ManifestPath={package.ManifestPath}, Exception={ex.GetType().Name}: {ex.Message}");
+                skippedManifestCount++;
+                var failure = $"Package={package.FullName}, Stage=ManifestReadParse, ManifestPath={package.ManifestPath}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}";
+                AddFailureFingerprint(failureFingerprint, failure);
+                if (skippedManifestSamples.Count < 3) skippedManifestSamples.Add(failure);
             }
         }
+
+        if (skippedManifestCount > 0 || enumerationComplete)
+            ReportWarning((userSid ?? "<unspecified>") + "|manifest",
+                skippedManifestCount == 0 ? null : $"{skippedManifestCount}:{Convert.ToHexString(failureFingerprint)}",
+                skippedManifestCount == 0 ? null : $"PackagedContextMenuManifestSkipped: Sid={userSid}, Count={skippedManifestCount}, Signature={Convert.ToHexString(failureFingerprint)}, Samples=[{string.Join("; ", skippedManifestSamples)}].", logger);
 
         return definitions
             .OrderBy(static definition => definition.Package.FullName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static definition => definition.Clsid, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static void ReportWarning(string scope, string? signature, string? detail, FileLogger? logger)
+    {
+        if (logger is null) return;
+        foreach (var message in Warnings.Observe(scope, signature, detail, DateTimeOffset.UtcNow))
+            logger.LogFireAndForget(RuntimeLogLevel.Warning, message);
+    }
+
+    private static string Fingerprint(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static void AddFailureFingerprint(byte[] aggregate, string failure)
+    {
+        // Order-independent package-set digest includes every failure, not just displayed samples.
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(failure));
+        var carry = 0;
+        for (var i = 0; i < aggregate.Length; i++)
+        {
+            var sum = aggregate[i] + digest[i] + carry;
+            aggregate[i] = (byte)sum;
+            carry = sum >> 8;
+        }
     }
 
     internal static IReadOnlyList<PackagedContextMenuDefinition> ParseManifest(

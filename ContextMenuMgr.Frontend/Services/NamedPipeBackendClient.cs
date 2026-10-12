@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Pipes;
 using System.Diagnostics;
 using System.Text;
@@ -821,8 +821,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 Request = request
             };
 
-            FrontendDebugLog.Operation(
-                "FrontendOperation",
+            FrontendDebugLog.RequestOperation(
+                request.Command,
                 BuildOperationStartLog(correlationId, request));
 
             var payload = JsonSerializer.Serialize(envelope, JsonOptions);
@@ -865,9 +865,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     FrontendDebugLog.Warning(
                         "NamedPipeBackendClient",
                         $"SendRequestAsync <- {request.Command} failed. ErrorCode={responseEnvelope.Response.ErrorCode ?? "<none>"}, Message={responseEnvelope.Response.Message}");
-                    FrontendDebugLog.Operation(
-                        "FrontendOperation",
-                        BuildOperationEndLog(correlationId, request, responseEnvelope.Response, stopwatch.ElapsedMilliseconds));
+                    FrontendDebugLog.RequestOperation(
+                        request.Command,
+                        BuildOperationEndLog(correlationId, request, responseEnvelope.Response, stopwatch.ElapsedMilliseconds), failed: true);
                     throw new BackendRequestException(
                         responseEnvelope.Response.Message,
                         responseEnvelope.Response.ErrorCode,
@@ -875,8 +875,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 }
 
                 stopwatch.Stop();
-                FrontendDebugLog.Operation(
-                    "FrontendOperation",
+                FrontendDebugLog.RequestOperation(
+                    request.Command,
                     BuildOperationEndLog(correlationId, request, responseEnvelope.Response, stopwatch.ElapsedMilliseconds));
                 FrontendDebugLog.Info("NamedPipeBackendClient", $"SendRequestAsync <- {request.Command} succeeded.");
                 _recentLocalOperations.MarkCompleted(request.ClientOperationId);
@@ -887,9 +887,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
-            FrontendDebugLog.Operation(
-                "FrontendOperation",
-                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Timeout, ElapsedMs={stopwatch.ElapsedMilliseconds}.");
+            FrontendDebugLog.RequestOperation(
+                request.Command,
+                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Timeout, ElapsedMs={stopwatch.ElapsedMilliseconds}.", failed: true);
             FrontendDebugLog.Warning("NamedPipeBackendClient", $"SendRequestAsync timed out for {request.Command}: {ex.Message}");
             throw;
         }
@@ -897,9 +897,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
-            FrontendDebugLog.Operation(
-                "FrontendOperation",
-                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Canceled, ElapsedMs={stopwatch.ElapsedMilliseconds}.");
+            FrontendDebugLog.RequestOperation(
+                request.Command,
+                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Canceled, ElapsedMs={stopwatch.ElapsedMilliseconds}.", failed: true);
             FrontendDebugLog.Info(
                 "NamedPipeBackendClient",
                 $"SendRequestAsync canceled for {request.Command}. Disposed={_disposed}, CancellationRequested={cancellationToken.IsCancellationRequested}, Message={ex.Message}");
@@ -909,9 +909,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
-            FrontendDebugLog.Operation(
-                "FrontendOperation",
-                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Disposed, ElapsedMs={stopwatch.ElapsedMilliseconds}.");
+            FrontendDebugLog.RequestOperation(
+                request.Command,
+                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=Disposed, ElapsedMs={stopwatch.ElapsedMilliseconds}.", failed: true);
             FrontendDebugLog.Info(
                 "NamedPipeBackendClient",
                 $"SendRequestAsync disposed while {request.Command} was in flight. Disposed={_disposed}, CancellationRequested={cancellationToken.IsCancellationRequested}, Message={ex.Message}");
@@ -921,9 +921,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
         {
             _recentLocalOperations.Remove(request.ClientOperationId);
             stopwatch.Stop();
-            FrontendDebugLog.Operation(
-                "FrontendOperation",
-                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=PipeClosedDuringCancellation, ElapsedMs={stopwatch.ElapsedMilliseconds}.");
+            FrontendDebugLog.RequestOperation(
+                request.Command,
+                $"FrontendOperationEnd: CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, Success=false, Error=PipeClosedDuringCancellation, ElapsedMs={stopwatch.ElapsedMilliseconds}.", failed: true);
             FrontendDebugLog.Info(
                 "NamedPipeBackendClient",
                 $"SendRequestAsync pipe closed during cancellation/shutdown for {request.Command}: {ex.Message}");

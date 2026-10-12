@@ -635,6 +635,9 @@ Continue anyway? (Not recommended)</value>
   <data name="MaintenanceResetRegistryProtectionFailed" xml:space="preserve">
     <value>Registry Write Protection could not be disabled and verified. The remaining settings were not reset.</value>
   </data>
+  <data name="MaintenanceClearLogsPartialFailure" xml:space="preserve">
+    <value>Some logs could not be cleared. Other logs were cleared; logging will continue.</value>
+  </data>
   <data name="MaintenanceClearLogsSucceeded" xml:space="preserve">
     <value>The frontend, backend, and tray logs were cleared.</value>
   </data>
