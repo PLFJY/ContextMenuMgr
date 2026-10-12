@@ -90,6 +90,14 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 | 优先查看的日志 | `backend.log`、`trayhost.log`。 |
 | 常见修复方向 | 检查服务是否拿到活动 SessionId；确认 `WTSQueryUserToken` / `CreateProcessAsUser` 结果；不要尝试从服务 Session 直接显示托盘 UI。 |
 
+### Explorer 重启后重复旧审核通知（Issue #133）
+
+先区分 `TaskbarCreated` 图标恢复与新 `ItemDetected` 通知。`NativeTrayHost` 只重试未成功提交给 Shell 的通知，成功的 `NIM_MODIFY` 会清空投递缓存；不得通过 `ShowNotification` 在图标恢复时重新填充缓存。Shell 注册/提交暂时失败使用每秒一次、最多额外五次的有界恢复，失败及丢弃通知写入现有 `trayhost.log`，不改变日志保留逻辑。API 成功不代表通知实际可见。
+
+手动验证：触发真实新增审核通知，处理审核并确认 Approvals 为空，连续两次重启当前用户的 Explorer，确认图标恢复但旧通知不重放；再触发新审核并确认通知正常。分别点击通知、普通托盘图标、托盘菜单，切换隐藏图标和语言；通知点击应打开普通 Approvals 页面，普通托盘点击应打开主窗口。图标重建保留合法通知点击上下文。还需在隔离 Windows 环境验证初始 `NIM_ADD` 失败后预算内恢复、`NIM_MODIFY` 失败后恢复及持续失败后的停止/丢弃。静态检查、编译和人工注入回调均不能替代真实 Explorer 重启与审核流程验证。
+
+本次临时 Windows harness 链接生产 `NativeTrayHost.cs`，使用真实隐藏窗口、Shell API 和 timer，验证成功提交清空缓存、两次人工发送 `TaskbarCreated` 后无缓存回填、鼠标/键盘/通知点击路由、菜单 command 路由、隐藏图标、本地化派发、真实 API 注册/提交失败后的恢复、六次持续提交失败后停止，以及退出释放窗口。失败由重复注册/删除 harness 自己的图标触发；未重启实际 Explorer，未启动后端服务或触发真实审核，也未人工确认通知可见、实际菜单交互或前端导航。此 harness 为临时验证工具，完成后删除，不向生产添加测试钩子。
+
 ## 5. 开机启动不生效
 
 | 项目 | 内容 |

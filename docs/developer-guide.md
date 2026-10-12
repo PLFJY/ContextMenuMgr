@@ -281,6 +281,10 @@ snapshot 和开关都需要 userContext。没有用户 SID 时，`Windows11Conte
 
 TrayHost 是每用户进程，因为托盘图标、通知和通知点击激活必须出现在用户交互式桌面。服务只是负责在正确 Session 中启动它，后端通知仍通过 IPC 交给 TrayHost 后再由 `Shell_NotifyIconW` 显示。开机启动必须带用户 SID，因为服务启动模式是机器级，用户是否希望随 Windows 启动以及是否显示托盘图标是用户级。TrayHost 可以没有可见托盘图标，但进程必须继续运行。
 
+`NativeTrayHost` 使用 `PostMessage(WM_APP + 1)` 将通知、图标显隐和本地化更新派发到隐藏窗口所属线程，与 `TaskbarCreated` 和托盘回调串行处理。只保留最新的一条尚未成功提交的通知；`Shell_NotifyIcon(NIM_MODIFY)` 返回 true 后立即清除投递缓存，此结果只表示 Shell 接受提交，不代表用户已经看到通知。图标注册或通知提交失败时，使用同线程 Win32 timer 每秒重试，最多额外五次；预算耗尽或 timer 创建失败时丢弃未提交通知并停止重试。已有恢复期间的 `TaskbarCreated` 不重置预算；后续新通知或新的图标恢复事件可再次尝试。图标重建不会重新缓存已提交通知。
+
+投递缓存与通知点击上下文独立：仅成功提交设置点击上下文，Explorer 重启不清除此上下文，也不再次投递通知。仅 `NIN_BALLOONUSERCLICK` 打开 Approvals；普通鼠标/键盘托盘选择打开主窗口，不消费通知点击上下文。Win32 回调只标识图标，无法可靠区分连续通知对应的审核项，因此通知点击使用现有 frontend control pipe 打开普通 Approvals 页面，不再传递最近接收的 item id。审核已处理时仍可安全打开当前审核列表，无需新增后端协议。
+
 `StartWithWindows` 是用户意图，不等于系统已健康实现该意图。启用操作按以下顺序收敛：验证服务注册与 executable path，设置并回读 startup mode，配置并验证 recovery，必要时启动并等待 SCM `Running`，最后等待 backend pipe 的真实 `Ping`；只有全部成功才写用户 policy。`Running` 但 pipe 不响应不能报告成功。普通关闭前端窗口时，仅 `KeepBackgroundAfterClose` 决定当前运行的 Backend Service 和 TrayHost 是否继续运行；即使 `StartWithWindows=true`，关闭保留后台选项也会请求两者退出。`StartWithWindows` 仍决定下次登录时的启动行为。
 
 `bootstrap.log` 和 `service-startup.log` 的生命周期诊断应包含 service/executable、实际 system/service drive、start type、delayed-auto、SCM status、recovery 是否配置、当前用户 policy，以及停止原因。原因只能在可证明时写 `FrontendRequest`、`WindowsShutdown`、`Uninstall`、`ForceRepair` 等；无法证明的 SCM stop 使用 `ServiceControlManager`，无回调返回才标记 `UnexpectedProcessExit`。

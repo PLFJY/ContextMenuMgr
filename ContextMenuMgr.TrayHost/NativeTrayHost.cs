@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
-using System.Text;
+using System.Collections.Concurrent;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.TrayHost;
 
@@ -14,6 +15,11 @@ internal sealed class NativeTrayHost : IDisposable
     private const int WM_COMMAND = 0x0111;
     private const int WM_USER = 0x0400;
     private const int WM_NULL = 0x0000;
+    private const int WM_TIMER = 0x0113;
+    private const int WindowActionMessage = 0x8000 + 1; // WM_APP + 1
+    private const int RecoveryTimerId = 1;
+    private const int RecoveryRetryCount = 5;
+    private const uint RecoveryRetryIntervalMs = 1000;
 
     private const int WM_LBUTTONUP = 0x0202;
     private const int WM_RBUTTONUP = 0x0205;
@@ -59,6 +65,9 @@ internal sealed class NativeTrayHost : IDisposable
     private readonly Action _showMainWindow;
     private readonly Action _exitApplication;
     private readonly Action _balloonClicked;
+    private readonly TrayHostLogger _logger;
+    private readonly ConcurrentDictionary<int, Action> _windowActions = new();
+    private int _nextWindowActionId;
     private string _tooltip;
     private string _showMainWindowText;
     private string _exitText;
@@ -68,10 +77,11 @@ internal sealed class NativeTrayHost : IDisposable
     private IntPtr _menu;
     private readonly uint _taskbarCreatedMessage;
     private bool _initialized;
-    private bool _disposed;
+    private volatile bool _disposed;
     private bool _trayIconAdded;
     private bool _trayIconVisible;
     private bool _hasPendingNotificationClick;
+    private int _recoveryRetriesRemaining;
 
     private string? _pendingBalloonTitle;
     private string? _pendingBalloonMessage;
@@ -89,7 +99,8 @@ internal sealed class NativeTrayHost : IDisposable
         bool showTrayIcon,
         Action showMainWindow,
         Action exitApplication,
-        Action balloonClicked)
+        Action balloonClicked,
+        TrayHostLogger logger)
     {
         _iconPath = iconPath;
         _tooltip = tooltip;
@@ -99,6 +110,7 @@ internal sealed class NativeTrayHost : IDisposable
         _showMainWindow = showMainWindow;
         _exitApplication = exitApplication;
         _balloonClicked = balloonClicked;
+        _logger = logger;
         _wndProc = WndProc;
         _taskbarCreatedMessage = RegisterWindowMessage("TaskbarCreated");
     }
@@ -144,7 +156,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         RebuildMenu();
 
-        TryCreateTrayIcon();
+        BeginRecovery();
 
         _initialized = true;
     }
@@ -173,16 +185,20 @@ internal sealed class NativeTrayHost : IDisposable
     /// </summary>
     public void ShowNotification(string title, string message)
     {
-        if (_hwnd == IntPtr.Zero)
+        PostWindowAction(() =>
         {
-            return;
-        }
+            // Keep only the latest unsubmitted notification, as before. A new
+            // notification gets its own bounded recovery budget.
+            StopRecovery();
+            _pendingBalloonTitle = title;
+            _pendingBalloonMessage = message;
+            BeginRecovery();
+        });
+    }
 
-        _pendingBalloonTitle = title;
-        _pendingBalloonMessage = message;
-        _hasPendingNotificationClick = true;
-
-        if (!_trayIconAdded)
+    private void TrySubmitPendingNotification()
+    {
+        if (!_trayIconAdded || _pendingBalloonTitle is null || _pendingBalloonMessage is null)
         {
             return;
         }
@@ -191,10 +207,21 @@ internal sealed class NativeTrayHost : IDisposable
         nid.uFlags = NIF_INFO;
         ApplyTrayIconState(ref nid);
         nid.dwInfoFlags = NIIF_INFO;
-        nid.szInfoTitle = title;
-        nid.szInfo = message;
+        nid.szInfoTitle = _pendingBalloonTitle;
+        nid.szInfo = _pendingBalloonMessage;
 
-        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+        if (!Shell_NotifyIcon(NIM_MODIFY, ref nid))
+        {
+            _ = _logger.LogAsync(RuntimeLogLevel.Warning, "Shell notification submission failed; retaining it for bounded recovery.");
+            return;
+        }
+
+        // Shell accepted the submission; this does not prove the user saw it.
+        // Delivery state must not survive to replay on TaskbarCreated. Click
+        // context is separate and remains valid across icon recreation.
+        _pendingBalloonTitle = null;
+        _pendingBalloonMessage = null;
+        _hasPendingNotificationClick = true;
     }
 
     /// <summary>
@@ -215,36 +242,42 @@ internal sealed class NativeTrayHost : IDisposable
     /// </summary>
     public void UpdateLocalization(string tooltip, string showMainWindowText, string exitText)
     {
-        _tooltip = tooltip;
-        _showMainWindowText = showMainWindowText;
-        _exitText = exitText;
-
-        RebuildMenu();
-
-        if (_hwnd == IntPtr.Zero || !_initialized || !_trayIconAdded)
+        PostWindowAction(() =>
         {
-            return;
-        }
+            _tooltip = tooltip;
+            _showMainWindowText = showMainWindowText;
+            _exitText = exitText;
 
-        var nid = CreateBaseNotifyIconData();
-        nid.uFlags = NIF_TIP;
-        ApplyTrayIconState(ref nid);
-        nid.szTip = _tooltip;
-        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+            RebuildMenu();
+
+            if (!_trayIconAdded)
+            {
+                return;
+            }
+
+            var nid = CreateBaseNotifyIconData();
+            nid.uFlags = NIF_TIP;
+            ApplyTrayIconState(ref nid);
+            nid.szTip = _tooltip;
+            Shell_NotifyIcon(NIM_MODIFY, ref nid);
+        });
     }
 
     public void SetTrayIconVisible(bool visible)
     {
-        _trayIconVisible = visible;
-        if (_hwnd == IntPtr.Zero || !_initialized || !_trayIconAdded)
+        PostWindowAction(() =>
         {
-            return;
-        }
+            _trayIconVisible = visible;
+            if (!_trayIconAdded)
+            {
+                return;
+            }
 
-        var nid = CreateBaseNotifyIconData();
-        nid.uFlags = NIF_STATE;
-        ApplyTrayIconState(ref nid);
-        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+            var nid = CreateBaseNotifyIconData();
+            nid.uFlags = NIF_STATE;
+            ApplyTrayIconState(ref nid);
+            Shell_NotifyIcon(NIM_MODIFY, ref nid);
+        });
     }
 
     /// <summary>
@@ -258,6 +291,11 @@ internal sealed class NativeTrayHost : IDisposable
         }
 
         _disposed = true;
+        _windowActions.Clear();
+        StopRecovery();
+        _pendingBalloonTitle = null;
+        _pendingBalloonMessage = null;
+        _hasPendingNotificationClick = false;
 
         RemoveTrayIcon();
 
@@ -301,15 +339,70 @@ internal sealed class NativeTrayHost : IDisposable
         {
             DestroyIcon(nid.hIcon);
         }
+    }
 
-        if (!string.IsNullOrWhiteSpace(_pendingBalloonTitle)
-            && !string.IsNullOrWhiteSpace(_pendingBalloonMessage))
+    private void BeginRecovery()
+    {
+        bool alreadyRetrying = _recoveryRetriesRemaining > 0;
+        if (!alreadyRetrying)
         {
-            var title = _pendingBalloonTitle;
-            var message = _pendingBalloonMessage;
-            _pendingBalloonTitle = null;
-            _pendingBalloonMessage = null;
-            ShowNotification(title, message);
+            _recoveryRetriesRemaining = RecoveryRetryCount;
+        }
+
+        if (TryRecover())
+        {
+            StopRecovery();
+        }
+        else if (!alreadyRetrying
+            && SetTimer(_hwnd, (UIntPtr)RecoveryTimerId, RecoveryRetryIntervalMs, IntPtr.Zero) == UIntPtr.Zero)
+        {
+            AbandonRecovery();
+        }
+    }
+
+    private bool TryRecover()
+    {
+        if (!_trayIconAdded)
+        {
+            TryCreateTrayIcon();
+        }
+
+        TrySubmitPendingNotification();
+        return _trayIconAdded && _pendingBalloonTitle is null;
+    }
+
+    private void StopRecovery()
+    {
+        if (_hwnd != IntPtr.Zero)
+        {
+            KillTimer(_hwnd, (UIntPtr)RecoveryTimerId);
+        }
+        _recoveryRetriesRemaining = 0;
+    }
+
+    private void AbandonRecovery()
+    {
+        StopRecovery();
+        _pendingBalloonTitle = null;
+        _pendingBalloonMessage = null;
+        _ = _logger.LogAsync(RuntimeLogLevel.Warning, "Tray recovery stopped; any unsubmitted notification was discarded.");
+    }
+
+    private void PostWindowAction(Action action)
+    {
+        var hwnd = Volatile.Read(ref _hwnd);
+        if (_disposed || hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        int id = Interlocked.Increment(ref _nextWindowActionId);
+        _windowActions[id] = action;
+        if (!PostMessage(hwnd, WindowActionMessage, (IntPtr)id, IntPtr.Zero))
+        {
+            int error = Marshal.GetLastWin32Error();
+            _windowActions.TryRemove(id, out _);
+            _ = _logger.LogAsync(RuntimeLogLevel.Warning, $"Tray window dispatch failed. Error={error}.");
         }
     }
 
@@ -392,7 +485,33 @@ internal sealed class NativeTrayHost : IDisposable
         if (msg == _taskbarCreatedMessage)
         {
             _trayIconAdded = false;
-            TryCreateTrayIcon();
+            BeginRecovery();
+            return IntPtr.Zero;
+        }
+
+        if (msg == WindowActionMessage)
+        {
+            if (_windowActions.TryRemove((int)wParam, out var action) && !_disposed)
+            {
+                action();
+            }
+            return IntPtr.Zero;
+        }
+
+        if (msg == WM_TIMER && wParam == (IntPtr)RecoveryTimerId)
+        {
+            if (_recoveryRetriesRemaining > 0)
+            {
+                _recoveryRetriesRemaining--;
+                if (TryRecover())
+                {
+                    StopRecovery();
+                }
+                else if (_recoveryRetriesRemaining == 0)
+                {
+                    AbandonRecovery();
+                }
+            }
             return IntPtr.Zero;
         }
 
@@ -406,23 +525,14 @@ internal sealed class NativeTrayHost : IDisposable
                 return IntPtr.Zero;
             }
 
-            if (code == NIN_BALLOONUSERCLICK
-                || code == NIN_SELECT
-                || code == NIN_KEYSELECT)
+            if (code == NIN_BALLOONUSERCLICK)
             {
-                if (TryHandlePendingNotificationClick())
-                {
-                    return IntPtr.Zero;
-                }
+                HandleNotificationClick();
+                return IntPtr.Zero;
             }
 
-            if (code == WM_LBUTTONUP)
+            if (code == WM_LBUTTONUP || code == NIN_SELECT || code == NIN_KEYSELECT)
             {
-                if (TryHandlePendingNotificationClick())
-                {
-                    return IntPtr.Zero;
-                }
-
                 _showMainWindow();
                 return IntPtr.Zero;
             }
@@ -446,6 +556,7 @@ internal sealed class NativeTrayHost : IDisposable
 
         if (msg == WM_DESTROY)
         {
+            StopRecovery();
             PostQuitMessage(0);
             return IntPtr.Zero;
         }
@@ -453,16 +564,15 @@ internal sealed class NativeTrayHost : IDisposable
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
-    private bool TryHandlePendingNotificationClick()
+    private void HandleNotificationClick()
     {
         if (!_hasPendingNotificationClick)
         {
-            return false;
+            return;
         }
 
         _hasPendingNotificationClick = false;
         _balloonClicked();
-        return true;
     }
 
     private static int LOWORD(IntPtr value)
@@ -701,6 +811,12 @@ internal sealed class NativeTrayHost : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern UIntPtr SetTimer(IntPtr hWnd, UIntPtr nIDEvent, uint uElapse, IntPtr lpTimerFunc);
+
+    [DllImport("user32.dll")]
+    private static extern bool KillTimer(IntPtr hWnd, UIntPtr uIDEvent);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);

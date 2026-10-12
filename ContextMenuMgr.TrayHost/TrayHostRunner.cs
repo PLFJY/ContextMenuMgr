@@ -24,7 +24,6 @@ internal sealed class TrayHostRunner : IDisposable
     private TrayHostControlServer? _controlServer;
     private CancellationTokenSource? _controlServerCts;
 
-    private string? _pendingApprovalItemId;
     private bool _isClosing;
 
     /// <summary>
@@ -67,7 +66,8 @@ internal sealed class TrayHostRunner : IDisposable
                 _initialShowTrayIcon,
                 ShowMainWindow,
                 RequestBackendShutdown,
-                OpenApprovals);
+                OpenApprovals,
+                _logger);
 
             _trayHost.Initialize();
 
@@ -135,13 +135,12 @@ internal sealed class TrayHostRunner : IDisposable
         _frontendActivationService.TryShowMainWindow();
     }
 
-    private void OpenApprovals() => OpenApprovals(_pendingApprovalItemId);
-
-    private void OpenApprovals(string? itemId)
+    private void OpenApprovals()
     {
-        var targetItemId = string.IsNullOrWhiteSpace(itemId) ? _pendingApprovalItemId : itemId;
-        _ = _logger.LogAsync($"Opening approvals from tray notification. PendingItemId={targetItemId ?? "<none>"}");
-        _frontendActivationService.TryOpenApprovals(targetItemId);
+        // Win32 balloon callbacks identify the icon, not an approval item. A
+        // newer notification or a resolved approval must not supply a stale ID.
+        _ = _logger.LogAsync("Opening approvals from tray notification.");
+        _frontendActivationService.TryOpenApprovals(null);
     }
 
     private void RequestBackendShutdown()
@@ -187,7 +186,6 @@ internal sealed class TrayHostRunner : IDisposable
             return;
         }
 
-        _pendingApprovalItemId = notification.Item.Id;
         _ = _logger.LogAsync($"Approval notification received for item {notification.Item.Id} ({notification.Item.DisplayName}).");
 
         var title = _localization.Translate("Tray.PendingApprovalTitle");
