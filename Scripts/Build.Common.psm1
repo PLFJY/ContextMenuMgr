@@ -974,6 +974,70 @@ function New-PortableArchive {
     return $archivePath
 }
 
+function Write-InstallerRuntimeInventory {
+    param(
+        [Parameter(Mandatory)] [string] $PublishDir,
+        [Parameter(Mandatory)] [string] $DistributionMode,
+        [Parameter(Mandatory)] [string] $Platform,
+        [Parameter(Mandatory)] [string] $Path
+    )
+
+    # Only SDK runtime-pack assets, never an enumeration of arbitrary publish files.
+    # Keep this compiler input outside publish output (including Portable staging).
+    $entries = @{}
+    $deps = Get-Content -LiteralPath (Join-Path $PublishDir 'ContextMenuManagerPlus.deps.json') -Raw | ConvertFrom-Json
+    $target = $deps.targets.PSObject.Properties[$deps.runtimeTarget.name].Value
+    $runtimePacks = @($target.PSObject.Properties | Where-Object {
+        $_.Name -match ('^runtimepack\.Microsoft\.(NETCore|WindowsDesktop)\.App\.Runtime\.' + [regex]::Escape($Platform) + '/')
+    })
+    if ($DistributionMode -eq 'framework-dependent' -and $runtimePacks.Count -gt 0) {
+        throw 'Framework-dependent installer input contains self-contained runtime packs.'
+    }
+    if ($DistributionMode -eq 'self-contained') {
+        foreach ($pack in $runtimePacks) {
+            foreach ($group in $pack.Value.PSObject.Properties) {
+                if ($group.Name -notin @('runtime', 'native')) { continue }
+                foreach ($asset in $group.Value.PSObject.Properties) {
+                    $name = $asset.Name
+                    if ($name -notmatch '^[A-Za-z0-9._-]+\.dll$' -and $name -ne 'createdump.exe') {
+                        throw "Unsupported runtime-pack asset layout: $name. Review installer cleanup before releasing."
+                    }
+                    $file = Join-Path $PublishDir $name
+                    Ensure-FileExists -Path $file -Description 'Published runtime-pack asset'
+                    $entries[$name] = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
+        }
+        foreach ($required in @('hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll', 'clrjit.dll', 'System.Private.CoreLib.dll', 'PresentationFramework.dll')) {
+            if (-not $entries.ContainsKey($required)) { throw "Incomplete self-contained runtime inventory: $required" }
+        }
+    }
+    $lines = @(
+        "#if (MyDistributionMode != ""$DistributionMode"") || (MyArchitecture != ""$Platform"")",
+        '#error Runtime ownership compiler input does not match the installer configuration',
+        '#endif',
+        'const', '  IncomingRuntimeFiles ='
+    )
+    foreach ($name in ($entries.Keys | Sort-Object)) {
+        $lines += "    '$name|$($entries[$name]);' +"
+    }
+    $lines += "    '';"
+    # Critical payload read-back: an ignored/failed replacement must not complete
+    # a mode transition with the previous runtimeconfig or application binaries.
+    $lines += '  IncomingApplicationFiles ='
+    foreach ($baseName in @('ContextMenuManagerPlus', 'ContextMenuManagerPlus.Service', 'ContextMenuManagerPlus.TrayHost')) {
+        foreach ($extension in @('.exe', '.dll', '.deps.json', '.runtimeconfig.json')) {
+            $name = $baseName + $extension
+            $file = Join-Path $PublishDir $name
+            Ensure-FileExists -Path $file -Description 'Critical installer payload'
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines += "    '$name|$hash;' +"
+        }
+    }
+    $lines += "    '';"
+    [System.IO.File]::WriteAllLines($Path, [string[]] $lines, [System.Text.Encoding]::UTF8)
+}
+
 function Invoke-InstallerBuildTarget {
     param(
         [Parameter(Mandatory)] [string] $Configuration,
@@ -1012,7 +1076,13 @@ function Invoke-InstallerBuildTarget {
     $installerOptions = Get-InstallerArchitectureOptions -Platform $Platform
     $setupBaseName = "$ArtifactProductName-$Version-$platformLabel-$($distributionOptions.InstallerSuffix)-Setup"
 
+    $runtimeInventory = Join-Path (Split-Path -Parent $publishDir) "$platformLabel-runtime.iss"
+    Write-InstallerRuntimeInventory -PublishDir $publishDir -DistributionMode $DistributionMode.ToLowerInvariant() -Platform $Platform.ToLowerInvariant() -Path $runtimeInventory
+
     $isccArguments = @(
+        "/DMyDistributionMode=$($DistributionMode.ToLowerInvariant())",
+        "/DMyArchitecture=$($Platform.ToLowerInvariant())",
+        "/DMyRuntimeInventory=$runtimeInventory",
         "/DMyArchitecturesAllowed=$($installerOptions.Allowed)",
         "/DMyArchitecturesInstallIn64BitMode=$($installerOptions.InstallIn64BitMode)",
         "/DMyUseDotNetDependencyInstaller=$($distributionOptions.UseDotNetDependencyInstaller)",

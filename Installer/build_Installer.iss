@@ -22,8 +22,29 @@
   #define MyArchitecturesInstallIn64BitMode "x64compatible"
 #endif
 
+#ifndef MyDistributionMode
+  #error MyDistributionMode must be explicitly supplied
+#endif
+#if (MyDistributionMode != "self-contained") && (MyDistributionMode != "framework-dependent")
+  #error Unsupported MyDistributionMode
+#endif
+#ifndef MyArchitecture
+  #error MyArchitecture must be explicitly supplied
+#endif
+#if (MyArchitecture != "win-x86") && (MyArchitecture != "win-x64") && (MyArchitecture != "win-arm64")
+  #error Unsupported MyArchitecture
+#endif
+#if ((MyArchitecture == "win-x86") && ((MyArchitecturesAllowed != "x86compatible") || (MyArchitecturesInstallIn64BitMode != ""))) || ((MyArchitecture == "win-x64") && ((MyArchitecturesAllowed != "x64compatible") || (MyArchitecturesInstallIn64BitMode != "x64compatible"))) || ((MyArchitecture == "win-arm64") && ((MyArchitecturesAllowed != "arm64") || (MyArchitecturesInstallIn64BitMode != "arm64")))
+  #error Architecture and Inno registry/install mode disagree
+#endif
+#ifndef MyRuntimeInventory
+  #error MyRuntimeInventory must be generated from published runtime-pack assets
+#endif
 #ifndef MyUseDotNetDependencyInstaller
-  #define MyUseDotNetDependencyInstaller "0"
+  #error MyUseDotNetDependencyInstaller must be explicitly supplied
+#endif
+#if ((MyDistributionMode == "self-contained") && (MyUseDotNetDependencyInstaller != "0")) || ((MyDistributionMode == "framework-dependent") && (MyUseDotNetDependencyInstaller != "1"))
+  #error Deployment mode and dependency installer disagree
 #endif
 
 #if MyUseDotNetDependencyInstaller == "1"
@@ -68,6 +89,9 @@ OutputBaseFilename={#MyAppSetupName}
 SetupIconFile=..\ContextMenuMgr.Frontend\Assets\AppIcon.ico
 SolidCompression=yes
 WizardStyle=modern
+PrivilegesRequired=admin
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
@@ -78,13 +102,24 @@ Name: "chinesetraditional"; MessagesFile: "compiler:Languages\ChineseTraditional
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkablealone
 
 [Files]
-Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: CleanupPreviousRuntime
+
+[INI]
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "AppId"; String: "{#MyAppId}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "DistributionMode"; String: "{#MyDistributionMode}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "Architecture"; String: "{#MyArchitecture}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "InstallPath"; String: "{app}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "RuntimeFiles"; String: "{code:GetIncomingRuntimeFiles}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "RuntimeFilesSHA256"; String: "{code:GetIncomingRuntimeHash}"
+Filename: "{app}\ContextMenuMgr.deployment.ini"; Section: "Deployment"; Key: "Complete"; String: "0"
 
 [Code]
 const
   ServiceName = 'ContextMenuManagerPlusService';
   LegacyServiceName = 'ContextMenuManagerService';
   ServiceDisplayName = 'Context Menu Manager Plus Service';
+
+#include "UpgradeDeployment.iss"
 
 procedure InitializeWizard();
 begin
@@ -159,4 +194,4 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserM
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; AppUserModelID: "{#MyAppUserModelID}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: postinstall shellexec skipifdoesntexist
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: postinstall shellexec skipifdoesntexist; Check: DeploymentSucceeded
