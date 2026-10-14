@@ -309,3 +309,5 @@ If the service process crashes between the two registry writes, no final ownersh
 增强菜单字典的条件/语言选择、命令编译与 CLI 校验统一在 `EnhanceMenuDictionary`；catalog 只调用该实现执行注册表写入与事务。CLI 校验不通过测试专用编译入口访问生产代码。
 
 维护决定：保留上文 v1.7.5 可见性签名恢复，直至明确停止支持所有仍带该签名、且没有物理 provenance 的持久状态升级；不能仅因项目已经生成新版 provenance 就移除它。迁移成功的单项自然转入当前事务格式，不引入永久兼容开关。
+
+OpenWith 的按扩展名来源检查复用 ContextMenuRegistryCatalog.ReadOpenWithProgIdReferences，保留 OpenWithProgIDs 的物理来源与无 command ProgID；传统菜单的 AddAssociatedClassRoot/HasAnyContextMenuSubkey 策略不变。来源检查不写 ProgID、默认关联或常规菜单状态；详见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。

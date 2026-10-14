@@ -5735,10 +5735,9 @@ public sealed class ContextMenuRegistryCatalog
         AssociatedClassRootSource source,
         IDictionary<string, AssociatedClassRootBuilder> roots)
     {
-        using var openWithProgIdsKey = classesRoot?.OpenSubKey($@"{extension}\OpenWithProgids", writable: false);
-        foreach (var progId in openWithProgIdsKey?.GetValueNames() ?? [])
+        foreach (var reference in ReadOpenWithProgIdReferences(classesRoot, extension))
         {
-            AddAssociatedClassRoot(roots, progId, source);
+            AddAssociatedClassRoot(roots, reference.ProgId, source);
         }
     }
 
@@ -5757,12 +5756,21 @@ public sealed class ContextMenuRegistryCatalog
         RegistryKey? fileExtsExtensionKey,
         IDictionary<string, AssociatedClassRootBuilder> roots)
     {
-        using var openWithProgIdsKey = fileExtsExtensionKey?.OpenSubKey("OpenWithProgids", writable: false);
-        foreach (var progId in openWithProgIdsKey?.GetValueNames() ?? [])
+        foreach (var reference in ReadOpenWithProgIdReferences(fileExtsExtensionKey))
         {
-            AddAssociatedClassRoot(roots, progId, AssociatedClassRootSource.FileExtsOpenWithProgids);
+            AddAssociatedClassRoot(roots, reference.ProgId, AssociatedClassRootSource.FileExtsOpenWithProgids);
         }
     }
+
+    // Shared unfiltered association evidence. The classic resolver applies its
+    // context-menu eligibility filter later; OpenWith must retain command-less ProgIDs.
+    internal static IReadOnlyList<OpenWithProgIdReference> ReadOpenWithProgIdReferences(RegistryKey? parent, string? extension = null)
+    {
+        using var key = parent?.OpenSubKey(extension is null ? "OpenWithProgids" : $@"{extension}\OpenWithProgids");
+        return key is null ? [] : key.GetValueNames().Select(id => new OpenWithProgIdReference(id, key.Name)).ToArray();
+    }
+
+    internal sealed record OpenWithProgIdReference(string ProgId, string SourcePath);
 
     private static void AddAssociatedClassRoot(
         IDictionary<string, AssociatedClassRootBuilder> roots,

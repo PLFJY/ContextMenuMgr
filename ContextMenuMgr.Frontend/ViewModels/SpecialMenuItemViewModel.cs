@@ -71,6 +71,22 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public bool IsReadOnlyPackagedShellNew =>
         string.Equals(Entry.Metadata.GetValueOrDefault("ProviderType"), "PackagedShellNew", StringComparison.Ordinal);
 
+    public bool IsReadOnlyOpenWith => Entry.Kind == SpecialMenuKind.OpenWith && !Entry.CanEdit;
+    public string OpenWithProtectedText => _localization.Translate("OpenWithProtectedText");
+    public bool HasRegistrationNotice => Entry.Kind == SpecialMenuKind.OpenWith && Entry.Id != "openwith:use-store";
+    public string RegistrationNotice => _localization.Translate("OpenWithScope" + Entry.Metadata.GetValueOrDefault("RegistryScope"))
+        + (IsReadOnlyOpenWith ? string.Empty : Entry.Metadata.GetValueOrDefault("VisibilityOwnership") switch
+        {
+            "Unknown" => " · " + _localization.Translate("OpenWithVisibilityUnknown"),
+            "Changed" => " · " + _localization.Translate("OpenWithVisibilityChanged"),
+            _ => string.Empty
+        });
+
+    public string RegistrationToolTip => IsReadOnlyOpenWith
+        ? _localization.Translate(Entry.Metadata.GetValueOrDefault("ReadOnlyReason") ?? "OpenWithUnsupportedRegistration")
+        : Entry.Metadata.GetValueOrDefault("VisibilityOwnership") is "Unknown" or "Changed"
+        ? _localization.Translate("OpenWithExternalVisibility") : RegistrationNotice;
+
     public string ReadOnlyLabel => _localization.Translate("PackagedShellNewReadOnlyLabel");
 
     public string ReadOnlyToolTip => _localization.Translate("PackagedShellNewReadOnlyToolTip");
@@ -103,7 +119,8 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool CanMoveUp => CanMove && _canMoveUp;
 
-    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain;
+    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain
+        && !(Entry.Kind == SpecialMenuKind.OpenWith && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") is "Unknown" or "Changed");
 
     public bool ShowDelete => (Entry.CanDelete || IsReadOnlyPackagedShellNew) && !IsDeleted;
 
@@ -120,7 +137,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         && !IsDeleted
         && (_canMoveUp || _canMoveDown);
 
-    public bool ShowToggle => (Entry.CanEdit || IsReadOnlyPackagedShellNew)
+    public bool ShowToggle => (Entry.CanEdit || IsReadOnlyPackagedShellNew || IsReadOnlyOpenWith)
         && Entry.Metadata.GetValueOrDefault("EntryType") is not ("DefaultDropEffect" or "Separator")
         && !IsDeleted;
 
@@ -213,6 +230,10 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Detail));
         OnPropertyChanged(nameof(HasDetail));
         OnPropertyChanged(nameof(IsReadOnlyPackagedShellNew));
+        OnPropertyChanged(nameof(IsReadOnlyOpenWith));
+        OnPropertyChanged(nameof(HasRegistrationNotice));
+        OnPropertyChanged(nameof(RegistrationNotice));
+        OnPropertyChanged(nameof(RegistrationToolTip));
         OnPropertyChanged(nameof(ReadOnlyLabel));
         OnPropertyChanged(nameof(ReadOnlyToolTip));
         OnPropertyChanged(nameof(ProviderSummary));
@@ -239,6 +260,9 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public void RefreshLocalization()
     {
+        OnPropertyChanged(nameof(OpenWithProtectedText));
+        OnPropertyChanged(nameof(RegistrationNotice));
+        OnPropertyChanged(nameof(RegistrationToolTip));
         OnPropertyChanged(nameof(ToggleLabel));
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(Subtitle));

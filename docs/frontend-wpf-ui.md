@@ -505,3 +505,9 @@ The per-item `AsyncToggleSwitch` ProgressRing stays active throughout a `SetEnab
 OpenWith 复用既有页面说明、错误对话框及 `StatusText`，没有新页面。`SpecialMenuPageViewModel` 只对 OpenWith 用同一 semaphore 串行快照与操作；失败 / 超时后独立读取快照，不重试写入。无法核对时 `SpecialMenuItemViewModel.IsStateUncertain` 禁止开关、编辑、Delete / Undo / Purge；后续 `Update` 清除此状态。迟到通知只触发 fresh snapshot，不直接 Upsert 过期 DTO。SpecialMenu item 的更新版本保护防止旧失败任务覆盖新权威状态。页面说明明确所选物理 Applications / NoOpenWith 范围及 Explorer 仍显示其它来源候选的可能性；新增文本同步三种资源语言。
 
 列表占位只由真实加载状态、延迟加载呈现和当前筛选结果决定，不提供全局 Loading/Empty 模拟服务或命令。DebugToolsWindow 及强制更新提示入口仅编译进 Debug；Beta/Release 不包含此窗口。WorkspaceNotificationState 独立保存普通菜单与 WPS/Office 的通知基线，工作区仍负责菜单项与后端操作。
+
+## OpenWith 来源与只读展示（#136）
+
+SpecialMenuContentView 复用原页面，在 OpenWith 页头增加扩展名输入、异步检查/取消按钮与可选择复制的有界只读结果区；不新增 Page 或导航项。查询有独立 CancellationToken，不在页面加载、定时刷新或每次输入时扫描关联。来源 DTO 和 Applications switch 状态分离，分组保留独立物理路径，明确说明 Resolved 不是 Explorer 可见性验证。用户/机器 Applications 卡片展示来源及作用域，正常项不重复显示“开关仅表示此物理注册状态”说明，OpenWith 非标准只读项保留显示禁用的开关，用 SystemFillColorCautionBrush 黄色文字标注“受系统保护”，详细只读原因移入 tooltip；编辑/删除仍不可用。仅 OpenWith 的 ItemsView 按 IsReadOnlyOpenWith、DisplayName、Id 实时排序，正常项在前、受保护只读项在后，覆盖初次加载、刷新、增量新增和支持状态变化。该标签是界面提示，不代表后端新增了 ACL 保护。
+
+归属未知/被改写的 NoOpenWith 显示保留原因及导出/人工核查说明。编辑表单打开前捕获 EditStamp；失败或 Pipe 超时继续沿用串行门、物理快照核对和 IsStateUncertain，迟到通知触发重读。Create/Update 成功缺失 SpecialItem 也按不确定结果处理。英文、简体中文、繁体中文资源同时更新。

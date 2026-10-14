@@ -145,7 +145,20 @@ public sealed record OpenWithCreateRequest(
 public sealed record OpenWithUpdateRequest(
     string Id,
     string? DisplayName = null,
-    string? Command = null);
+    string? Command = null,
+    string? ExpectedEditStamp = null);
+
+// Inspection evidence is separate from a mutable SpecialMenuEntry / switch state.
+public enum OpenWithSourceKind { Applications, ClassesProgIds, ExplorerList, ExplorerProgIds, Capabilities, Package }
+public enum OpenWithSourceResolution { Resolved, MultipleRegistrations, Unresolved, Invalid, Inaccessible }
+public sealed record OpenWithSourceReference(
+    OpenWithSourceKind Kind, string SourcePath, string ValueName,
+    OpenWithSourceResolution Resolution, IReadOnlyList<string> RegistrationPaths,
+    IReadOnlyList<string> ManageableRegistrationIds);
+public sealed record OpenWithAssociationCandidate(string Identifier, IReadOnlyList<OpenWithSourceReference> Sources);
+public sealed record OpenWithInspectionDiagnostic(string Code, string SourcePath);
+public sealed record OpenWithAssociationInspection(
+    string Extension, IReadOnlyList<OpenWithAssociationCandidate> Candidates, IReadOnlyList<OpenWithInspectionDiagnostic> Diagnostics);
 
 public sealed record DragDropCreateRequest(string GuidText, string GroupName);
 

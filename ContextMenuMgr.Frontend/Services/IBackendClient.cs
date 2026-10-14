@@ -142,6 +142,8 @@ public interface IBackendClient : IAsyncDisposable
         Guid clientOperationId,
         CancellationToken cancellationToken);
 
+    Task<OpenWithAssociationInspection> InspectOpenWithSourcesAsync(string extension, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<Win11BlockedItem>> GetWin11BlockedItemsAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ContextMenuEntry>> GetWin11ContextMenuSnapshotAsync(CancellationToken cancellationToken);

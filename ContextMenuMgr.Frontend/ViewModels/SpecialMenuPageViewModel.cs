@@ -54,6 +54,13 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
+        if (kind == SpecialMenuKind.OpenWith)
+        {
+            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith), ListSortDirection.Ascending));
+            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
+            ((ListCollectionView)ItemsView).IsLiveSorting = true;
+        }
         SearchLabel = _localization.Translate("SearchLabel");
         AddText = _localization.Translate("Add");
         EditText = _localization.Translate("Edit");
@@ -95,6 +102,54 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     public string Title => _localization.Translate(_titleKey);
 
     public string Description => _localization.Translate(_descriptionKey);
+
+    public bool ShowOpenWithInspection => Kind == SpecialMenuKind.OpenWith;
+    public string OpenWithInspectionLabel => _localization.Translate("OpenWithInspectionLabel");
+    public string OpenWithInspectText => _localization.Translate("OpenWithInspect");
+    public string OpenWithCancelText => _localization.Translate("DialogCancel");
+
+    [ObservableProperty]
+    public partial string InspectionExtension { get; set; } = ".txt";
+
+    [ObservableProperty]
+    public partial string InspectionText { get; set; } = string.Empty;
+
+    [RelayCommand(IncludeCancelCommand = true)]
+    private async Task InspectOpenWithAsync(CancellationToken cancellationToken)
+    {
+        if (!ShowOpenWithInspection) return;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token, _disposeCts.Token);
+        InspectionText = _localization.Translate("LoadingItemsText");
+        try
+        {
+            var result = await _backendClient.InspectOpenWithSourcesAsync(InspectionExtension, linked.Token);
+            linked.Token.ThrowIfCancellationRequested();
+            var lines = new List<string> { result.Extension, _localization.Translate("OpenWithInspectionNotice") };
+            foreach (var candidate in result.Candidates)
+            {
+                lines.Add(string.Empty);
+                lines.Add(candidate.Identifier);
+                foreach (var source in candidate.Sources)
+                {
+                    lines.Add(_localization.Translate("OpenWithSource" + source.Kind) + " · "
+                        + _localization.Translate("OpenWithResolution" + source.Resolution));
+                    lines.Add(source.SourcePath + " [" + source.ValueName + "]");
+                    lines.AddRange(source.RegistrationPaths.Select(p => "  → " + p));
+                    lines.Add(_localization.Translate(source.ManageableRegistrationIds.Count > 0
+                        ? "OpenWithManageableReference" : "OpenWithReadOnlySource"));
+                }
+            }
+            if (result.Candidates.Count == 0) lines.Add(_localization.Translate("EmptyItemsText"));
+            lines.AddRange(result.Diagnostics.Select(d => _localization.Translate(d.Code) + " " + d.SourcePath));
+            InspectionText = string.Join(Environment.NewLine, lines);
+        }
+        catch (OperationCanceledException)
+        {
+            InspectionText = _localization.Translate("OpenWithInspectionCanceled");
+        }
+        catch (Exception ex) { InspectionText = ex.Message; }
+    }
 
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
@@ -433,6 +488,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 openWithGateHeld = true;
             }
             var item = await _backendClient.CreateSpecialMenuItemAsync(request, cts.Token);
+            if (Kind == SpecialMenuKind.OpenWith && item is null)
+                throw new InvalidOperationException("OpenWithOperationUncertain");
             if (item is not null)
             {
                 if (Kind == SpecialMenuKind.WinX)
@@ -455,7 +512,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             if (openWithGateHeld) await ReconcileOpenWithFailureAsync(null);
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, Title);
+            await FrontendMessageBox.ShowErrorAsync(LocalizeOpenWithError(ex), Title);
         }
         finally
         {
@@ -508,7 +565,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
                 await ReconcileOpenWithFailureAsync(item);
             await FrontendMessageBox.ShowErrorAsync(
-                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                LocalizeOpenWithError(ex),
                 item.DisplayName);
         }
         finally
@@ -556,7 +613,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
                 await ReconcileOpenWithFailureAsync(item);
             await FrontendMessageBox.ShowErrorAsync(
-                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                LocalizeOpenWithError(ex),
                 item.DisplayName);
         }
         finally
@@ -608,7 +665,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
                 await ReconcileOpenWithFailureAsync(item);
             await FrontendMessageBox.ShowErrorAsync(
-                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                LocalizeOpenWithError(ex),
                 item.DisplayName);
         }
         finally
@@ -644,6 +701,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var updated = await _backendClient.UpdateSpecialMenuItemAsync(request, cts.Token);
+            if (Kind == SpecialMenuKind.OpenWith && updated is null)
+                throw new InvalidOperationException("OpenWithOperationUncertain");
             if (updated is not null)
             {
                 if (Kind == SpecialMenuKind.WinX)
@@ -662,7 +721,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
                 await ReconcileOpenWithFailureAsync(item);
             await FrontendMessageBox.ShowErrorAsync(
-                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                LocalizeOpenWithError(ex),
                 item.DisplayName);
         }
         finally
@@ -796,7 +855,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
                 await ReconcileOpenWithFailureAsync(item);
             await FrontendMessageBox.ShowErrorAsync(
-                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                LocalizeOpenWithError(ex),
                 item.DisplayName);
             return false;
         }
@@ -805,6 +864,10 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             if (openWithGateHeld) _openWithOperationGate.Release();
         }
     }
+
+    private string LocalizeOpenWithError(Exception ex) => ex.Message is
+        "OpenWithExternalVisibility" or "OpenWithOperationUncertain" or "OpenWithUnsupportedRegistration"
+            ? _localization.Translate(ex.Message) : ex.Message;
 
     private async Task ReconcileOpenWithFailureAsync(SpecialMenuItemViewModel? item)
     {
@@ -1063,6 +1126,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     ClientOperationId = operationId
                 };
             case SpecialMenuKind.OpenWith:
+                var expectedEditStamp = item.Entry.Metadata.GetValueOrDefault("EditStamp");
                 var openWithInitialData = new MenuItemFormData
                 {
                     Name = item.DisplayName,
@@ -1088,7 +1152,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     OpenWithUpdate = new OpenWithUpdateRequest(
                         item.Id,
                         openWithData.Name,
-                        EmptyToNull(openWithData.Arguments)),
+                        EmptyToNull(openWithData.Arguments),
+                        expectedEditStamp),
                     ClientOperationId = operationId
                 };
             case SpecialMenuKind.CommandStore:
@@ -1360,6 +1425,9 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Description));
+        OnPropertyChanged(nameof(OpenWithInspectionLabel));
+        OnPropertyChanged(nameof(OpenWithInspectText));
+        OnPropertyChanged(nameof(OpenWithCancelText));
         OnPropertyChanged(nameof(LoadingItemsText));
         OnPropertyChanged(nameof(EmptyItemsText));
         RefreshListPlaceholderState();

@@ -76,7 +76,7 @@ Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务�
 常规快照只组合 HKLM 和该次交互用户 SID 的 Classes；无交互用户上下文的监控轮询不执行隔离、纠偏或缺失清理。`AcknowledgeItemState` 也从 Pipe 客户端解析同一前端用户上下文，再采纳该用户的实际项。
 `NamedPipeBackendServer` 会在需要用户上下文时创建 `BackendUserContextResolver`。解析顺序是先从 pipe client 解析，失败时部分场景回退到交互式用户。`BackendUserContext` 包含 `Sid`、`UserName`、`ProfilePath`、`LocalAppDataPath`、`RoamingAppDataPath` 和可选 `SessionId`。
 
-OpenWith 的上下文只接受 `TryResolveFromPipeClient`，认证解析失败时不使用交互用户 fallback；snapshot 和 mutation 都先验证 account SID / 已加载 hive。所选用户路径必须属于同一 SID 的 `Software\Classes\Applications`，机器项只允许真实 `HKLM\SOFTWARE\Classes\Applications`；两者均使用 native registry view。归属、事务提交和回读规则见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。该修复不新增 PipeCommand，不改变其它 SpecialMenu 的 fallback。
+OpenWith 的上下文只接受 `TryResolveFromPipeClient`，认证解析失败时不使用交互用户 fallback；snapshot 和 mutation 都先验证 account SID / 已加载 hive。所选用户路径必须属于同一 SID 的 `Software\Classes\Applications`，机器项只允许真实 `HKLM\SOFTWARE\Classes\Applications`；两者均使用 native registry view。归属、事务提交和回读规则见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。InspectOpenWithSources 是新增只读 PipeCommand，ScopeValue 仅接受经校验的扩展名；复用同一个严格认证解析入口（allowInteractiveFallback=false），需要 SID/loaded hive，不需要 SessionId，不改变其它 SpecialMenu 的 fallback。响应 OpenWithInspection 携带来源证据、解析状态、可管理 Applications Id 和不完整诊断；查询不广播 mutation 通知。
 
 必须有 frontend user context 的场景包括：
 

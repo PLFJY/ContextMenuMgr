@@ -76,4 +76,6 @@ public sealed record PipeResponse
 
     public OfficeSuiteCoexistenceStatus? OfficeSuiteCoexistence { get; init; }
 
+    public OpenWithAssociationInspection? OpenWithInspection { get; init; }
+
 }

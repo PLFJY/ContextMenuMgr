@@ -244,7 +244,7 @@ WinX 是用户 `LocalAppData` 下的目录：`%LOCALAPPDATA%\Microsoft\Windows\W
 
 ### OpenWith
 
-OpenWith 管理所有文件“打开方式”菜单中的应用注册。后端枚举 `HKU\<sid>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，通过应用 key 上的 `NoOpenWith` 控制是否出现在菜单中，并提供 `NoUseStoreOpenWith` policy 开关。新增项只写当前前端用户的 `HKU\<sid>\Software\Classes\Applications\<app.exe>\shell\open\command` 和 `FriendlyAppName`；不要写服务 `HKCU`。
+OpenWith 管理所有文件“打开方式”菜单中的应用注册。后端枚举 `HKU\<sid>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，通过应用 key 上的 `NoOpenWith` 控制该物理 Applications 注册的候选排除标记，不保证独立关联来源或 Explorer 实际列表变化，并提供 `NoUseStoreOpenWith` policy 开关。新增项只写当前前端用户的 `HKU\<sid>\Software\Classes\Applications\<app.exe>\shell\open\command` 和 `FriendlyAppName`；不要写服务 `HKCU`。
 
 ## 9. Windows 11 新右键菜单
 
@@ -461,3 +461,9 @@ Frontend 在单实例 ownership 成立后、DI 前启动 session，正常 OnExit
 `PipeOperationLogging` 的显式 allow-list 只决定 routine request 成功日志，不决定业务 mutation routing。snapshot/WPS 查询保留既有 baseline/reconciliation 行为；这些内部错误不能通过请求分类过滤。双方统一抑制 Warning 下成功查询，保留 mutation 和所有失败/timeout 关联证据。新增命令应审查语义；未知命令默认保留 operation evidence。`PackageDiscoveryWarningAggregator` 按用户/阶段有界保存 signature 与样本，15 分钟重复汇总，变化/恢复/淘汰汇总 suppressed count。
 
 维护 UI 用 `RuntimeLogFiles.ClearAsync` 同 lease 清归档/截断活动文件；后台任务仅用于一次维护，不用于每条日志。准确报告部分失败，不触碰未知文件/数据/备份、不删除 lease 文件、不停止 Backend/TrayHost。完整命名、失败/丢弃策略和日志收集见 [排错指南](./troubleshooting.md#日志轮转与收集134)。永久日志测试只保留 rolling/ownership/concurrency/recovery 与 bounded warning aggregation 的非平凡不变量；实际 SCM、WPF OnExit 和多账号 ACL 仍需 Windows 场景验证。
+
+## OpenWith 来源检查与编辑完整性（#136）
+
+新增 PipeCommand.InspectOpenWithSources，输入 PipeRequest.ScopeValue 的单个扩展名，响应 PipeResponse.OpenWithInspection。SpecialMenuService 调用 OpenWithSourceInspection；它复用 catalog 的 ReadOpenWithProgIdReferences 原始来源读取与现有 Applications reader，不复用会过滤无 shell ProgID 的传统菜单候选结果。仅按需检查所选扩展名，源路径、解析状态及可管理 Applications Id 独立于 SpecialMenuEntry/IsEnabled。所有非 Applications 来源保持只读。
+
+OpenWithUpdateRequest 新增 ExpectedEditStamp；前端在打开编辑表单前捕获，后端在写入前和事务内校验。Create/Update 使用 OpenWithRegistration 既有 TxR 机制，提交后 fresh read-back；提交后无法确认返回 OpenWithOperationUncertain，前端查询真实快照，不重试。没有 stamp 的旧客户端编辑请求被拒绝。发现非标准 Applications 不等于授予修改权限；Unknown NoOpenWith 不自动迁移。范围、数量预算、取消边界及手工验证见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。

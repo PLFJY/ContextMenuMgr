@@ -136,6 +136,16 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
+                <StackPanel Margin="0,8,0,0" Visibility="{Binding ShowOpenWithInspection, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="{Binding OpenWithInspectionLabel}" TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,6,0,0">
+                        <TextBox Width="120" Text="{Binding InspectionExtension, UpdateSourceTrigger=PropertyChanged}" />
+                        <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCommand}" Content="{Binding OpenWithInspectText}" />
+                        <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCancelCommand}" Content="{Binding OpenWithCancelText}" />
+                    </WrapPanel>
+                    <TextBox Margin="0,6,0,0" MaxHeight="220" IsReadOnly="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Text="{Binding InspectionText, Mode=OneWay}" />
+                </StackPanel>
                 <ui:TextBlock
                     Margin="0,8,0,0"
                     Foreground="#C75000"
@@ -470,6 +480,13 @@
                                                     Opacity="0.65"
                                                     Text="{Binding Subtitle}"
                                                     TextWrapping="Wrap" />
+                                                <ui:TextBlock
+                                                    Margin="0,6,0,0"
+                                                    FontSize="12"
+                                                    Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                                    Text="{Binding OpenWithProtectedText}"
+                                                    ToolTip="{Binding RegistrationToolTip}"
+                                                    Visibility="{Binding IsReadOnlyOpenWith, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <Border
                                                     Margin="0,6,0,0"
                                                     Padding="6,2"
@@ -500,6 +517,10 @@
                                             Text="{Binding CreationSummary}"
                                             TextWrapping="Wrap"
                                             Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                                            Text="{Binding RegistrationNotice}"
+                                            ToolTip="{Binding RegistrationToolTip}"
+                                            Visibility="{Binding HasRegistrationNotice, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <ui:TextBlock
                                             Margin="0,8,0,0"
                                             Opacity="0.72"

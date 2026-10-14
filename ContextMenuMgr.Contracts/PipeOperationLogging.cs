@@ -14,7 +14,7 @@ public static class PipeOperationLogging
         PipeCommand.GetAutoStartEnabled or PipeCommand.AnalyzeFileTypeContext or
         PipeCommand.FindRelatedFileTypeMenuItems or PipeCommand.GetEnhanceMenuDefinitions or
         PipeCommand.GetEnhanceMenuState or PipeCommand.GetOfficeSuiteCoexistenceStatus or
-        PipeCommand.GetWpsOfficePendingApprovals;
+        PipeCommand.GetWpsOfficePendingApprovals or PipeCommand.InspectOpenWithSources;
 
     public static bool ShouldWrite(PipeCommand command, RuntimeLogLevel configuredLevel, bool failed = false)
         => failed || !IsRoutineQuery(command) || configuredLevel == RuntimeLogLevel.Information;

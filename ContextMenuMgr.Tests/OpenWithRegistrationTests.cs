@@ -11,6 +11,112 @@ namespace ContextMenuMgr.Tests;
 [Collection("Registry catalog integration")]
 public sealed class OpenWithRegistrationTests
 {
+    // Permanent: newly discovered structures must never acquire unsafe mutation capabilities.
+    [Theory]
+    [InlineData("MissingShell")]
+    [InlineData("DropTarget")]
+    [InlineData("DelegateExecute")]
+    [InlineData("InvalidCommandType")]
+    public async Task NonstandardApplications_AreDiscoveredAsReadOnlyAndRejectMutations(string structure)
+    {
+        using var fixture = new Fixture();
+        fixture.Create(complete: structure != "MissingShell");
+        using (var key = fixture.Open(writable: true))
+        {
+            key!.SetValue("FriendlyAppName", "Nonstandard application");
+            if (structure == "DropTarget")
+            {
+                key.DeleteSubKeyTree(@"shell\open\command");
+                using var drop = key.CreateSubKey(@"shell\open\DropTarget");
+                drop.SetValue("CLSID", "{00000000-0000-0000-0000-000000000001}");
+            }
+            if (structure == "DelegateExecute")
+            {
+                using var command = key.OpenSubKey(@"shell\open\command", writable: true);
+                command!.SetValue("DelegateExecute", "{00000000-0000-0000-0000-000000000001}");
+            }
+            if (structure == "InvalidCommandType")
+            {
+                using var command = key.OpenSubKey(@"shell\open\command", writable: true);
+                command!.SetValue(null, new byte[] { 1, 2 }, RegistryValueKind.Binary);
+            }
+        }
+        var item = await fixture.Read();
+        Assert.False(item.CanEdit);
+        Assert.False(item.CanDelete);
+        Assert.Equal("User", item.Metadata["RegistryScope"]);
+        Assert.Equal("OpenWithUnsupportedRegistration", item.Metadata["ReadOnlyReason"]);
+        Assert.False((await fixture.Service.SetEnabledAsync(item, false, null, fixture.Context, default)).Success);
+        // A caller cannot grant itself permissions by changing the DTO flags.
+        Assert.False((await fixture.Service.DeleteAsync(item with { CanDelete = true }, null, fixture.Context, default)).Success);
+        Assert.False((await fixture.Service.UpdateAsync(new PipeRequest { SpecialKind = SpecialMenuKind.OpenWith,
+            OpenWithUpdate = new(item.Id, "Unsafe edit", ExpectedEditStamp: "forged") }, fixture.Context, default)).Success);
+        using var actual = fixture.Open();
+        Assert.Equal("Nonstandard application", actual!.GetValue("FriendlyAppName"));
+        Assert.Null(actual.GetValue("NoOpenWith"));
+    }
+
+    // Permanent: both fields are one operation, including invalid input and cancellation after staging.
+    [Fact]
+    public async Task UpdateValidationAndTransactionAbort_PreserveNameRawCommandAndAcl()
+    {
+        using var fixture = new Fixture();
+        fixture.Create();
+        using (var key = fixture.Open(writable: true)) key!.SetValue("FriendlyAppName", "Before");
+        var before = await fixture.Read();
+        Assert.Equal("Before", before.DisplayName);
+        var acl = fixture.Acl();
+        // Expanding the original target to the service's environment must not authorize a new literal target.
+        var expandedTarget = Environment.ExpandEnvironmentVariables(before.CommandText!);
+        foreach (var invalid in new[] { "\"C:\\different.exe\" \"%1\"", "\"unterminated", "   ", expandedTarget })
+        {
+            var response = await fixture.Service.UpdateAsync(new PipeRequest
+            {
+                SpecialKind = SpecialMenuKind.OpenWith,
+                OpenWithUpdate = new(before.Id, "Must not persist", invalid, before.Metadata["EditStamp"])
+            }, fixture.Context, default);
+            Assert.False(response.Success);
+            using var actual = fixture.Open();
+            Assert.Equal("Before", actual!.GetValue("FriendlyAppName"));
+        }
+        Assert.Throws<OperationCanceledException>(() => OpenWithRegistration.Update(fixture.Path, @"shell\open\command",
+            "Canceled", before.CommandText + " /test", before.Metadata["EditStamp"], before.CommandText, new CancellationToken(true)));
+        using (var key = fixture.Open()) Assert.Equal("Before", key!.GetValue("FriendlyAppName"));
+        var updated = await fixture.Service.UpdateAsync(new PipeRequest
+        {
+            SpecialKind = SpecialMenuKind.OpenWith,
+            OpenWithUpdate = new(before.Id, "After", before.CommandText + " /test", before.Metadata["EditStamp"])
+        }, fixture.Context, default);
+        Assert.True(updated.Success, updated.Message);
+        Assert.Equal("After", updated.SpecialItem!.DisplayName);
+        using (var key = fixture.Open())
+        using (var command = key!.OpenSubKey(@"shell\open\command"))
+        {
+            Assert.Equal("After", key.GetValue("FriendlyAppName"));
+            Assert.Equal(before.CommandText + " /test", command!.GetValue(null, null, RegistryValueOptions.DoNotExpandEnvironmentNames));
+            Assert.Equal(RegistryValueKind.ExpandString, command.GetValueKind(string.Empty));
+            fixture.AssertData(key);
+        }
+        Assert.Equal(acl, fixture.Acl());
+        Assert.False((await fixture.Service.UpdateAsync(new PipeRequest { SpecialKind = SpecialMenuKind.OpenWith,
+            OpenWithUpdate = new(before.Id, "Stale", before.CommandText, before.Metadata["EditStamp"]) }, fixture.Context, default)).Success);
+    }
+
+    [Fact]
+    public void CreateTransaction_CanceledAfterStagingLeavesNoKeyAndExistingKeysAreNeverOverwritten()
+    {
+        using var fixture = new Fixture();
+        Assert.Throws<OperationCanceledException>(() => OpenWithRegistration.Create(fixture.Path, "Canceled",
+            "\"C:\\test.exe\" \"%1\"", new CancellationToken(true)));
+        Assert.Null(fixture.Open());
+        OpenWithRegistration.Create(fixture.Path, "Created", "\"C:\\test.exe\" \"%1\"", default);
+        Assert.Throws<InvalidOperationException>(() => OpenWithRegistration.Create(fixture.Path, "Overwrite", "other.exe", default));
+        using var actual = fixture.Open();
+        using var command = actual!.OpenSubKey(@"shell\open\command");
+        Assert.Equal("Created", actual.GetValue("FriendlyAppName"));
+        Assert.Equal("\"C:\\test.exe\" \"%1\"", command!.GetValue(null));
+    }
+
     [Fact]
     public async Task ToggleAndDeleteRestoreCycles_ReturnPhysicalStateAndPreserveRawValuesAndAcl()
     {
@@ -73,6 +179,7 @@ public sealed class OpenWithRegistrationTests
             }, kind);
         var item = await fixture.Read();
         using var original = fixture.Open();
+        Assert.Equal("Unknown", item.Metadata["VisibilityOwnership"]);
         var before = ShellVerbVisibility.CaptureValue(original!, "NoOpenWith");
         var disable = await fixture.Service.SetEnabledAsync(item, false, null, fixture.Context, default);
         Assert.True(disable.Success, disable.Message);
@@ -117,6 +224,11 @@ public sealed class OpenWithRegistrationTests
         fixture.Create(".deleted", complete: false);
         var failure = await fixture.Service.DeleteAsync(item, null, fixture.Context, default);
         Assert.False(failure.Success);
+        var incomplete = await fixture.Read(".deleted");
+        Assert.Equal("True", incomplete.Metadata["IsDeleted"]);
+        Assert.False(incomplete.CanDelete);
+        Assert.False((await fixture.Service.UndoDeleteAsync(incomplete, null, fixture.Context, default)).Success);
+        Assert.False((await fixture.Service.PurgeDeletedAsync(incomplete, null, fixture.Context, default)).Success);
         using (var source = fixture.Open()) fixture.AssertData(source!);
         using (var partial = fixture.Open(".deleted")) Assert.Null(partial!.OpenSubKey("shell"));
         fixture.Remove(".deleted");
@@ -258,6 +370,38 @@ public sealed class OpenWithRegistrationTests
             associations.SetValue(extension, progId);
             using var registered = Registry.CurrentUser.CreateSubKey(@"Software\RegisteredApplications")!;
             registered.SetValue(progId, capabilitiesRoot + @"\Capabilities");
+
+            using (var app = fixture.Open(writable: true))
+            using (var supported = app!.CreateSubKey("SupportedTypes")) supported.SetValue(extension, string.Empty);
+            var inspected = await fixture.Service.InspectOpenWithSourcesAsync(extension, fixture.Context, default);
+            var progIdCandidate = Assert.Single(inspected.Candidates, c => c.Identifier == progId);
+            Assert.Contains(progIdCandidate.Sources, r => r.Kind == OpenWithSourceKind.ClassesProgIds);
+            Assert.Contains(progIdCandidate.Sources, r => r.Kind == OpenWithSourceKind.ExplorerProgIds);
+            Assert.Equal(2, progIdCandidate.Sources.Count(r => r.Kind == OpenWithSourceKind.Capabilities));
+            Assert.All(progIdCandidate.Sources, r =>
+            {
+                Assert.Equal(OpenWithSourceResolution.Resolved, r.Resolution);
+                Assert.Contains($@"HKEY_USERS\{fixture.Context.Sid}\{progIdPath}", r.RegistrationPaths);
+                Assert.Empty(r.ManageableRegistrationIds); // A ProgID command is not an Applications mutation target.
+            });
+            var applicationCandidate = Assert.Single(inspected.Candidates, c => c.Identifier == appName);
+            Assert.Equal(2, applicationCandidate.Sources.Count);
+            Assert.All(applicationCandidate.Sources, r => Assert.Single(r.ManageableRegistrationIds));
+            Assert.Contains(applicationCandidate.Sources, r => r.SourcePath == fixture.Path + @"\SupportedTypes");
+            Assert.Contains(applicationCandidate.Sources, r => r.SourcePath.EndsWith(@"\OpenWithList"));
+            candidates.SetValue(progId + ".Missing", string.Empty);
+            candidates.SetValue(@"Invalid\Nested", string.Empty);
+            command.DeleteValue(string.Empty); // Existing ProgID with no conventional command must still resolve.
+            inspected = await fixture.Service.InspectOpenWithSourcesAsync(extension, fixture.Context, default);
+            Assert.All(Assert.Single(inspected.Candidates, c => c.Identifier == progId).Sources,
+                r => Assert.Equal(OpenWithSourceResolution.Resolved, r.Resolution));
+            Assert.Equal(OpenWithSourceResolution.Unresolved,
+                Assert.Single(Assert.Single(inspected.Candidates, c => c.Identifier == progId + ".Missing").Sources).Resolution);
+            Assert.Equal(OpenWithSourceResolution.Invalid,
+                Assert.Single(Assert.Single(inspected.Candidates, c => c.Identifier == @"Invalid\Nested").Sources).Resolution);
+            command.SetValue(null, "association-handler.exe \"%1\"");
+            await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.InspectOpenWithSourcesAsync(@".test\..\Other", fixture.Context, default));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Service.InspectOpenWithSourcesAsync(extension, fixture.Context, new CancellationToken(true)));
 
             var disabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), false, null, fixture.Context, default);
             Assert.True(disabled.Success, disabled.Message);

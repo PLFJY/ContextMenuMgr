@@ -1564,9 +1564,35 @@
   <data name="CompactViewTooltip" xml:space="preserve"><value>以精簡卡片顯示右鍵選單項目</value></data>
   <data name="DetailedViewTooltip" xml:space="preserve"><value>以詳細卡片顯示右鍵選單項目</value></data>
   <data name="OpenWithExternalVisibility" xml:space="preserve">
-    <value>此 NoOpenWith 值不是由 ContextMenuMgrPlus 寫入，或註冊已變更，因此已保留。請透過對應應用程式或登錄編輯程式檢查此註冊。</value>
+    <value>無法驗證 NoOpenWith 的歸屬。舊版可能未寫入歸屬標記，其他程式也可能寫入此值；本次已保留。請先匯出所選 Applications 的確切實體機碼，在登錄編輯程式或應用廠商指導下核查值類型、內容和命令，再決定是否手動復原。修改後請重新整理。</value>
   </data>
   <data name="OpenWithOperationUncertain" xml:space="preserve">
     <value>無法確認開啟方式操作的結果。請重新整理以核對登錄狀態後再重試。</value>
   </data>
+  <data name="OpenWithInspectionLabel" xml:space="preserve"><value>依副檔名檢查登錄來源（唯讀）</value></data>
+  <data name="OpenWithInspect" xml:space="preserve"><value>檢查來源</value></data>
+  <data name="OpenWithInspectionNotice" xml:space="preserve"><value>以下僅為登錄證據。「已解析」不表示 Explorer 一定顯示候選；修改 Applications 不會移除獨立關聯來源。</value></data>
+  <data name="OpenWithSourceApplications" xml:space="preserve"><value>Applications 支援類型</value></data>
+  <data name="OpenWithSourceClassesProgIds" xml:space="preserve"><value>Classes · OpenWithProgIDs</value></data>
+  <data name="OpenWithSourceExplorerList" xml:space="preserve"><value>Explorer · OpenWithList 使用記錄</value></data>
+  <data name="OpenWithSourceExplorerProgIds" xml:space="preserve"><value>Explorer · OpenWithProgids</value></data>
+  <data name="OpenWithSourceCapabilities" xml:space="preserve"><value>RegisteredApplications / Capabilities 宣告</value></data>
+  <data name="OpenWithSourcePackage" xml:space="preserve"><value>AppX/MSIX 資訊清單宣告</value></data>
+  <data name="OpenWithResolutionResolved" xml:space="preserve"><value>參照已解析</value></data>
+  <data name="OpenWithResolutionUnresolved" xml:space="preserve"><value>未解析到登錄</value></data>
+  <data name="OpenWithResolutionInvalid" xml:space="preserve"><value>識別碼無效</value></data>
+  <data name="OpenWithResolutionInaccessible" xml:space="preserve"><value>解析不完整：存取失敗</value></data>
+  <data name="OpenWithManageableReference" xml:space="preserve"><value>可在下方管理對應 Applications 登錄；此來源本身仍為唯讀。</value></data>
+  <data name="OpenWithReadOnlySource" xml:space="preserve"><value>唯讀關聯來源；沒有經過驗證的 Applications 修改目標。</value></data>
+  <data name="OpenWithInspectionIncomplete" xml:space="preserve"><value>檢查不完整：部分來源無法讀取或解析。</value></data>
+  <data name="OpenWithInspectionLimited" xml:space="preserve"><value>檢查已達安全數量限制；結果不完整。</value></data>
+  <data name="OpenWithInspectionCanceled" xml:space="preserve"><value>檢查已取消或逾時。請重新檢查以取得最新證據。</value></data>
+  <data name="OpenWithUnsupportedRegistration" xml:space="preserve"><value>唯讀 · 此啟用結構尚無經過驗證的修改支援</value></data>
+  <data name="OpenWithInaccessibleRegistration" xml:space="preserve"><value>唯讀 · 無法讀取登錄中繼資料</value></data>
+  <data name="OpenWithScopeUser" xml:space="preserve"><value>目前使用者 · Applications</value></data>
+  <data name="OpenWithScopeMachine" xml:space="preserve"><value>電腦 · Applications</value></data>
+  <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith 歸屬未知（可能來自舊版或其他程式），拒絕自動移除。</value></data>
+  <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可見性資料或歸屬標記與已驗證寫入不符，已保留。</value></data>
+  <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多個實體登錄，未確定最終生效的處理程式</value></data>
+  <data name="OpenWithProtectedText" xml:space="preserve"><value>受系統保護</value></data>
 </root>

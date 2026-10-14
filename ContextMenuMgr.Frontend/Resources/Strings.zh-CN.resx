@@ -1564,9 +1564,35 @@
   <data name="CompactViewTooltip" xml:space="preserve"><value>以精简卡片显示右键菜单项</value></data>
   <data name="DetailedViewTooltip" xml:space="preserve"><value>以详细卡片显示右键菜单项</value></data>
   <data name="OpenWithExternalVisibility" xml:space="preserve">
-    <value>此 NoOpenWith 值不是 ContextMenuMgrPlus 写入的，或注册已改变，因此已保留。请通过对应应用或注册表编辑器检查此注册。</value>
+    <value>无法验证 NoOpenWith 的归属。旧版可能未写入归属标记，其他程序也可能写入此值；本次已保留。请先导出所选 Applications 的准确物理键，在注册表编辑器或应用厂商指导下核查值类型、内容和命令，再决定是否手动恢复。修改后请刷新。</value>
   </data>
   <data name="OpenWithOperationUncertain" xml:space="preserve">
     <value>无法确认打开方式操作的结果。请刷新核对注册表状态后再重试。</value>
   </data>
+  <data name="OpenWithInspectionLabel" xml:space="preserve"><value>按文件扩展名检查注册来源（只读）</value></data>
+  <data name="OpenWithInspect" xml:space="preserve"><value>检查来源</value></data>
+  <data name="OpenWithInspectionNotice" xml:space="preserve"><value>以下仅为注册证据。“已解析”不表示 Explorer 一定显示候选；修改 Applications 不会移除独立关联来源。</value></data>
+  <data name="OpenWithSourceApplications" xml:space="preserve"><value>Applications 支持类型</value></data>
+  <data name="OpenWithSourceClassesProgIds" xml:space="preserve"><value>Classes · OpenWithProgIDs</value></data>
+  <data name="OpenWithSourceExplorerList" xml:space="preserve"><value>Explorer · OpenWithList 使用记录</value></data>
+  <data name="OpenWithSourceExplorerProgIds" xml:space="preserve"><value>Explorer · OpenWithProgids</value></data>
+  <data name="OpenWithSourceCapabilities" xml:space="preserve"><value>RegisteredApplications / Capabilities 声明</value></data>
+  <data name="OpenWithSourcePackage" xml:space="preserve"><value>AppX/MSIX 清单声明</value></data>
+  <data name="OpenWithResolutionResolved" xml:space="preserve"><value>引用已解析</value></data>
+  <data name="OpenWithResolutionUnresolved" xml:space="preserve"><value>未解析到注册</value></data>
+  <data name="OpenWithResolutionInvalid" xml:space="preserve"><value>标识符无效</value></data>
+  <data name="OpenWithResolutionInaccessible" xml:space="preserve"><value>解析不完整：访问失败</value></data>
+  <data name="OpenWithManageableReference" xml:space="preserve"><value>可在下方管理对应 Applications 注册；此来源本身仍为只读。</value></data>
+  <data name="OpenWithReadOnlySource" xml:space="preserve"><value>只读关联来源；没有经过验证的 Applications 修改目标。</value></data>
+  <data name="OpenWithInspectionIncomplete" xml:space="preserve"><value>检查不完整：部分来源无法读取或解析。</value></data>
+  <data name="OpenWithInspectionLimited" xml:space="preserve"><value>检查已达到安全数量限制；结果不完整。</value></data>
+  <data name="OpenWithInspectionCanceled" xml:space="preserve"><value>检查已取消或超时。请重新检查以获取最新证据。</value></data>
+  <data name="OpenWithUnsupportedRegistration" xml:space="preserve"><value>只读 · 此激活结构尚无经过验证的修改支持</value></data>
+  <data name="OpenWithInaccessibleRegistration" xml:space="preserve"><value>只读 · 无法读取注册元数据</value></data>
+  <data name="OpenWithScopeUser" xml:space="preserve"><value>当前用户 · Applications</value></data>
+  <data name="OpenWithScopeMachine" xml:space="preserve"><value>计算机 · Applications</value></data>
+  <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith 归属未知（可能来自旧版或其他程序），拒绝自动移除。</value></data>
+  <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可见性数据或归属标记与已验证写入不符，已保留。</value></data>
+  <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多个物理注册，未确定最终生效的处理程序</value></data>
+  <data name="OpenWithProtectedText" xml:space="preserve"><value>受系统保护</value></data>
 </root>

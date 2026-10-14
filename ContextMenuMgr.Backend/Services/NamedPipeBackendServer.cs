@@ -413,6 +413,14 @@ public sealed class NamedPipeBackendServer
                 => await _catalog.PurgeDeletedItemAsync(request.ItemId, cancellationToken),
             PipeCommand.ResetStateDatabase
                 => await _catalog.ResetStateDatabaseAsync(cancellationToken),
+            PipeCommand.InspectOpenWithSources when request.ScopeValue is not null
+                => new PipeResponse
+                {
+                    Success = true,
+                    OpenWithInspection = await _specialMenuService.InspectOpenWithSourcesAsync(request.ScopeValue,
+                        await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false),
+                        cancellationToken)
+                },
             PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
                 => new PipeResponse
                 {

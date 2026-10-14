@@ -36,6 +36,7 @@ internal static class OpenWithRegistration
             : throw new UnauthorizedAccessException("The path is outside the caller's Open With Applications registrations.");
         var name = path[prefix.Length..];
         if (string.IsNullOrWhiteSpace(name) || name.Contains('\\') || name.Contains('/')
+            || name is "." or ".." || name != name.Trim() || name.Any(char.IsControl)
             || !name.Contains('.') || (!deleted && name.EndsWith(".deleted", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Invalid Open With application key.");
         return path;
@@ -50,32 +51,117 @@ internal static class OpenWithRegistration
         return root.OpenSubKey(path[(path.IndexOf('\\') + 1)..], writable);
     }
 
-    internal static RegistryKey CreateNewUserApplication(string path, BackendUserContext context)
+    internal static void Create(string path, string displayName, string command, CancellationToken cancellationToken)
     {
-        ValidatePath(path, context);
-        using var root = RegistryKey.OpenBaseKey(RegistryHive.Users,
-            Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
-        using var hive = root.OpenSubKey(context.Sid, writable: true)
-            ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
-        using var parent = hive.CreateSubKey(@"Software\Classes\Applications", writable: true);
-        var status = RegCreateKeyEx(parent.Handle, path[(path.LastIndexOf('\\') + 1)..], 0, null,
-            0, (int)(RegistryRights.ReadKey | RegistryRights.WriteKey), IntPtr.Zero, out var handle, out var disposition);
-        if (status != 0)
+        using var transaction = new RegistryTransaction();
+        using var key = transaction.Create(path, requireNew: true);
+        key.SetValue("FriendlyAppName", displayName, RegistryValueKind.String);
+        using var commandKey = transaction.Create(path + @"\shell\open\command");
+        commandKey.SetValue(null, command, RegistryValueKind.String);
+        cancellationToken.ThrowIfCancellationRequested();
+        transaction.Commit();
+        VerifyCommitted(() =>
         {
-            handle.Dispose();
-            throw new Win32Exception(status);
-        }
-        if (disposition != 1)
+            using var actual = Open(path);
+            using var actualCommand = Open(path + @"\shell\open\command");
+            return actual?.GetValue("FriendlyAppName") as string == displayName
+                && actual.GetValueKind("FriendlyAppName") == RegistryValueKind.String
+                && actualCommand?.GetValue(null) as string == command
+                && actualCommand.GetValueKind(string.Empty) == RegistryValueKind.String;
+        });
+    }
+
+    internal static void Update(string path, string commandSubPath, string? displayName, string? command,
+        string expectedStamp, string? expectedCommand, CancellationToken cancellationToken)
+    {
+        using var transaction = new RegistryTransaction();
+        using var key = transaction.Open(path, writable: true)
+            ?? throw new InvalidOperationException("The Open With registration no longer exists.");
+        using var commandKey = transaction.Open(path + "\\" + commandSubPath, writable: true)
+            ?? throw new InvalidOperationException("The Open With command no longer exists.");
+        var verbName = commandSubPath.Split('\\')[1];
+        if (!CanManage(key, verbName, commandKey, expectedCommand, path, transaction)
+            || EditStamp(key, path, transaction) != expectedStamp
+            || commandKey.GetValue(null, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string != expectedCommand)
+            throw new InvalidOperationException("The Open With registration changed. Refresh before editing.");
+        // Do not change command generation underneath a visibility ownership marker.
+        if (command is not null && command != expectedCommand && ShellVerbVisibility.CaptureValue(key, OwnershipMarker).Existed)
+            throw new InvalidOperationException("Enable the Applications registration before changing its command.");
+        var nameBefore = ShellVerbVisibility.CaptureValue(key, "FriendlyAppName");
+        if (displayName is not null && nameBefore.Existed
+            && nameBefore.Kind is not ((int)RegistryValueKind.String or (int)RegistryValueKind.ExpandString))
+            throw new InvalidOperationException("The FriendlyAppName value has an unsupported type; it was preserved.");
+        if (displayName is not null) key.SetValue("FriendlyAppName", displayName,
+            nameBefore.Existed ? (RegistryValueKind)nameBefore.Kind : RegistryValueKind.String);
+        if (command is not null) commandKey.SetValue(null, command, commandKey.GetValueKind(string.Empty));
+        var after = EditStamp(key, path, transaction);
+        cancellationToken.ThrowIfCancellationRequested();
+        transaction.Commit();
+        VerifyCommitted(() =>
         {
-            handle.Dispose();
-            throw new InvalidOperationException("This Open With application registration already exists.");
+            using var actual = Open(path);
+            return actual is not null && EditStamp(actual, path) == after;
+        });
+    }
+
+    internal static string EditStamp(RegistryKey key, string path) => EditStamp(key, path, null);
+
+    private static string EditStamp(RegistryKey key, string path, RegistryTransaction? transaction)
+        => Hash(OwnershipValue(key, path, transaction) + VisibilityStamp(key)
+            + JsonSerializer.Serialize(ShellVerbVisibility.CaptureValue(key, "FriendlyAppName")));
+
+    private static void VerifyCommitted(Func<bool> verify)
+    {
+        try
+        {
+            if (verify()) return;
         }
-        return RegistryKey.FromHandle(handle);
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("OpenWithOperationUncertain", ex);
+        }
+        throw new InvalidOperationException("OpenWithOperationUncertain");
     }
 
     internal static string VisibilityStamp(RegistryKey key)
         => Hash(JsonSerializer.Serialize(new[] { ShellVerbVisibility.CaptureValue(key, VisibilityValue),
             ShellVerbVisibility.CaptureValue(key, OwnershipMarker) }));
+
+    internal static bool CanManage(RegistryKey app, string? verbName, RegistryKey? command, string? target)
+        => CanManage(app, verbName, command, target, null, null);
+
+    private static bool CanManage(RegistryKey app, string? verbName, RegistryKey? command, string? target,
+        string? path, RegistryTransaction? transaction)
+    {
+        if (verbName is null || command is null || string.IsNullOrWhiteSpace(target)
+            || command.GetValueKind(string.Empty) is not (RegistryValueKind.String or RegistryValueKind.ExpandString))
+            return false;
+        using var shell = transaction is null ? app.OpenSubKey("shell") : transaction.Open(path + @"\shell");
+        foreach (var name in shell?.GetSubKeyNames() ?? [])
+        {
+            var verbPath = path + @"\shell\" + name;
+            using var verb = transaction is null ? shell!.OpenSubKey(name) : transaction.Open(verbPath);
+            using var cmd = transaction is null ? verb?.OpenSubKey("command") : transaction.Open(verbPath + @"\command");
+            using var drop = transaction is null ? verb?.OpenSubKey("DropTarget") : transaction.Open(verbPath + @"\DropTarget");
+            using var dde = transaction is null ? verb?.OpenSubKey("ddeexec") : transaction.Open(verbPath + @"\ddeexec");
+            if (verb is null || drop is not null || dde is not null
+                || verb.GetValueNames().Any(n => new[] { "DelegateExecute", "ExplorerCommandHandler", "SubCommands", "ExtendedSubCommandsKey" }.Contains(n, StringComparer.OrdinalIgnoreCase))
+                || cmd?.GetValueNames().Any(n => n.Equals("DelegateExecute", StringComparison.OrdinalIgnoreCase)) == true)
+                return false;
+        }
+        return true;
+    }
+
+    internal static string VisibilityOwnership(RegistryKey key, string path, bool manageable)
+    {
+        var visibility = ShellVerbVisibility.CaptureValue(key, VisibilityValue);
+        var marker = ShellVerbVisibility.CaptureValue(key, OwnershipMarker);
+        if (!visibility.Existed) return marker.Existed ? "Changed" : "Enabled";
+        if (!marker.Existed) return "Unknown";
+        return manageable && visibility.Kind == (int)RegistryValueKind.String && visibility.StringValue == string.Empty
+            && marker.Kind == (int)RegistryValueKind.String && marker.StringValue == OwnershipValue(key, path)
+                ? "Owned" : "Changed";
+    }
 
     private static string OwnershipValue(RegistryKey key, string path, RegistryTransaction? transaction = null)
     {
@@ -103,7 +189,8 @@ internal static class OpenWithRegistration
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    internal static void SetEnabled(string path, bool enabled, string? expectedStamp, string commandSubPath, string? expectedCommand)
+    internal static void SetEnabled(string path, bool enabled, string? expectedStamp, string commandSubPath, string? expectedCommand,
+        string? expectedEditStamp = null)
     {
         using var transaction = new RegistryTransaction();
         using var key = transaction.Open(path, writable: true)
@@ -112,9 +199,13 @@ internal static class OpenWithRegistration
         var ownerBefore = ShellVerbVisibility.CaptureValue(key, OwnershipMarker);
         if (expectedStamp is not null && !string.Equals(VisibilityStamp(key), expectedStamp, StringComparison.Ordinal))
             throw new InvalidOperationException("The Open With visibility value changed. Refresh before retrying.");
+        if (expectedEditStamp is not null && EditStamp(key, path, transaction) != expectedEditStamp)
+            throw new InvalidOperationException("The Open With registration changed. Refresh before retrying.");
         using var selectedCommand = transaction.Open(path + "\\" + commandSubPath);
-        if (selectedCommand is null || !string.Equals(selectedCommand.GetValue(null)?.ToString(), expectedCommand, StringComparison.Ordinal))
+        if (selectedCommand is null || !string.Equals(selectedCommand.GetValue(null, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string, expectedCommand, StringComparison.Ordinal))
             throw new InvalidOperationException("The Open With command changed. Refresh before retrying.");
+        if (!CanManage(key, commandSubPath.Split('\\')[1], selectedCommand, expectedCommand, path, transaction))
+            throw new InvalidOperationException("OpenWithUnsupportedRegistration");
         var ownedValue = OwnershipValue(key, path, transaction);
         if (enabled && before.Existed
             && (before.Kind != (int)RegistryValueKind.String || before.StringValue != string.Empty
@@ -206,6 +297,22 @@ internal static class OpenWithRegistration
             throw new Win32Exception(status);
         }
 
+        public RegistryKey Create(string path, bool requireNew = false)
+        {
+            // Anchor creation beneath an already-open hive. A concurrent profile unload
+            // must fail this handle, never create a replacement SID key under HKEY_USERS.
+            var anchorEnd = path.IndexOf('\\', path.IndexOf('\\') + 1);
+            using var anchor = Open(path[..anchorEnd], writable: true)
+                ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
+            var status = RegCreateKeyTransacted(anchor.Handle.DangerousGetHandle(), path[(anchorEnd + 1)..], 0, null, 0,
+                (int)(RegistryRights.ReadKey | RegistryRights.WriteKey) | ViewFlag, IntPtr.Zero,
+                out var key, out var disposition, _handle, IntPtr.Zero);
+            if (status == 0 && (!requireNew || disposition == 1)) return RegistryKey.FromHandle(key);
+            key.Dispose();
+            if (status != 0) throw new Win32Exception(status);
+            throw new InvalidOperationException("This Open With application registration already exists.");
+        }
+
         public void DeleteTree(string path)
         {
             using (var key = Open(path) ?? throw new InvalidOperationException("The Open With backup no longer exists."))
@@ -248,12 +355,13 @@ internal static class OpenWithRegistration
         [DllImport("advapi32.dll", EntryPoint = "RegDeleteKeyTransactedW", CharSet = CharSet.Unicode)]
         private static extern int RegDeleteKeyTransacted(IntPtr root, string path, int view, int reserved,
             SafeFileHandle transaction, IntPtr extendedParameter);
+        [DllImport("advapi32.dll", EntryPoint = "RegCreateKeyTransactedW", CharSet = CharSet.Unicode)]
+        private static extern int RegCreateKeyTransacted(IntPtr root, string path, int reserved, string? keyClass,
+            int options, int access, IntPtr securityAttributes, out SafeRegistryHandle key, out int disposition,
+            SafeFileHandle transaction, IntPtr extendedParameter);
     }
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int RegRenameKey(SafeRegistryHandle key, string? subKeyName, string newKeyName);
 
-    [DllImport("advapi32.dll", EntryPoint = "RegCreateKeyExW", CharSet = CharSet.Unicode)]
-    private static extern int RegCreateKeyEx(SafeRegistryHandle key, string subKey, int reserved, string? keyClass,
-        int options, int desiredAccess, IntPtr securityAttributes, out SafeRegistryHandle result, out int disposition);
 }
