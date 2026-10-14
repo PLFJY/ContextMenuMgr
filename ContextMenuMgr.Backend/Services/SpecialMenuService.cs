@@ -126,7 +126,9 @@ public sealed class SpecialMenuService
 
             ShellChangeNotifier.NotifyAssociationsChanged();
             await _logger.LogAsync($"Set special menu item enabled. Kind={item.Kind}, Id={item.Id}, Enabled={enabled}, ResultId={updated.Id}, RegistryPath={updated.RegistryPath}, Path={updated.Path}, Sid={DiagnosticLogFormatter.FormatSid(userContext)}.", cancellationToken);
-            return Success("Special menu item updated.", updated, operationId);
+            return Success(item.Kind == SpecialMenuKind.OpenWith && item.Id != "openwith:use-store"
+                ? "Open With Applications visibility updated and verified. Other association sources may still show the application."
+                : "Special menu item updated.", updated, operationId);
         }
         catch (Exception ex)
         {
@@ -243,8 +245,9 @@ public sealed class SpecialMenuService
                     deletedPath = SoftDeleteRegistryTree(item.RegistryPath, logger: _logger);
                     break;
                 case SpecialMenuKind.OpenWith:
-                    deletedPath = SoftDeleteRegistryTree(GetOpenWithItemAppPath(item), RequireUserContext(userContext), _logger);
-                    break;
+                    var deletedRegistration = DeleteOpenWith(item, RequireUserContext(userContext));
+                    ShellChangeNotifier.NotifyAssociationsChanged();
+                    return Success("Open With Applications registration soft-deleted and verified.", deletedRegistration, operationId);
                 case SpecialMenuKind.GuidBlock:
                     GuidBlockMenuService.Delete(item.KeyName, _logger);
                     break;
@@ -330,12 +333,9 @@ public sealed class SpecialMenuService
                     RestoreSoftDeletedRegistryTree(item.RegistryPath, logger: _logger);
                     break;
                 case SpecialMenuKind.OpenWith:
-                    RestoreSoftDeletedRegistryTree(
-                        GetOpenWithItemAppPath(item),
-                        RequireUserContext(userContext),
-                        _logger,
-                        item.Metadata.GetValueOrDefault("DeletedPath"));
-                    break;
+                    var restored = RestoreOpenWith(item, RequireUserContext(userContext));
+                    ShellChangeNotifier.NotifyAssociationsChanged();
+                    return Success("Open With Applications registration restored and verified.", restored, operationId);
                 case SpecialMenuKind.SendTo:
                     RestoreSoftDeletedFileSystemItem(item.Path, GetSendToPath(RequireUserContext(userContext)), item.Metadata.GetValueOrDefault("DeletedPath"), _logger);
                     break;
@@ -391,10 +391,7 @@ public sealed class SpecialMenuService
                     DeleteRegistryTree(item.RegistryPath + DeletedSuffix, logger: _logger);
                     break;
                 case SpecialMenuKind.OpenWith:
-                    DeleteRegistryTree(
-                        item.Metadata.GetValueOrDefault("DeletedPath") ?? GetOpenWithItemAppPath(item) + DeletedSuffix,
-                        RequireUserContext(userContext),
-                        _logger);
+                    PurgeOpenWith(item, RequireUserContext(userContext));
                     break;
                 case SpecialMenuKind.SendTo:
                 {
@@ -462,20 +459,14 @@ public sealed class SpecialMenuService
     private static void RestoreSoftDeletedRegistryTree(
         string? path,
         BackendUserContext? context = null,
-        FileLogger? logger = null,
-        string? deletedPathOverride = null)
+        FileLogger? logger = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
         }
 
-        var deletedPath = deletedPathOverride ?? path + DeletedSuffix;
-        if (!IsDeletedRegistryPathFor(path, deletedPath))
-        {
-            logger?.LogFireAndForget(RuntimeLogLevel.Warning, $"RestoreSoftDeletedRegistryTreeSkipped: Path={path}, DeletedPath={deletedPath}, Reason=InvalidDeletedPath, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
-            return;
-        }
+        var deletedPath = path + DeletedSuffix;
         logger?.LogFireAndForget($"RestoreSoftDeletedRegistryTreeStart: Path={path}, DeletedPath={deletedPath}, Sid={DiagnosticLogFormatter.FormatSid(context)}.");
         using var sourceKey = OpenRegistryKey(deletedPath, writable: true, context);
         if (sourceKey is null)
@@ -2282,40 +2273,46 @@ public sealed class SpecialMenuService
 
     private static IReadOnlyList<SpecialMenuEntry> GetOpenWithItems(BackendUserContext context)
     {
-        var result = new List<SpecialMenuEntry>
+        lock (OpenWithRegistration.Sync)
         {
-            GetUseStoreOpenWithItem(context)
-        };
+            OpenWithRegistration.ValidateUser(context);
+            using var userRoot = RegistryKey.OpenBaseKey(RegistryHive.Users, NativeRegistryView);
+            using var machineRoot = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, NativeRegistryView);
+            var result = new List<SpecialMenuEntry>
+            {
+                GetUseStoreOpenWithItem(context)
+            };
 
-        PopulateOpenWithItems(
-            Registry.Users,
-            $@"{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
-            $@"HKEY_USERS\{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
-            "User",
-            result);
+            PopulateOpenWithItems(
+                userRoot,
+                $@"{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
+                $@"HKEY_USERS\{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
+                "User",
+                result);
 
-        PopulateOpenWithItems(
-            Registry.LocalMachine,
-            $@"{MachineClassesPath}\{ApplicationsPath}",
-            $@"HKEY_LOCAL_MACHINE\{MachineClassesPath}\{ApplicationsPath}",
-            "Machine",
-            result);
+            PopulateOpenWithItems(
+                machineRoot,
+                $@"{MachineClassesPath}\{ApplicationsPath}",
+                $@"HKEY_LOCAL_MACHINE\{MachineClassesPath}\{ApplicationsPath}",
+                "Machine",
+                result);
 
-        return result
-            .GroupBy(static item => item.RegistryPath ?? item.Id, StringComparer.OrdinalIgnoreCase)
-            .Select(static group => group.First())
-            .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+            return result
+                .GroupBy(static item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(static group => group.First())
+                .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
     }
+
+    private static RegistryView NativeRegistryView => Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32;
 
     private static SpecialMenuEntry GetUseStoreOpenWithItem(BackendUserContext context)
     {
-        var machineDisabled = Registry.LocalMachine
-            .OpenSubKey(@"SOFTWARE\Policies\Microsoft\Windows\Explorer", writable: false)
-            ?.GetValue("NoUseStoreOpenWith") is int machineValue && machineValue == 1;
-        var userDisabled = Registry.Users
-            .OpenSubKey($@"{context.Sid}\{OpenWithPolicyPath}", writable: false)
-            ?.GetValue("NoUseStoreOpenWith") is int userValue && userValue == 1;
+        using var machineKey = OpenWithRegistration.Open(@"HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer");
+        using var userKey = OpenWithRegistration.Open($@"HKEY_USERS\{context.Sid}\{OpenWithPolicyPath}");
+        var machineDisabled = machineKey?.GetValue("NoUseStoreOpenWith") is int machineValue && machineValue == 1;
+        var userDisabled = userKey?.GetValue("NoUseStoreOpenWith") is int userValue && userValue == 1;
 
         return new SpecialMenuEntry
         {
@@ -2342,7 +2339,8 @@ public sealed class SpecialMenuService
         string subPath,
         string displayRootPath,
         string scope,
-        List<SpecialMenuEntry> result)
+        List<SpecialMenuEntry> result,
+        string? selectedAppName = null)
     {
         using var applicationsKey = root.OpenSubKey(subPath, writable: false);
         if (applicationsKey is null)
@@ -2352,6 +2350,8 @@ public sealed class SpecialMenuService
 
         foreach (var appName in applicationsKey.GetSubKeyNames().OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
         {
+            if (selectedAppName is not null && !appName.Equals(selectedAppName, StringComparison.OrdinalIgnoreCase))
+                continue;
             if (!appName.Contains('.', StringComparison.Ordinal))
             {
                 continue;
@@ -2388,16 +2388,16 @@ public sealed class SpecialMenuService
             var deletedAppPath = $@"{displayRootPath}\{appName}";
             var verbPath = $@"{appPath}\shell\{verbName}";
             var commandPath = $@"{verbPath}\command";
-            var displayName = ResolveOpenWithDisplayName(appKey, appName, targetPath);
+            var displayName = ResolveOpenWithDisplayName(appKey, originalAppName, targetPath);
             var icon = ShellMetadataResolver.ResolveVerbIcon(verbKey!, command);
 
             result.Add(new SpecialMenuEntry
             {
-                Id = EncodeId(SpecialMenuKind.OpenWith, commandPath),
+                Id = EncodeId(SpecialMenuKind.OpenWith, $@"{deletedAppPath}\shell\{verbName}\command"),
                 Kind = SpecialMenuKind.OpenWith,
                 DisplayName = displayName,
                 KeyName = appName,
-                IsEnabled = appKey.GetValue("NoOpenWith") is null,
+                IsEnabled = deletedSuffixCount == 0 && !ShellVerbVisibility.CaptureValue(appKey, "NoOpenWith").Existed,
                 IconPath = icon.IconPath ?? targetPath,
                 IconIndex = icon.IconIndex,
                 RegistryPath = commandPath,
@@ -2409,9 +2409,10 @@ public sealed class SpecialMenuService
                     ["VerbRegistryPath"] = verbPath,
                     ["VerbName"] = verbName,
                     ["RegistryScope"] = scope,
+                    ["VisibilityStamp"] = OpenWithRegistration.VisibilityStamp(appKey),
                     ["IsDeleted"] = (deletedSuffixCount > 0).ToString(),
                     ["DeletedPath"] = deletedSuffixCount > 0 ? deletedAppPath : string.Empty,
-                    ["DeletedAt"] = deletedSuffixCount > 0 ? "Unknown (legacy soft delete)" : string.Empty
+                    ["DeletedAt"] = deletedSuffixCount > 0 ? "Unknown" : string.Empty
                 }
             });
         }
@@ -2499,121 +2500,142 @@ public sealed class SpecialMenuService
 
     private static SpecialMenuEntry CreateOpenWith(OpenWithCreateRequest request, BackendUserContext context)
     {
-        if (string.IsNullOrWhiteSpace(request.DisplayName) || string.IsNullOrWhiteSpace(request.TargetPath))
+        lock (OpenWithRegistration.Sync)
         {
-            throw new InvalidOperationException("Open With items require a display name and target path.");
-        }
+            OpenWithRegistration.ValidateUser(context);
+            if (string.IsNullOrWhiteSpace(request.DisplayName) || string.IsNullOrWhiteSpace(request.TargetPath))
+            {
+                throw new InvalidOperationException("Open With items require a display name and target path.");
+            }
 
-        var targetPath = Environment.ExpandEnvironmentVariables(request.TargetPath.Trim().Trim('"'));
-        if (!File.Exists(targetPath))
-        {
-            throw new FileNotFoundException("The selected application was not found.", targetPath);
-        }
+            var targetPath = Environment.ExpandEnvironmentVariables(request.TargetPath.Trim().Trim('"'));
+            if (!File.Exists(targetPath))
+            {
+                throw new FileNotFoundException("The selected application was not found.", targetPath);
+            }
 
-        var appName = Path.GetFileName(targetPath);
-        if (string.IsNullOrWhiteSpace(appName) || !appName.Contains('.', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Open With application keys require a filename with an extension.");
-        }
+            var appName = Path.GetFileName(targetPath);
+            if (string.IsNullOrWhiteSpace(appName) || !appName.Contains('.', StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Open With application keys require a filename with an extension.");
+            }
 
-        var appPath = $@"HKEY_USERS\{context.Sid}\{UserClassesPath}\{ApplicationsPath}\{SanitizeKeyName(appName)}";
-        var commandPath = $@"{appPath}\shell\open\command";
-        var command = BuildOpenWithCommand(targetPath, request.Arguments);
-        using (var appKey = CreateRegistryKey(appPath, context)
-            ?? throw new InvalidOperationException($"Unable to create {appPath}."))
-        {
-            appKey.SetValue("FriendlyAppName", request.DisplayName, RegistryValueKind.String);
-            appKey.DeleteValue("NoOpenWith", throwOnMissingValue: false);
-        }
+            var appPath = $@"HKEY_USERS\{context.Sid}\{UserClassesPath}\{ApplicationsPath}\{SanitizeKeyName(appName)}";
+            OpenWithRegistration.ValidatePath(appPath, context);
+            using var existingApp = OpenWithRegistration.Open(appPath);
+            if (existingApp is not null)
+                throw new InvalidOperationException("This Open With application registration already exists. Edit the existing entry instead.");
+            var commandPath = $@"{appPath}\shell\open\command";
+            var command = BuildOpenWithCommand(targetPath, request.Arguments);
+            using (var appKey = OpenWithRegistration.CreateNewUserApplication(appPath, context))
+            {
+                appKey.SetValue("FriendlyAppName", request.DisplayName, RegistryValueKind.String);
+                using var commandKey = appKey.CreateSubKey(@"shell\open\command", writable: true);
+                commandKey.SetValue(string.Empty, command, RegistryValueKind.String);
+            }
 
-        using (var commandKey = CreateRegistryKey(commandPath, context)
-            ?? throw new InvalidOperationException($"Unable to create {commandPath}."))
-        {
-            commandKey.SetValue(string.Empty, command, RegistryValueKind.String);
+            return ReadOpenWithRegistration(appPath, context);
         }
-
-        return GetOpenWithItems(context).First(item => string.Equals(item.RegistryPath, commandPath, StringComparison.OrdinalIgnoreCase));
     }
 
     private static SpecialMenuEntry UpdateOpenWith(OpenWithUpdateRequest request, BackendUserContext context)
     {
-        var commandPath = DecodeId(request.Id);
-        var appPath = GetOpenWithAppPath(commandPath);
-        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+        lock (OpenWithRegistration.Sync)
         {
-            using var appKey = OpenRegistryKey(appPath, writable: true, context)
-                ?? throw new InvalidOperationException($"Unable to open {appPath}.");
-            appKey.SetValue("FriendlyAppName", request.DisplayName, RegistryValueKind.String);
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Command))
-        {
-            var existing = OpenRegistryKey(commandPath, writable: false, context)?.GetValue(null)?.ToString();
-            var existingTarget = ExtractCommandExecutablePath(existing);
-            var newTarget = ExtractCommandExecutablePath(request.Command);
-            if (!string.IsNullOrWhiteSpace(existingTarget)
-                && !string.IsNullOrWhiteSpace(newTarget)
-                && !existingTarget.Equals(newTarget, StringComparison.OrdinalIgnoreCase))
+            var commandPath = DecodeId(request.Id);
+            var appPath = OpenWithRegistration.ValidatePath(GetOpenWithAppPath(commandPath), context);
+            if (!string.IsNullOrWhiteSpace(request.DisplayName))
             {
-                throw new InvalidOperationException("Changing the target application path is not supported for existing Open With items.");
+                using var appKey = OpenWithRegistration.Open(appPath, writable: true)
+                    ?? throw new InvalidOperationException($"Unable to open {appPath}.");
+                appKey.SetValue("FriendlyAppName", request.DisplayName, RegistryValueKind.String);
             }
 
-            using var commandKey = OpenRegistryKey(commandPath, writable: true, context)
-                ?? throw new InvalidOperationException($"Unable to open {commandPath}.");
-            commandKey.SetValue(string.Empty, request.Command, RegistryValueKind.String);
-        }
+            if (!string.IsNullOrWhiteSpace(request.Command))
+            {
+                using var existingCommandKey = OpenWithRegistration.Open(commandPath);
+                var existing = existingCommandKey?.GetValue(null)?.ToString();
+                var existingTarget = ExtractCommandExecutablePath(existing);
+                var newTarget = ExtractCommandExecutablePath(request.Command);
+                if (!string.IsNullOrWhiteSpace(existingTarget)
+                    && !string.IsNullOrWhiteSpace(newTarget)
+                    && !existingTarget.Equals(newTarget, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Changing the target application path is not supported for existing Open With items.");
+                }
 
-        return GetOpenWithItems(context).First(item => string.Equals(item.RegistryPath, commandPath, StringComparison.OrdinalIgnoreCase));
+                using var commandKey = OpenWithRegistration.Open(commandPath, writable: true)
+                    ?? throw new InvalidOperationException($"Unable to open {commandPath}.");
+                commandKey.SetValue(string.Empty, request.Command, RegistryValueKind.String);
+            }
+
+            return ReadOpenWithRegistration(appPath, context);
+        }
     }
 
     private static SpecialMenuEntry SetOpenWithEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext context)
     {
-        if (item.Id.Equals("openwith:use-store", StringComparison.OrdinalIgnoreCase))
+        lock (OpenWithRegistration.Sync)
         {
-            SetUseStoreOpenWithEnabled(enabled, context);
-            return GetUseStoreOpenWithItem(context);
-        }
+            OpenWithRegistration.ValidateUser(context);
+            if (item.Id.Equals("openwith:use-store", StringComparison.OrdinalIgnoreCase))
+            {
+                SetUseStoreOpenWithEnabled(enabled, context);
+                var policy = GetUseStoreOpenWithItem(context);
+                if (policy.IsEnabled != enabled)
+                    throw new InvalidOperationException("Open With Store policy read-back did not match the requested state.");
+                return policy;
+            }
 
-        var commandPath = item.RegistryPath ?? DecodeId(item.Id);
-        var appPath = item.Metadata.TryGetValue("AppRegistryPath", out var metadataAppPath)
-            ? metadataAppPath
-            : GetOpenWithAppPath(commandPath);
-        using var appKey = OpenRegistryKey(appPath, writable: true, context)
-            ?? throw new InvalidOperationException($"Unable to open {appPath}.");
-        if (enabled)
-        {
-            appKey.DeleteValue("NoOpenWith", throwOnMissingValue: false);
+            var appPath = GetValidatedOpenWithAppPath(item, context);
+            VerifyOpenWithRequest(item, appPath);
+            var commandPath = item.RegistryPath ?? DecodeId(item.Id);
+            OpenWithRegistration.SetEnabled(appPath, enabled, item.Metadata.GetValueOrDefault("VisibilityStamp"),
+                commandPath[(appPath.Length + 1)..], item.CommandText);
+            var updated = ReadOpenWithRegistration(appPath, context);
+            if (updated.IsEnabled != enabled)
+                throw new InvalidOperationException("Open With visibility read-back did not match the requested state.");
+            return updated;
         }
-        else
-        {
-            appKey.SetValue("NoOpenWith", string.Empty, RegistryValueKind.String);
-        }
-
-        return item with { IsEnabled = enabled };
     }
 
     private static void SetUseStoreOpenWithEnabled(bool enabled, BackendUserContext context)
     {
-        using (var machineKey = Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Policies\Microsoft\Windows\Explorer", writable: true))
+        using var machineRoot = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, NativeRegistryView);
+        using var userRoot = RegistryKey.OpenBaseKey(RegistryHive.Users, NativeRegistryView);
+        using (var machineKey = machineRoot.CreateSubKey(@"SOFTWARE\Policies\Microsoft\Windows\Explorer", writable: true)
+            ?? throw new InvalidOperationException("Unable to open the machine Open With Store policy."))
         {
             if (enabled)
             {
-                machineKey?.DeleteValue("NoUseStoreOpenWith", throwOnMissingValue: false);
+                machineKey.DeleteValue("NoUseStoreOpenWith", throwOnMissingValue: false);
             }
             else
             {
-                machineKey?.SetValue("NoUseStoreOpenWith", 1, RegistryValueKind.DWord);
+                machineKey.SetValue("NoUseStoreOpenWith", 1, RegistryValueKind.DWord);
             }
         }
 
-        using var userKey = Registry.Users.CreateSubKey($@"{context.Sid}\{OpenWithPolicyPath}", writable: true);
+        using var userHive = userRoot.OpenSubKey(context.Sid, writable: true)
+            ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
+        using var userKey = userHive.CreateSubKey(OpenWithPolicyPath, writable: true)
+            ?? throw new InvalidOperationException("Unable to open the user Open With Store policy.");
         if (enabled)
         {
-            userKey?.DeleteValue("NoUseStoreOpenWith", throwOnMissingValue: false);
+            userKey.DeleteValue("NoUseStoreOpenWith", throwOnMissingValue: false);
         }
         else
         {
-            userKey?.SetValue("NoUseStoreOpenWith", 1, RegistryValueKind.DWord);
+            userKey.SetValue("NoUseStoreOpenWith", 1, RegistryValueKind.DWord);
+        }
+        foreach (var path in new[] { @"HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer",
+                     $@"HKEY_USERS\{context.Sid}\{OpenWithPolicyPath}" })
+        {
+            using var readBack = OpenWithRegistration.Open(path)
+                ?? throw new InvalidOperationException("The Open With Store policy disappeared after the write.");
+            var value = ShellVerbVisibility.CaptureValue(readBack, "NoUseStoreOpenWith");
+            if (enabled ? value.Existed : !value.Existed || value.Kind != (int)RegistryValueKind.DWord || value.IntegerValue != 1)
+                throw new InvalidOperationException("Open With Store policy read-back did not match the requested state.");
         }
     }
 
@@ -2630,10 +2652,93 @@ public sealed class SpecialMenuService
         return normalized[..shellIndex];
     }
 
-    private static string GetOpenWithItemAppPath(SpecialMenuEntry item)
-        => item.Metadata.TryGetValue("AppRegistryPath", out var appPath) && !string.IsNullOrWhiteSpace(appPath)
-            ? appPath
-            : GetOpenWithAppPath(item.RegistryPath ?? DecodeId(item.Id));
+    private static string GetValidatedOpenWithAppPath(SpecialMenuEntry item, BackendUserContext context)
+    {
+        var commandPath = item.RegistryPath ?? DecodeId(item.Id);
+        var appPath = OpenWithRegistration.ValidatePath(GetOpenWithAppPath(commandPath), context);
+        var tail = commandPath[(appPath.Length + 1)..].Split('\\');
+        if (tail.Length != 3 || !tail[0].Equals("shell", StringComparison.OrdinalIgnoreCase)
+            || !tail[2].Equals("command", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(tail[1]) || tail[1] is "." or ".." || tail[1].Contains('/'))
+            throw new InvalidOperationException("Invalid Open With command path.");
+        if (item.Metadata.TryGetValue("AppRegistryPath", out var suppliedPath)
+            && !appPath.Equals(suppliedPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Open With application metadata does not match the selected registration.");
+        return appPath;
+    }
+
+    private static string GetOpenWithBackupPath(SpecialMenuEntry item, string appPath, BackendUserContext context)
+    {
+        var backup = item.Metadata.GetValueOrDefault("DeletedPath");
+        if (string.IsNullOrWhiteSpace(backup)) backup = appPath + DeletedSuffix;
+        OpenWithRegistration.ValidatePath(backup, context, deleted: true);
+        if (backup.Equals(appPath, StringComparison.OrdinalIgnoreCase) || !IsDeletedRegistryPathFor(appPath, backup))
+            throw new InvalidOperationException("Invalid Open With backup path.");
+        return backup;
+    }
+
+    private static void VerifyOpenWithRequest(SpecialMenuEntry item, string physicalAppPath)
+    {
+        using var key = OpenWithRegistration.Open(physicalAppPath)
+            ?? throw new InvalidOperationException("The selected Open With registration no longer exists.");
+        if (item.Metadata.TryGetValue("VisibilityStamp", out var stamp)
+            && stamp != OpenWithRegistration.VisibilityStamp(key))
+            throw new InvalidOperationException("Open With visibility changed. Refresh before retrying.");
+        var commandPath = item.RegistryPath ?? DecodeId(item.Id);
+        var originalAppPath = GetOpenWithAppPath(commandPath);
+        using var command = key.OpenSubKey(commandPath[(originalAppPath.Length + 1)..]);
+        if (command is null || !string.Equals(command.GetValue(null)?.ToString(), item.CommandText, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Open With command changed. Refresh before retrying.");
+    }
+
+    private static SpecialMenuEntry ReadOpenWithRegistration(string physicalAppPath, BackendUserContext context)
+    {
+        var isMachine = physicalAppPath.StartsWith("HKEY_LOCAL_MACHINE\\", StringComparison.OrdinalIgnoreCase);
+        using var root = RegistryKey.OpenBaseKey(isMachine ? RegistryHive.LocalMachine : RegistryHive.Users, NativeRegistryView);
+        var parent = physicalAppPath[..physicalAppPath.LastIndexOf('\\')];
+        var entries = new List<SpecialMenuEntry>();
+        PopulateOpenWithItems(root, parent[(parent.IndexOf('\\') + 1)..], parent,
+            isMachine ? "Machine" : "User", entries, physicalAppPath[(physicalAppPath.LastIndexOf('\\') + 1)..]);
+        return entries.SingleOrDefault()
+            ?? throw new InvalidOperationException("The Open With registration could not be read back. Refresh to check its state.");
+    }
+
+    private static SpecialMenuEntry DeleteOpenWith(SpecialMenuEntry item, BackendUserContext context)
+    {
+        lock (OpenWithRegistration.Sync)
+        {
+            var appPath = GetValidatedOpenWithAppPath(item, context);
+            if (!item.CanDelete || bool.TryParse(item.Metadata.GetValueOrDefault("IsDeleted"), out var deleted) && deleted)
+                throw new InvalidOperationException("This Open With registration cannot be deleted.");
+            VerifyOpenWithRequest(item, appPath);
+            var backup = appPath + DeletedSuffix;
+            OpenWithRegistration.Rename(appPath, backup);
+            return ReadOpenWithRegistration(backup, context);
+        }
+    }
+
+    private static SpecialMenuEntry RestoreOpenWith(SpecialMenuEntry item, BackendUserContext context)
+    {
+        lock (OpenWithRegistration.Sync)
+        {
+            var appPath = GetValidatedOpenWithAppPath(item, context);
+            var backup = GetOpenWithBackupPath(item, appPath, context);
+            VerifyOpenWithRequest(item, backup);
+            OpenWithRegistration.Rename(backup, appPath);
+            return ReadOpenWithRegistration(appPath, context);
+        }
+    }
+
+    private static void PurgeOpenWith(SpecialMenuEntry item, BackendUserContext context)
+    {
+        lock (OpenWithRegistration.Sync)
+        {
+            var appPath = GetValidatedOpenWithAppPath(item, context);
+            var backup = GetOpenWithBackupPath(item, appPath, context);
+            VerifyOpenWithRequest(item, backup);
+            OpenWithRegistration.Purge(backup);
+        }
+    }
 
     private static string BuildOpenWithCommand(string targetPath, string? arguments)
     {

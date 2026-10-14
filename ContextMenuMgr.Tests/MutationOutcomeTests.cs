@@ -246,6 +246,47 @@ public sealed class MutationOutcomeTests
     }
 
     [Fact]
+    public async Task SpecialMenuFailedRequest_DoesNotRevertAuthoritativeReadBackOrAllowUncertainRetry()
+    {
+        var settings = new FrontendSettingsService(null,
+            Path.Combine(Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid() + ".json"));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var original = new SpecialMenuEntry { Id = "OpenWith:test", Kind = SpecialMenuKind.OpenWith, IsEnabled = true };
+        var item = new SpecialMenuItemViewModel(original, null!, new LocalizationService(settings), (_, _) =>
+        {
+            started.TrySetResult();
+            return finish.Task;
+        });
+        item.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(item.IsBusy) && !item.IsBusy) idle.TrySetResult();
+        };
+        item.IsEnabled = false;
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        item.IsStateUncertain = true;
+        finish.SetResult(false);
+        await idle.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.False(item.CanToggle);
+        Assert.False(item.CanDelete);
+        Assert.False(item.IsEnabled);
+        item.Update(original with { IsEnabled = false });
+        Assert.True(item.CanToggle);
+
+        // A late authoritative refresh must also survive an older failing request.
+        started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        finish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        item.IsEnabled = true;
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        item.Update(original);
+        finish.SetResult(false);
+        await idle.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.True(item.IsEnabled);
+    }
+
+    [Fact]
     public async Task FailedMutation_DoesNotPublishSuccessfulStateChange()
     {
         var published = 0;

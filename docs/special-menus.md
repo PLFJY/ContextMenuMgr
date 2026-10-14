@@ -132,7 +132,19 @@ COM，不调用 `IShellLink.Resolve`，也不使用 `WScript.Shell`。SendTo 当
 
 ## 7. OpenWith
 
-OpenWith 管理的是所有文件“打开方式”子菜单中的应用注册。它参考 BluePointLilac / ContextMenuManager 的模型，但在本项目中必须走后端 pipe 和前端用户上下文。
+OpenWith 只管理用户 / 机器 Classes 的 `Applications` 物理注册及既有 Microsoft Store 入口 policy。它不枚举所有文件关联来源，也不承诺开关或删除后应用从每个 Explorer 打开方式列表中消失。操作走链路 A：Frontend -> Backend Pipe -> `SpecialMenuService`，不使用 UAC bootstrapper、ProbeHost 或新增监控。
+
+必须区分三件事：应用注册为打开方式候选、Explorer 针对某个文件实际显示此候选、该文件类型的默认处理程序。页面的开关仅表示所选物理 `Applications` key 是否存在 `NoOpenWith`；用户 / 机器同名项分别显示和修改，不代表合并 HKCR 的最终菜单状态。微软明确说明，文件类型的 `OpenWithProgIDs` 可以在 Applications 设置 `NoOpenWith` 后继续提供应用候选：[Application Registration](https://learn.microsoft.com/en-us/windows/win32/shell/app-registration)、[Open With 注册与排除说明](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/hh127438%28v%3Dvs.85%29)。
+
+| 来源 | 与当前管理范围的关系 |
+| --- | --- |
+| `HKU\<SID>\Software\Classes\Applications`、`HKLM\SOFTWARE\Classes\Applications` | 当前支持的物理注册。64 位系统固定读取 / 修改 Registry64，匹配 native Explorer；服务 x86 构建也不改用 32 位 view。 |
+| Classes `.<ext>\OpenWithProgIDs` 及对应 ProgID command | 按文件类型提供候选，不随 Applications 开关或软删除改变；不删除、不修改这些 ProgID。参见 [Include an Application in Open With](https://learn.microsoft.com/en-us/windows/win32/shell/how-to-include-an-application-on-the-open-with-dialog-box)。 |
+| 用户 `Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.<ext>` | `OpenWithList` / `OpenWithProgids` 是用户文件类型候选 / 使用记录来源；`UserChoice` 是默认选择证据。当前页不写入这些路径，不改 Hash。 |
+| `Software\RegisteredApplications` -> 应用 `Capabilities\FileAssociations` | 应用声明支持的文件类型，可关联独立 ProgID；不能当作 Applications key 的副本，也不在本页修改。参见 [Default Programs](https://learn.microsoft.com/en-us/windows/win32/shell/default-programs)。 |
+| AppX/MSIX `uap:FileTypeAssociation` 等声明 | 包注册可以提供文件类型处理能力；本页不管理包 manifest、包生成的 ProgID 或默认应用选择。参见 [FileTypeAssociation](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-filetypeassociation)。 |
+
+不通过 UserChoice / Hash、UCPD、ACL lock 或拦截安装器扩大此范围。不改 unrelated ProgID、Capabilities 或默认关联设置。如果默认调用路径本身依赖被删除的 `Applications\<app>` 注册，删除会影响该注册的调用能力；保留默认关联设置并不保证该程序仍可启动，默认选择应通过 Windows 设置管理。
 
 WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护文档扩展名 owner，也不在该页面提供默认应用切换。关联、图标、ShellNew 注入只作为 WPS 专用待审核项显示；`UserChoice` 只能作为证据读取，不能由本项目直接写入 Hash。
 
@@ -140,13 +152,33 @@ WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护�
 | --- | --- |
 | 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，只纳入带文件扩展名的应用 key，并选择 `shell` 下优先的非 `NeverDefault` verb。 |
 | 显示名 | 当应用 key 名等于命令目标文件名时优先解析 `FriendlyAppName`，否则读取目标文件 `FileDescription`，最后回退到文件名。 |
-| 启用 / 禁用 | 对应用 key 写入或删除 `NoOpenWith`。 |
-| 新增 | 写入当前前端用户的 `HKU\<SID>\Software\Classes\Applications\<app.exe>\shell\open\command`，并写 `FriendlyAppName`。 |
+| 启用 / 禁用 | 禁用只在值不存在时写空 `REG_SZ NoOpenWith`，同时写独立 `ContextMenuMgrPlus.OpenWithVisibility` 归属值；两值在短生命周期 Windows 注册表事务中提交。启用只撤销匹配本物理路径、command generation 和值类型 / 内容的本程序写入；预存或第三方改写的值均保留并返回错误。 |
+| 新增 | 写入当前前端用户的 `HKU\<SID>\Software\Classes\Applications\<app.exe>\shell\open\command`，并写 `FriendlyAppName`；原子创建 app leaf，已有注册拒绝覆盖，也不清除已有 `NoOpenWith`。 |
 | 编辑 | 更新 `FriendlyAppName` 和 command 默认值；为避免把一个应用 key 改成另一个程序，当前不允许编辑时改变目标 exe 路径。 |
-| 删除 / 恢复 | 对应用 key 做 `.deleted` 软删除和恢复，而不是只删除 `command` 子键。 |
-| 应用商店入口 | 快照包含 `NoUseStoreOpenWith` policy 项；开关会同步 HKLM 和当前用户 HKU policy 值。 |
+| 删除 / 恢复 | 对所选 app key 使用 Win32 `RegRenameKey` 重命名为 sibling `.deleted` / 恢复原名；保留完整树、原始 ExpandString、ACL 和开关状态。拒绝缺失源、目标冲突及无效 backup metadata，不覆盖现有备份 / 重新注册的原项，不提供 copy/delete fallback。成功必须回读源已不存在、目标存在，再返回从目标读取的 DTO。 |
+| 永久删除 | 仅删除经过路径和请求状态校验的所选 `.deleted` 备份，逐层加入同一注册表事务；任一子键访问拒绝 / 并发冲突会回滚，提交后确认备份不存在。失败不报告成功，不触碰重新出现的原 app key。 |
+| 应用商店入口 | 保留既有 `NoUseStoreOpenWith` policy 项；开关同步 HKLM 和当前用户 HKU policy 值并回读结果。某一 hive 失败时返回失败，已完成的 policy 写入可能仍存在，应刷新核对。 |
 
-OpenWith 需要 SID，但不需要 SessionId。服务不能用 LocalSystem 的 `HKCU` 读写用户 Applications 或用户 policy。机器级 Applications 项按真实 `HKLM\SOFTWARE\Classes` 路径显示和修改；新增自定义项默认只写用户覆盖层。
+OpenWith 需要 SID，但不需要 SessionId。请求只能使用 Pipe 客户端认证身份；解析失败不退回另一个交互用户。快照和修改先验证 account SID 与已加载的用户 hive；即使所选项属于 HKLM，用户上下文缺失也拒绝操作。服务不能用 LocalSystem `HKCU`、重建未加载的 SID hive，或信任不匹配的 `AppRegistryPath` / `DeletedPath`。
+
+后端串行化本程序 OpenWith 快照与 mutation，校验请求携带的 visibility stamp / command；注册表事务中的非事务并发写入会使事务失败，项目不会覆盖第三方结果。成功是提交后 fresh read-back 的结论，不是永久禁止第三方重建注册。事务创建 / 提交不可用时直接报错，没有放弃验证的 fallback。
+
+前端串行化该页快照和操作；旧快照不能在成功 response 后覆盖状态。失败 / 超时后用独立快照核对物理状态，不重试 mutation；核对失败显示结果未确认并锁定该条目操作，后续成功刷新解除。迟到通知触发重新查询，不直接使用可能过期的 DTO；旧失败任务也不能撤销较新的权威更新。
+
+兼容决定：保留已发布的 sibling `.deleted` 及历史 `.deleted.deleted` 等重复后缀恢复路径。备份和活动项使用不同物理 Id，冲突时两者都显示；恢复只选择 DTO 指定且属于原 app 的备份。旧版本没有记录完整性，历史残缺备份不能凭后缀判为完整；缺少 command 的备份不作为可管理项，但仍阻止覆盖。也不推断旧版空 `NoOpenWith` 的归属：无 marker 的值必须保留。Issue #136 的维护决定是继续支持这些数据；只有明确停止支持历史 sibling 备份 / 完成归属核实后才可退休，不能猜测发布版本或自动删除旧值。
+
+### Windows 10 / 11 手动验证（仍需真实 Explorer / 服务环境）
+
+在可恢复的测试机上准备唯一应用 key 和测试扩展名，先导出测试注册；只清理自己创建的测试数据，不修改真实 `UserChoice` / Hash。分别在 Windows 10、Windows 11 执行：
+
+1. 同一 app 分别注册在 HKU 当前 SID 和 HKLM，含 command、FriendlyAppName、ExpandString 和 nested values；运行普通权限前端 / 后端服务，分别开关。直接核对所选 hive 的空 `NoOpenWith`、归属值及刷新状态，另一 hive 不改变。服务 x86 / x64 构建应操作同一 native view。对两个用户重复，不能读取或改写另一 SID；认证失败 / hive 未加载返回错误，不新建 SID 根。
+2. 预先设置空字符串、非空字符串、DWORD / Binary `NoOpenWith`。刷新后禁用保持原值，启用明确拒绝且仍显示物理禁用状态；旧版本无 marker 的值同样保留。由第三方改写 NoOpenWith、marker 或 command 后重试，旧请求拒绝，刷新准确反映当前值。
+3. 分别测试 Applications-only、同时通过 `OpenWithProgIDs`、用户 FileExts、RegisteredApplications/Capabilities 和打包应用提供的候选。观察实际文件的子菜单及“选择其他应用”对话框，记录 Windows 版本和文件类型；注册表成功而 Explorer 仍显示候选属于范围限制，不能判为已验证 Explorer 移除。默认应用通过 Windows 设置选择，比较操作前后的只读 UserChoice / 默认处理行为，不手工写 Hash。
+4. 连续至少三次开关、刷新、删除 / 重启服务 / 恢复：原 key 与 backup 必须互斥，ACL、值类型、未展开文本、command 与原开关状态完整恢复。人为预置 `.deleted` 冲突（包括残缺副本）时不覆盖；原 app 被安装器重建后 Undo 拒绝，两项仍可查看，Purge 只清理选中备份。验证历史重复后缀只恢复指定副本。
+5. 在测试 key / 某个 backup 子键设置可恢复的权限拒绝，分别尝试 toggle、Delete、Undo、Purge。错误不得显示完成；事务失败不留半对 marker/NoOpenWith 或残缺备份。解除测试 ACL 后重试，并直接检查树和前端状态。模拟进程在原生 rename / 事务提交前后退出，不能出现半棵复制树。
+6. 测试并发安装器改写、两个前端、旧刷新在操作中完成、Pipe 响应丢失 / 超时但后端已提交、核对查询也失败和随后迟到通知。核对成功后只显示真实状态；核对不可用时阻止条目重复操作，成功刷新后恢复，不把取消 / 超时当作物理写入必然失败。
+
+自动测试使用当前普通账号的唯一 HKU Applications fixture，并清理全部测试 key / ACL。它验证注册表状态、raw values、归属、备份冲突、事务 rollback、SID 隔离和旧失败响应不会覆盖新状态；不证明 HKLM 高权限服务 mutation、跨账号真实 Pipe 身份、Explorer 候选可见性或 Windows 默认应用启动行为。原 Issue 没有操作时间线、物理注册路径或对应日志，尚不能确定其截图应用的具体注册来源；需要 `backend.log` / `frontend-debug.log` 和上述只读路径信息补齐证据。
 
 ## 8. SpecialMenu 的用户上下文要求
 

@@ -196,6 +196,7 @@ Registry Write Protection 自身也属于链路 A，但同时覆盖 HKLM 与 fro
 - 遇到 ProbeHost 问题时不准改普通菜单开关逻辑。
 - 遇到 Win11 状态问题时必须检查 userContext。
 - 遇到 SpecialMenu 问题时必须检查 `SpecialMenuService`，不要先改 `ContextMenuRegistryCatalog`。
+- OpenWith 只管理明确的 Applications 注册；认证 Pipe SID / loaded hive 失败时拒绝，不退回另一交互用户。开关必须保留外部 NoOpenWith，归属与物理值一起事务提交并回读；删除 / 恢复使用原生 rename，不覆盖 sibling backup。Explorer 候选和默认关联不是 Applications 开关状态，范围与历史 `.deleted` 兼容决定见 `special-menus.md`。
 - 遇到服务安装问题时必须检查 `BackendServiceManager` / `BackendServiceBootstrapper`，不要先改 `NamedPipeBackendServer`。
 - 服务卸载、强力修复和 install-or-repair 的 stale service 恢复必须共用 bootstrapper 的容错移除路径；停止失败只能作为警告记录，不能阻止后续 SCM 删除请求。
 - 启用 AutoStart 是生命周期收敛，不是只写 policy 或只执行 `sc config`；必须验证 SCM 配置、恢复策略、Running 和真实 pipe Ping，最后才提交用户 policy。

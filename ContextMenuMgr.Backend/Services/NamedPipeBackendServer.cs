@@ -877,7 +877,8 @@ public sealed class NamedPipeBackendServer
             return null;
         }
 
-        return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken);
+        return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken,
+            allowInteractiveFallback: kind != SpecialMenuKind.OpenWith);
     }
 
     private static bool RequiresSpecialMenuUserContext(SpecialMenuKind kind)
@@ -962,14 +963,16 @@ public sealed class NamedPipeBackendServer
         return userContext;
     }
 
-    // Resolve only for context-aware special menus (ShellNew / SendTo / WinX).
+    // Resolve only for context-aware special menus. OpenWith requires the authenticated pipe caller.
     // Do not call this from ordinary catalog, Win11, registry protection,
     // auto-start, file-type scene, or restart routes.
-    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
+    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken,
+        bool allowInteractiveFallback = true)
     {
         var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream)
-            ?? resolver.TryResolveInteractiveUserFallback();
+        var userContext = resolver.TryResolveFromPipeClient(stream);
+        if (userContext is null && allowInteractiveFallback)
+            userContext = resolver.TryResolveInteractiveUserFallback();
         if (userContext is null)
         {
             await _logger.LogAsync(RuntimeLogLevel.Warning, "Context-aware special menu request could not resolve frontend user context.", cancellationToken);

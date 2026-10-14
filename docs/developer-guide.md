@@ -210,6 +210,8 @@ ACL 检查按语义处理 Windows/.NET 的 ACE 合并：Builtin Users 与 Authen
 
 `SpecialMenuService` 管理的入口不是普通菜单项。`SpecialMenuKind` 当前包括 `ShellNew`、`SendTo`、`WinX`、`OpenWith`、`DragDrop`、`CommandStore`、`GuidBlock`、`InternetExplorer`。其中 `ShellNew`、`SendTo`、`WinX`、`OpenWith` 明确需要 `BackendUserContext`。
 
+OpenWith 使用认证 Pipe caller SID（不回退其它用户）和已加载 hive，固定 native registry view。`OpenWithRegistration` 只处理所选 Applications 物理 key：empty NoOpenWith 与独立归属值一起事务提交、fresh read-back，软删除 / Undo 原生 rename，Purge 事务删除。页面不管理 FileExts / ProgID / Capabilities / package association 或默认选择；完整支持范围、旧 `.deleted` 兼容和 Windows 10/11 验证步骤见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。
+
 WPS / Microsoft Office 共存保护由 `OfficeSuiteCoexistenceDetector` 提供。它只在 WPS Office 和 Microsoft Office 都被检测到时启用，并且只通过链路 A 读取 / 写入当前前端用户的 `HKEY_USERS\<sid>\Software\Classes`。该保护会把 WPS 对 Office 文档扩展名默认 ProgID、Office ProgID `DefaultIcon`、以及 WPS ShellNew command 注入的变更生成为 `special:wps-*` 合成待审核项。WPS 合成项通过 `PipeCommand.GetWpsOfficePendingApprovals` 单独进入待审核页，不进入普通菜单 snapshot、文件页面、ShellNew 页面、OpenWith 页面或全局搜索。它不使用宽泛 ACL 硬拦截 WPS，不修改 Windows `UserChoice` / Hash，不恢复默认应用关联。
 
 文档图标来源切换同样属于 WPS / Microsoft Office 共存保护的一部分，只在 ShellNew 页面以 `Microsoft Office <ToggleSwitch> WPS Office` 形式展示；OpenWith 页面不展示该开关，WPS 合成异常条目仍只进入待审核页。`PipeCommand.GetOfficeSuiteCoexistenceStatus` 返回检测状态和受保护扩展名列表；`PipeCommand.SetDocumentIconProvider` 只切换用户级 `HKU\<sid>\Software\Classes\<OfficeProgID>\DefaultIcon`，并在成功后通知 Shell 关联变化。默认打开方式切换不是当前功能的一部分，后续若要支持必须单独设计，不能直接写 `UserChoice` Hash。

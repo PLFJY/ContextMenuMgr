@@ -502,4 +502,6 @@ Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说�
 
 The per-item `AsyncToggleSwitch` ProgressRing stays active throughout a `SetEnabled` request and any timeout verification. A timed-out direct response is reconciled against the original physical source before the ViewModel receives a definitive failure. An uncertain result keeps the optimistic value and disables a second toggle until a notification or refresh supplies an authoritative item. A late authoritative `Update` increments the item version so an older failed task cannot roll it back.
 
+OpenWith 复用既有页面说明、错误对话框及 `StatusText`，没有新页面。`SpecialMenuPageViewModel` 只对 OpenWith 用同一 semaphore 串行快照与操作；失败 / 超时后独立读取快照，不重试写入。无法核对时 `SpecialMenuItemViewModel.IsStateUncertain` 禁止开关、编辑、Delete / Undo / Purge；后续 `Update` 清除此状态。迟到通知只触发 fresh snapshot，不直接 Upsert 过期 DTO。SpecialMenu item 的更新版本保护防止旧失败任务覆盖新权威状态。页面说明明确所选物理 Applications / NoOpenWith 范围及 Explorer 仍显示其它来源候选的可能性；新增文本同步三种资源语言。
+
 列表占位只由真实加载状态、延迟加载呈现和当前筛选结果决定，不提供全局 Loading/Empty 模拟服务或命令。DebugToolsWindow 及强制更新提示入口仅编译进 Debug；Beta/Release 不包含此窗口。WorkspaceNotificationState 独立保存普通菜单与 WPS/Office 的通知基线，工作区仍负责菜单项与后端操作。

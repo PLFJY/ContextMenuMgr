@@ -17,6 +17,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     private bool _canMoveDown = true;
     private bool _canMoveUp = true;
     private bool _suppressSync;
+    private int _stateVersion;
     private ImageSource? _iconSource;
     private int _iconLoadGeneration;
     private string? _iconRequestKey;
@@ -83,16 +84,17 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         "PackagedShellNewCreationSummary",
         Entry.Metadata.GetValueOrDefault("ShellNewFileName") ?? string.Empty);
 
-    public bool CanDelete => Entry.CanDelete && !IsBusy && !IsDeleted;
+    public bool CanDelete => Entry.CanDelete && !IsBusy && !IsDeleted && !IsStateUncertain;
 
-    public bool CanUndoDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted;
+    public bool CanUndoDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
 
-    public bool CanPermanentlyDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted;
+    public bool CanPermanentlyDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
 
     public bool CanEdit => Entry.CanEdit
         && Entry.Metadata.GetValueOrDefault("EntryType") != "DefaultDropEffect"
         && Entry.Metadata.GetValueOrDefault("CanEditDetails") != "false"
         && !IsBusy
+        && !IsStateUncertain
         && !IsDeleted;
 
     public bool CanMove => Entry.CanMove && !IsBusy && !IsDeleted;
@@ -101,7 +103,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool CanMoveUp => CanMove && _canMoveUp;
 
-    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted;
+    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain;
 
     public bool ShowDelete => (Entry.CanDelete || IsReadOnlyPackagedShellNew) && !IsDeleted;
 
@@ -162,6 +164,14 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public partial bool IsBusy { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDelete))]
+    [NotifyPropertyChangedFor(nameof(CanUndoDelete))]
+    [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    [NotifyPropertyChangedFor(nameof(CanEdit))]
+    [NotifyPropertyChangedFor(nameof(CanToggle))]
+    public partial bool IsStateUncertain { get; set; }
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     public partial bool IsEnabled { get; set; }
 
@@ -179,6 +189,8 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public void Update(SpecialMenuEntry entry)
     {
+        _stateVersion++;
+        IsStateUncertain = false;
         Entry = entry;
         _suppressSync = true;
         try
@@ -293,7 +305,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
             return;
         }
 
-        if (IsBusy)
+        if (IsBusy || IsStateUncertain)
         {
             Revert(oldValue);
             return;
@@ -305,17 +317,18 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     private async Task SyncAsync(bool oldValue, bool newValue)
     {
+        var version = _stateVersion;
         try
         {
             await ToggleBusyPresentation.WaitForFirstFrameAsync();
-            if (!await _setEnabledAsync(this, newValue))
+            if (!await _setEnabledAsync(this, newValue) && version == _stateVersion && !IsStateUncertain)
             {
                 Revert(oldValue);
             }
         }
         catch
         {
-            Revert(oldValue);
+            if (version == _stateVersion && !IsStateUncertain) Revert(oldValue);
         }
         finally
         {

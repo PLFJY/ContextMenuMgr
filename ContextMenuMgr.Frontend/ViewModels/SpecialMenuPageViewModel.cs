@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows.Data;
@@ -22,6 +22,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private readonly string _descriptionKey;
     private readonly Dictionary<string, bool> _winXExpandedStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _refreshSync = new();
+    private readonly SemaphoreSlim _openWithOperationGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private Task? _refreshTask;
@@ -320,6 +321,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private async Task RefreshCoreAsync(int generation, bool markLoaded, bool showBusy)
     {
+        var openWithGateHeld = false;
         if (showBusy)
         {
             await SetLoadingAsync(true);
@@ -329,6 +331,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
         try
         {
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _disposeCts.Token);
             var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, linkedCts.Token);
@@ -397,6 +404,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            if (openWithGateHeld) _openWithOperationGate.Release();
             if (showBusy && IsCurrentRefreshGeneration(generation))
             {
                 await SetLoadingAsync(false);
@@ -408,6 +416,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task AddAsync()
     {
+        var openWithGateHeld = false;
         try
         {
             var operationId = Guid.NewGuid();
@@ -418,6 +427,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             var item = await _backendClient.CreateSpecialMenuItemAsync(request, cts.Token);
             if (item is not null)
             {
@@ -440,7 +454,12 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            if (openWithGateHeld) await ReconcileOpenWithFailureAsync(null);
             await FrontendMessageBox.ShowErrorAsync(ex.Message, Title);
+        }
+        finally
+        {
+            if (openWithGateHeld) _openWithOperationGate.Release();
         }
     }
 
@@ -452,6 +471,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var openWithGateHeld = false;
         try
         {
             if (ProtectedMenuItemGuard.IsProtectedOpenItem(item)
@@ -461,6 +481,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
 
             item.IsBusy = true;
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var updated = await _backendClient.DeleteSpecialMenuItemAsync(item.Entry, Guid.NewGuid(), cts.Token);
             if (updated is not null)
@@ -480,10 +505,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, item.DisplayName);
+            if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
+                await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                item.DisplayName);
         }
         finally
         {
+            if (openWithGateHeld) _openWithOperationGate.Release();
             item.IsBusy = false;
         }
     }
@@ -496,9 +526,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var openWithGateHeld = false;
         try
         {
             item.IsBusy = true;
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var updated = await _backendClient.UndoDeleteSpecialMenuItemAsync(item.Entry, Guid.NewGuid(), cts.Token);
             if (updated is not null)
@@ -517,10 +553,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, item.DisplayName);
+            if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
+                await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                item.DisplayName);
         }
         finally
         {
+            if (openWithGateHeld) _openWithOperationGate.Release();
             item.IsBusy = false;
         }
     }
@@ -545,9 +586,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
 
         item.IsPermanentDeleteFlyoutOpen = false;
+        var openWithGateHeld = false;
         try
         {
             item.IsBusy = true;
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await _backendClient.PurgeDeletedSpecialMenuItemAsync(item.Entry, Guid.NewGuid(), cts.Token);
             Items.Remove(item);
@@ -558,10 +605,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, item.DisplayName);
+            if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
+                await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                item.DisplayName);
         }
         finally
         {
+            if (openWithGateHeld) _openWithOperationGate.Release();
             item.IsBusy = false;
         }
     }
@@ -574,6 +626,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var openWithGateHeld = false;
         try
         {
             var operationId = Guid.NewGuid();
@@ -584,6 +637,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
 
             item.IsBusy = true;
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var updated = await _backendClient.UpdateSpecialMenuItemAsync(request, cts.Token);
             if (updated is not null)
@@ -601,10 +659,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, item.DisplayName);
+            if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
+                await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                item.DisplayName);
         }
         finally
         {
+            if (openWithGateHeld) _openWithOperationGate.Release();
             item.IsBusy = false;
         }
     }
@@ -698,6 +761,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private async Task<bool> SetEnabledAsync(SpecialMenuItemViewModel item, bool enabled)
     {
+        var openWithGateHeld = false;
         try
         {
             if (!enabled
@@ -707,6 +771,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return false;
             }
 
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+                openWithGateHeld = true;
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var updated = await _backendClient.SetSpecialMenuItemEnabledAsync(item.Entry, enabled, Guid.NewGuid(), cts.Token);
             if (updated is not null)
@@ -718,12 +787,41 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 }
             }
 
+            if (Kind == SpecialMenuKind.OpenWith && updated is null)
+                throw new InvalidOperationException(_localization.Translate("OpenWithOperationUncertain"));
             return true;
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, item.DisplayName);
+            if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
+                await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(
+                ex.Message == "OpenWithExternalVisibility" ? _localization.Translate("OpenWithExternalVisibility") : ex.Message,
+                item.DisplayName);
             return false;
+        }
+        finally
+        {
+            if (openWithGateHeld) _openWithOperationGate.Release();
+        }
+    }
+
+    private async Task ReconcileOpenWithFailureAsync(SpecialMenuItemViewModel? item)
+    {
+        if (item is not null) item.IsStateUncertain = true;
+        try
+        {
+            // A failed/expired response can follow a completed registry write. Never retry it here.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, _disposeCts.Token);
+            var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, linked.Token);
+            await ApplySnapshotAsync(snapshot);
+            StatusText = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            StatusText = _localization.Translate("OpenWithOperationUncertain");
+            FrontendDebugLog.Warning("SpecialMenuPageViewModel", $"OpenWith outcome verification failed: {ex.Message}");
         }
     }
 
@@ -1218,6 +1316,12 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
+            if (Kind == SpecialMenuKind.OpenWith)
+            {
+                // Notifications can arrive late or out of order. Read the physical source.
+                ObserveFireAndForget(RefreshAsync(), "OpenWithNotificationRefreshAsync");
+                return;
+            }
             if (Kind == SpecialMenuKind.WinX)
             {
                 ObserveFireAndForget(RefreshAsync(), "WinXNotificationRefreshAsync");

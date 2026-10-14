@@ -1257,7 +1257,7 @@
     <value>開啟方式</value>
   </data>
   <data name="OpenWithPageDescription" xml:space="preserve">
-    <value>管理目前使用者「開啟方式」選單中註冊的應用程式。</value>
+    <value>管理使用者及電腦層級的 Applications 註冊。開關表示 NoOpenWith 狀態，刪除僅移除此註冊。ProgID、檔案類型關聯或封裝應用程式仍可能出現在檔案總管中；不修改預設應用程式設定。</value>
   </data>
   <data name="WinXCompatibilityNotice" xml:space="preserve">
     <value>新版 Windows 可能會拒絕新加入的自訂 Win+X 項目。</value>
@@ -1563,4 +1563,10 @@
   <data name="HideDisabledItems" xml:space="preserve"><value>隱藏已停用項目</value></data>
   <data name="CompactViewTooltip" xml:space="preserve"><value>以精簡卡片顯示右鍵選單項目</value></data>
   <data name="DetailedViewTooltip" xml:space="preserve"><value>以詳細卡片顯示右鍵選單項目</value></data>
+  <data name="OpenWithExternalVisibility" xml:space="preserve">
+    <value>此 NoOpenWith 值不是由 ContextMenuMgrPlus 寫入，或註冊已變更，因此已保留。請透過對應應用程式或登錄編輯程式檢查此註冊。</value>
+  </data>
+  <data name="OpenWithOperationUncertain" xml:space="preserve">
+    <value>無法確認開啟方式操作的結果。請重新整理以核對登錄狀態後再重試。</value>
+  </data>
 </root>

@@ -1257,7 +1257,7 @@ Continue anyway? (Not recommended)</value>
     <value>Open With</value>
   </data>
   <data name="OpenWithPageDescription" xml:space="preserve">
-    <value>Manage applications registered in the current user's Open With menu.</value>
+    <value>Manage user and machine Applications registrations. Switches report NoOpenWith state; deleting removes only this registration. ProgIDs, per-file associations and packaged apps may still appear in Explorer. Default-app settings are not edited.</value>
   </data>
   <data name="WinXCompatibilityNotice" xml:space="preserve">
     <value>Newer Windows versions may reject newly added custom Win+X items.</value>
@@ -1563,4 +1563,10 @@ Continue anyway? (Not recommended)</value>
   <data name="HideDisabledItems" xml:space="preserve"><value>Hide disabled items</value></data>
   <data name="CompactViewTooltip" xml:space="preserve"><value>Show compact context-menu entry cards</value></data>
   <data name="DetailedViewTooltip" xml:space="preserve"><value>Show detailed context-menu entry cards</value></data>
+  <data name="OpenWithExternalVisibility" xml:space="preserve">
+    <value>This NoOpenWith value was not introduced by ContextMenuMgrPlus, or the registration has changed. It was preserved. Review the registration with its application or Registry Editor.</value>
+  </data>
+  <data name="OpenWithOperationUncertain" xml:space="preserve">
+    <value>The Open With operation outcome could not be confirmed. Refresh to check the registry state before trying again.</value>
+  </data>
 </root>
