@@ -240,7 +240,7 @@ Run workflow 有两种模式，均从 `main` 检出起点：
 
 `resolve-metadata` 把准确的 `source_sha` 传递给全部七个 build matrix 目标及 `create-release`；所有构建从同一提交执行。创建 Release 时向 `softprops/action-gh-release` 显式传入 `target_commitish: source_sha`，若 tag 不存在，由 GitHub 创建指向该提交的 tag；若 tag 已存在，必须预先验证该 tag 解引用后恰好指向 `source_sha`，绝不移动现有 tag。创建 draft 后再次读取远端 tag 核验。GitHub API 对已经存在的 tag 会忽略 `target_commitish`，所以不能只添加该参数而不检查 tag。
 
-防止 #137 重现：`resolve-metadata` 在构建前、`create-release` 在上传前分别查询 GitHub Release API；同名 Release 已存在时，无论是 draft、published 还是 immutable，**直接失败**，不允许任何重新生成的正文覆盖它。最终上传 job 按 release tag 分组串行化并禁止 cancel-in-progress，以封闭两次 workflow 同时通过早期检查的竞态。上传动作还设置 `overwrite_files: false` 与 `fail_on_unmatched_files: true`。取消/失败的 build 不会修改已经存在的 Release。若没有 Release 但已有同名 tag，只有 tag 指向同一 `source_sha` 才允许继续。
+防止 #137 重现：`resolve-metadata` 在构建前、`create-release` 在上传前分别分页列出 GitHub Releases（含 draft，不能只用按 tag 查询接口）；同名 Release 已存在时，无论是 draft、published 还是 immutable，**直接失败**，不允许任何重新生成的正文覆盖它。最终上传 job 按 release tag 分组串行化并禁止 cancel-in-progress，以封闭两次 workflow 同时通过早期检查的竞态。上传动作还设置 `overwrite_files: false` 与 `fail_on_unmatched_files: true`。取消/失败的 build 不会修改已经存在的 Release。若没有 Release 但已有同名 tag，只有 tag 指向同一 `source_sha` 才允许继续。tag 不存在属于正常首次发布，不得因 Git 命令返回非零状态导致 PowerShell step 误报失败。
 
 发布流程仍然先创建 **draft**，由维护者手动发布，再触发现有 Scoop、winget 与 GitCode 下游流程；不自动 publish，也不改变现有矩阵、安装器 GUID 或 stable/beta 渠道逻辑。
 
