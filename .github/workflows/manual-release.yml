@@ -125,28 +125,30 @@ jobs:
 
           # Treat an existing draft and an already published release identically:
           # neither may have its body or assets changed by another build.
-          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$([Uri]::EscapeDataString($tag))"
-          $existing = $null
-          try {
-            $existing = Invoke-RestMethod -Uri $url -Method Get -Headers @{
-              Authorization = "Bearer $env:GH_TOKEN"
-              Accept = 'application/vnd.github+json'
-            } -ErrorAction Stop
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
           }
-          catch {
-            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
-              throw
+          for ($page = 1; $page -le 100; $page++) {
+            $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases?per_page=100&page=$page"
+            $releases = @(Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop)
+            $match = @($releases | Where-Object { $_.tag_name -ceq $tag })
+            if ($match.Count -ne 0) {
+              throw "Release '$tag' already exists (draft=$($match[0].draft)). Refusing to overwrite body or assets."
             }
-          }
-          if ($null -ne $existing) {
-            throw "Release '$tag' already exists (draft=$($existing.draft)). Refusing to overwrite body or assets."
+            if ($releases.Count -lt 100) { break }
+            if ($page -eq 100) { throw 'Release listing exceeded the scan limit.' }
           }
 
           # target_commitish is ignored for existing tags. Fail rather than
           # silently publishing a build under a tag pointing elsewhere.
-          $tagSha = git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null
-          if ($LASTEXITCODE -eq 0 -and ([string] $tagSha).Trim() -ne $sha) {
-            throw "Tag '$tag' points to $tagSha instead of selected commit $sha."
+          $tagNames = @(git tag --list -- $tag)
+          if ($LASTEXITCODE -ne 0) { throw "Failed to query git tags for '$tag'." }
+          if ($tagNames.Count -gt 0) {
+            $tagSha = git rev-parse --verify "refs/tags/$tag^{commit}"
+            if ($LASTEXITCODE -ne 0 -or ([string] $tagSha).Trim() -ne $sha) {
+              throw "Tag '$tag' does not point to selected commit $sha."
+            }
           }
           Write-Host "Release destination verified: $tag -> $sha"
 
@@ -254,28 +256,30 @@ jobs:
 
           # Treat an existing draft and an already published release identically:
           # neither may have its body or assets changed by another build.
-          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$([Uri]::EscapeDataString($tag))"
-          $existing = $null
-          try {
-            $existing = Invoke-RestMethod -Uri $url -Method Get -Headers @{
-              Authorization = "Bearer $env:GH_TOKEN"
-              Accept = 'application/vnd.github+json'
-            } -ErrorAction Stop
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
           }
-          catch {
-            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
-              throw
+          for ($page = 1; $page -le 100; $page++) {
+            $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases?per_page=100&page=$page"
+            $releases = @(Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop)
+            $match = @($releases | Where-Object { $_.tag_name -ceq $tag })
+            if ($match.Count -ne 0) {
+              throw "Release '$tag' already exists (draft=$($match[0].draft)). Refusing to overwrite body or assets."
             }
-          }
-          if ($null -ne $existing) {
-            throw "Release '$tag' already exists (draft=$($existing.draft)). Refusing to overwrite body or assets."
+            if ($releases.Count -lt 100) { break }
+            if ($page -eq 100) { throw 'Release listing exceeded the scan limit.' }
           }
 
           # target_commitish is ignored for existing tags. Fail rather than
           # silently publishing a build under a tag pointing elsewhere.
-          $tagSha = git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null
-          if ($LASTEXITCODE -eq 0 -and ([string] $tagSha).Trim() -ne $sha) {
-            throw "Tag '$tag' points to $tagSha instead of selected commit $sha."
+          $tagNames = @(git tag --list -- $tag)
+          if ($LASTEXITCODE -ne 0) { throw "Failed to query git tags for '$tag'." }
+          if ($tagNames.Count -gt 0) {
+            $tagSha = git rev-parse --verify "refs/tags/$tag^{commit}"
+            if ($LASTEXITCODE -ne 0 -or ([string] $tagSha).Trim() -ne $sha) {
+              throw "Tag '$tag' does not point to selected commit $sha."
+            }
           }
           Write-Host "Release destination verified: $tag -> $sha"
 
