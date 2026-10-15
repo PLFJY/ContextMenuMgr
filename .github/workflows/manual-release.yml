@@ -17,6 +17,11 @@ on:
         required: false
         default: 45156332-3408-47B7-B5D2-2567E5888F64
         type: string
+      commit_sha:
+        description: Optional commit from main history (7-40 hex characters); empty builds the selected main HEAD
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -25,6 +30,7 @@ jobs:
   resolve-metadata:
     runs-on: windows-latest
     outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
       release_version: ${{ steps.version.outputs.release_version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_name: ${{ steps.version.outputs.release_name }}
@@ -33,9 +39,52 @@ jobs:
       should_create_release: ${{ steps.version.outputs.should_create_release }}
 
     steps:
-      - name: Checkout
+      - name: Checkout main for source selection
         uses: actions/checkout@v6
         with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve source commit
+        id: source
+        shell: pwsh
+        env:
+          REQUESTED_COMMIT: ${{ inputs.commit_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $requested = ([string] $env:REQUESTED_COMMIT).Trim()
+          if ($requested -and $requested -notmatch '^[0-9a-fA-F]{7,40}$') {
+            throw 'commit_sha must be a 7-40 character hexadecimal commit SHA.'
+          }
+
+          if ($requested) {
+            $sourceSha = git rev-parse --verify "$requested^{commit}" 2>$null
+            if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-fA-F]{40}$') {
+              throw "Cannot resolve commit_sha '$requested' to a unique commit."
+            }
+            git merge-base --is-ancestor $sourceSha origin/main
+            if ($LASTEXITCODE -ne 0) {
+              throw "Selected commit '$sourceSha' is not reachable from main."
+            }
+          }
+          else {
+            $sourceSha = git rev-parse HEAD
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Cannot resolve the checked-out main HEAD.'
+            }
+          }
+
+          $sourceSha = ([string] $sourceSha).Trim().ToLowerInvariant()
+          if ($sourceSha -notmatch '^[0-9a-f]{40}$') {
+            throw "Invalid resolved source SHA '$sourceSha'."
+          }
+          "source_sha=$sourceSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Build source: $sourceSha"
+
+      - name: Checkout selected source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
           fetch-depth: 0
           submodules: recursive
 
@@ -58,6 +107,49 @@ jobs:
           .\Scripts\Test-BetaVersionGate.ps1 `
             -BetaVersion '${{ steps.version.outputs.release_version }}' `
             -OwnerRepo '${{ github.repository }}'
+
+      - name: Guard release destination before building
+        if: steps.version.outputs.should_create_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG
+          $sha = $env:SOURCE_SHA
+          if ($tag -notmatch '^[A-Za-z0-9._+-]+$' -or $sha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Invalid release tag or source commit SHA.'
+          }
+
+          # Treat an existing draft and an already published release identically:
+          # neither may have its body or assets changed by another build.
+          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$([Uri]::EscapeDataString($tag))"
+          $existing = $null
+          try {
+            $existing = Invoke-RestMethod -Uri $url -Method Get -Headers @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = 'application/vnd.github+json'
+            } -ErrorAction Stop
+          }
+          catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
+              throw
+            }
+          }
+          if ($null -ne $existing) {
+            throw "Release '$tag' already exists (draft=$($existing.draft)). Refusing to overwrite body or assets."
+          }
+
+          # target_commitish is ignored for existing tags. Fail rather than
+          # silently publishing a build under a tag pointing elsewhere.
+          $tagSha = git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null
+          if ($LASTEXITCODE -eq 0 -and ([string] $tagSha).Trim() -ne $sha) {
+            throw "Tag '$tag' points to $tagSha instead of selected commit $sha."
+          }
+          Write-Host "Release destination verified: $tag -> $sha"
+
 
       - name: Create release notes
         shell: pwsh
@@ -100,9 +192,10 @@ jobs:
             distribution: framework-dependent
 
     steps:
-      - name: Checkout
+      - name: Checkout selected source
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.resolve-metadata.outputs.source_sha }}
           submodules: recursive
 
       - name: Setup .NET
@@ -133,10 +226,59 @@ jobs:
       - resolve-metadata
       - build
     runs-on: windows-latest
+    concurrency:
+      group: release-${{ needs.resolve-metadata.outputs.release_tag }}
+      cancel-in-progress: false
 
     steps:
-      - name: Checkout
+      - name: Checkout selected source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-metadata.outputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Guard release destination before upload
+        if: needs.resolve-metadata.outputs.should_create_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          RELEASE_TAG: ${{ needs.resolve-metadata.outputs.release_tag }}
+          SOURCE_SHA: ${{ needs.resolve-metadata.outputs.source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG
+          $sha = $env:SOURCE_SHA
+          if ($tag -notmatch '^[A-Za-z0-9._+-]+$' -or $sha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Invalid release tag or source commit SHA.'
+          }
+
+          # Treat an existing draft and an already published release identically:
+          # neither may have its body or assets changed by another build.
+          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$([Uri]::EscapeDataString($tag))"
+          $existing = $null
+          try {
+            $existing = Invoke-RestMethod -Uri $url -Method Get -Headers @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = 'application/vnd.github+json'
+            } -ErrorAction Stop
+          }
+          catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
+              throw
+            }
+          }
+          if ($null -ne $existing) {
+            throw "Release '$tag' already exists (draft=$($existing.draft)). Refusing to overwrite body or assets."
+          }
+
+          # target_commitish is ignored for existing tags. Fail rather than
+          # silently publishing a build under a tag pointing elsewhere.
+          $tagSha = git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>$null
+          if ($LASTEXITCODE -eq 0 -and ([string] $tagSha).Trim() -ne $sha) {
+            throw "Tag '$tag' points to $tagSha instead of selected commit $sha."
+          }
+          Write-Host "Release destination verified: $tag -> $sha"
+
 
       - name: Download build artifacts
         uses: actions/download-artifact@v7
@@ -169,8 +311,29 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.resolve-metadata.outputs.release_tag }}
+          target_commitish: ${{ needs.resolve-metadata.outputs.source_sha }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
           name: ${{ needs.resolve-metadata.outputs.release_name }}
           draft: true
           prerelease: ${{ needs.resolve-metadata.outputs.prerelease }}
           body_path: build/release-body.md
           files: build/dist/*
+          overwrite_files: false
+          fail_on_unmatched_files: true
+
+      - name: Verify release tag commit
+        if: needs.resolve-metadata.outputs.should_create_release == 'true'
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.resolve-metadata.outputs.release_tag }}
+          SOURCE_SHA: ${{ needs.resolve-metadata.outputs.source_sha }}
+        run: |
+          git fetch origin "refs/tags/$env:RELEASE_TAG" --force
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot retrieve release tag '$env:RELEASE_TAG' after draft creation."
+          }
+          $tagSha = git rev-parse --verify "refs/tags/$env:RELEASE_TAG^{commit}"
+          if ($LASTEXITCODE -ne 0 -or ([string] $tagSha).Trim() -ne $env:SOURCE_SHA) {
+            throw "Release tag '$env:RELEASE_TAG' does not point to built commit '$env:SOURCE_SHA'."
+          }
+          Write-Host "Verified release tag $env:RELEASE_TAG at $tagSha."

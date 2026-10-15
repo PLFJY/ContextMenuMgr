@@ -207,10 +207,11 @@ Frontend/TrayHost 使用 Inno Restart Manager，并额外注册需删除的 runt
 仍须在隔离 Windows VM 用 /LOG 验证真实两种 clean installs、同模式升级、双向切换、旧版升级、重装、自定义路径、多次升级后卸载、取消及中断；检查部署文件、实际 Inno AppId 卸载注册/日志追加、SCM/pipe/Frontend/TrayHost、数据和备份。FD 在全局 Desktop Runtime 下启动，SC 在无全局 runtime 环境启动。还需验证不同真实服务路径/架构、Portable 目录拒绝、只读标识、提权与非提权差异。当前没有隔离 VM，未进行产品的实际提升安装；真实服务恢复、应用启动及完整产品升级/卸载周期仍未验证。
 ## 8. GitHub Actions
 
-`.github/workflows/manual-release.yml` 是当前手动发布 workflow。它通过 `workflow_dispatch` 接收 `configuration` 和 `app_id`，主要流程是：
+`.github/workflows/manual-release.yml` 是当前手动发布 workflow。它通过 `workflow_dispatch` 接收 `configuration`、`app_id` 和可选的 `commit_sha`，主要流程是：
 
 ```text
 resolve-metadata
+-> Checkout main / 解析可选 commit_sha / Checkout 固定 source_sha
 -> Resolve-Version.ps1
 -> Beta version gate（仅 Beta 配置，见下文）
 -> New-ReleaseNotes.ps1
@@ -219,7 +220,9 @@ resolve-metadata
 -> 上传 installer / portable artifacts
 -> 汇总 artifacts
 -> New-ChecksumTable.ps1
--> 创建 draft release
+-> 复查同名 Release / tag
+-> 使用 source_sha 创建 tag 和 draft release
+-> 验证 tag 的最终 commit
 ```
 
 `Beta version gate` 步骤只在 `configuration == Beta` 且 `should_create_release == true` 时执行，调用 `Scripts/Test-BetaVersionGate.ps1` 查询 GitHub API 获取最新已发布的非预发布 Release，比较当前 Beta 基础版本与最新 Stable 版本。如果 Beta 基础版本 ≤ Stable 版本，workflow 直接报错，阻止后续构建和 draft release 创建。该门禁的原因和包管理器版本策略见 [包管理器发布说明](./package-managers.md)。
@@ -227,6 +230,23 @@ resolve-metadata
 构建矩阵覆盖 `win-x64`、`win-x86`、`win-arm64` 的 self-contained 和 framework-dependent installer，以及 framework-dependent portable。
 
 `.github/workflows/publish-package-managers.yml` 是包管理器发布 workflow。它在 GitHub Release 从 draft 被维护者手动发布后，通过 `release.published` 触发，读取已公开的 Release assets，生成并发布 Scoop / winget manifests。Scoop 和 winget 的详细渠道、变量、secret、dry-run 和首个 Beta 验证流程见 [包管理器发布说明](./package-managers.md)。
+
+### Release 源 commit 和重入保护（#137）
+
+Run workflow 有两种模式，均从 `main` 检出起点：
+
+- `commit_sha` 留空：使用这次运行开始时检出的 `main` HEAD，立即固定为 `source_sha`。后续即使 `main` 有新提交，本次各个 job 仍构建原先选定的 SHA。
+- `commit_sha` 输入 7–40 位十六进制 SHA：必须可唯一解析为 commit，且位于 `main` 的祖先历史中；不接受其它分支独有、无效或歧义 SHA。选择后再次 checkout 指定 commit，因此版本、发布说明、编译和打包脚本均取自该 commit。旧 commit 的 `Directory.Build.props` 版本决定 Release tag 和产物版本，不使用当前 `main` 的新版本号。
+
+`resolve-metadata` 把准确的 `source_sha` 传递给全部七个 build matrix 目标及 `create-release`；所有构建从同一提交执行。创建 Release 时向 `softprops/action-gh-release` 显式传入 `target_commitish: source_sha`，若 tag 不存在，由 GitHub 创建指向该提交的 tag；若 tag 已存在，必须预先验证该 tag 解引用后恰好指向 `source_sha`，绝不移动现有 tag。创建 draft 后再次读取远端 tag 核验。GitHub API 对已经存在的 tag 会忽略 `target_commitish`，所以不能只添加该参数而不检查 tag。
+
+防止 #137 重现：`resolve-metadata` 在构建前、`create-release` 在上传前分别查询 GitHub Release API；同名 Release 已存在时，无论是 draft、published 还是 immutable，**直接失败**，不允许任何重新生成的正文覆盖它。最终上传 job 按 release tag 分组串行化并禁止 cancel-in-progress，以封闭两次 workflow 同时通过早期检查的竞态。上传动作还设置 `overwrite_files: false` 与 `fail_on_unmatched_files: true`。取消/失败的 build 不会修改已经存在的 Release。若没有 Release 但已有同名 tag，只有 tag 指向同一 `source_sha` 才允许继续。
+
+发布流程仍然先创建 **draft**，由维护者手动发布，再触发现有 Scoop、winget 与 GitCode 下游流程；不自动 publish，也不改变现有矩阵、安装器 GUID 或 stable/beta 渠道逻辑。
+
+权限：默认使用 `github.token`（`contents: write`）。如 GitHub 因旧提交包含 workflow 文件差异而拒绝为目标 commit 创建 tag/Release，可设置可选仓库 secret `RELEASE_TOKEN`，使用具备所需仓库 Contents/Workflows 写入权限的 token；不允许遇到权限不足时静默改用 `main` HEAD。运行失败的 tag 创建与 draft 创建需要检查 GitHub 状态后再处理，不以 workflow steps success 代替最终资产与校验表的真实验证。
+
+手动验证需要覆盖：默认 main 模式、指定祖先 SHA、非 main SHA/歧义 SHA、已有 tag 指向不同提交、重复触发未发布 draft、已发布 immutable Release、同时运行两次相同 tag、旧 commit 创建 tag 的 token 权限，以及 tag/Release/资产实际 commit 与散列一致性。当前仅修改 workflow 配置与文档，尚未实际运行 GitHub Actions 端到端发布。
 
 ### GitHub Release 同步到 GitCode
 
