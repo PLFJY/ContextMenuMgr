@@ -311,6 +311,7 @@ jobs:
         run: .\Scripts\New-ChecksumTable.ps1 -ArtifactDirectory build/dist -ReleaseBodyPath build/release-body.md
 
       - name: Create draft release
+        id: publish
         if: needs.resolve-metadata.outputs.should_create_release == 'true'
         uses: softprops/action-gh-release@v3
         with:
@@ -325,19 +326,48 @@ jobs:
           overwrite_files: false
           fail_on_unmatched_files: true
 
-      - name: Verify release tag commit
+      - name: Verify draft release assets and checksums
         if: needs.resolve-metadata.outputs.should_create_release == 'true'
         shell: pwsh
         env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          RELEASE_ID: ${{ steps.publish.outputs.id }}
           RELEASE_TAG: ${{ needs.resolve-metadata.outputs.release_tag }}
           SOURCE_SHA: ${{ needs.resolve-metadata.outputs.source_sha }}
         run: |
-          git fetch origin "refs/tags/$env:RELEASE_TAG" --force
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cannot retrieve release tag '$env:RELEASE_TAG' after draft creation."
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_ID -notmatch '^\d+$') {
+            throw 'The release action did not return a valid Release ID.'
           }
-          $tagSha = git rev-parse --verify "refs/tags/$env:RELEASE_TAG^{commit}"
-          if ($LASTEXITCODE -ne 0 -or ([string] $tagSha).Trim() -ne $env:SOURCE_SHA) {
-            throw "Release tag '$env:RELEASE_TAG' does not point to built commit '$env:SOURCE_SHA'."
+          $url = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"
+          $release = Invoke-RestMethod -Uri $url -Headers @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+          } -ErrorAction Stop
+          if (-not $release.draft -or $release.tag_name -cne $env:RELEASE_TAG -or
+              $release.target_commitish -cne $env:SOURCE_SHA) {
+            throw 'Draft Release metadata differs from the selected tag or source commit.'
           }
-          Write-Host "Verified release tag $env:RELEASE_TAG at $tagSha."
+
+          $localFiles = @(Get-ChildItem -LiteralPath 'build/dist' -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' })
+          $uploaded = @($release.assets)
+          if ($localFiles.Count -eq 0 -or $uploaded.Count -ne $localFiles.Count) {
+            throw "Asset count mismatch: local=$($localFiles.Count), uploaded=$($uploaded.Count)."
+          }
+          foreach ($file in $localFiles) {
+            $matches = @($uploaded | Where-Object { $_.name -ceq $file.Name })
+            if ($matches.Count -ne 1) {
+              throw "Missing or duplicated Release asset: $($file.Name)"
+            }
+            $expectedHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ([string]$matches[0].digest -cne "sha256:$expectedHash") {
+              throw "Uploaded Release digest mismatch: $($file.Name)"
+            }
+            $rowPattern = '(?mi)^\|\s*' + [regex]::Escape($file.Name) +
+              '\s*\|\s*' + $expectedHash + '\s*\|\s*$'
+            if ([regex]::Matches([string]$release.body, $rowPattern).Count -ne 1) {
+              throw "Release body checksum mismatch: $($file.Name)"
+            }
+          }
+          Write-Host "Verified draft $env:RELEASE_TAG (id=$env:RELEASE_ID, source=$env:SOURCE_SHA): $($uploaded.Count) assets and checksums."
