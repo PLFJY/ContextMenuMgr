@@ -8,5 +8,6 @@ public enum PipeNotificationKind
     ItemDetected,
     ItemStateChanged,
     ServiceMessage,
-    ServiceStopping
+    ServiceStopping,
+    OpenWithChanged
 }

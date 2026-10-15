@@ -106,6 +106,8 @@ internal static class OpenWithRegistration
 
     internal static string EditStamp(RegistryKey key, string path) => EditStamp(key, path, null);
 
+    internal static string CommandIdentity(RegistryKey key, string path) => OwnershipValue(key, path);
+
     private static string EditStamp(RegistryKey key, string path, RegistryTransaction? transaction)
         => Hash(OwnershipValue(key, path, transaction) + VisibilityStamp(key)
             + JsonSerializer.Serialize(ShellVerbVisibility.CaptureValue(key, "FriendlyAppName")));

@@ -185,6 +185,8 @@ public partial class App : Application
         }
 
         var focusItemId = GetArgumentValue(args, "--focus-item");
+        if (args.Any(static arg => string.Equals(arg, "--open-openwith", StringComparison.OrdinalIgnoreCase)))
+            return new FrontendControlRequest { Command = FrontendControlCommand.OpenWith };
         if (args.Any(static arg => string.Equals(arg, "--open-approvals", StringComparison.OrdinalIgnoreCase)))
         {
             return new FrontendControlRequest
@@ -279,6 +281,7 @@ public partial class App : Application
                         ShowMainWindow(request, forceActivate: true);
                         break;
                     case FrontendControlCommand.OpenApprovals:
+                    case FrontendControlCommand.OpenWith:
                         ShowMainWindow(request, forceActivate: true);
                         break;
                     case FrontendControlCommand.Shutdown:
@@ -328,6 +331,11 @@ public partial class App : Application
         {
             _navigationState?.RequestApprovals(request.FocusItemId);
             _mainWindow.NavigateTo(typeof(ApprovalsPage));
+        }
+        else if (request.Command == FrontendControlCommand.OpenWith)
+        {
+            _navigationState?.ClearFocusItem();
+            _mainWindow.NavigateTo(typeof(OpenWithPage));
         }
         else
         {

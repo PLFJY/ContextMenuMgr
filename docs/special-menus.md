@@ -132,7 +132,7 @@ COM，不调用 `IShellLink.Resolve`，也不使用 `WScript.Shell`。SendTo 当
 
 ## 7. OpenWith
 
-OpenWith 列表发现用户 / 机器 Classes 的 `Applications` 物理注册（含无常规 command、DropTarget 等只读结构），仅管理经过验证的常规结构及既有 Microsoft Store 入口 policy。扩展名来源检查按需读取独立关联来源，不承诺开关或删除后应用从每个 Explorer 打开方式列表中消失。操作走链路 A：Frontend -> Backend Pipe -> `SpecialMenuService`，不使用 UAC bootstrapper、ProbeHost 或新增监控。
+OpenWith 列表发现用户 / 机器 Classes 的 `Applications` 物理注册（含无常规 command、DropTarget 等只读结构），仅管理经过验证的常规结构及既有 Microsoft Store 入口 policy。扩展名来源检查按需读取独立关联来源，不承诺开关或删除后应用从每个 Explorer 打开方式列表中消失。操作走链路 A：Frontend -> Backend Pipe -> `SpecialMenuService`，不使用 UAC bootstrapper 或 ProbeHost；Applications 专用监控见下文。
 
 必须区分三件事：应用注册为打开方式候选、Explorer 针对某个文件实际显示此候选、该文件类型的默认处理程序。页面的开关仅表示所选物理 `Applications` key 是否存在 `NoOpenWith`；用户 / 机器同名项分别显示和修改，不代表合并 HKCR 的最终菜单状态。微软明确说明，文件类型的 `OpenWithProgIDs` 可以在 Applications 设置 `NoOpenWith` 后继续提供应用候选：[Application Registration](https://learn.microsoft.com/en-us/windows/win32/shell/app-registration)、[Open With 注册与排除说明](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/hh127438%28v%3Dvs.85%29)。
 
@@ -182,7 +182,7 @@ NoOpenWith 归属分为 Enabled（无值且无 marker；孤立 marker 归为 Cha
 
 Create/Update 提交成功后必须 fresh read-back；read-back 抛错或不一致返回 OpenWithOperationUncertain，不能声称没有变化。前端沿用串行门、失败/超时快照核对、IsStateUncertain、迟到通知重查，不盲重试；编辑对话框打开前捕获 ExpectedEditStamp，不能在表单期间刷新后用新 stamp 覆盖旧表单。旧客户端没有 edit stamp 时拒绝编辑并要求刷新/更新客户端。
 
-RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没有用 copy/delete 替代。某些 Explorer 版本是否会把 sibling .deleted 注册作为额外候选仍未实测，不能声称 rename 等于 Explorer 列表移除。自动拦截注册、安装器更新监控和持久强制策略留给后续阶段。
+RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没有用 copy/delete 替代。某些 Explorer 版本是否会把 sibling .deleted 注册作为额外候选仍未实测，不能声称 rename 等于 Explorer 列表移除。新增注册默认仅送审；安装器重注册监控及显式 HKU 持久保护见下文，不提供永久自动删除。
 
 ### Windows 10 / 11 手动验证（仍需真实 Explorer / 服务环境）
 
@@ -227,3 +227,35 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 
 `GuidBlockMenuService` 独立持有机器级 GUID Block 路径，负责其枚举、创建、开关和删除；`SpecialMenuService` 只在现有分派与响应/日志边界调用它。该列表与 classic per-registration 开关、Windows 11 用户 blocked list 均有不同语义，不能互相替代。
+
+## OpenWith registration monitoring and explicit protection (#136)
+
+`OpenWithMonitoringService` is driven by `ContextMenuRegistryMonitor`'s existing five-second cycle. It adds no independent backend polling task or extension scan. Each poll reopens native-view HKU/HKLM Applications roots through the existing `SpecialMenuService.GetOpenWithItems` discovery model; there are no retained registry handles or RegNotify watchers to invalidate after subtree replacement. The monitor limits each root to 4096 child names and gives discovery a cooperative fifteen-second budget. Individual synchronous Windows calls cannot be interrupted by a token.
+
+Authenticated pipe users and WTS active/connected/disconnected user tokens identify the monitored users. WTS enumeration runs at most every thirty seconds; SID, loaded user hive and Classes root are validated before reconciliation. No SYSTEM HKCU fallback or hive creation is used. Sessions sharing a SID share one baseline. Each SID has separate baseline/review records; HKLM and HKU names remain separate physical paths. Notifications are filtered to subscribers authenticated as that SID, including normal OpenWith mutation broadcasts.
+
+A new or session-reset monitor waits thirty seconds and requires ten seconds of unchanged discovery before reconciling. Individual registrations and confirmed absences also settle for ten seconds. Missing roots/keys are reopened on subsequent polls; access denial/incomplete reads suspend adoption, log a failure and back off thirty seconds. Repeated identical failures generate one attention signal until recovery. The first complete snapshot for a SID without an OpenWith baseline adopts current entries silently, even when classic/WPS state already exists. Existing baselines detect new offline registrations after startup settling. Changes that appear and disappear entirely between polling observations cannot be detected.
+
+New physical registrations, including unsupported structures, enter persisted review without automatic disable. One aggregate notification per SID/cycle directs the tray/frontend to the existing OpenWith page. Each card retains its source path, command and User/Machine scope. Accept current state acknowledges the displayed generation; the normal switch disables eligible entries. No auto-disable-new-applications policy is provided. Supported and unsupported registrations use the same discovery; extension association inspection stays read-only and on demand.
+
+Persistent protection is a separate explicit authorization, available only after this program has disabled a manageable **per-user HKU registration** with verified Owned visibility provenance. Existing third-party/legacy NoOpenWith values never create rules. The rule stores authenticated SID, exact physical path, every command-bearing verb's generation fingerprint, literal executable path, SHA-256 of the executable, authorization, cumulative attempt count/backoff and last verified outcome/time. Executables must exist on a fixed local drive, be at most 128 MiB, have no environment-variable tokens, UNC paths or reparse-point ancestors. An open file handle disallows executable replacement while a corrective write is verified. An exact binary fingerprint is intentionally conservative: changed binaries (including legitimate updates), changed command generations and version-specific paths require review and renewed authorization. Publisher/product metadata is not trusted as identity evidence.
+
+Automatic enforcement never writes HKLM. Machine entries remain reviewable and manually manageable; the UI does not offer persistent machine protection. One user's preference must not become an all-users policy. This is the exact scope of automatic protection in this implementation.
+
+Before correction, re-resolve the original physical registration, validate SID/path/identity/manageability and fresh visibility ownership, and persist an Uncertain attempt reservation. Under the durable-state gate, re-read authorization and the registration, hold the executable identity handle, call the existing transactional `OpenWithRegistration.SetEnabled` through `SpecialMenuService.SetOpenWithEnabled`, then perform authoritative read-back and persist the outcome. Existing NoOpenWith values are never overwritten or adopted. Already Owned-disabled registrations are satisfied without another write. A failed/canceled operation or failed outcome save leaves durable Uncertain: subsequent observation can confirm disabled state or suspend to Conflict/review, but never blindly repeats that write.
+
+At most three automatic corrections are allowed per explicit authorization, with persisted 30/120/270-second backoff after successive attempts. The fourth rewrite becomes Conflict until the user inspects and authorizes again. Conflicts do not continuously write against installers/admins. Explicit user Enable removes the corresponding rule durably **before** the registry enable; persistence failure prevents that enable. Stop persistent protection removes authorization without changing current physical visibility. An absent registration retains its rule: the page shows a rule-only card (or its existing deleted backup) so authorization can still be removed.
+
+Soft deletion remains native RegRenameKey to the existing sibling .deleted key. Monitoring never renames, purges, appends suffixes or overwrites a backup/recreated original. Re-registration alongside a backup enters separate review; an explicitly protected matching original may receive safe NoOpenWith suppression. The UI says disabled and verified, not deleted. Historical .deleted/.deleted.deleted recovery compatibility remains unchanged.
+
+Rules and review/baseline records live in a separate `openWith` section of the same schema-3 state envelope. They are never fake classic ContextMenuEntry/PersistedContextMenuState records. Existing atomic replacement, validated backup, corruption recovery and portable host quarantine are reused. Classic Save reloads and merges this section under the store gate; OpenWith updates load/merge/write the latest classic states under that same gate. Schema 2 and raw dictionaries migrate without inventing rules; older schema-2 readers reject schema 3 rather than erasing it. Reset removes rules, baseline, pending reviews and backup together; current registry state is adopted silently next time, without enabling registrations or deleting NoOpenWith. Host fingerprints remain hashed; the separate authorization section necessarily records the rule's SID and physical HKU path.
+
+Applications/NoOpenWith suppression does not change defaults, UserChoice/Hash, UCPD, OpenWithProgIDs, FileExts, Capabilities or package declarations. These independent sources may still offer the application in Explorer.
+
+Manual Windows verification still required:
+
+1. Start/reset with preexisting enabled/disabled Applications entries: after settling, no initial review flood or automatic policies. Register a new HKU and HKLM app: one review per physical source, neither automatically disabled.
+2. Disable a literal-path HKU app, opt in, recreate its original key with unchanged commands/binary and no visibility values. Verify empty REG_SZ NoOpenWith plus matching provenance, persisted Reapplied and fresh UI state, including after a backend restart.
+3. Replace its binary/command/path or add a foreign visibility marker: verify Conflict and untouched external values. Repeatedly remove owned visibility: verify three bounded corrections, then review. Explicit Enable must revoke the rule.
+4. Soft-delete, then recreate the original; verify the sibling backup and ACL survive, no extra .deleted suffix, and Undo refuses the collision. Stop protection must remain available while the original is absent.
+5. Exercise actual service stop/start/shutdown, RDP/fast user switching and hive unload/reload; check SID-specific notifications, fresh UI snapshots, tray activation with hidden icon and no startup storms. Elevated HKLM writes, Explorer-visible candidate lists and real installer timing require desktop testing; registry integration tests alone do not prove these results.

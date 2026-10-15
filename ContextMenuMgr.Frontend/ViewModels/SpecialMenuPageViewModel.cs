@@ -865,8 +865,41 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
     }
 
+    [RelayCommand]
+    private Task ProtectOpenWithAsync(SpecialMenuItemViewModel item)
+        => ReviewOpenWithAsync(item, !item.HasPersistentProtection);
+
+    [RelayCommand]
+    private Task AcceptOpenWithAsync(SpecialMenuItemViewModel item) => ReviewOpenWithAsync(item, null);
+
+    private async Task ReviewOpenWithAsync(SpecialMenuItemViewModel item, bool? protect)
+    {
+        if (Kind != SpecialMenuKind.OpenWith || !item.CanReviewOpenWith) return;
+        item.IsBusy = true;
+        var gateHeld = false;
+        try
+        {
+            await _openWithOperationGate.WaitAsync(_disposeCts.Token);
+            gateHeld = true;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(20));
+            await _backendClient.ReviewOpenWithRegistrationAsync(item.Entry, protect, timeout.Token);
+            // Even a successful response may precede a corrective action or another client.
+            var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, timeout.Token);
+            await ApplySnapshotAsync(snapshot);
+        }
+        catch (Exception ex)
+        {
+            await ReconcileOpenWithFailureAsync(item);
+            await FrontendMessageBox.ShowErrorAsync(LocalizeOpenWithError(ex), Title);
+        }
+        finally { item.IsBusy = false; if (gateHeld) _openWithOperationGate.Release(); }
+    }
+
     private string LocalizeOpenWithError(Exception ex) => ex.Message is
         "OpenWithExternalVisibility" or "OpenWithOperationUncertain" or "OpenWithUnsupportedRegistration"
+        or "OpenWithIdentityUnavailable" or "OpenWithPersistenceUnavailable" or "OpenWithUserProtectionOnly"
+        or "OpenWithProtectionRequiresDisabled"
             ? _localization.Translate(ex.Message) : ex.Message;
 
     private async Task ReconcileOpenWithFailureAsync(SpecialMenuItemViewModel? item)
@@ -1374,7 +1407,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private void OnNotificationReceived(object? sender, BackendNotification notification)
     {
-        if (notification.SpecialKind != Kind || notification.SpecialItem is null)
+        if (notification.SpecialKind != Kind || notification.SpecialItem is null && notification.Kind != PipeNotificationKind.OpenWithChanged)
         {
             return;
         }
@@ -1393,7 +1426,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            Upsert(notification.SpecialItem);
+            if (notification.SpecialItem is { } specialItem) Upsert(specialItem);
         });
     }
 

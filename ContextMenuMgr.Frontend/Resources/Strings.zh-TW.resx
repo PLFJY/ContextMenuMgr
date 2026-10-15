@@ -1595,4 +1595,22 @@
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可見性資料或歸屬標記與已驗證寫入不符，已保留。</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多個實體登錄，未確定最終生效的處理程式</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>受系統保護</value></data>
+  <data name="OpenWithAcceptCurrent" xml:space="preserve"><value>接受目前狀態</value></data>
+  <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>無法驗證程式身分。需為現有本機檔案的絕對路徑，不能使用環境變數或符號連結，檔案不能超過 128 MiB。</value></data>
+  <data name="OpenWithMonitorChanged" xml:space="preserve"><value>註冊已變更，請檢查來源與命令。</value></data>
+  <data name="OpenWithMonitorConflict" xml:space="preserve"><value>保護需要審核：身分、可見性歸屬或修正次數存在衝突，已停止自動寫入。可停止保護以接受註冊，或檢查後停用並重新授權。</value></data>
+  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>開啟方式註冊發生變更，請在開啟方式頁面審核。</value></data>
+  <data name="OpenWithMonitorMissing" xml:space="preserve"><value>受保護註冊不存在。規則仍保留，可在此停止保護。</value></data>
+  <data name="OpenWithMonitorNew" xml:space="preserve"><value>新註冊待審核：使用開關停用，或接受目前狀態。</value></data>
+  <data name="OpenWithMonitorReapplied" xml:space="preserve"><value>已重新停用並驗證重新註冊或啟用的應用程式；未執行刪除。</value></data>
+  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>應用程式已重新註冊，原刪除備份仍保留。</value></data>
+  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>修正結果尚未確認，正在等待實體狀態回讀；已暫停自動重試。</value></data>
+  <data name="OpenWithPersistenceUnavailable" xml:space="preserve"><value>保護未儲存：無法驗證此可攜版的主機身分。</value></data>
+  <data name="OpenWithProtectionActive" xml:space="preserve"><value>已啟用持續保護</value></data>
+  <data name="OpenWithProtectionNotice" xml:space="preserve"><value>僅保護此使用者註冊。登錄路徑、命令、程式路徑及 SHA-256 必須一致；程式檔案或路徑變更時需重新審核。每次授權最多自動修正三次，HKLM 僅手動管理。其他關聯來源仍可能顯示此應用程式。</value></data>
+  <data name="OpenWithProtectionOff" xml:space="preserve"><value>停止持續保護</value></data>
+  <data name="OpenWithProtectionOn" xml:space="preserve"><value>持續保持此註冊停用</value></data>
+  <data name="OpenWithProtectionRequiresDisabled" xml:space="preserve"><value>請先停用此註冊，重新整理後再啟用保護。現有第三方可見性值不能自動轉為保護規則。</value></data>
+  <data name="OpenWithUserProtectionOnly" xml:space="preserve"><value>自動保護僅適用於已驗證使用者的註冊，電腦層級註冊需手動管理。</value></data>
+  <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>開啟方式監控正在等待登錄存取權限或狀態儲存恢復，請重新整理開啟方式頁面檢查目前狀態。</value></data>
 </root>

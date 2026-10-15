@@ -11,6 +11,208 @@ namespace ContextMenuMgr.Tests;
 [Collection("Registry catalog integration")]
 public sealed class OpenWithRegistrationTests
 {
+    // Permanent: observed visibility, whether third-party or previously program-owned,
+    // must never become automatic authorization without the user's opt-in.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Monitoring_DoesNotInferProtectionFromExistingDisabledState(bool thirdParty)
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        if (thirdParty)
+        {
+            using var key = fixture.Open(writable: true);
+            key!.SetValue("NoOpenWith", "external value");
+        }
+        else Assert.True((await fixture.Service.SetEnabledAsync(await fixture.Read(), false, null, fixture.Context, default)).Success);
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
+        fixture.Remove();
+        fixture.CreateLiteral();
+        await fixture.Poll(40);
+        await fixture.Poll(55);
+        Assert.True((await fixture.Read()).IsEnabled);
+        Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
+    }
+
+    // Permanent: real physical registrations, settled/offline detection, dedup and explicit intent.
+    [Fact]
+    public async Task Monitoring_AdoptsStartupAndReviewsNewAndOfflineRegistrationsOnce()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        fixture.CreateLiteral();
+        var signals = new List<BackendNotification>();
+        fixture.Monitoring!.Changed += (_, e) => signals.Add(e);
+        await fixture.Poll(40);
+        Assert.Empty(signals); // incomplete/unstable installer generation
+        await fixture.Poll(55);
+        Assert.Equal("New", (await fixture.Read()).Metadata["MonitoringStatus"]);
+        Assert.True((await fixture.Read()).IsEnabled);
+        await fixture.Poll(70);
+        Assert.Single(signals);
+        Assert.Equal(fixture.Context.Sid, signals[0].UserSid);
+        await fixture.Monitoring.ReviewAsync(await fixture.Read(), null, fixture.Context, default);
+        await fixture.Poll(85);
+        Assert.Empty((await fixture.Read()).Metadata["MonitoringStatus"]);
+        fixture.Remove();
+        await fixture.Poll(90);
+        await fixture.Poll(105);
+        fixture.RestartMonitoring();
+        fixture.CreateLiteral();
+        await fixture.Poll(110);
+        await fixture.Poll(145);
+        Assert.Equal("New", (await fixture.Read()).Metadata["MonitoringStatus"]);
+        Assert.True((await fixture.Read()).IsEnabled);
+    }
+
+    // Permanent: durable protection survives key recreation/restart; backup collision safety;
+    // explicit enable removes intent and cannot be silently undone.
+    [Fact]
+    public async Task Monitoring_ReappliesVerifiedIdentityAfterRestartWithoutTouchingDeletedBackup_AndEnableRevokesRule()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        Assert.Empty((await fixture.Read()).Metadata["MonitoringStatus"]);
+        var disabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), false, null, fixture.Context, default);
+        Assert.True(disabled.Success, disabled.Message);
+        await fixture.Monitoring!.ReviewAsync(disabled.SpecialItem!, true, fixture.Context, default);
+        Assert.Equal("True", (await fixture.Read()).Metadata["PersistentProtection"]);
+        var deleted = await fixture.Service.DeleteAsync(await fixture.Read(), null, fixture.Context, default);
+        Assert.True(deleted.Success, deleted.Message);
+        var backupAcl = fixture.Acl(".deleted");
+        fixture.CreateLiteral();
+        fixture.RestartMonitoring();
+        await fixture.Poll(40);
+        await fixture.Poll(75);
+        var corrected = await fixture.Read();
+        Assert.False(corrected.IsEnabled);
+        Assert.Equal("Owned", corrected.Metadata["VisibilityOwnership"]);
+        Assert.Equal("Reapplied", corrected.Metadata["MonitoringStatus"]);
+        Assert.Equal(backupAcl, fixture.Acl(".deleted"));
+        using (var backup = fixture.Open(".deleted")) fixture.AssertData(backup!);
+        Assert.Null(fixture.Open(".deleted.deleted"));
+        var stamp = corrected.Metadata["VisibilityStamp"];
+        await fixture.Poll(90);
+        await fixture.Poll(105);
+        Assert.Equal(stamp, (await fixture.Read()).Metadata["VisibilityStamp"]);
+        var enabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), true, null, fixture.Context, default);
+        Assert.True(enabled.Success, enabled.Message);
+        await fixture.Poll(120);
+        await fixture.Poll(135);
+        Assert.True((await fixture.Read()).IsEnabled);
+        Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
+    }
+
+    // Permanent: filename reuse, binary replacement, provenance conflicts and bounded write fights.
+    [Theory]
+    [InlineData("Command")]
+    [InlineData("Binary")]
+    [InlineData("Marker")]
+    [InlineData("Limit")]
+    [InlineData("Uncertain")]
+    public async Task Monitoring_ConflictsNeverModifyUntrustedOrRepeatedlyRewrittenRegistrations(string conflict)
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        var disabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), false, null, fixture.Context, default);
+        await fixture.Monitoring!.ReviewAsync(disabled.SpecialItem!, true, fixture.Context, default);
+        if (conflict == "Uncertain")
+            await fixture.Store!.WithOpenWithAsync(s =>
+            {
+                Assert.Single(s.Rules).Value.Outcome = "Uncertain";
+                return true;
+            }, true, default);
+        var rounds = conflict == "Limit" ? 4 : 1;
+        for (var round = 0; round < rounds; round++)
+        {
+            fixture.Remove();
+            fixture.CreateLiteral();
+            if (conflict == "Command")
+            {
+                using var command = fixture.Open(@"\shell\open\command", writable: true);
+                command!.SetValue(null, "\"C:\\Unrelated\\replacement.exe\" \"%1\"");
+            }
+            if (conflict == "Binary") File.AppendAllText(fixture.ExecutablePath, "replacement bytes");
+            if (conflict == "Marker")
+            {
+                using var key = fixture.Open(writable: true);
+                key!.SetValue("ContextMenuMgrPlus.OpenWithVisibility", "another owner");
+            }
+            await fixture.Poll(40 + round * 400);
+            await fixture.Poll(55 + round * 400);
+            if (round < rounds - 1) Assert.False((await fixture.Read()).IsEnabled);
+        }
+        var current = await fixture.Read();
+        Assert.True(current.IsEnabled);
+        Assert.Equal("Conflict", current.Metadata["MonitoringStatus"]);
+        using var physical = fixture.Open();
+        Assert.Null(physical!.GetValue("NoOpenWith"));
+    }
+
+    // Permanent: actual state-file replacement failure must not claim protection or authorize writes.
+    [Fact]
+    public async Task Monitoring_PersistenceFailureDoesNotGrantProtection_OrEnableAgainstSavedIntent()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        var disabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), false, null, fixture.Context, default);
+        using (File.Open(fixture.StatePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Assert.ThrowsAnyAsync<IOException>(() => fixture.Monitoring!.ReviewAsync(disabled.SpecialItem!, true, fixture.Context, default));
+            Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
+        }
+        await fixture.Monitoring!.ReviewAsync(await fixture.Read(), true, fixture.Context, default);
+        using (File.Open(fixture.StatePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var failedEnable = await fixture.Service.SetEnabledAsync(await fixture.Read(), true, null, fixture.Context, default);
+            Assert.False(failedEnable.Success);
+            Assert.False((await fixture.Read()).IsEnabled);
+            Assert.Equal("True", (await fixture.Read()).Metadata["PersistentProtection"]);
+        }
+    }
+
+    // Permanent: a same-name HKLM target cannot acquire a user's automatic authorization;
+    // foreign/unloaded SIDs are rejected before any mutation. No HKLM write privileges required.
+    [Fact]
+    public async Task Monitoring_ProtectsOnlyAuthenticatedUserHive_AndNeverMachineRegistration()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        var userItem = await fixture.Read();
+        var machinePath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\" + userItem.KeyName;
+        using (var absent = OpenWithRegistration.Open(machinePath)) Assert.Null(absent);
+        var machineItem = userItem with
+        {
+            RegistryPath = machinePath + @"\shell\open\command",
+            Metadata = new Dictionary<string, string>(userItem.Metadata)
+            { ["AppRegistryPath"] = machinePath, ["RegistryScope"] = "User" }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Monitoring!.ReviewAsync(machineItem, true, fixture.Context, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Monitoring!.ReviewAsync(userItem, true,
+            fixture.Context with { Sid = "S-1-5-21-1-2-3-1001" }, default));
+        var disabled = await fixture.Service.SetEnabledAsync(userItem, false, null, fixture.Context, default);
+        await fixture.Monitoring!.ReviewAsync(disabled.SpecialItem!, true, fixture.Context, default);
+        fixture.Remove();
+        fixture.CreateLiteral();
+        await fixture.Poll(40);
+        await fixture.Poll(55);
+        Assert.False((await fixture.Read()).IsEnabled);
+        using var actualMachine = OpenWithRegistration.Open(machinePath);
+        Assert.Null(actualMachine);
+    }
+
     // Permanent: newly discovered structures must never acquire unsafe mutation capabilities.
     [Theory]
     [InlineData("MissingShell")]
@@ -436,16 +638,37 @@ public sealed class OpenWithRegistrationTests
         private readonly string _name = "ContextMenuMgr.Tests.OpenWith." + Guid.NewGuid().ToString("N") + ".exe";
         private readonly string _logDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid().ToString("N"));
         private readonly RegistryKey _hive;
-        public Fixture()
+        public Fixture(bool monitoring = false)
         {
             var sid = WindowsIdentity.GetCurrent().User!.Value;
             Context = new BackendUserContext(sid, Environment.UserName, _logDirectory, _logDirectory, _logDirectory, null);
             _hive = RegistryKey.OpenBaseKey(RegistryHive.Users, Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
             Directory.CreateDirectory(_logDirectory);
             Service = new SpecialMenuService(new FileLogger(System.IO.Path.Combine(_logDirectory, "backend.log")));
+            if (monitoring) RestartMonitoring();
         }
         public BackendUserContext Context { get; }
         public SpecialMenuService Service { get; }
+        public OpenWithMonitoringService? Monitoring { get; private set; }
+        public ContextMenuStateStore? Store { get; private set; }
+        public string StatePath => System.IO.Path.Combine(_logDirectory, "state.json");
+        public string ExecutablePath => System.IO.Path.Combine(_logDirectory, "verified.exe");
+        private readonly DateTimeOffset _started = DateTimeOffset.UtcNow;
+        public void RestartMonitoring()
+        {
+            var logger = new FileLogger(System.IO.Path.Combine(_logDirectory, "backend.log"));
+            Store = new ContextMenuStateStore(StatePath, logger, quarantineDirectory: System.IO.Path.Combine(_logDirectory, "quarantine"));
+            Monitoring = new OpenWithMonitoringService(Store, logger);
+            Service.OpenWithMonitoring = Monitoring;
+        }
+        public Task Poll(int seconds) => Monitoring!.PollAsync(Context, _started.AddSeconds(seconds), default);
+        public void CreateLiteral()
+        {
+            Create();
+            File.WriteAllText(ExecutablePath, "MZ persistent test identity");
+            using var command = Open(@"\shell\open\command", writable: true);
+            command!.SetValue(null, $"\"{ExecutablePath}\" \"%1\"", RegistryValueKind.String);
+        }
         private string SubPath => $@"{Context.Sid}\Software\Classes\Applications\{_name}";
         public string Path => $@"HKEY_USERS\{SubPath}";
         public RegistryKey? Open(string suffix = "", bool writable = false) => _hive.OpenSubKey(SubPath + suffix, writable);

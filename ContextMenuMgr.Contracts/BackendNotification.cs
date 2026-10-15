@@ -5,6 +5,7 @@
 /// </summary>
 public sealed record BackendNotification
 {
+    public string? UserSid { get; init; }
     /// <summary>
     /// Gets or sets the kind.
     /// </summary>

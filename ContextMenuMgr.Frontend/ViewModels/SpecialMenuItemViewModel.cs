@@ -71,8 +71,22 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public bool IsReadOnlyPackagedShellNew =>
         string.Equals(Entry.Metadata.GetValueOrDefault("ProviderType"), "PackagedShellNew", StringComparison.Ordinal);
 
-    public bool IsReadOnlyOpenWith => Entry.Kind == SpecialMenuKind.OpenWith && !Entry.CanEdit;
+    public bool IsReadOnlyOpenWith => Entry.Kind == SpecialMenuKind.OpenWith && !Entry.CanEdit
+        && Entry.Metadata.GetValueOrDefault("RuleOnly") != "true";
     public string OpenWithProtectedText => _localization.Translate("OpenWithProtectedText");
+    public bool HasPersistentProtection => Entry.Metadata.GetValueOrDefault("PersistentProtection") == "True";
+    public bool ShowProtection => HasPersistentProtection || Entry.Kind == SpecialMenuKind.OpenWith
+        && Entry.CanEdit && !IsEnabled && !IsDeleted && Entry.Metadata.GetValueOrDefault("RegistryScope") == "User"
+        && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") == "Owned";
+    public bool CanReviewOpenWith => !IsBusy && !IsStateUncertain;
+    public string ProtectionText => _localization.Translate(HasPersistentProtection ? "OpenWithProtectionOff" : "OpenWithProtectionOn");
+    public string ProtectionToolTip => _localization.Translate("OpenWithProtectionNotice");
+    public string MonitoringText => (HasPersistentProtection ? _localization.Translate("OpenWithProtectionActive") + " · " : string.Empty)
+        + (Entry.Metadata.GetValueOrDefault("MonitoringStatus") is { Length: > 0 } status
+            ? _localization.Translate("OpenWithMonitor" + status) : string.Empty);
+    public bool HasMonitoringText => !string.IsNullOrWhiteSpace(MonitoringText);
+    public bool ShowOpenWithReview => Entry.Metadata.GetValueOrDefault("MonitoringStatus") is "New" or "Changed" or "ReRegistered" or "Reapplied";
+    public string AcceptOpenWithText => _localization.Translate("OpenWithAcceptCurrent");
     public bool HasRegistrationNotice => Entry.Kind == SpecialMenuKind.OpenWith && Entry.Id != "openwith:use-store";
     public string RegistrationNotice => _localization.Translate("OpenWithScope" + Entry.Metadata.GetValueOrDefault("RegistryScope"))
         + (IsReadOnlyOpenWith ? string.Empty : Entry.Metadata.GetValueOrDefault("VisibilityOwnership") switch
@@ -233,6 +247,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(IsReadOnlyOpenWith));
         OnPropertyChanged(nameof(HasRegistrationNotice));
         OnPropertyChanged(nameof(RegistrationNotice));
+        RefreshMonitoringProperties();
         OnPropertyChanged(nameof(RegistrationToolTip));
         OnPropertyChanged(nameof(ReadOnlyLabel));
         OnPropertyChanged(nameof(ReadOnlyToolTip));
@@ -260,6 +275,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public void RefreshLocalization()
     {
+        RefreshMonitoringProperties();
         OnPropertyChanged(nameof(OpenWithProtectedText));
         OnPropertyChanged(nameof(RegistrationNotice));
         OnPropertyChanged(nameof(RegistrationToolTip));
@@ -272,6 +288,22 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CreationSummary));
         OnPropertyChanged(nameof(DeletedAtText));
     }
+
+    private void RefreshMonitoringProperties()
+    {
+        OnPropertyChanged(nameof(HasPersistentProtection));
+        OnPropertyChanged(nameof(ShowProtection));
+        OnPropertyChanged(nameof(CanReviewOpenWith));
+        OnPropertyChanged(nameof(ProtectionText));
+        OnPropertyChanged(nameof(ProtectionToolTip));
+        OnPropertyChanged(nameof(MonitoringText));
+        OnPropertyChanged(nameof(HasMonitoringText));
+        OnPropertyChanged(nameof(ShowOpenWithReview));
+        OnPropertyChanged(nameof(AcceptOpenWithText));
+    }
+
+    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(CanReviewOpenWith));
+    partial void OnIsStateUncertainChanged(bool value) => OnPropertyChanged(nameof(CanReviewOpenWith));
 
     public void SetMoveAvailability(bool canMoveUp, bool canMoveDown)
     {

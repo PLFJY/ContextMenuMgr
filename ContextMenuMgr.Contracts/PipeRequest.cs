@@ -140,6 +140,9 @@ public sealed record PipeRequest
 
     public OpenWithUpdateRequest? OpenWithUpdate { get; init; }
 
+    // null acknowledges review, true explicitly authorizes per-user protection, false removes it.
+    public bool? OpenWithProtection { get; init; }
+
     public DragDropCreateRequest? DragDropCreate { get; init; }
 
     public GuidBlockCreateRequest? GuidBlockCreate { get; init; }

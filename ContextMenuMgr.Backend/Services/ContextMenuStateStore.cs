@@ -12,7 +12,7 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class ContextMenuStateStore
 {
-    private const int CurrentStateSchemaVersion = 2;
+    private const int CurrentStateSchemaVersion = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -24,6 +24,7 @@ public sealed class ContextMenuStateStore
     private readonly FileLogger? _logger;
     private readonly RuntimeHostIdentityProvider? _hostIdentityProvider;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private OpenWithMonitorState _openWith = new();
     private bool _isCurrentHostIdentityVerified = RuntimePaths.PackageKind != RuntimePackageKind.Portable;
 
     /// <summary>
@@ -71,27 +72,56 @@ public sealed class ContextMenuStateStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            CleanupStaleTemporaryFiles();
-            if (!File.Exists(_storagePath))
-            {
-                _logger?.LogFireAndForget($"ContextMenuStateStoreLoad: Path={_storagePath}, Exists=false, PersistedStateCount=0.");
-                return NewStateDictionary();
-            }
+            return await LoadCoreAsync(cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
 
-            try
-            {
-                var parsed = await ReadValidatedStateFileAsync(_storagePath, cancellationToken);
-                return await LoadParsedStateAsync(parsed, _storagePath, cancellationToken);
-            }
-            catch (Exception ex) when (IsCorruptedStateException(ex))
-            {
-                return await RecoverCorruptedCurrentAsync(ex, cancellationToken);
-            }
-        }
-        finally
+    private async Task<Dictionary<string, PersistedContextMenuState>> LoadCoreAsync(CancellationToken cancellationToken)
+    {
+        _openWith = new();
+        CleanupStaleTemporaryFiles();
+        if (!File.Exists(_storagePath))
         {
-            _gate.Release();
+            _isCurrentHostIdentityVerified = RuntimePaths.PackageKind != RuntimePackageKind.Portable
+                || _hostIdentityProvider?.GetCurrent().IsTrusted == true;
+            _logger?.LogFireAndForget($"ContextMenuStateStoreLoad: Path={_storagePath}, Exists=false, PersistedStateCount=0.");
+            return NewStateDictionary();
         }
+
+        try
+        {
+            var parsed = await ReadValidatedStateFileAsync(_storagePath, cancellationToken);
+            return await LoadParsedStateAsync(parsed, _storagePath, cancellationToken);
+        }
+        catch (Exception ex) when (IsCorruptedStateException(ex))
+        {
+            return await RecoverCorruptedCurrentAsync(ex, cancellationToken);
+        }
+    }
+
+    // One gate covers section read/modify/write AND any authorized registry action.
+    // Ordinary classic saves always reload this section before merging their states.
+    internal async Task<T> WithOpenWithAsync<T>(Func<OpenWithMonitorState, T> action,
+        bool save, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var states = await LoadCoreAsync(cancellationToken);
+            if (!_isCurrentHostIdentityVerified)
+                throw new InvalidOperationException("OpenWithPersistenceUnavailable");
+            var before = save ? JsonSerializer.Serialize(_openWith, JsonOptions) : null;
+            var result = action(_openWith);
+            if (save && before != JsonSerializer.Serialize(_openWith, JsonOptions))
+            {
+                await SaveCoreAsync(states, cancellationToken);
+                if (!_isCurrentHostIdentityVerified)
+                    throw new InvalidOperationException("OpenWithPersistenceUnavailable");
+            }
+            return result;
+        }
+        finally { _gate.Release(); }
     }
 
     /// <summary>
@@ -104,7 +134,7 @@ public sealed class ContextMenuStateStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            CleanupStaleTemporaryFiles();
+            await LoadCoreAsync(cancellationToken);
             await SaveCoreAsync(states, cancellationToken);
         }
         finally
@@ -125,6 +155,7 @@ public sealed class ContextMenuStateStore
         {
             TryDeleteStateFile(_storagePath);
             TryDeleteStateFile(_backupPath);
+            _openWith = new();
 
             var directory = Path.GetDirectoryName(_storagePath);
             if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
@@ -273,7 +304,8 @@ public sealed class ContextMenuStateStore
                 return;
             }
 
-            await SavePayloadAtomicallyAsync(states, states.Count, schemaVersion: null, cancellationToken);
+            // Schema 3 prevents older readers from silently discarding protection rules.
+            await SaveEnvelopeAsync(states, identity ?? RuntimeHostIdentity.Untrusted("InstallerIdentityUnavailable"), cancellationToken);
         }
         catch (Exception ex)
         {
@@ -296,6 +328,7 @@ public sealed class ContextMenuStateStore
         var storedPrefix = GetFingerprintPrefix(parsed.Envelope.HostIdentity?.Fingerprint);
         if (RuntimePaths.PackageKind != RuntimePackageKind.Portable)
         {
+            _openWith = parsed.Envelope.OpenWith ?? new();
             _isCurrentHostIdentityVerified = true;
             _logger?.LogFireAndForget(
                 $"ContextMenuStateStoreLoad: Path={sourcePath}, Exists=true, Format=Envelope, SchemaVersion={parsed.Envelope.SchemaVersion}, StoredFingerprintPrefix={storedPrefix}, Action=loaded, PersistedStateCount={states.Count}.");
@@ -314,6 +347,7 @@ public sealed class ContextMenuStateStore
 
         if (string.Equals(current.Fingerprint, parsed.Envelope.HostIdentity?.Fingerprint, StringComparison.OrdinalIgnoreCase))
         {
+            _openWith = parsed.Envelope.OpenWith ?? new();
             _isCurrentHostIdentityVerified = true;
             _logger?.LogFireAndForget(
                 $"PortableHostIdentityCheck: CurrentFingerprintPrefix={current.FingerprintPrefix}, StoredFingerprintPrefix={storedPrefix}, Action=loaded, PersistedStateCount={states.Count}.");
@@ -381,7 +415,8 @@ public sealed class ContextMenuStateStore
             {
                 SchemaVersion = CurrentStateSchemaVersion,
                 HostIdentity = HostIdentityEnvelope.FromRuntimeIdentity(identity),
-                States = states
+                States = states,
+                OpenWith = _openWith
             },
             states.Count,
             CurrentStateSchemaVersion,
@@ -504,7 +539,7 @@ public sealed class ContextMenuStateStore
                 throw new UnsupportedContextMenuStateSchemaException(schemaVersion);
             }
 
-            if (schemaVersion != CurrentStateSchemaVersion
+            if (schemaVersion is not (2 or CurrentStateSchemaVersion)
                 || !document.RootElement.TryGetProperty("states", out var statesElement)
                 || statesElement.ValueKind != JsonValueKind.Object)
             {
@@ -518,8 +553,27 @@ public sealed class ContextMenuStateStore
                 throw new InvalidDataException("The context-menu state envelope has no states dictionary.");
             }
 
+            if (schemaVersion == CurrentStateSchemaVersion && envelope.OpenWith is null)
+                throw new InvalidDataException("The state envelope has no Open With section.");
+
             var states = ToCaseInsensitiveDictionary(envelope.States);
             ValidateStates(states);
+            if (envelope.OpenWith is { } monitoring)
+            {
+                if (monitoring.Users is null || monitoring.Rules is null
+                    || monitoring.Users.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is null
+                        || p.Value.Registrations is null || p.Value.Reviews is null)
+                    || monitoring.Rules.Any(p => p.Value is null || string.IsNullOrWhiteSpace(p.Value.Sid)
+                        || string.IsNullOrWhiteSpace(p.Value.Path) || p.Value.Attempts < 0))
+                    throw new InvalidDataException("Invalid Open With monitoring state.");
+                monitoring.Users = new(monitoring.Users, StringComparer.OrdinalIgnoreCase);
+                monitoring.Rules = new(monitoring.Rules, StringComparer.OrdinalIgnoreCase);
+                foreach (var user in monitoring.Users.Values)
+                {
+                    user.Registrations = new(user.Registrations, StringComparer.OrdinalIgnoreCase);
+                    user.Reviews = new(user.Reviews, StringComparer.OrdinalIgnoreCase);
+                }
+            }
             return new ParsedState(states, envelope);
         }
 
@@ -693,6 +747,8 @@ public sealed class ContextMenuStateStore
         public HostIdentityEnvelope? HostIdentity { get; set; }
 
         public Dictionary<string, PersistedContextMenuState>? States { get; set; }
+
+        public OpenWithMonitorState? OpenWith { get; set; }
     }
 
     private sealed class HostIdentityEnvelope

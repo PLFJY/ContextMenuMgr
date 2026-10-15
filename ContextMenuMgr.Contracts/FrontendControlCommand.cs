@@ -7,5 +7,6 @@ public enum FrontendControlCommand
 {
     ShowMainWindow,
     OpenApprovals,
-    Shutdown
+    Shutdown,
+    OpenWith
 }

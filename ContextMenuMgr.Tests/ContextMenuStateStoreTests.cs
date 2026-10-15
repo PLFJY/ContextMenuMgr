@@ -8,6 +8,48 @@ namespace ContextMenuMgr.Tests;
 
 public sealed class ContextMenuStateStoreTests
 {
+    // Permanent: independent section merge, recovery and reset protect saved authorization
+    // from concurrent ordinary menu saves; schema 2 must migrate without invented rules.
+    [Fact]
+    public async Task OpenWithSection_SurvivesClassicSavesAndRecovery_AndResetRevokesIt()
+    {
+        using var fixture = new StateStoreFixture();
+        await File.WriteAllTextAsync(fixture.StatePath, "{\"schemaVersion\":2,\"states\":{}}");
+        var store = fixture.CreateStore();
+        Assert.Empty(await store.WithOpenWithAsync(s => s.Rules, false, default));
+        var staleClassic = await store.LoadAsync(default);
+        await store.WithOpenWithAsync(s =>
+        {
+            s.Rules["user|path"] = new OpenWithProtectionRule
+            {
+                Sid = "S-1-5-21-1-2-3-1001", Path = @"HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Classes\Applications\example.exe",
+                Authorized = true, CommandIdentity = "verified-generation", ExecutablePath = @"C:\Example\example.exe",
+                ExecutableHash = "verified-binary"
+            };
+            return true;
+        }, true, default);
+        await Task.WhenAll(store.SaveAsync(staleClassic, default), store.WithOpenWithAsync(s =>
+        {
+            s.Rules["user|path"].Attempts = 1;
+            s.Rules["user|path"].Outcome = "Uncertain";
+            return true;
+        }, true, default));
+        await store.SaveAsync(CreateStates("after-monitor", false), default);
+        var rule = Assert.Single(await fixture.CreateStore().WithOpenWithAsync(s => s.Rules.Values.ToArray(), false, default));
+        Assert.True(rule.Authorized);
+        Assert.Equal("Uncertain", rule.Outcome);
+        Assert.Equal(1, rule.Attempts);
+        using (var json = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath)))
+            Assert.Equal(3, json.RootElement.GetProperty("schemaVersion").GetInt32());
+        await File.WriteAllTextAsync(fixture.StatePath, "{corrupt");
+        var recovered = fixture.CreateStore();
+        Assert.Single(await recovered.WithOpenWithAsync(s => s.Rules, false, default));
+        Assert.Equal(ContextMenuStateStoreHealth.RecoveredFromBackup, recovered.Health);
+        await recovered.ResetAsync(default);
+        Assert.Empty(await recovered.WithOpenWithAsync(s => s.Rules, false, default));
+        Assert.Empty(await recovered.LoadAsync(default));
+    }
+
     [Fact]
     public async Task SaveAsync_ReplacesCurrentAndKeepsPreviousValidatedStateAsBackup()
     {

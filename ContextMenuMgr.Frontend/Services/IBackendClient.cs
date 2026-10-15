@@ -88,6 +88,9 @@ public interface IBackendClient : IAsyncDisposable
         SpecialMenuKind kind,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<SpecialMenuEntry>> ReviewOpenWithRegistrationAsync(SpecialMenuEntry item,
+        bool? protect, CancellationToken cancellationToken);
+
     Task<SpecialMenuEntry?> SetSpecialMenuItemEnabledAsync(
         SpecialMenuEntry item,
         bool enable,

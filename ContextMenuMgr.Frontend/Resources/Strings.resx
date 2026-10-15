@@ -1595,4 +1595,22 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>Visibility data or ownership marker differs from the verified writer; it is preserved.</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>Multiple physical registrations; effective handler not determined</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>System protected</value></data>
+  <data name="OpenWithAcceptCurrent" xml:space="preserve"><value>Accept current state</value></data>
+  <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>Cannot verify the executable identity. Use a literal local path to an existing file without symbolic links. Files over 128 MiB are not eligible.</value></data>
+  <data name="OpenWithMonitorChanged" xml:space="preserve"><value>Registration changed — review its source and command.</value></data>
+  <data name="OpenWithMonitorConflict" xml:space="preserve"><value>Protection needs review. Identity, visibility ownership or correction limit conflicts; no automatic write. Stop protection to accept the registration, or disable and authorize it again after inspection.</value></data>
+  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>Open With registrations changed. Review the Open With page.</value></data>
+  <data name="OpenWithMonitorMissing" xml:space="preserve"><value>Protected registration missing. The saved rule remains; stop protection here if no longer wanted.</value></data>
+  <data name="OpenWithMonitorNew" xml:space="preserve"><value>New registration — review; use the switch to disable or accept to keep.</value></data>
+  <data name="OpenWithMonitorReapplied" xml:space="preserve"><value>Re-registered or re-enabled application disabled and verified; not deleted.</value></data>
+  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>Application re-registered; the deleted backup is preserved.</value></data>
+  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>Correction outcome uncertain. Waiting for physical read-back; automatic retries are suspended.</value></data>
+  <data name="OpenWithPersistenceUnavailable" xml:space="preserve"><value>Protection was not saved: this portable host identity could not be verified.</value></data>
+  <data name="OpenWithProtectionActive" xml:space="preserve"><value>Persistent protection enabled</value></data>
+  <data name="OpenWithProtectionNotice" xml:space="preserve"><value>Opt in for this user registration only. Exact registry path, commands, executable path and SHA-256 must still match. Changed binaries or paths require review. At most three corrections per authorization; HKLM requires manual action. Other association sources can still offer this app.</value></data>
+  <data name="OpenWithProtectionOff" xml:space="preserve"><value>Stop persistent protection</value></data>
+  <data name="OpenWithProtectionOn" xml:space="preserve"><value>Keep this registration disabled</value></data>
+  <data name="OpenWithProtectionRequiresDisabled" xml:space="preserve"><value>Disable this registration first, then refresh and enable protection. Existing third-party visibility values cannot become protection rules.</value></data>
+  <data name="OpenWithUserProtectionOnly" xml:space="preserve"><value>Automatic protection is available only for the authenticated user registration. Machine registrations require manual action.</value></data>
+  <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>Open With monitoring is waiting for registry access or durable storage. Refresh the Open With page to inspect the current state.</value></data>
 </root>

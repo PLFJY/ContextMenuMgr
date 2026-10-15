@@ -414,6 +414,17 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.OpenWithInspection ?? throw new InvalidOperationException("Missing Open With inspection response.");
     }
 
+    public async Task<IReadOnlyList<SpecialMenuEntry>> ReviewOpenWithRegistrationAsync(SpecialMenuEntry item,
+        bool? protect, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest
+        {
+            Command = PipeCommand.ReviewOpenWithRegistration, SpecialItem = item,
+            OpenWithProtection = protect, ClientOperationId = Guid.NewGuid()
+        }, cancellationToken);
+        return response.SpecialItems;
+    }
+
     public async Task<SpecialMenuEntry?> SetSpecialMenuItemEnabledAsync(
         SpecialMenuEntry item,
         bool enable,

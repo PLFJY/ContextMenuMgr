@@ -229,3 +229,7 @@ Registry Write Protection 自身也属于链路 A，但同时覆盖 HKLM 与 fro
 | 无调用的旧 Frontend PowerShell 生命周期脚本生成器 | 已被 bootstrapper 完全替代，删除；不是升级数据迁移。 |
 
 完成任务时执行 `AGENTS.md` 的清理规则：移除临时测试与被替换实现、搜索旧名称/资源/生成命令、审阅 diff，并分别报告自动验证和人工运行验证。无需为每个兼容 helper 新建追踪文档或捏造退休版本。
+
+## OpenWith monitoring maintenance (#136)
+
+OpenWith persistent protection is Flow A and lives in its own schema-3 state section. New Applications registrations are review-only; classic Added/quarantine/desired-disabled rules must never be applied to them. Only a user-explicit HKU rule can authorize correction, after exact physical SID/path, command generation and executable SHA-256 validation. HKLM remains manual-only. Existing NoOpenWith values are not policies. Persist intent/attempt reservation before writes, use existing transactional SetEnabled plus fresh read-back, and suspend uncertain/conflicting outcomes instead of blindly retrying. Explicit Enable revokes the rule durably first. Preserve sibling .deleted backups. WTS/pipe identities identify each user; loaded hive validation and native registry view remain mandatory. Full behavior and upgrade/reset/verification decisions are documented in [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136).

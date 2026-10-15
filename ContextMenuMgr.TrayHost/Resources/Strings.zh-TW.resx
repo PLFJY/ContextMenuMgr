@@ -76,4 +76,6 @@
   <data name="Tray.BackendUnavailable" xml:space="preserve">
     <value>後端服務無法使用。</value>
   </data>
+  <data name="Tray.OpenWithTitle" xml:space="preserve"><value>開啟方式審核</value></data>
+  <data name="Tray.OpenWithMessage" xml:space="preserve"><value>開啟方式註冊已變更或保護需要處理，請開啟開啟方式頁面審核。</value></data>
 </root>

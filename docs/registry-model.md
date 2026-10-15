@@ -311,3 +311,7 @@ If the service process crashes between the two registry writes, no final ownersh
 维护决定：保留上文 v1.7.5 可见性签名恢复，直至明确停止支持所有仍带该签名、且没有物理 provenance 的持久状态升级；不能仅因项目已经生成新版 provenance 就移除它。迁移成功的单项自然转入当前事务格式，不引入永久兼容开关。
 
 OpenWith 的按扩展名来源检查复用 ContextMenuRegistryCatalog.ReadOpenWithProgIdReferences，保留 OpenWithProgIDs 的物理来源与无 command ProgID；传统菜单的 AddAssociatedClassRoot/HasAnyContextMenuSubkey 策略不变。来源检查不写 ProgID、默认关联或常规菜单状态；详见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。
+
+## OpenWith monitoring boundary (#136)
+
+The six classic monitoring rules above do not apply to Applications registrations. OpenWith uses a separate schema-3 section and settled per-SID physical-path baseline in ContextMenuStateStore, not synthetic classic entries. Its runtime and offline new registrations are review-only by default; a preexisting NoOpenWith never implies enforcement. Only explicit, fingerprint-bound HKU protection authorizes safe verified NoOpenWith correction, including across restarts. HKLM is manual-only. The store gate merges OpenWith updates with ordinary classic saves; reset removes both sections and their backup. Details, limits, migration and manual verification are in [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136). Classic mutation methods and registry ACL protection are unchanged.

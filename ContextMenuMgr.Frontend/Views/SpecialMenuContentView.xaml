@@ -521,6 +521,20 @@
                                             Text="{Binding RegistrationNotice}"
                                             ToolTip="{Binding RegistrationToolTip}"
                                             Visibility="{Binding HasRegistrationNotice, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                                            Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                            Text="{Binding MonitoringText}"
+                                            Visibility="{Binding HasMonitoringText, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <WrapPanel Margin="0,6,0,0">
+                                            <ui:Button Margin="0,0,6,0" Content="{Binding AcceptOpenWithText}"
+                                                Command="{Binding DataContext.AcceptOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                                Visibility="{Binding ShowOpenWithReview, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <ui:Button Content="{Binding ProtectionText}" ToolTip="{Binding ProtectionToolTip}"
+                                                Command="{Binding DataContext.ProtectOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                                Visibility="{Binding ShowProtection, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        </WrapPanel>
                                         <ui:TextBlock
                                             Margin="0,8,0,0"
                                             Opacity="0.72"

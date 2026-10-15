@@ -59,5 +59,6 @@ public enum PipeCommand
     GetWpsOfficePendingApprovals,
     SetDocumentIconProvider,
     GetContextMenuItemState,
-    InspectOpenWithSources
+    InspectOpenWithSources,
+    ReviewOpenWithRegistration
 }

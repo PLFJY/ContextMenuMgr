@@ -136,6 +136,27 @@ public sealed class BackendUserContextResolver
         }
     }
 
+    // Monitoring may have several logged-in users even when only one console is active.
+    // Tokens establish identity; a loaded HKEY_USERS hive is validated separately by OpenWith.
+    internal IReadOnlyList<BackendUserContext> ResolveLoggedInUsers()
+    {
+        if (!NativeMethods.WTSEnumerateSessionsW(IntPtr.Zero, 0, 1, out var sessions, out var count)) return [];
+        try
+        {
+            var result = new List<BackendUserContext>();
+            var size = Marshal.SizeOf<NativeMethods.WTS_SESSION_INFO>();
+            for (var index = 0; index < Math.Min(count, 128); index++)
+            {
+                var session = Marshal.PtrToStructure<NativeMethods.WTS_SESSION_INFO>(IntPtr.Add(sessions, index * size));
+                if (session.State is not (NativeMethods.WTS_CONNECTSTATE_CLASS.WTSActive
+                    or NativeMethods.WTS_CONNECTSTATE_CLASS.WTSConnected or NativeMethods.WTS_CONNECTSTATE_CLASS.WTSDisconnected)) continue;
+                if (TryResolveSession(session.SessionID, out var context)) result.Add(context!);
+            }
+            return result.DistinctBy(c => c.Sid, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+        finally { NativeMethods.WTSFreeMemory(sessions); }
+    }
+
     private int? TryResolvePipeClientSessionId(NamedPipeServerStream stream)
     {
         try

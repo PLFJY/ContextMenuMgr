@@ -19,7 +19,9 @@ public sealed class ContextMenuRegistryMonitor
     private readonly ConcurrentQueue<(string? Sid, IReadOnlyList<ContextMenuEntry> Items)> _committedSwitches = new();
     private readonly TaskCompletionSource _baselineEstablished = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _monitorTask;
+    private CancellationTokenSource? _monitorCts;
     private volatile bool _interactiveBaselineResetRequested;
+    internal OpenWithMonitoringService? OpenWithMonitoring { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuRegistryMonitor"/> class.
@@ -62,6 +64,7 @@ public sealed class ContextMenuRegistryMonitor
     public void NotifyInteractiveSessionObserved()
     {
         _interactiveBaselineResetRequested = true;
+        OpenWithMonitoring?.NotifySessionBoundary();
     }
 
     /// <summary>
@@ -70,7 +73,19 @@ public sealed class ContextMenuRegistryMonitor
     public void Start(CancellationToken cancellationToken)
     {
         _logger.LogFireAndForget($"RegistryMonitorStart: PollIntervalMs={_pollInterval.TotalMilliseconds}.");
-        _monitorTask ??= Task.Run(() => MonitorLoopAsync(cancellationToken), cancellationToken);
+        if (_monitorTask is not null) return;
+        _monitorCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var monitorToken = _monitorCts.Token;
+        _monitorTask = Task.Run(() => MonitorLoopAsync(monitorToken), monitorToken);
+    }
+
+    internal async Task StopAsync()
+    {
+        var monitorCts = Interlocked.Exchange(ref _monitorCts, null);
+        monitorCts?.Cancel();
+        try { await Completion; }
+        catch (OperationCanceledException) { }
+        finally { monitorCts?.Dispose(); }
     }
 
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
@@ -79,7 +94,24 @@ public sealed class ContextMenuRegistryMonitor
         // disabled-to-enabled drift here: rule 5 requires both switch directions
         // to remain visible as Modified until the user handles them.
         ClearCommittedSwitches();
-        var initialScan = await ReadSnapshotAsync(cancellationToken);
+        (IReadOnlyList<ContextMenuEntry> Items, BackendUserContext? UserContext) initialScan;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (OpenWithMonitoring is { } openWith)
+                    await openWith.PollAsync(_resolveUserContext(), DateTimeOffset.UtcNow, cancellationToken);
+                initialScan = await ReadSnapshotAsync(cancellationToken);
+                break;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                await _logger.LogAsync(RuntimeLogLevel.Warning, $"Registry monitor initial snapshot deferred: {ex.Message}", cancellationToken);
+                await Task.Delay(_pollInterval, cancellationToken);
+            }
+        }
         var baselineSid = initialScan.UserContext?.Sid;
         var knownItems = initialScan.Items
             .Where(static item => item.IsPresentInRegistry && !item.IsDeleted)
@@ -101,6 +133,9 @@ public sealed class ContextMenuRegistryMonitor
             {
                 await _logger.LogAsync($"RegistryMonitorDebounceWait: DelayMs={_pollInterval.TotalMilliseconds}.", cancellationToken);
                 await Task.Delay(_pollInterval, cancellationToken);
+
+                if (OpenWithMonitoring is { } openWith)
+                    await openWith.PollAsync(_resolveUserContext(), DateTimeOffset.UtcNow, cancellationToken);
 
                 if (!_interactiveBaselineResetRequested)
                 {

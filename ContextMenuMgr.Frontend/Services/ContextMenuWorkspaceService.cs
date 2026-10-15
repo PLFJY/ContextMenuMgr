@@ -1296,7 +1296,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     {
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
-            if (notification.Kind == PipeNotificationKind.ServiceMessage
+            if (notification.Kind is PipeNotificationKind.ServiceMessage or PipeNotificationKind.OpenWithChanged
                 && !string.IsNullOrWhiteSpace(notification.Message))
             {
                 ServiceAttentionText = string.IsNullOrWhiteSpace(notification.MessageResourceKey)

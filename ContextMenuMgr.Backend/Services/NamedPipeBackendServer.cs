@@ -194,6 +194,13 @@ public sealed class NamedPipeBackendServer
                     await _logger.LogAsync($"SubscribeTrayHost: ConnectionId={connection.Id}, CorrelationId={envelope.CorrelationId}, ClientOperationId={envelope.Request.ClientOperationId}, Timestamp={DateTimeOffset.UtcNow:O}.", cancellationToken);
                 }
 
+                if (connection.UserContext is null)
+                {
+                    connection.UserContext = new BackendUserContextResolver(_logger).TryResolveFromPipeClient(stream);
+                    if (connection.UserContext is { } subscribedUser)
+                        _specialMenuService.OpenWithMonitoring?.ObserveUser(subscribedUser);
+                }
+
                 PipeResponse response;
                 var stopwatch = Stopwatch.StartNew();
                 await _logger.LogAsync(BuildRequestStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken);
@@ -231,7 +238,11 @@ public sealed class NamedPipeBackendServer
 
                 var deliveryFailure = await PublishAndDeliverResponseAsync(
                     envelope.Request, response,
-                    notification => BroadcastNotificationAsync(notification, cancellationToken),
+                    notification => notification.SpecialKind == SpecialMenuKind.OpenWith
+                        ? connection.UserContext is { } caller
+                            ? BroadcastNotificationAsync(notification with { UserSid = caller.Sid }, cancellationToken)
+                            : Task.CompletedTask
+                        : BroadcastNotificationAsync(notification, cancellationToken),
                     () => connection.SendAsync(
                         new PipeEnvelope
                         {
@@ -421,6 +432,11 @@ public sealed class NamedPipeBackendServer
                         await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false),
                         cancellationToken)
                 },
+            PipeCommand.ReviewOpenWithRegistration when request.SpecialItem is not null
+                && _specialMenuService.OpenWithMonitoring is { } monitoring
+                => await monitoring.ReviewAsync(request.SpecialItem, request.OpenWithProtection,
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
             PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
                 => new PipeResponse
                 {
@@ -997,7 +1013,8 @@ public sealed class NamedPipeBackendServer
             Notification = notification
         };
 
-        var subscribers = _clients.Values.Where(static connection => connection.IsNotificationSubscriber).ToList();
+        var subscribers = _clients.Values.Where(connection => connection.IsNotificationSubscriber
+            && (notification.UserSid is null || notification.UserSid.Equals(connection.UserContext?.Sid, StringComparison.OrdinalIgnoreCase))).ToList();
         var removedDeadSubscribers = 0;
         await _logger.LogAsync(
             $"BroadcastNotificationStart: Kind={notification.Kind}, ClientOperationId={notification.ClientOperationId}, SubscriberCount={subscribers.Count}, Timestamp={DateTimeOffset.UtcNow:O}.",
@@ -1206,6 +1223,8 @@ public sealed class NamedPipeBackendServer
         /// Gets or sets a value indicating whether notification Subscriber.
         /// </summary>
         public bool IsNotificationSubscriber { get; set; }
+
+        public BackendUserContext? UserContext { get; set; }
 
         /// <summary>
         /// Executes send Async.

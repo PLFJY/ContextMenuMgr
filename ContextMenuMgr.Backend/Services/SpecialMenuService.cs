@@ -37,6 +37,7 @@ public sealed class SpecialMenuService
     private const RegistryRights ShellNewOrderLockRights = RegistryRights.SetValue | RegistryRights.CreateSubKey | RegistryRights.Delete;
 
     private readonly FileLogger _logger;
+    internal OpenWithMonitoringService? OpenWithMonitoring { get; set; }
 
     public SpecialMenuService(FileLogger logger)
     {
@@ -54,8 +55,10 @@ public sealed class SpecialMenuService
             path => ReadOpenWithRegistration(path, context), linked.Token));
     }
 
-    public Task<IReadOnlyList<SpecialMenuEntry>> GetSnapshotAsync(SpecialMenuKind kind, BackendUserContext? userContext, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SpecialMenuEntry>> GetSnapshotAsync(SpecialMenuKind kind, BackendUserContext? userContext, CancellationToken cancellationToken)
     {
+        if (kind == SpecialMenuKind.OpenWith && OpenWithMonitoring is { } monitoring)
+            return await monitoring.GetSnapshotAsync(RequireUserContext(userContext), cancellationToken);
         var requiresUserContext = kind is SpecialMenuKind.ShellNew or SpecialMenuKind.SendTo or SpecialMenuKind.WinX or SpecialMenuKind.OpenWith;
         if (kind == SpecialMenuKind.WinX)
         {
@@ -77,7 +80,7 @@ public sealed class SpecialMenuService
         };
 
         _logger.LogFireAndForget($"SpecialMenuGetSnapshot: Kind={kind}, RequiresUserContext={requiresUserContext}, Sid={DiagnosticLogFormatter.FormatSid(userContext)}, Count={items.Count}.");
-        return Task.FromResult(items);
+        return items;
     }
 
     public async Task<PipeResponse> SetEnabledAsync(SpecialMenuEntry item, bool enabled, Guid? operationId, BackendUserContext? userContext, CancellationToken cancellationToken)
@@ -105,7 +108,9 @@ public sealed class SpecialMenuService
                     SpecialMenuKind.ShellNew => SetShellNewEnabled(item, enabled, RequireUserContext(userContext)),
                     SpecialMenuKind.SendTo => SetFileSystemItemEnabled(item, enabled, GetSendToPath(RequireUserContext(userContext))),
                     SpecialMenuKind.WinX => SetFileSystemItemEnabled(item, enabled, GetWinXPath(RequireUserContext(userContext))),
-                    SpecialMenuKind.OpenWith => SetOpenWithEnabled(item, enabled, RequireUserContext(userContext)),
+                    SpecialMenuKind.OpenWith => OpenWithMonitoring is { } monitoring
+                        ? await monitoring.SetEnabledAsync(item, enabled, RequireUserContext(userContext), cancellationToken)
+                        : SetOpenWithEnabled(item, enabled, RequireUserContext(userContext)),
                     SpecialMenuKind.DragDrop => SetDragDropEnabled(item, enabled),
                     SpecialMenuKind.InternetExplorer => SetRenameBackedRegistryItemEnabled(item, enabled, "MenuExt", "-MenuExt"),
                     SpecialMenuKind.CommandStore => SetCommandStoreEnabled(item, enabled),
@@ -2283,7 +2288,8 @@ public sealed class SpecialMenuService
         return GetDragDropItems().First(static item => item.Id == "dragdrop:default-drop-effect");
     }
 
-    private static IReadOnlyList<SpecialMenuEntry> GetOpenWithItems(BackendUserContext context, CancellationToken cancellationToken)
+    internal static IReadOnlyList<SpecialMenuEntry> GetOpenWithItems(BackendUserContext context, CancellationToken cancellationToken,
+        int? rootLimit = null)
     {
         lock (OpenWithRegistration.Sync)
         {
@@ -2300,14 +2306,14 @@ public sealed class SpecialMenuService
                 $@"{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
                 $@"HKEY_USERS\{context.Sid}\{UserClassesPath}\{ApplicationsPath}",
                 "User",
-                result, cancellationToken: cancellationToken);
+                result, cancellationToken: cancellationToken, maxNames: rootLimit);
 
             PopulateOpenWithItems(
                 machineRoot,
                 $@"{MachineClassesPath}\{ApplicationsPath}",
                 $@"HKEY_LOCAL_MACHINE\{MachineClassesPath}\{ApplicationsPath}",
                 "Machine",
-                result, cancellationToken: cancellationToken);
+                result, cancellationToken: cancellationToken, maxNames: rootLimit);
 
             return result
                 .GroupBy(static item => item.Id, StringComparer.OrdinalIgnoreCase)
@@ -2353,7 +2359,7 @@ public sealed class SpecialMenuService
         string scope,
         List<SpecialMenuEntry> result,
         string? selectedAppName = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? maxNames = null)
     {
         using var applicationsKey = root.OpenSubKey(subPath, writable: false);
         if (applicationsKey is null)
@@ -2362,6 +2368,8 @@ public sealed class SpecialMenuService
         }
 
         var appNames = selectedAppName is null ? applicationsKey.GetSubKeyNames() : [selectedAppName];
+        if (maxNames is { } limit && appNames.Length > limit)
+            throw new InvalidOperationException("OpenWith monitoring registration budget exceeded.");
         foreach (var appName in appNames.OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -2424,6 +2432,7 @@ public sealed class SpecialMenuService
                         ["VerbName"] = verbName ?? string.Empty,
                         ["ReadOnlyReason"] = manageable ? string.Empty : "OpenWithUnsupportedRegistration",
                         ["EditStamp"] = manageable ? OpenWithRegistration.EditStamp(appKey, deletedAppPath) : string.Empty,
+                        ["CommandIdentity"] = manageable ? OpenWithRegistration.CommandIdentity(appKey, appPath) : string.Empty,
                         ["VisibilityOwnership"] = OpenWithRegistration.VisibilityOwnership(appKey, appPath, manageable),
                         ["RegistryScope"] = scope,
                         ["VisibilityStamp"] = OpenWithRegistration.VisibilityStamp(appKey),
@@ -2592,7 +2601,7 @@ public sealed class SpecialMenuService
         }
     }
 
-    private static SpecialMenuEntry SetOpenWithEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext context)
+    internal static SpecialMenuEntry SetOpenWithEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext context)
     {
         lock (OpenWithRegistration.Sync)
         {
@@ -2739,7 +2748,7 @@ public sealed class SpecialMenuService
         catch (Exception ex) { throw new InvalidOperationException("OpenWithOperationUncertain", ex); }
     }
 
-    private static SpecialMenuEntry ReadOpenWithRegistration(string physicalAppPath, BackendUserContext context)
+    internal static SpecialMenuEntry ReadOpenWithRegistration(string physicalAppPath, BackendUserContext context)
     {
         var isMachine = physicalAppPath.StartsWith("HKEY_LOCAL_MACHINE\\", StringComparison.OrdinalIgnoreCase);
         using var root = RegistryKey.OpenBaseKey(isMachine ? RegistryHive.LocalMachine : RegistryHive.Users, NativeRegistryView);

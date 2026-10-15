@@ -25,6 +25,7 @@ internal sealed class TrayHostRunner : IDisposable
     private CancellationTokenSource? _controlServerCts;
 
     private bool _isClosing;
+    private volatile bool _openWithNotification;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TrayHostRunner"/> class.
@@ -137,6 +138,11 @@ internal sealed class TrayHostRunner : IDisposable
 
     private void OpenApprovals()
     {
+        if (_openWithNotification)
+        {
+            _frontendActivationService.TryOpenOpenWith();
+            return;
+        }
         // Win32 balloon callbacks identify the icon, not an approval item. A
         // newer notification or a resolved approval must not supply a stale ID.
         _ = _logger.LogAsync("Opening approvals from tray notification.");
@@ -175,6 +181,13 @@ internal sealed class TrayHostRunner : IDisposable
 
     private void OnNotificationReceived(object? sender, BackendNotification notification)
     {
+        if (notification.Kind == PipeNotificationKind.OpenWithChanged)
+        {
+            _openWithNotification = true;
+            _trayHost?.ShowNotification(_localization.Translate("Tray.OpenWithTitle"),
+                _localization.Translate("Tray.OpenWithMessage"));
+            return;
+        }
         if (notification.Kind == PipeNotificationKind.ServiceStopping)
         {
             _trayHost?.RequestClose();
@@ -185,6 +198,8 @@ internal sealed class TrayHostRunner : IDisposable
         {
             return;
         }
+
+        _openWithNotification = false;
 
         _ = _logger.LogAsync($"Approval notification received for item {notification.Item.Id} ({notification.Item.DisplayName}).");
 
