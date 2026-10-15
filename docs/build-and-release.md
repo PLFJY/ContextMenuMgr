@@ -238,7 +238,7 @@ Run workflow 有两种模式，均从 `main` 检出起点：
 - `commit_sha` 留空：使用这次运行开始时检出的 `main` HEAD，立即固定为 `source_sha`。后续即使 `main` 有新提交，本次各个 job 仍构建原先选定的 SHA。
 - `commit_sha` 输入 7–40 位十六进制 SHA：必须可唯一解析为 commit，且位于 `main` 的祖先历史中；不接受其它分支独有、无效或歧义 SHA。选择后再次 checkout 指定 commit，因此版本、发布说明、编译和打包脚本均取自该 commit。旧 commit 的 `Directory.Build.props` 版本决定 Release tag 和产物版本，不使用当前 `main` 的新版本号。
 
-`resolve-metadata` 把准确的 `source_sha` 传递给全部七个 build matrix 目标及 `create-release`；所有构建从同一提交执行。创建 Release 时向 `softprops/action-gh-release` 显式传入 `target_commitish: source_sha`，若 tag 不存在，由 GitHub 创建指向该提交的 tag；若 tag 已存在，必须预先验证该 tag 解引用后恰好指向 `source_sha`，绝不移动现有 tag。创建 draft 后再次读取远端 tag 核验。GitHub API 对已经存在的 tag 会忽略 `target_commitish`，所以不能只添加该参数而不检查 tag。
+`resolve-metadata` 把准确的 `source_sha` 传递给全部七个 build matrix 目标及 `create-release`；所有构建从同一提交执行。创建 Release 时向 `softprops/action-gh-release` 显式传入 `target_commitish: source_sha`，若 tag 不存在，由 GitHub 创建指向该提交的 tag；若 tag 已存在，必须预先验证该 tag 解引用后恰好指向 `source_sha`，绝不移动现有 tag。创建 draft 后通过 Release ID 回读 draft 的目标 Commit、10 个上传资产及正文 SHA-256；Git tag 在 draft 阶段不一定存在，不应在发布前强制 fetch。正式发布后再核验 tag 是否指向目标 Commit。GitHub API 对已经存在的 tag 会忽略 `target_commitish`，所以不能只添加该参数而不检查 tag。
 
 防止 #137 重现：`resolve-metadata` 在构建前、`create-release` 在上传前分别分页列出 GitHub Releases（含 draft，不能只用按 tag 查询接口）；同名 Release 已存在时，无论是 draft、published 还是 immutable，**直接失败**，不允许任何重新生成的正文覆盖它。最终上传 job 按 release tag 分组串行化并禁止 cancel-in-progress，以封闭两次 workflow 同时通过早期检查的竞态。上传动作还设置 `overwrite_files: false` 与 `fail_on_unmatched_files: true`。取消/失败的 build 不会修改已经存在的 Release。若没有 Release 但已有同名 tag，只有 tag 指向同一 `source_sha` 才允许继续。tag 不存在属于正常首次发布，不得因 Git 命令返回非零状态导致 PowerShell step 误报失败。
 
