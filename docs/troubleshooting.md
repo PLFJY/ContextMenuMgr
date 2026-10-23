@@ -186,6 +186,14 @@ Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
 
 ## 10. Registry Write Protection 导致编辑失败
 
+### 删除后仍提示注册项存在 / Safe360Ext
+
+2026-10-23 日志中的 `*\shellex\ContextMenuHandlers|Safe360Ext` 删除目标为 `HKLM\SOFTWARE\Classes\*\shellex\-ContextMenuHandlers\Safe360Ext`。旧删除 API 在无法取得 value-write handle 时可能静默跳过；独立测试键已复现“允许 DELETE、拒绝 SetValue，DeleteSubKeyTree 返回但键仍存在”。当前实现按 ReadKey/DELETE 检查整树并逐键删除，不修改 ACL。原日志中另外一次启用的 Access Denied 发生在创建 active 目标，不能据此断言删除也被第三方自保护阻止。
+
+重试时检查 `ClassicDeleteStarted` 的真实路径、备份及失败异常，再实际打开同一路径和视图确认。若仍 Access Denied，应继续核查服务身份、目标权限或外部拦截证据；不能仅凭软件名称判断原因。成功编译和隔离键测试不能替代安装版服务上的真实删除/撤销验证。
+
+“打开注册表位置”应使用卡片的真实 `BackendRegistryPath`，而非猜测 HKCR overlay。前端向当前用户 Regedit `LastKey` 写完整 hive 路径，不拼接应用语言下的“计算机/Computer”；同 Session 已有 Regedit 时使用 `-m` 新窗口，使新路径被读取，不关闭用户原窗口。查看 `RegistryEditorNavigationRequested` 确认请求路径；该事件只代表已请求定位，窗口启动不证明已选中目标。
+
 | 项目 | 内容 |
 | --- | --- |
 | 现象 | 编辑、启用、删除菜单项时报注册表保护错误。 |

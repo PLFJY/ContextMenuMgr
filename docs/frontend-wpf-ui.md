@@ -25,6 +25,10 @@
 | `NavigationPages.cs` | WPF-UI NavigationView 使用的页面类型 | 导航项的 `TargetPageType` 应指向 Page 类型。 |
 
 前端是 UI 层。它通过 `NamedPipeBackendClient` 请求 Backend Service，通过 `BackendServiceManager` 触发服务安装/修复等 UAC bootstrapper 操作，通过 `ContextMenuDeepAnalysisService` 启动 ProbeHost。前端不应该直接执行高权限注册表操作，也不应该直接加载第三方 Shell Extension DLL。
+
+菜单详情的注册表定位由 `ContextMenuItemActionsService` 在前端用户 Session 发起：优先打开真实 `BackendRegistryPath`，缺少物理路径时才使用展示路径的 HKCR fallback；已经是完整 hive 的路径不能重复加 `HKEY_CLASSES_ROOT`。Regedit 的 `LastKey` 使用完整 hive 路径，不依赖应用语言生成计算机根名称。同 Session 已有 Regedit 时强制 `-m` 新实例，因为唤醒旧实例不会重读 LastKey；保留用户已有窗口，未开启多开偏好时也适用这一定位要求。仅写前端用户自己的 Regedit 偏好，不通过服务启动 UI，也不加载第三方扩展。
+
+人工验证：Windows 英文/应用中文及相反组合，分别在无 Regedit、已有 Regedit、已有多个 Regedit 时点击定位；确认新窗口地址栏和选中键与真实 HKLM/HKU active/disabled 路径一致。验证 CLSID 定位和导出，以及 UAC 取消后错误提示；`FrontendLocalActionEnd Success=true` 只代表动作完成，不能代替对选中键的观察。
 外部变化或一致性提示的“忽略/确认”按钮只有在后端 `AcknowledgeItemState` 成功后才在当前界面隐藏提示；请求失败时保留提示，避免 UI 显示已确认而状态库仍未采纳。
 
 ## 3. App.xaml 资源字典与全局样式

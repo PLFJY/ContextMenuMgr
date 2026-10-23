@@ -2235,9 +2235,17 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             deleteRegistryPath = backendRegistryPath;
+            var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync(
+                "DeleteItem", [backendRegistryPath], cancellationToken);
+            if (preflight is not null)
+            {
+                return preflight;
+            }
+
             var backupFilePath = await _backupService.ExportKeyAsync(backendRegistryPath, cancellationToken);
             exportedBackupPath = backupFilePath;
-            DeleteRegistryKey(backendRegistryPath);
+            _logger.LogFireAndForget($"ClassicDeleteStarted: ItemId={itemId}, BackendRegistryPath={backendRegistryPath}, BackupFilePath={backupFilePath}.");
+            DeleteRegistryKeyTree(backendRegistryPath);
             using (var deletionVerification = OpenRegistryKey(backendRegistryPath, writable: false))
             {
                 if (deletionVerification is not null)
@@ -2299,7 +2307,7 @@ public sealed class ContextMenuRegistryCatalog
                     rollback = new ShellVerbRollbackResult(true, false, false, rollbackException.Message);
                 }
             }
-            await _logger.LogAsync($"Failed to delete {displayName}: {ex.Message}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}; RollbackError={rollback.Error ?? "<none>"}.", CancellationToken.None);
+            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Failed to delete {displayName}: BackendRegistryPath={deleteRegistryPath}; Exception={ex}; RollbackAttempted={rollback.Attempted}; RollbackSucceeded={rollback.Succeeded}; RollbackConflict={rollback.Conflict}; RollbackError={rollback.Error ?? "<none>"}.", CancellationToken.None);
             return CreateFailure(
                 rollback.Conflict || !rollback.Succeeded
                     ? $"{ex.Message} The deleted registry key could not be restored safely."
@@ -2311,7 +2319,9 @@ public sealed class ContextMenuRegistryCatalog
                     ? PipeErrorCodes.RegistryMutationRollbackConflict
                     : registryDeleted
                         ? PipeErrorCodes.RegistryMutationRolledBack
-                        : null);
+                        : ex is ProtectedRegistryMutationException mutationException
+                            ? mutationException.ErrorCode
+                            : PipeErrorCodes.RegistryMutationVerificationFailed);
         }
     }
 
@@ -4985,11 +4995,6 @@ public sealed class ContextMenuRegistryCatalog
         return Equals(left, right);
     }
 
-    private static void DeleteRegistryKey(string registryPath)
-    {
-        DeleteRegistryKeyTree(registryPath);
-    }
-
     private static EnhanceAttributeWriteResult? SetEnhanceShellItemEnabled(
         string relativeGroupPath,
         XElement itemElement,
@@ -6460,13 +6465,49 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void DeleteRegistryKeyTree(string absoluteRegistryPath)
     {
-        if (TrySplitAbsoluteRegistryPath(absoluteRegistryPath, out var rootKey, out var subPath))
+        if (!TrySplitAbsoluteRegistryPath(absoluteRegistryPath, out var rootKey, out var subPath))
         {
-            rootKey.DeleteSubKeyTree(subPath, throwOnMissingSubKey: false);
-            return;
+            rootKey = Registry.ClassesRoot;
+            subPath = absoluteRegistryPath;
         }
 
-        Registry.ClassesRoot.DeleteSubKeyTree(absoluteRegistryPath, throwOnMissingSubKey: false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subPath);
+
+        // DeleteSubKeyTree first requests value-write access and silently treats a
+        // denied open as a missing key. Deleting a key only needs read/enumeration
+        // and DELETE rights; it must not clear values before deleting the key.
+        // Check the entire tree before deleting any children so a known DELETE
+        // denial cannot leave a partially stripped registration behind.
+        var deletionPaths = new List<string>();
+        CollectDeletionPaths(subPath);
+        foreach (var path in deletionPaths)
+        {
+            rootKey.DeleteSubKey(path, throwOnMissingSubKey: false);
+            using var verification = rootKey.OpenSubKey(path, writable: false);
+            if (verification is not null)
+            {
+                throw new ProtectedRegistryMutationException(
+                    PipeErrorCodes.RegistryMutationVerificationFailed,
+                    $"The registry key still exists after deletion: {rootKey.Name}\\{path}.");
+            }
+        }
+
+        void CollectDeletionPaths(string path)
+        {
+            using var key = rootKey.OpenSubKey(path, RegistryKeyPermissionCheck.ReadSubTree,
+                RegistryRights.ReadKey | RegistryRights.Delete);
+            if (key is null)
+            {
+                return;
+            }
+
+            foreach (var child in key.GetSubKeyNames())
+            {
+                CollectDeletionPaths($@"{path}\{child}");
+            }
+
+            deletionPaths.Add(path);
+        }
     }
 
     private static bool TrySplitAbsoluteRegistryPath(string absoluteRegistryPath, out RegistryKey rootKey, out string subPath)

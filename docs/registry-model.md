@@ -160,6 +160,10 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 保留备份是为了降低误删风险，也让审核中的 Remove 操作可回滚。备份本身不是注册表真实状态，导入失败或目标权限变化仍可能导致恢复失败。
 
+经典注册项删除先执行 Registry Write Protection preflight，再导出真实 `BackendRegistryPath`。共享的树删除实现先只申请 `ReadKey | Delete`，检查整个子树，随后从叶到根使用 `DeleteSubKey` 删除并逐键重新打开验证；不申请 `SetValue`、不预先清空 value、不接管所有权或改 ACL。不要换回 `DeleteSubKeyTree(..., false)`：它内部请求 value-write 权限，打开被拒绝时可能把现存 key 当作缺失而静默跳过。允许 DELETE 但拒绝 SetValue 的注册项仍应能删除；确实拒绝 DELETE 时应在删除任何子键前失败。外部并发修改仍可能导致执行阶段失败，`.reg` 备份不包含 ACL，不能据此宣称安全描述符已恢复。
+
+`ClassicDeleteStarted` 记录物理路径与备份路径；失败日志包含完整异常和回滚结果，失败响应保留 mutation 错误码。只有物理缺失回读及状态库保存成功才报告已删除。手动检查：在禁用目录删除 Shell Extension，刷新确认物理键缺失、卡片可撤销、重启后恢复记录仍存在，再撤销确认注册内容恢复；写保护开启时应拒绝且不导出新备份。
+
 恢复用户级或 HKCR overlay 相关菜单项时，后端必须带 frontend user context 重读快照，不能用服务进程的 HKCU 或无用户上下文的全局快照判断恢复结果。
 
 ## 8. 状态库与显式 baseline

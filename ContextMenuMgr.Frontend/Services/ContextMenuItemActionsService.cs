@@ -140,7 +140,9 @@ public sealed class ContextMenuItemActionsService
                     return;
                 }
 
-                OpenRegistryEditor(GetClassesRootPath(item.Entry.RegistryPath));
+                OpenRegistryEditor(string.IsNullOrWhiteSpace(item.Entry.BackendRegistryPath)
+                    ? GetClassesRootPath(item.Entry.RegistryPath)
+                    : item.Entry.BackendRegistryPath);
             },
             "DetailsRegistryLocation");
     }
@@ -245,18 +247,37 @@ public sealed class ContextMenuItemActionsService
 
     private void OpenRegistryEditor(string fullRegistryPath)
     {
-        using var regeditKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit");
-        var computerLabel = _localization.CurrentCultureName switch
+        // LastKey accepts a hive-qualified path. A localized computer prefix
+        // based on the application's language may not match Windows' language.
+        using (var regeditKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit"))
         {
-            "zh-CN" => "计算机",
-            "zh-TW" => "電腦",
-            _ => "Computer"
-        };
-        regeditKey?.SetValue("LastKey", $@"{computerLabel}\{fullRegistryPath}", RegistryValueKind.String);
-        Process.Start(new ProcessStartInfo("regedit.exe", _settingsService.Current.OpenMoreRegedit ? "-m" : string.Empty)
+            regeditKey.SetValue("LastKey", fullRegistryPath, RegistryValueKind.String);
+        }
+
+        // An existing instance does not reload LastKey when activated. Open a
+        // fresh instance for navigation without closing the user's other windows.
+        var existingEditors = Process.GetProcessesByName("regedit");
+        bool hasExistingEditor;
+        try
+        {
+            var sessionId = Process.GetCurrentProcess().SessionId;
+            hasExistingEditor = existingEditors.Any(editor => editor.SessionId == sessionId);
+        }
+        finally
+        {
+            foreach (var editor in existingEditors)
+            {
+                editor.Dispose();
+            }
+        }
+
+        var forceNewInstance = _settingsService.Current.OpenMoreRegedit || hasExistingEditor;
+        FrontendDebugLog.Operation("FrontendOperation",
+            $"RegistryEditorNavigationRequested: RegistryPath={fullRegistryPath}, NewInstance={forceNewInstance}.");
+        using var process = Process.Start(new ProcessStartInfo("regedit.exe", forceNewInstance ? "-m" : string.Empty)
         {
             UseShellExecute = true
-        });
+        }) ?? throw new InvalidOperationException("Failed to start regedit.exe.");
     }
 
     private Task ShowMissingTargetAsync(string messageKey, string titleKey)
@@ -291,7 +312,10 @@ public sealed class ContextMenuItemActionsService
         }
     }
 
-    private static string GetClassesRootPath(string relativeRegistryPath) => $@"HKEY_CLASSES_ROOT\{relativeRegistryPath}";
+    private static string GetClassesRootPath(string registryPath)
+        => registryPath.StartsWith("HKEY_", StringComparison.OrdinalIgnoreCase)
+            ? registryPath
+            : $@"HKEY_CLASSES_ROOT\{registryPath}";
 
     private static string SanitizeFileName(string name)
     {
