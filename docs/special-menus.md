@@ -1,6 +1,6 @@
 # SpecialMenu 实现说明
 
-## 1. 为什么 SpecialMenu 不是普通右键菜单
+## 为什么 SpecialMenu 不是普通右键菜单
 
 SpecialMenu 指当前代码中由 `SpecialMenuService` 管理、但不适合放进 `ContextMenuRegistryCatalog` 的菜单面。它们不完全遵循传统 `shell` / `shellex\ContextMenuHandlers` 模型：
 
@@ -17,7 +17,7 @@ SpecialMenu 指当前代码中由 `SpecialMenuService` 管理、但不适合放�
 
 因此不要用 `ContextMenuRegistryCatalog` 的普通开关、删除、恢复逻辑直接处理 SpecialMenu，除非代码已经明确把某个路径泛化。
 
-## 2. SpecialMenuService 总览
+## SpecialMenuService 总览
 
 `SpecialMenuService` 位于 `ContextMenuMgr.Backend/Services/SpecialMenuService.cs`。当前 `SpecialMenuKind` 定义在 `ContextMenuMgr.Contracts/SpecialMenuContracts.cs`：
 
@@ -30,79 +30,15 @@ SpecialMenu 指当前代码中由 `SpecialMenuService` 管理、但不适合放�
 | `DragDrop` | 相关 Classes 注册表路径 | 当前实现可在服务侧处理，仍需谨慎区分用户级与机器级。 |
 | `CommandStore` | Explorer CommandStore 注册表路径 | 不等同于普通右键菜单。 |
 | `GuidBlock` | GUID blocked list | 用于屏蔽指定 GUID。 |
-| `InternetExplorer` | IE MenuExt 注册表路径 | 旧式功能，当前实现按执行进程的 `HKCU` 处理，属于 best-effort；后续若要面向前端用户，应补用户上下文路径。 |
+| `InternetExplorer` | IE MenuExt 注册表路径 | 当前按执行进程 HKCU，未实现前端 SID 路由；服务模式可能指向 SYSTEM，不能承诺交互用户覆盖。 |
 
 前端主要由 `SpecialMenuPageViewModel` 组装 `PipeRequest`，后端由 `NamedPipeBackendServer` 分发到 `SpecialMenuService`。
 
-## 3. ShellNew
+## 专用责任文档
 
-ShellNew 是 SpecialMenu 中最容易踩坑的部分。
+ShellNew 的发现、排序、ACL、恢复和三态 UI 统一见 [ShellNew](shellnew.md)；Applications 注册、只读关联来源及显式持久保护统一见 [OpenWith](openwith.md)。Registry Write Protection 统一见[注册表模型](registry-model.md#registry-write-protection)。
 
-WPS / Microsoft Office 共存保护不会在 ShellNew 或 OpenWith 普通页面追加 File Association / Icon 项。两套 Office 同时存在时，后端只通过待审核专用管道读取当前用户 `HKEY_USERS\<SID>\Software\Classes` 和 ShellNew order key，检测 WPS 注入的 `.pdfwpsshellnew`、`.pptxwpsaicreateshellnew` 等 ShellNew command 项，以及 WPS 对文档关联和图标的用户级覆盖。检测结果是 `special:wps-*` 合成待审核项，不通过 ShellNew ACL lock 修复，也不会自动删除 WPS key。首次运行或重置后，当前已存在的 WPS 合成项会作为已确认 baseline 保存，不进入待审核或外部变化；同时写入 `internal:baseline:wps-office:v1`，即使当前检测结果为零项也要标记扫描已经完成。建立 WPS baseline 后首次出现的新合成项才进入待审核，常规菜单 baseline 不能影响这一判断。
-
-| 概念 | 当前实现说明 |
-| --- | --- |
-| `ShellNew` 子键 | 位于扩展名 Classes 下，例如 `Software\Classes\.txt\ShellNew`。发现使用前端交互用户的合并 HKCR；修改仍使用明确的物理 HKU/HKLM 路径。 |
-| 文件扩展名与新建项 | 每个扩展名可能对应一个“新建”菜单项，显示名按 Windows / BluePointLilac 语义解析。 |
-| `NullFile` | 表示创建空文件。当前创建请求未提供 `DataText` 时倾向写入 `NullFile`。 |
-| `Data` | 当前 `ShellNewCreateRequest` 支持 `DataText`，后端会写入二进制 `Data`。 |
-| `Command` | `ShellNewUpdateRequest` 支持更新 `Command`。 |
-| 创建请求字段 | 新建时会应用前端表单中的扩展名、显示名、图标路径、命令、数据文本和 `BeforeSeparator`；命令优先于 `Data`，没有命令和数据时写 `NullFile`。 |
-| `FileName` / `Directory` | Windows ShellNew 支持这些创建方式；枚举会把 `NullFile`、`Data`、`FileName`、`Directory`、`Command` 视为有效 ShellNew 值。 |
-| `Config\BeforeSeparator` | 当前更新请求支持 `BeforeSeparator`。 |
-| Explorer ShellNew order key | `Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew`，控制 Explorer 侧排序信息。 |
-| Classes 排序值 | 排序会同时考虑扩展名、Explorer order key 和 Classes 相关数据。 |
-
-ShellNew 快照发现通过 `RegOpenUserClassesRoot` 打开前端交互用户的合并 HKCR（`HKU\<SID>\Software\Classes` + `HKLM\SOFTWARE\Classes`），而不是服务进程的 `Registry.ClassesRoot` 或手工叠加两棵树。它从这个有效视图枚举扩展名、解析 ProgID、`ShellNew`/`-ShellNew`、显示名和图标；因此用户扩展名关联到机器 ProgID 的跨 hive 注册也能与 Explorer 一致。服务使用请求携带的 SessionId 取得 WTS 用户 token，以只读方式打开句柄；无法取得 token、profile 未加载或 API 失败时分阶段记录 `ShellNewMergedClassesOpenFailed` 并使发现失败，不退回到 LocalSystem 的 HKCR。WTS token 的 SID 和 TokenSessionId 必须与认证 Pipe 用户一致；ShellNew 不使用另一交互用户 fallback。64 位系统请求 64 位 Classes view，以匹配 64 位 Explorer。
-
-每个发现项同时解析实际提供 `ShellNew` 值的物理来源：优先用户 `HKU\<SID>\Software\Classes\...`，否则机器 `HKLM\SOFTWARE\Classes\...`，并将该物理路径作为 `RegistryPath` 和 `DisabledRegistryPath` 返回。合并视图只用于发现和有效元数据，绝不作为写入目标；开关、软删除、恢复、导出/定位和 ShellNew-local 编辑都使用此物理来源。扩展名/ProgID 的元数据来源可以不同于 ShellNew 的可变来源。
-
-除传统物理注册外，快照还使用 `PackageManager.FindPackagesForUser(frontendSid)` 扫描该前台用户已安装 AppX/MSIX 包的 `AppxManifest.xml`。带有 `uap4:ShellNewFileName` 的 `FileType` 声明会作为 `PackagedShellNew` 返回，并携带 package full/family name、Application ID、FileTypeAssociation、原始 `FileType` 声明、`ShellNewFileName` / `ShellNewDisplayName` / `ShellNewCommandParameters` 元数据。它们在同一列表显示“应用提供 · 只读”，不参与 ShellNew order lock 或排序；`CanEdit`、`CanDelete`、`CanMove` 都为 false，服务端也拒绝开关、编辑、删除和恢复请求。前端为保持列表右侧布局，会保留禁用的开关、编辑和删除按钮，但不显示排序按钮。不得修改 `AppxManifest.xml`、安装目录、UserChoice、ProgID 或为此类项目制造注册表 ShellNew key；目前没有已验证的独立 Windows 开关。
-
-创建 ShellNew 时，后端仍写入明确的用户 Classes 物理路径，而不能使用服务进程的 `Registry.ClassesRoot` 来验证 ProgId。解析顺序是用户 `HKU\<SID>\Software\Classes\.ext`、机器 `HKLM\SOFTWARE\Classes\.ext`、用户 `FileExts\.ext\UserChoice\ProgId`，再考虑 `OpenWithProgids`。ProgId 只在同一组用户 / 机器 Classes 根中存在时才视为有效；`UserChoice` 只读不写，不修改 hash，也不会为项目创建全局 fake ProgId。
-
-ShellNew 显示名遵循 Windows / BluePointLilac 优先级：`ShellNew\MenuText` 仅在它是 `@...` 间接资源字符串且能解析为非空文本时优先；其次读取默认 ProgID 的 `FriendlyTypeName`；再读取默认 ProgID 的默认值；最后回退到扩展名。创建或编辑普通用户显示名时，ContextMenuMgr 不写纯文本 `ShellNew\MenuText`，而是写入前端用户覆盖层 `HKU\<SID>\Software\Classes\<ProgID>\FriendlyTypeName`。编辑显示名时会从实际可写的用户 ShellNew 覆盖键删除 `MenuText`，避免旧值继续压过 `FriendlyTypeName`。
-
-即使扩展名没有出现在用户或机器 Classes 中，创建仍会继续写用户级 `HKU\<SID>\Software\Classes\.ext\ShellNew`。ProgId 是可选元数据：解析到有效 ProgId 时用于 per-user `FriendlyTypeName` 和返回项 metadata；没有 ProgId 时仍创建扩展名级 ShellNew，但普通显示名不会保存为纯文本 `MenuText`，刷新后可能回退到扩展名。`UserChoice` 始终只读，不写入、不修改 hash。
-
-编辑 ShellNew-local 属性时，后端写入发现结果携带的实际物理 `ShellNew` 或 `-ShellNew` 路径；不会通过 HKCR 隐式选择 hive，也不会因为扫描而把机器注册移动到用户 hive。显示名覆盖仍写到用户 ProgID 的 `FriendlyTypeName`。
-
-ShellNew 开关会在同一物理来源的 `ShellNew` 与 `-ShellNew` sibling key 之间移动注册。每次操作都会以当前实际存在的 sibling key 为准，而不信任前端旧快照中的 alternate-path metadata；移动后会确认源 key 已不存在、目标 key 已存在，再返回与物理路径一致的 `RegistryPath`、`Id`、`IsEnabled` 和 alternate path metadata。若两个 sibling 同时存在或都不存在，操作会失败而不会只修改返回 DTO 的启用状态。
-
-当 WPS 与 Microsoft Office 共存时，新建菜单页的“文档图标提供方”开关通过后端 Pipe 写入当前前端用户 `HKEY_USERS\<SID>\Software\Classes` 下的 Office ProgID `DefaultIcon` 覆盖。这是用户主动选择；成功写入后，后端会确认对应的 `special:wps-office-icon:document-icons` 合成检测项，不能把这次写入重新送入待审核。来自 WPS 或其他程序的关联修改和 ShellNew 注入仍保持原有检测规则。
-
-新建菜单排序锁使用独立的 `GetShellNewOrderLock` 读取物理 ACL，不依赖昂贵的项目/包枚举或条目的 `OrderLocked` metadata。前端保留 Unknown / Locked / Unlocked，写入期间禁用重复切换和移动；超时或失败后用独立请求核对实际锁状态。无法核对时显示明确错误并保持 Unknown，不恢复旧 Toggle。刷新用状态版本阻止较旧的查询覆盖新的核对结果。
-
-`GetShellNewItems` 只有完整的经典发现成功后才返回列表；成功的零项与失败不同。WTS token、合并 HKCR、逐扩展名读取、物理来源解析、枚举期间候选集合变化或取消均使整个发现失败，不返回部分列表，也不继续用 packaged-only 结果充当经典发现。枚举只读，不修复注册或关联。包声明仍按原有只读/best-effort 方式发现，但必须先完成经典扫描，包失败不能为经典结果背书。
-
-排序锁定和 `MoveShellNewAsync` 共用 `ShellNewOrderTransaction`，替代原先分开的 unlock / 无条件覆盖 Classes / relock 路径：
-
-1. 串行化本服务的锁定、解锁、移动和锁状态查询；发现前捕获同一用户物理 HKU order key 的 Classes 是否存在、原始类型/数据及 Owner、Group、DACL。锁定/移动必须取得完整且非空的经典发现，不扫描包清单；单独解锁不依赖发现，也不创建或清空 Classes。
-2. proposed entries 必须是权威经典条目的完整排列，不允许未知/缺失/重复输入。Classes 用原生 value API 捕获/比较原始类型及字节；已有类型异常、非规范 MULTI_SZ 或含歧义空条目时拒绝排序，不自动规范化；已有未知项保留原文和相对槽位，已发现项在其槽位中排列，新增已发现项追加。不会删除未确定归属的现有项，不会写空列表。候选减少时也不会据此删除原列表中的其它项。
-3. 先验证 ACL 可读/可修改及目标规则，不提前解锁。最后一次取消检查之后，同步完成提交或回滚，不让 Pipe 断开/取消中断两次写入之间的状态。正常服务停止会等待已经开始的 ShellNew mutation 退出，并拒绝新的 mutation。
-4. 每次值或 DACL 修改前检查捕获的值和描述符仍匹配，之后通过新句柄回读；最终再次验证值和实际锁状态。DACL 只添加/移除明确匹配的 WorldSid `Deny SetValue | CreateSubKey | Delete` 和历史精确 `WriteKey` 规则（无继承/传播）；通过 RegGetKeySecurity / RegSetKeySecurity 仅读取 Owner/Group/DACL 并仅写原始 DACL，避免 .NET 合并同 SID deny ACE 而丢失第三方规则边界；保留其它 ACE、DACL 保护/继承和 Owner/Group，不写所有者，不请求 SACL，不 take ownership、不重置 DACL、不启用权限。未知 World deny 阻止操作时拒绝，留给外部核查。
-5. catchable failure 时，仅在实际值和 ACL 同时匹配本操作已知中间/目标状态时恢复原值（含不存在）和原 DACL，并重新回读。外部变更或读回失败则停止回滚，记录 `ShellNewOrderRollbackUncertain` 并返回错误。Windows 写回 unprotected DACL 时自动计算的 `SE_DACL_AUTO_INHERITED` 位不作为冲突；Owner/Group、DACL protected 标志、每个 ACE 及其继承/传播位仍参与比较。
-
-这是逐步验证的条件事务，不是 Windows 原子 compare-and-swap，也不是持久崩溃恢复日志。外部写入仍可能发生在比较与写 API 之间；硬杀进程/断电可能留下中间状态，不能宣称自动恢复。对原本不存在的 order key，失败时恢复 Classes 的不存在状态，但保留新建的空键并记录，避免删除并发新增的数据。旧版已经丢失的 Classes 无法从发现结果可靠还原；恢复步骤见 [#141 排错与恢复](./troubleshooting.md#shellnew-141诊断恢复与验收)。
-
-所有 ShellNew 发现共用 single-flight gate，已有扫描尚未结束时拒绝新扫描，不排队堆积；每轮有 8 秒协作取消预算，扩展名及包之间检查取消。WTS、RegOpenUserClassesRoot、经典扫描、包清单和慢扩展名/慢包均有窄范围计时。Windows 同步注册表/资源/PackageManager API 本身可能不可取消，因此预算不是硬终止承诺。前端 ShellNew 自动刷新在上轮结束后等待 30 秒；其它 SpecialMenu 仍等待 5 秒。锁状态查询不等待包扫描，仅在独立 8 秒预算内等待 mutation；并发写请求直接拒绝，不排队等待到前端超时后才写入。
-
-兼容维护决定（#141）：保留历史精确 WorldSid `Deny WriteKey`、无继承/传播的 ACL 格式；其最早发布版本未核实，不捏造版本下限。只有维护者明确停止支持该 ACL 格式并验证受支持安装已完成外部修复后，才能删除此窄迁移识别。包含额外未知 rights 的 broad deny 不属于可删除签名。
-
-如果旧版本 broad `WriteKey` lock 或外部工具留下的 broken ACL 无法通过 `ReadPermissions | ChangePermissions` 安全修改，本程序会返回明确错误：需要先用 BluePointLilac / ContextMenuManager 或系统工具解锁 / 修复，然后重试。主后端不再执行 take ownership、replacement DACL 或自动 ACL reset。
-
-## 4. ShellNew ACL Lock 与 Registry Write Protection 的区别
-
-| 项目 | ShellNew ACL Lock | Registry Write Protection |
-| --- | --- | --- |
-| 保护范围 | 主要针对 Explorer ShellNew order key / 新建菜单排序保护。 | 更广泛的传统右键菜单注册表写入保护。 |
-| 代码路径 | `SpecialMenuService.SetShellNewOrderLockAsync`。 | `ContextMenuRegistryCatalog` 的注册表写保护相关逻辑。 |
-| 用户提示 | 主要围绕 ShellNew 排序锁定 / 解锁；无法安全修改 ACL 时提示外部修复。 | 编辑菜单项时可能提示去设置页解锁。 |
-| 失败形态 | legacy broad `WriteKey` 或 broken ACL 可能导致 `ChangePermissions` 修改失败；主程序不会 take ownership 或替换 DACL。 | 可能阻止第三方安装器或本程序运行时写入受保护路径。 |
-
-不要把两者混用。ShellNew ACL Lock 不是普通菜单禁用，也不是全局右键菜单保护开关。
-
-## 5. SendTo
+## SendTo
 
 SendTo 菜单来自用户 profile 下的目录，当前代码通过 `BackendUserContext.GetSendToPath()` 定位到 RoamingAppData 的 `Microsoft\Windows\SendTo`。
 
@@ -117,7 +53,7 @@ SendTo 菜单来自用户 profile 下的目录，当前代码通过 `BackendUser
 
 SendTo 是文件系统菜单，不是 registry-only 功能。没有正确 profile path 时，服务可能改到错误用户目录或找不到目标。
 
-## 6. WinX
+## WinX
 
 WinX 菜单来自用户 `LocalAppData` 下的 `Microsoft\Windows\WinX` 目录。它包含分组、排序、`.lnk` 文件和 hash。
 
@@ -142,132 +78,27 @@ COM，不调用 `IShellLink.Resolve`，也不使用 `WScript.Shell`。SendTo 当
 `WinXHashStart/End` 和 `WinXCreateEnd`。若创建失败，`WinXCreateFailed` 会记录失败
 阶段；COM 异常同时记录 HRESULT。
 
-## 7. OpenWith
+## 其它特殊入口
 
-OpenWith 列表发现用户 / 机器 Classes 的 `Applications` 物理注册（含无常规 command、DropTarget 等只读结构），仅管理经过验证的常规结构及既有 Microsoft Store 入口 policy。扩展名来源检查按需读取独立关联来源，不承诺开关或删除后应用从每个 Explorer 打开方式列表中消失。操作走链路 A：Frontend -> Backend Pipe -> `SpecialMenuService`，不使用 UAC bootstrapper 或 ProbeHost；Applications 专用监控见下文。
-
-必须区分三件事：应用注册为打开方式候选、Explorer 针对某个文件实际显示此候选、该文件类型的默认处理程序。页面的开关仅表示所选物理 `Applications` key 是否存在 `NoOpenWith`；用户 / 机器同名项分别显示和修改，不代表合并 HKCR 的最终菜单状态。微软明确说明，文件类型的 `OpenWithProgIDs` 可以在 Applications 设置 `NoOpenWith` 后继续提供应用候选：[Application Registration](https://learn.microsoft.com/en-us/windows/win32/shell/app-registration)、[Open With 注册与排除说明](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/hh127438%28v%3Dvs.85%29)。
-
-| 来源 | 与当前管理范围的关系 |
+| 入口 | 当前实现与边界 |
 | --- | --- |
-| `HKU\<SID>\Software\Classes\Applications`、`HKLM\SOFTWARE\Classes\Applications` | 当前支持的物理注册。64 位系统固定读取 / 修改 Registry64，匹配 native Explorer；服务 x86 构建也不改用 32 位 view。 |
-| Classes `.<ext>\OpenWithProgIDs` 及对应 ProgID command | 按文件类型提供候选，不随 Applications 开关或软删除改变；不删除、不修改这些 ProgID。参见 [Include an Application in Open With](https://learn.microsoft.com/en-us/windows/win32/shell/how-to-include-an-application-on-the-open-with-dialog-box)。 |
-| 用户 `Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.<ext>` | `OpenWithList` / `OpenWithProgids` 是用户文件类型候选 / 使用记录来源；`UserChoice` 是默认选择证据。当前页不写入这些路径，不改 Hash。 |
-| `Software\RegisteredApplications` -> 应用 `Capabilities\FileAssociations` | 应用声明支持的文件类型，可关联独立 ProgID；不能当作 Applications key 的副本，也不在本页修改。参见 [Default Programs](https://learn.microsoft.com/en-us/windows/win32/shell/default-programs)。 |
-| AppX/MSIX `uap:FileTypeAssociation` 等声明 | 包注册可以提供文件类型处理能力；本页不管理包 manifest、包生成的 ProgID 或默认应用选择。参见 [FileTypeAssociation](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-filetypeassociation)。 |
+| DragDrop | `SpecialMenuService` 管理 Classes 的拖放 handler / DefaultDropEffect；仍有服务 HKCR helper，不能宣称已实现所有前端用户 overlay |
+| CommandStore | 读取 Explorer CommandStore；与传统父级 SubCommands 引用开关、Win11 白名单系统命令是不同入口，不由它们推导任意命令可安全修改 |
+| GuidBlock | [GuidBlockMenuService](../ContextMenuMgr.Backend/Services/GuidBlockMenuService.cs) 独立管理机器级 GUID Block 创建/开关/删除；与 classic per-registration、Win11 用户 Blocked 语义不同 |
+| InternetExplorer | 旧 `MenuExt` / `-MenuExt` 路径、创建/更新脚本信息；现有 HKCU 限制如上，不是现代浏览器扩展管理 |
 
-不通过 UserChoice / Hash、UCPD、ACL lock 或拦截安装器扩大此范围。不改 unrelated ProgID、Capabilities 或默认关联设置。如果默认调用路径本身依赖被删除的 `Applications\<app>` 注册，删除会影响该注册的调用能力；保留默认关联设置并不保证该程序仍可启动，默认选择应通过 Windows 设置管理。
+## WPS 与 Microsoft Office 共存
 
-WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护文档扩展名 owner，也不在该页面提供默认应用切换。关联、图标、ShellNew 注入只作为 WPS 专用待审核项显示；`UserChoice` 只能作为证据读取，不能由本项目直接写入 Hash。
+WPS / Microsoft Office 共存保护不会在 ShellNew 或 OpenWith 普通页面追加 File Association / Icon 项。两套 Office 同时存在时，后端只通过待审核专用管道读取当前用户 `HKEY_USERS\<SID>\Software\Classes` 和 ShellNew order key，检测 WPS 注入的 `.pdfwpsshellnew`、`.pptxwpsaicreateshellnew` 等 ShellNew command 项，以及 WPS 对文档关联和图标的用户级覆盖。检测结果是 `special:wps-*` 合成待审核项，不通过 ShellNew ACL lock 修复，也不会自动删除 WPS key。首次运行或重置后，当前已存在的 WPS 合成项会作为已确认 baseline 保存，不进入待审核或外部变化；同时写入 `internal:baseline:wps-office:v1`，即使当前检测结果为零项也要标记扫描已经完成。建立 WPS baseline 后首次出现的新合成项才进入待审核，常规菜单 baseline 不能影响这一判断。
 
-| 行为 | 当前实现倾向 |
-| --- | --- |
-| 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，纳入带文件扩展名的应用 key；常规 command-bearing verb 保留旧物理 command Id。缺少 shell/verb/command、无可提取目标、DropTarget、DDE、DelegateExecute、ExplorerCommandHandler 或级联结构仍显示，但 CanEdit/CanDelete=false；开关可见但禁用，无删除/恢复操作，黄色标注“受系统保护”并排在正常项后；详细只读原因在 tooltip。无常规 command 的 Id 使用真实 app key，不制造 command。逐项访问失败保留只读物理路径。 |
-| 显示名 | 优先解析物理注册的 `FriendlyAppName`（不要求 app key 名与命令目标文件名相同），否则读取目标文件 `FileDescription`，最后回退到文件名；没有目标时使用 FriendlyAppName 或原 app 名。DefaultIcon 优先，无法解析时允许空图标，不制造 exe 路径。 |
-| 启用 / 禁用 | 禁用只在值不存在时写空 `REG_SZ NoOpenWith`，同时写独立 `ContextMenuMgrPlus.OpenWithVisibility` 归属值；两值在短生命周期 Windows 注册表事务中提交。启用只撤销匹配本物理路径、command generation 和值类型 / 内容的本程序写入；预存或第三方改写的值均保留并返回错误。 |
-| 新增 | 写入当前前端用户的 `HKU\<SID>\Software\Classes\Applications\<app.exe>\shell\open\command`，并写 `FriendlyAppName`；名称、command 与所有新子键使用同一 TxR 事务；通过事务中已打开的现有 SID hive handle 创建子键，避免用户 hive 并发卸载时创建替代 SID 根。检查 leaf disposition 必须为新建，已有或安装器抢先创建的 key 拒绝覆盖。失败/提交前取消回滚整次创建，不清除已有 `NoOpenWith`。创建目标必须是无环境变量的绝对文件路径。 |
-| 编辑 | 更新 `FriendlyAppName` 和 command 默认值；为避免把一个应用 key 改成另一个程序，当前不允许编辑时改变目标 exe 路径。先验证全部输入，再在同一 TxR 事务内校验 ExpectedEditStamp、原始 command 和支持的激活结构并写入两字段。保留现有 String/ExpandString 类型、其它值与 ACL。目标 exe 比较使用未展开的原始 token；不把 LocalSystem 环境展开结果当作交互用户的程序身份，因此即使环境表达式和绝对路径在服务进程中碰巧相同，也不能互相替换。图标环境变量交给前端用户上下文展开。命令不能在 visibility ownership marker 存在时改变代际；先启用该注册再编辑命令。 |
-| 删除 / 恢复 | 对所选 app key 使用 Win32 `RegRenameKey` 重命名为 sibling `.deleted` / 恢复原名；保留完整树、原始 ExpandString、ACL 和开关状态。拒绝缺失源、目标冲突及无效 backup metadata，不覆盖现有备份 / 重新注册的原项，不提供 copy/delete fallback。成功必须回读源已不存在、目标存在，再返回从目标读取的 DTO。 |
-| 永久删除 | 仅删除经过路径和请求状态校验的所选 `.deleted` 备份，逐层加入同一注册表事务；任一子键访问拒绝 / 并发冲突会回滚，提交后确认备份不存在。失败不报告成功，不触碰重新出现的原 app key。 |
-| 应用商店入口 | 保留既有 `NoUseStoreOpenWith` policy 项；开关同步 HKLM 和当前用户 HKU policy 值并回读结果。某一 hive 失败时返回失败，已完成的 policy 写入可能仍存在，应刷新核对。 |
+[OfficeSuiteCoexistenceDetector](../ContextMenuMgr.Backend/Services/OfficeSuiteCoexistenceDetector.cs) 与 catalog 专用 WPS Pipe 路径负责检测、持久状态与审核；不是 Applications 注册监控。`GetOfficeSuiteCoexistenceStatus` 提供状态及受保护扩展名，`GetWpsOfficePendingApprovals` 提供审核项；`SetDocumentIconProvider` 仅写前端 HKU Office ProgID `DefaultIcon`，成功后确认本次合成项并通知 Shell。
 
-OpenWith 需要 SID，但不需要 SessionId。请求只能使用 Pipe 客户端认证身份；解析失败不退回另一个交互用户。快照和修改先验证 account SID 与已加载的用户 hive；即使所选项属于 HKLM，用户上下文缺失也拒绝操作。服务不能用 LocalSystem `HKCU`、重建未加载的 SID hive，或信任不匹配的 `AppRegistryPath` / `DeletedPath`。
+仅 ShellNew 页面显示 Microsoft Office/WPS 图标来源选择，OpenWith 不展示默认应用 owner 或切换器。处置不写 UserChoice/Hash，不自动删 WPS key；有效默认关联变化与显示图标是不同机制。baseline/离线规则只在[状态与监控](state-and-monitoring.md)维护。
 
-后端串行化本程序 OpenWith 快照与 mutation，校验请求携带的 visibility stamp / command；注册表事务中的非事务并发写入会使事务失败，项目不会覆盖第三方结果。成功是提交后 fresh read-back 的结论，不是永久禁止第三方重建注册。事务创建 / 提交不可用时直接报错，没有放弃验证的 fallback。
+## 失败、验证与维护
 
-前端串行化该页快照和操作；旧快照不能在成功 response 后覆盖状态。失败 / 超时后用独立快照核对物理状态，不重试 mutation；核对失败显示结果未确认并锁定该条目操作，后续成功刷新解除。迟到通知触发重新查询，不直接使用可能过期的 DTO；旧失败任务也不能撤销较新的权威更新。
+SendTo/WinX 必须来自 `BackendUserContext` 的 profile/AppData，不能由服务环境变量猜前端目录；SID 不等于桌面 Session。文件系统操作也有部分失败，日志或 `.lnk` 生成不等于 Explorer 接受。
 
-兼容决定：保留已发布的 sibling `.deleted` 及历史 `.deleted.deleted` 等重复后缀恢复路径。备份和活动项使用不同物理 Id，冲突时两者都显示；恢复只选择 DTO 指定且属于原 app 的备份。旧版本没有记录完整性，历史残缺备份不能凭后缀判为完整；缺少 command 的备份作为已删除只读项展示，不能 Undo/Purge，但仍阻止覆盖。也不推断旧版空 `NoOpenWith` 的归属：无 marker 的值必须保留。Issue #136 的维护决定是继续支持这些数据；只有明确停止支持历史 sibling 备份 / 完成归属核实后才可退休，不能猜测发布版本或自动删除旧值。
+Windows 手验分别检查 SendTo hidden/soft-delete/恢复及动态磁盘只读；WinX 各 group 创建、移动、target/arguments 更改后 hash、显示名/图标修改、恢复单 group 的 backup/回滚和真实 Win+X。新版 Windows 可能额外筛选已 hash 快捷方式，实际可见性仍需验证。对 WPS/Office 共存与单独安装分别测首次/reset、后续注入、图标切换、审核/重启与两 SID 隔离。
 
-### 按扩展名检查来源（#136）
-
-页面输入如 .txt 后点击“检查来源”，通过新增 PipeCommand.InspectOpenWithSources（ScopeValue=扩展名）返回独立 OpenWithAssociationInspection DTO。检查结果不使用 SpecialMenuEntry.RegistryPath 或 IsEnabled 表示关联状态，也不提供直接关联修改按钮。所有证据只读，Resolved 仅表示物理引用已解析，不表示 Explorer 一定显示候选。
-
-- Applications：只对所选扩展名检查 SupportedTypes；FileExts OpenWithList 的明确 app 名也可解析到 HKU/HKLM Applications。复用现有 Applications reader 判断可管理 Id，不把相同 exe 的 ProgID 猜成可删除的 Applications 注册。
-- Classes 扩展名 OpenWithProgIDs、用户 FileExts OpenWithProgids：复用 ContextMenuRegistryCatalog.ReadOpenWithProgIdReferences 的原始来源读取。传统菜单 resolver 的 HasAnyContextMenuSubkey 过滤不适合这里，因此检查保留无 command 的 ProgID。后续按用户/机器物理 Classes 解析引用；两棵树都有 key 时显示 MultipleRegistrations，不猜合并后的有效处理程序。
-- RegisteredApplications 与 Capabilities/FileAssociations：只读取所选扩展名，并分别保留声明值和间接 FileAssociations 值的准确路径。标识符分组不丢失独立物理来源。
-- AppX/MSIX：只对认证用户的已安装包读取 manifest 中匹配扩展名的 FileTypeAssociation，显示 package family、Application Id、manifest 路径与 association 名，始终只读。不改包、UserChoice/Hash、UCPD 或任何关联 ACL。
-
-结果区可选择/复制，包含本地化来源、解析状态和物理路径。未找到注册、无效标识符、拒绝访问及扫描不完整分别呈现；诊断数量最多 64。常规加载/定时刷新不触发关联检查。每个来源目录最多检查 4096 个名、总证据最多 4096 条；包最多 512 个、单 manifest 最多 8 MiB 字符；超限明确标记不完整。后端 25 秒协作取消预算，前端 30 秒等待预算和独立取消按钮；操作系统单次同步 registry/package API 本身无法被 token 抢占。取消前端请求只停止等待，不把它当成已停止服务端调用；服务端继续受自己的预算约束。结果只代表当次读取，不是跨来源原子快照。
-
-NoOpenWith 归属分为 Enabled（无值且无 marker；孤立 marker 归为 Changed）、Owned（当前 marker 和精确数据匹配）、Unknown（无 marker，含可能来自旧版本的值）、Changed（marker/数据/command 代际不符）。Unknown 与 Changed 都保留原值并拒绝普通启用；界面禁用该开关并在来源说明 tooltip 提供导出/核查步骤；旧版值不会自动认领。界面说明先导出准确物理 Applications key，再与应用厂商/注册表编辑器核查。未实现带持久恢复快照的显式 legacy recovery，因为当前没有能证明旧值来源的资料；不能为了兼容而弱化 provenance。
-
-Create/Update 提交成功后必须 fresh read-back；read-back 抛错或不一致返回 OpenWithOperationUncertain，不能声称没有变化。前端沿用串行门、失败/超时快照核对、IsStateUncertain、迟到通知重查，不盲重试；编辑对话框打开前捕获 ExpectedEditStamp，不能在表单期间刷新后用新 stamp 覆盖旧表单。旧客户端没有 edit stamp 时拒绝编辑并要求刷新/更新客户端。
-
-RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没有用 copy/delete 替代。某些 Explorer 版本是否会把 sibling .deleted 注册作为额外候选仍未实测，不能声称 rename 等于 Explorer 列表移除。新增注册默认仅送审；安装器重注册监控及显式 HKU 持久保护见下文，不提供永久自动删除。
-
-### Windows 10 / 11 手动验证（仍需真实 Explorer / 服务环境）
-
-在可恢复的测试机上准备唯一应用 key 和测试扩展名，先导出测试注册；只清理自己创建的测试数据，不修改真实 `UserChoice` / Hash。分别在 Windows 10、Windows 11 执行：
-
-1. 同一 app 分别注册在 HKU 当前 SID 和 HKLM，含 command、FriendlyAppName、ExpandString 和 nested values；运行普通权限前端 / 后端服务，分别开关。直接核对所选 hive 的空 `NoOpenWith`、归属值及刷新状态，另一 hive 不改变。服务 x86 / x64 构建应操作同一 native view。对两个用户重复，不能读取或改写另一 SID；认证失败 / hive 未加载返回错误，不新建 SID 根。
-2. 预先设置空字符串、非空字符串、DWORD / Binary `NoOpenWith`。刷新后未知/改写归属的开关不可操作，来源说明 tooltip 给出导出/核查步骤，物理值与类型保持不变；通过后端请求启用也必须拒绝。旧版本无 marker 的值同样保留。由第三方改写 NoOpenWith、marker 或 command 后重试，旧请求拒绝，刷新准确反映当前值。
-3. 使用唯一 GUID 夹具：扩展名 .cmm136-<GUID>、应用 Cmm136-<GUID>.exe、独立 ProgID Cmm136.<GUID>；只对这些键操作。准备一个可丢弃测试 exe 的常规 Applications 注册、另一个仅 shell/open/DropTarget/CLSID 的注册和仅 FriendlyAppName/SupportedTypes 的注册。后两者必须展示只读且不能被伪造 DTO 启用/删除。分别测试 Applications-only、同时通过 `OpenWithProgIDs`、用户 FileExts、RegisteredApplications/Capabilities 和打包应用提供的候选。对同一扩展名同时创建 HKU Classes OpenWithProgIDs、FileExts OpenWithList/OpenWithProgids、RegisteredApplications/Capabilities 引用；点击检查，确认同一标识符分组中保留每条准确物理路径，独立 ProgID 始终只读，Applications 引用显示对应可管理注册。输入路径穿越/无效扩展名应拒绝，取消不会卡住页面，访问失败/包扫描失败显示不完整。观察实际文件的子菜单及“选择其他应用”对话框，记录 Windows 版本和文件类型；注册表成功而 Explorer 仍显示候选属于范围限制，不能判为已验证 Explorer 移除。默认应用通过 Windows 设置选择，比较操作前后的只读 UserChoice / 默认处理行为，不手工写 Hash。
-4. 连续至少三次开关、刷新、删除 / 重启服务 / 恢复：原 key 与 backup 必须互斥，ACL、值类型、未展开文本、command 与原开关状态完整恢复。人为预置 `.deleted` 冲突（包括残缺副本）时不覆盖；原 app 被安装器重建后 Undo 拒绝，两项仍可查看，Purge 只清理选中备份。验证历史重复后缀只恢复指定副本。
-5. 在测试 key / 某个 backup 子键设置可恢复的权限拒绝，分别尝试 toggle、Delete、Undo、Purge。错误不得显示完成；事务失败不留半对 marker/NoOpenWith 或残缺备份。解除测试 ACL 后重试，并直接检查树和前端状态。模拟进程在原生 rename / 事务提交前后退出，不能出现半棵复制树。
-6. 编辑同时更改名称和目标 exe 为另一程序，操作必须失败且名称/command/ACL 完全不变。合法的名称+参数编辑必须一起提交，ExpandString 类型和未展开变量保留。表单打开后在外部改名称或 command，提交旧表单必须拒绝；事务不可用、提交前取消/写入拒绝不得留下半初始化 app key。
-7. 测试并发安装器改写、两个前端、旧刷新在操作中完成、Pipe 响应丢失 / 超时但后端已提交、核对查询也失败和随后迟到通知。核对成功后只显示真实状态；核对不可用时阻止条目重复操作，成功刷新后恢复，不把取消 / 超时当作物理写入必然失败。
-
-自动测试使用当前普通账号的唯一 HKU Applications fixture，并清理全部测试 key / ACL。它验证注册表状态、raw values、归属、备份冲突、事务 rollback、SID 隔离和旧失败响应不会覆盖新状态；不证明 HKLM 高权限服务 mutation、跨账号真实 Pipe 身份、Explorer 候选可见性或 Windows 默认应用启动行为。本次提供的是 2026-10-13/14 日志观察摘要，未提供原始附件。摘要中的 Applications 写入确认不能证明 Explorer 候选已消失；BaiduNetdisk 的 marker-less/changed visibility 具体来源仍证据不足，需要该物理 key 的原始值/类型/marker/command 和对应原始日志，不能断言是本程序旧版写入。
-
-## 8. SpecialMenu 的用户上下文要求
-
-| SpecialMenu | 需要 SID | 需要 ProfilePath | 需要 LocalAppData/RoamingAppData | 原因 |
-| --- | --- | --- | --- | --- |
-| `ShellNew` | 是 | 通常需要 | 需要用户 hive 和 Explorer order key | 用户级 Classes 和 ShellNew order key 必须写 `HKEY_USERS\<SID>`。 |
-| `SendTo` | 通常需要 | 是 | 需要 RoamingAppData | SendTo 是用户 profile 下目录。 |
-| `WinX` | 通常需要 | 是 | 需要 LocalAppData | WinX 是每用户文件系统配置。 |
-| `OpenWith` | 是 | 通常不需要 | 通常不需要 | 用户级 Applications 和 `NoUseStoreOpenWith` policy 必须写 `HKEY_USERS\<SID>`，不能写服务 `HKCU`。 |
-| `DragDrop` | 视具体操作而定 | 通常不需要 | 通常不需要 | 当前实现主要按注册表路径处理。 |
-| `CommandStore` | 视具体操作而定 | 通常不需要 | 通常不需要 | 属于 Explorer 命令注册表模型。 |
-| `GuidBlock` | 视具体操作而定 | 通常不需要 | 通常不需要 | 以 GUID blocked list 为主。 |
-| `InternetExplorer` | 视具体操作而定 | 通常不需要 | 通常不需要 | 旧式 IE MenuExt 路径。 |
-
-这里的“通常需要”表示当前实现会通过 `BackendUserContext` 获取 SID 或 profile 目录。不要用 LocalSystem 的环境变量推断前端用户路径。
-
-## 9. 常见坑
-
-| 坑 | 正确处理 |
-| --- | --- |
-| 用普通 `ContextMenuRegistryCatalog` 处理 ShellNew 排序 | 走 `SpecialMenuService` 的 ShellNew 专用逻辑。 |
-| 用服务 `HKCU` 写 ShellNew | 写 `HKEY_USERS\<sid>`。 |
-| 把锁定失败简单判断为权限不够 | ACL deny、所有者、继承状态都可能影响 `ReadPermissions` / `ChangePermissions`；证据不足时不要推断根因。 |
-| 期望主程序自动修复 legacy broad lock / broken ACL | ShellNew lock/unlock 不再 take ownership、不替换 DACL；旧版 `WriteKey` broad lock 无法安全修改时应使用 BluePointLilac / ContextMenuManager 或系统工具外部解锁 / 修复。 |
-| 把 SendTo / WinX 当 registry-only 功能 | 它们主要是用户文件系统目录。 |
-| 用服务 `HKCU` 写 OpenWith Applications | 新增和用户 policy 写 `HKEY_USERS\<sid>`；机器级项才写 HKLM。 |
-| 把 ShellNew ACL Lock 和 Registry Write Protection 混用 | 两者保护范围、代码路径和用户提示都不同。 |
-
-
-`GuidBlockMenuService` 独立持有机器级 GUID Block 路径，负责其枚举、创建、开关和删除；`SpecialMenuService` 只在现有分派与响应/日志边界调用它。该列表与 classic per-registration 开关、Windows 11 用户 blocked list 均有不同语义，不能互相替代。
-
-## OpenWith registration monitoring and explicit protection (#136)
-
-`OpenWithMonitoringService` is driven by `ContextMenuRegistryMonitor`'s existing five-second cycle. It adds no independent backend polling task or extension scan. Each poll reopens native-view HKU/HKLM Applications roots through the existing `SpecialMenuService.GetOpenWithItems` discovery model; there are no retained registry handles or RegNotify watchers to invalidate after subtree replacement. The monitor limits each root to 4096 child names and gives discovery a cooperative fifteen-second budget. Individual synchronous Windows calls cannot be interrupted by a token.
-
-Authenticated pipe users and WTS active/connected/disconnected user tokens identify the monitored users. WTS enumeration runs at most every thirty seconds; SID, loaded user hive and Classes root are validated before reconciliation. No SYSTEM HKCU fallback or hive creation is used. Sessions sharing a SID share one baseline. Each SID has separate baseline/review records; HKLM and HKU names remain separate physical paths. Notifications are filtered to subscribers authenticated as that SID, including normal OpenWith mutation broadcasts.
-
-A new or session-reset monitor waits thirty seconds and requires ten seconds of unchanged discovery before reconciling. Individual registrations and confirmed absences also settle for ten seconds. Missing roots/keys are reopened on subsequent polls; access denial/incomplete reads suspend adoption, log a failure and back off thirty seconds. Repeated identical failures generate one attention signal until recovery. The first complete snapshot for a SID without an OpenWith baseline adopts current entries silently, even when classic/WPS state already exists. Existing baselines detect new offline registrations after startup settling. Changes that appear and disappear entirely between polling observations cannot be detected.
-
-New physical registrations, including unsupported structures, enter persisted review without automatic disable. One aggregate notification per SID/cycle directs the tray/frontend to the existing OpenWith page. Each card retains its source path, command and User/Machine scope. Accept current state acknowledges the displayed generation; the normal switch disables eligible entries. No auto-disable-new-applications policy is provided. Supported and unsupported registrations use the same discovery; extension association inspection stays read-only and on demand.
-
-Persistent protection is a separate explicit authorization, available only after this program has disabled a manageable **per-user HKU registration** with verified Owned visibility provenance. Existing third-party/legacy NoOpenWith values never create rules. The rule stores authenticated SID, exact physical path, every command-bearing verb's generation fingerprint, literal executable path, SHA-256 of the executable, authorization, cumulative attempt count/backoff and last verified outcome/time. Executables must exist on a fixed local drive, be at most 128 MiB, have no environment-variable tokens, UNC paths or reparse-point ancestors. An open file handle disallows executable replacement while a corrective write is verified. An exact binary fingerprint is intentionally conservative: changed binaries (including legitimate updates), changed command generations and version-specific paths require review and renewed authorization. Publisher/product metadata is not trusted as identity evidence.
-
-Automatic enforcement never writes HKLM. Machine entries remain reviewable and manually manageable; the UI does not offer persistent machine protection. One user's preference must not become an all-users policy. This is the exact scope of automatic protection in this implementation.
-
-Before correction, re-resolve the original physical registration, validate SID/path/identity/manageability and fresh visibility ownership, and persist an Uncertain attempt reservation. Under the durable-state gate, re-read authorization and the registration, hold the executable identity handle, call the existing transactional `OpenWithRegistration.SetEnabled` through `SpecialMenuService.SetOpenWithEnabled`, then perform authoritative read-back and persist the outcome. Existing NoOpenWith values are never overwritten or adopted. Already Owned-disabled registrations are satisfied without another write. A failed/canceled operation or failed outcome save leaves durable Uncertain: subsequent observation can confirm disabled state or suspend to Conflict/review, but never blindly repeats that write.
-
-At most three automatic corrections are allowed per explicit authorization, with persisted 30/120/270-second backoff after successive attempts. The fourth rewrite becomes Conflict until the user inspects and authorizes again. Conflicts do not continuously write against installers/admins. Explicit user Enable removes the corresponding rule durably **before** the registry enable; persistence failure prevents that enable. Stop persistent protection removes authorization without changing current physical visibility. An absent registration retains its rule: the page shows a rule-only card (or its existing deleted backup) so authorization can still be removed.
-
-Soft deletion remains native RegRenameKey to the existing sibling .deleted key. Monitoring never renames, purges, appends suffixes or overwrites a backup/recreated original. Re-registration alongside a backup enters separate review; an explicitly protected matching original may receive safe NoOpenWith suppression. The UI says disabled and verified, not deleted. Historical .deleted/.deleted.deleted recovery compatibility remains unchanged.
-
-Rules and review/baseline records live in a separate `openWith` section of the same schema-3 state envelope. They are never fake classic ContextMenuEntry/PersistedContextMenuState records. Existing atomic replacement, validated backup, corruption recovery and portable host quarantine are reused. Classic Save reloads and merges this section under the store gate; OpenWith updates load/merge/write the latest classic states under that same gate. Schema 2 and raw dictionaries migrate without inventing rules; older schema-2 readers reject schema 3 rather than erasing it. Reset removes rules, baseline, pending reviews and backup together; current registry state is adopted silently next time, without enabling registrations or deleting NoOpenWith. Host fingerprints remain hashed; the separate authorization section necessarily records the rule's SID and physical HKU path.
-
-Applications/NoOpenWith suppression does not change defaults, UserChoice/Hash, UCPD, OpenWithProgIDs, FileExts, Capabilities or package declarations. These independent sources may still offer the application in Explorer.
-
-Manual Windows verification still required:
-
-1. Start/reset with preexisting enabled/disabled Applications entries: after settling, no initial review flood or automatic policies. Register a new HKU and HKLM app: one review per physical source, neither automatically disabled.
-2. Disable a literal-path HKU app, opt in, recreate its original key with unchanged commands/binary and no visibility values. Verify empty REG_SZ NoOpenWith plus matching provenance, persisted Reapplied and fresh UI state, including after a backend restart.
-3. Replace its binary/command/path or add a foreign visibility marker: verify Conflict and untouched external values. Repeatedly remove owned visibility: verify three bounded corrections, then review. Explicit Enable must revoke the rule.
-4. Soft-delete, then recreate the original; verify the sibling backup and ACL survive, no extra .deleted suffix, and Undo refuses the collision. Stop protection must remain available while the original is absent.
-5. Exercise actual service stop/start/shutdown, RDP/fast user switching and hive unload/reload; check SID-specific notifications, fresh UI snapshots, tray activation with hidden icon and no startup storms. Elevated HKLM writes, Explorer-visible candidate lists and real installer timing require desktop testing; registry integration tests alone do not prove these results.
+变更 `SpecialMenuKind`、文件恢复策略、hash 或 WPS 检测/处置时更新本文及相关模型文档；不要在其它指南再复制 ShellNew/OpenWith 实现。

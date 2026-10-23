@@ -1,12 +1,12 @@
 # 注册表模型与传统右键菜单实现
 
-## 1. 本文目的
+## 本文目的
 
 本文解释传统右键菜单如何在 ContextMenuMgr 中被扫描、建模、禁用、删除、恢复、审核和备份。这里的“传统右键菜单”主要指注册在 `shell` 和 `shellex\ContextMenuHandlers` 体系下的菜单项，不包含 Windows 11 packaged context menu，也不包含 ShellNew / SendTo / WinX 等 SpecialMenu。
 
-相关主实现位于 `ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs`、`ContextMenuRegistryMonitor.cs`、`ContextMenuStateStore.cs` 和 `RegistryBackupService.cs`，前后端传输模型位于 `ContextMenuMgr.Contracts/ContextMenuEntry.cs`。
+相关主实现位于 `ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs`、`RegistryBackupService.cs`，前后端传输模型位于 `ContextMenuMgr.Contracts/ContextMenuEntry.cs`。
 
-## 2. Windows 传统右键菜单基础
+## Windows 传统右键菜单基础
 
 传统右键菜单不是单一注册表路径，而是一组按对象类型分散的注册表入口：
 
@@ -27,7 +27,7 @@
 
 不要把 `HKCR` 当成真实单一路径。`HKEY_CLASSES_ROOT` 是用户级 Classes 与机器级 Classes 的合并视图，读取时方便，写入时必须明确写到用户级还是机器级。后端服务不能用 LocalSystem 的 `HKCU` 代替前端用户的 `HKEY_USERS\<SID>`。
 
-## 3. 项目中的 MonitoredRoots
+## 项目中的 MonitoredRoots
 
 `ContextMenuRegistryCatalog` 用 `MonitoredRoots` 定义传统菜单扫描范围。当前代码覆盖以下 `ContextMenuCategory`：
 
@@ -46,7 +46,7 @@
 
 `-ContextMenuHandlers` 是项目识别的 disabled mirror 形态之一，用于表示从启用位置移出的 Shell Extension handler。不要把所有禁用都简化成一个注册表值。
 
-## 4. ContextMenuEntry 模型
+## ContextMenuEntry 模型
 
 `ContextMenuEntry` 是传统菜单、Win11 菜单和审核流程共享的传输模型。当前重要字段如下：
 
@@ -72,13 +72,13 @@
 | `IsPendingApproval` | 运行时新增项隔离成功后进入待审核；普通 `Modified` 只显示变化提示。 |
 | `HasBackup` / `DeletedAtUtc` | 删除备份相关状态。 |
 | `CanToggle` | 是否具有经过验证的普通启用/禁用操作。`PropertySheetHandlers` 等未验证类型为只读。 |
-| `HasConsistencyIssue` / `ConsistencyIssue` | 状态库和真实注册表不一致时的诊断信息。 |
+| `HasConsistencyIssue` / `ConsistencyIssue` | 真实注册表结构冲突等诊断；普通开关差异属于 Modified 或纠偏。 |
 | `HasLegacyGlobalShellExtensionBlock` | 兼容性诊断：经典 handler 的 CLSID 同时存在于旧版机器级全局 Blocked 列表；不改变当前注册项的开关状态。 |
-| `DetectedChangeKind` / `DetectedChangeDetails` | 监控发现的新增、删除、修改等变化。 |
-| `IsWindows11ContextMenu` | 标识 Win11 packaged context menu。传统菜单通常为 `false`。 |
+| `DetectedChangeKind` / `DetectedChangeDetails` | 新增/修改分类；确认缺失从活动 baseline 移除，不展示 Removed。 |
+| `IsWindows11ContextMenu` | 标识 Win11 独立目录项，含 PackagedCom 和 SystemCommandStore。传统菜单通常为 `false`。 |
 | `Notes` | 诊断和补充说明，不应参与主逻辑判断。 |
 
-## 5. Snapshot 构建流程
+## Snapshot 构建流程
 
 当前后端 snapshot 是“真实注册表 + 状态库”的合并结果，不是单纯枚举注册表：
 
@@ -95,9 +95,9 @@
 
 `ContextMenuRegistryMonitor` 基于周期性 snapshot 比较发现变化。首次 baseline 和用户登录后的 baseline 重建很重要，否则容易把系统已有项误判为新安装项。
 
-待审核 `ApplyDecision` 在持久状态操作门内只取得一次完整 snapshot；Allow/Deny 把该 snapshot 传给开关核心逻辑，Remove 把已解析的物理条目传给删除核心逻辑。普通独立开关/删除请求仍自行取 snapshot。这样不会在一次审核操作中重复做完整注册表与 Win11 包枚举，也不会绕过原有状态库串行化。
+待审核 `ApplyDecision` 在持久状态操作门内只取得一次完整 snapshot；Allow/Deny 把该 snapshot 传给开关核心逻辑，Remove 把已解析的物理条目传给删除核心逻辑。普通 classic 开关使用受限 classic projection；删除保留自己的查询路径。这样不会在一次审核操作中重复做完整注册表与 Win11 包枚举，也不会绕过原有状态库串行化。
 
-## 6. 启用 / 禁用策略
+## 启用 / 禁用策略
 
 传统菜单的禁用方式按 `EntryKind` 和实际路径分流：
 
@@ -119,6 +119,8 @@ ShellVerb 开关使用物理路径级事务。写入前先捕获本次会改变�
 
 v1.7.5 在禁用 classic ShellVerb 时直接写 `HideBasedOnVelocityId=0x639bc8` (DWORD)、空字符串 `ProgrammaticAccessOnly`，普通 verb 还写空字符串 `LegacyDisable`；`Folder\shell\opennewwindow` 不写 `LegacyDisable`，有 `ShowAsDisabledIfHidden` 时只保留 velocity hide marker。该版本没有保存原始 visibility provenance。升级后，只有状态库在本次 snapshot 之前已记录同一逻辑项的明确禁用意图、其物理 `BackendRegistryPath` 完全一致，且真实 key 的值与相应 v1.7.5 签名及类型严格匹配时，Allow/Enable 才能使用一次性 legacy recovery 删除这些确定的旧 marker。恢复操作执行物理代际比较、重新打开验证、逻辑核对、状态提交及有条件回滚；它不伪造未知原始值的 v1.7.6+ provenance。签名不完整、来源不明或第三方 visibility metadata 均继续返回 `SHELL_VERB_VISIBILITY_PROVENANCE_MISSING`，不会被自动删除。后续再次禁用由当前事务建立正常 provenance。
 
+维护决定：保留v1.7.5 可见性签名恢复，直至明确停止支持所有仍带该签名、且没有物理 provenance 的持久状态升级；不能仅因项目已经生成新版 provenance 就移除它。迁移成功的单项自然转入当前事务格式，不引入永久兼容开关。
+
 事务在物理验证、logical reconciliation、状态保存、取消或异常失败时执行乐观回滚：仅当当前值仍等于本事务写入值时才恢复原值，并重新打开 key 验证。若第三方已把值改成其它内容，则保留第三方内容并返回 `REGISTRY_MUTATION_ROLLBACK_CONFLICT`；安全回滚成功返回 `REGISTRY_MUTATION_ROLLED_BACK`。多物理 classic Shell Extension move 同样记录每一步，后续 move 或状态保存失败时逆序恢复，继续保留 #108 的 active / `-ContextMenuHandlers` 冲突保护。
 
 File category 的 `open` 是 activation-critical safety class。若父 `shell` 默认值选中它，或前端用户的有效扩展名关联使用该 ProgID，则普通禁用、通用命令编辑和通用属性编辑在写入前返回 `FILE_TYPE_ACTIVATION_VERB_PROTECTED`。本保护不会修改 `UserChoice` 或默认应用，也不 blanket-ban `print` / `printto`；例如隐藏 `print` 只改变目标 print verb 的受管可见性 value，不改 sibling `open`、两个 command、父 `shell` 默认值或其它 association source。
@@ -129,15 +131,13 @@ Recycle Bin 页面额外投影一个虚拟传统项 `special:recyclebin:pintohom
 
 普通 ShellVerb 的命令文本编辑不解析命令行、不拆分程序和参数、也不重写引号；`SetCommandText` 只把用户输入的字符串原样写到 `<verb>\command` 的默认 `REG_SZ`。后端会先检查 `CanEditCommandText` 和当前注册表形态，并经过 Registry Write Protection preflight；不支持 Shell Extension、Windows 11 packaged context menu、`SubCommands` / `ExtendedSubCommandsKey` 父级、`DelegateExecute`、`DropTarget\CLSID` 或 `ExplorerCommandHandler` 项。
 
-### Protected machine ShellVerb mutations
+### 受保护机器 ShellVerb 的窄写入路径
 
-Ordinary ShellVerb visibility changes first open the entry for a normal write and then read the same key back through `ShellVerbVisibility.IsEnabled`. If Windows denies that normal operation on an actual `HKLM\SOFTWARE\Classes\...` entry, the backend may use a narrowly scoped protected-mutation fallback. It never runs for `HKEY_USERS\<SID>\Software\Classes` entries, which retain their frontend-user provenance.
+普通 ShellVerb 可见性先尝试正常打开/写入，并重新读取同 key 的 `ShellVerbVisibility.IsEnabled`。仅真实 `HKLM\SOFTWARE\Classes\...\shell\<verb>` 的普通写因 ACL 拒绝时，才可进入窄 `ProtectedRegistryMutation` fallback；不适用于 HKCR、HKU、非 Classes 或无关 Classes path。Registry Write Protection preflight 仍优先阻止操作。
 
-The fallback captures the original owner/group/DACL descriptor, enables only `SeTakeOwnershipPrivilege` and `SeRestorePrivilege` on a disposable copy of the service token, grants LocalSystem only `SetValue`, performs and verifies the requested visibility write, then restores and byte-verifies the exact original owner/group/DACL descriptor (including inheritance and ACE ordering). `ScopedRegistryPrivileges` opens the primary token for Query/Duplicate while unimpersonated, attaches a private impersonation token synchronously, and opens that copy for privilege adjustment. It never adjusts the process token; concurrent requests and partial acquisition failures cannot leave shared privileges enabled. Restoration marks only the captured Owner/Group/Access sections; the uncaptured audit SACL is never marked for writing. The previous effective identity is restored when the scope exits. This does not change the authenticated frontend SID or physical hive selection.
+fallback 捕获原 Owner/Group/DACL，在服务 token 的私有可丢弃副本仅启用 `SeTakeOwnershipPrivilege` / `SeRestorePrivilege`，临时授 LocalSystem SetValue，写入/验证后精确恢复并逐字节验证原 descriptor（含继承与 ACE 顺序）。`ScopedRegistryPrivileges` 在无模拟身份下用 Query/Duplicate 打开主 token，同步挂载私有 impersonation token 并在副本上调整权限，不修改进程 token；退出恢复调用前身份，部分获取失败或并发 scope 不留下共享启用权限。只将已捕获的 Owner/Group/Access 标记待写，不把未捕获 SACL 标记写入。
 
-Eligibility requires a physical machine Classes path ending in `shell\<verb>`; HKCR, HKU, non-Classes keys and unrelated Classes keys are excluded. It does not permanently take ownership, grant Administrators or SYSTEM FullControl, or delete/replace a Windows ShellVerb key. Cleanup starts even if the first owner update throws. Before temporary changes and restoration, the descriptor is compared with the captured/intended states; an observed external ACL change is left untouched and returns `REGISTRY_SECURITY_RESTORE_FAILED`. That error remains authoritative even if subsequent value rollback succeeds. The compare/write operations are optimistic Windows registry operations, not an atomic compare-and-swap against an external installer; an uncooperative writer can still race between a comparison and a native write, and uncertain restoration is always failure.
-
-This Windows ACL path is distinct from ContextMenuMgr Registry Write Protection. The latter is checked before all normal menu mutations; when it is enabled, the protected-key fallback is not attempted.
+不永久接管、不授 Administrators/SYSTEM FullControl、不删/替换系统 verb。第一次 owner update 即使抛错也启动清理；临时改动/恢复前比较原/预期 descriptor。外部 ACL 改动保留并返回 `REGISTRY_SECURITY_RESTORE_FAILED`，即使后续值回滚成功也不能掩盖该错误。比较/写入是乐观 Windows 操作，非跨安装器原子 CAS，仍可能在间隙竞态；不确定恢复必须失败。私有 scope 不改变认证 SID、选定 hive 或 Session。
 
 传统分类页支持通过前端的 `CreateSceneMenuItem` 入口创建自定义 classic 菜单项。分类页把当前 `ContextMenuCategory` 映射为 `ContextMenuSceneKind.CustomRegistryPath` 和对应的 HKCR scene root（例如 `HKCR\*\shell`、`HKCR\Directory\shell`、`HKCR\Drive\shell`），再通过 Backend Pipe 交给 `FileTypeSceneMenuService.CreateSceneMenuItemAsync` 写入 `shell\<verb>\command`。首版只创建普通 shell verb 命令：前端负责生成带引号的命令行并追加 `%1` 或 `%V` 选中对象占位符，后端负责 Registry Write Protection preflight、创建不覆盖已有项的唯一 key、通知 Shell 关联变更，并在状态库中抑制本次新建项检测，避免把用户主动创建的项标为待审核。本入口不创建 ShellEx handler、不复制 CommandStore 引用，也不创建子菜单。
 
@@ -147,11 +147,9 @@ This Windows ACL path is distinct from ContextMenuMgr Registry Write Protection.
 
 File Types 的隐藏批量管理视图通过 `FindRelatedFileTypeMenuItems` 做一次性相关项扫描。该扫描覆盖 HKLM 与前端用户 `Software\Classes` 下的扩展名 key、ProgId key、以及 `SystemFileAssociations\<extension|perceivedType>` 的 `shell` / `shellex\ContextMenuHandlers` / disabled mirror 根；它不会在服务启动时运行，也不会把扫描到的文件类型项加入普通全局启动检测 baseline。ShellVerb 相关性要求命令程序路径规范化后相同并且 key name 相同；ShellExtension 相关性要求 Handler CLSID 相同；显示名只用于展示，不作为匹配依据。批量扫描会把匹配 query 的已删除备份状态合并回结果，因此删除后的相关项仍可在批量页撤销。批量视图中的开关和删除继续走普通 `SetEnabled` / `DeleteItem`，并通过 fallback `ContextMenuEntry` 支持不在普通 workspace snapshot 中的 scene-only 文件类型项。文件类型 `open` / `edit` 核心 ShellVerb 禁止删除；用户若想隐藏这类项，应使用禁用开关。
 
-## 7. 删除、恢复与备份
+## 删除、恢复与备份
 
-删除不总是“立即永久删除”。`RegistryBackupService` 在删除前通过 `reg.exe export` 导出注册表备份。Installer 包下备份保存在 `%ProgramData%\ContextMenuMgr\DeletedBackups`；Portable 包下备份保存在当前 host identity 前缀对应的 `<应用目录>\Data\DeletedBackups\<host-prefix>`。host identity 由 Windows `MachineGuid` 和前端用户 SID 的 SHA-256 指纹表示，JSON 和目录名只保存指纹/前缀，不保存原始 MachineGuid 或 SID。
-
-Portable 包被复制到另一台 Windows 或另一个用户配置文件时，旧 `DeletedBackups` 不再可信。启动时后端会把当前 host 前缀之外的备份移动到 `Data\Quarantine\foreign-host-...`；恢复删除项时也只允许导入当前 host-scoped backup 目录中的 `.reg` 文件。其它路径会返回“属于不同 Windows 安装或用户配置文件，不能安全恢复”的错误。
+删除前 `RegistryBackupService` 用 reg.exe export 保存真实目标 .reg；备份位置与 Portable host-scoped 目录/foreign-host 拒绝统一见[运行时数据](runtime-data-and-logging.md#portable-host-identity)。不能导入另一用户/Windows 的备份。
 
 | 操作 | 说明 |
 | --- | --- |
@@ -168,95 +166,7 @@ Portable 包被复制到另一台 Windows 或另一个用户配置文件时，�
 
 恢复用户级或 HKCR overlay 相关菜单项时，后端必须带 frontend user context 重读快照，不能用服务进程的 HKCU 或无用户上下文的全局快照判断恢复结果。
 
-## 8. 状态库与显式 baseline
-
-`ContextMenuStateStore` 保存项目自己的状态，路径为 `RuntimePaths.StateDatabasePath`。它不是注册表副本，而是“上一次已确认状态 + 用户开关意图 + 待审核状态 + 删除恢复记录”。
-
-状态库保存继续采用 current + last-known-good backup：先写入同目录唯一临时文件，flush 并用生产解析器验证，然后原子替换 current，并把已验证的旧 current 保存为 `.bak`。损坏恢复、portable host identity 隔离规则保持不变。
-
-常规菜单与 WPS/Office 合成项共享 JSON 文件，但各自使用独立的显式 baseline 标记：
-
-- `internal:baseline:regular:v1`
-- `internal:baseline:wps-office:v1`
-
-不能再用“状态库中存在任意记录”推断某一数据源已经建立 baseline。即使首次扫描结果为零项，也必须写入对应标记；否则未来第一个真实新增会被误当成首次采纳。
-
-只有能够解析到交互式用户上下文的完整快照才允许创建首次 baseline。无 SID 的服务早期快照可以用于显示和诊断，但不得提交不完整 baseline。常规快照、WPS 快照、监控 reconciliation 和用户操作通过同一个持久状态操作门串行执行，避免多个“Load -> Merge -> Save”流程互相覆盖。
-
-首次采纳的每个实际项同时保存：
-
-- `ObservedEnabled = 当前注册表开关状态`
-- `DesiredEnabled = 当前注册表开关状态`
-- `IsPendingApproval = false`
-- 当前显示名、命令、图标、CLSID、路径和属性元数据
-
-因此首次运行时，原本已经关闭的菜单也会形成 `DesiredEnabled=false` 策略；监控运行期间若相邻稳定快照观察到它被第三方重新打开，后端可以静默关回去。启动首轮已经存在的差异属于离线修改，不走这条纠偏路径。
-
-## 9. 六条外部变化核心规则
-
-下表是拦截、状态库和 UI 提示的唯一行为矩阵。后续改动不得引入与此表冲突的 Reappeared 或泛化 consistency 分支。
-
-| 编号 | 场景 | 后端行为 | 前端状态 |
-| --- | --- | --- | --- |
-| 1 | 软件运行期间出现未知菜单项 | 下一轮监控发现后禁用并写入状态库，进入待审核；隔离失败时保留为未知项并在后续轮询重试 | `Added` + `IsPendingApproval=true`（成功隔离后） |
-| 2 | 软件运行期间，已知项从开变关 | 不自动重新打开，保留旧 baseline 供用户确认 | `Modified`，不再叠加“状态不一致” |
-| 3 | 软件运行期间，相邻稳定快照观察到已知项从关变开 | 静默重新关闭，继续保留 `DesiredEnabled=false` | 纠偏后无待审核、无外部修改、无 generic consistency |
-| 4 | 软件停止后出现未知菜单项，重启时发现 | 不隔离、不自动禁用，等待用户确认当前变化 | `Added`，不进入待审核 |
-| 5 | 软件停止后已知项开关改变，重启时发现 | 无论开变关还是关变开都保留当前注册表状态，等待用户确认 | `Modified`，不待审核 |
-| 6 | 实际注册表项已删除 | 完整快照连续确认缺失后，从活动 baseline 移除 | 不显示 Removed、不参与以后比对 |
-
-“连续确认缺失”当前为两次具有交互用户上下文的持久快照，用于避开注册表枚举瞬态。上下文不完整的服务快照不得清理状态。
-
-应用主动执行 Delete 时产生的 `.reg` 备份属于恢复记录，不属于活动监控 baseline。它可以暂时保留以支持 Undo Delete，但不参与新增、修改或重新出现分类。若相同注册表 key 再次真实出现，旧恢复记录和旧备份会被清理，该 key 按普通未知 `Added` 处理，不再使用 `Reappeared` 状态机。
-
-## 10. 实现时序
-
-### 10.1 状态库缺失或被重置
-
-```text
-解析 frontend userContext
--> 枚举常规注册表 + Win11 项
--> 当前状态全部写入 regular baseline（包括已关闭项）
--> 写 regular baseline marker
--> 枚举 WPS/Office 合成项
--> 当前 WPS 状态全部写入 baseline，全部已确认
--> 写 WPS baseline marker（即使当前为零项）
--> 返回无 Added / Modified / Pending / generic inconsistency 的快照
-```
-
-首次 baseline 不能经过普通“未知项”运行时隔离路径。WPS 的默认打开方式、图标覆盖和 ShellNew 注入只要在重置时已经存在，都作为当前事实采纳，不进入待审核，也不暴露外部变化徽标。
-
-### 10.2 运行时轮询
-
-```text
-读取持久状态
--> 获取带交互用户上下文的实际快照
--> 与 monitor 上一个稳定内存快照比较
--> 仅对本轮确认的“上一轮关、本轮开”执行 DesiredEnabled=false reconciliation
--> 如有写入，只重新枚举一次
--> 比较稳定 Id 和元数据
--> 未知 Added：隔离并待审核
--> 已知 Modified：只高亮
--> 连续缺失：移除活动 baseline
--> 用 post-reconciliation 快照更新 monitor knownItems
-```
-
-监控循环独立于前端 Pipe 连接运行。普通开关、Win11 blocked list 和用户级 Classes 必须继续使用 frontend/interactive SID，不能使用服务进程 HKCU。
-常规扫描只枚举 HKLM 和当前交互用户的 `HKEY_USERS\<SID>\Software\Classes`；暂时取不到交互用户上下文时，监控保留已有运行时基准，不进行新增项隔离或静默纠偏。软件内开关成功提交后，其写后条目会同步到 monitor 的内存基准，避免“用户关闭→应用在下一次轮询前重新打开”被误看成“开→开”。
-
-### 10.3 启动/离线比对
-
-监控启动时首先取得原始实际快照并建立内存 `knownItems`，不得先执行 disabled-state reconciliation。已有 baseline 下的未知项保留 `Added` 标记，但启动阶段不会触发 `ItemDetected`，因此不会隔离或进入待审核。元数据和开关状态无论往哪个方向变化都按 `Modified` 显示。只有后续两个相邻稳定运行时快照观察到关变开，才进入规则 3 的静默纠偏。
-
-交互式 session 登录、解锁或连接时，monitor 仍会重建内存 baseline。若可见项数量明显低于持久活动状态数量，则延后重建，避免用户 hive 尚未加载时制造运行时新增通知。
-
-### 10.4 一致性状态
-
-开关差异必须落入规则 2、3 或 5，因此 `GetConsistencyIssue` 不再为 `DesiredEnabled != actual` 生成 generic consistency。用户确认 `Modified` 后，`AcknowledgeItemState` 用当前实际值更新 `DesiredEnabled`、`ObservedEnabled` 和元数据。
-
-generic consistency 只保留无法自动归一化的真实注册表结构冲突，以及经典 handler 同时命中旧版全局 Blocked 等诊断。它不能用于表达普通开关变化；active/disabled 双键并存已属于自动修复流程，不能再显示这条泛化提示。
-
-### 10.5 传统 Shell Extension 物理状态
+## 传统 ShellExtension 物理状态
 
 传统 Shell Extension 的普通开关以注册项为单位：启用位置是 `<root>\shellex\ContextMenuHandlers\<name>`，禁用位置是 `<root>\shellex\-ContextMenuHandlers\<name>`。两者使用同一个稳定 Id。
 
@@ -268,17 +178,7 @@ File Types / scene（包括 `SystemFileAssociations`）根不必属于常规 `Mo
 
 `PropertySheetHandlers` 仍是只读注册类型，`CanToggle=false`，不参与自动隔离或开关 reconciliation。
 
-### 10.6 竞争与失败
-
-- 所有会读写 `ContextMenuStateStore` 的常规快照、WPS 快照、审核、删除/恢复和 reconciliation 必须通过 catalog 的持久状态操作门串行化。
-- reconciliation 写入失败时保留 `DesiredEnabled=false`，记录结构化日志并在后续快照重试；不得伪造 `ObservedEnabled=false`，也不得转成待审核。
-- 已禁用 ShellVerb 的同一稳定 Id 若被第三方重新创建为可见项，且命令等物理代际指纹改变，静默重新禁用时丢弃旧代际恢复数据、捕获新代际的原值并验证写入；旧代际恢复数据仍不得用于启用新注册项。连续两次完整快照确认删除并移出 baseline 后重新出现的项仍按未知 `Added` 处理。
-- ContextMenuMgr 自己的写入必须从 post-write 快照更新 baseline，不能被下一轮识别为外部变化。
-- 普通开关在物理写入和逻辑验证成功后，必须用同一次写后快照的条目更新开关状态与全部可比对元数据（包括 handler 移动后的路径），并将返回前端的本次操作结果清除 `DetectedChangeKind`；写前条目及其 `Modified` 标记不能作为软件自身写入的结果。
-- `SuppressNextDetection` 只能抑制一次由应用自身恢复/创建导致的检测，建立 monitor baseline 时必须消费。
-- WPS/Office 是否已有 baseline 只看 WPS marker 或旧版 WPS state，不能被常规菜单 state 影响。
-
-## 11. 常见坑
+## Registry Write Protection
 
 Registry Write Protection 的设置值不是“用户最后一次点击的值”，而是 ACL 已完成收敛的提交标记。后端从 `MonitoredRoots` 的 distinct `StableRelativePath` 派生 HKLM 与 frontend `HKEY_USERS\<SID>` target，先读取每个现存 root 的 DACL，再修改并 fresh read-back。只有全部 applicable target 验证成功才写 `backend-protection-settings.json`。
 
@@ -290,34 +190,44 @@ Registry Write Protection 的设置值不是“用户最后一次点击的值”
 - 禁用只修改 Builtin Users / Authenticated Users 的显式目标 DENY rights `CreateSubKey | SetValue`，保留其它 rights、无关 ACE 和 inherited ACE。
 - Registry Write Protection transition 使用独立 gate，不与状态库 gate 耦合。
 
-| 坑 | 正确处理 |
-| --- | --- |
-| 只看 `DisplayName` 判断同一项 | 使用 `Id`、`KeyName`、`RegistryPath`、`HandlerClsid` 等稳定信息。 |
-| 把 `HKCR` 当真实写入路径 | 写入时明确选择 `HKEY_USERS\<SID>\Software\Classes` 或 `HKLM\SOFTWARE\Classes`。 |
-| 混用用户级和机器级 Classes | 用户级操作必须带前端用户 SID，机器级操作由服务高权限执行。 |
-| 用同一种开关策略处理 `ShellVerb` 和 `ShellExtension` | 按 `EntryKind` 和路径分流。 |
-| 把 Registry Write Protection 当普通禁用 | Registry Write Protection 是权限保护功能，不是菜单项状态。 |
-| 假设状态库和注册表永远一致 | 外部安装器、系统更新和手工修改都会造成短暂不一致。 |
+## 受限快照与结果核对
 
-## Classic mutation snapshot isolation
+普通 classic `SetEnabled` 用 monitored roots 与持久 classic state 解析/验证，写前/写后 projection 不枚举 Win11 package 或 CommandStore。写前仍归一 active/disabled 双容器并更新已有 classic state，但不得建立局部首次 baseline。Win11 Id 继续分流 Win11 catalog，scene-only 项按 `FindEntriesByIdAsync` 的物理校验处理。结果查询保留原 HKLM/前端 HKU source，在持久 gate 内合并状态，不以另一 hive 替代缺失来源。
 
-Ordinary classic `SetEnabled` resolves and verifies ShellVerb/ShellExtension changes from classic monitored roots and persisted classic state. Its pre-write and post-write projections do not enumerate Windows 11 packaged COM or CommandStore entries. The pre-write projection still repairs duplicate active/disabled handler containers and updates established classic state, but cannot establish a partial first baseline. Win11 item IDs continue through the Win11 catalog. Scene-only File Types items still use `FindEntriesByIdAsync` and the existing physical reconciliation. The targeted outcome query also uses `FindEntriesByIdAsync`, preserves the original HKLM or frontend `HKEY_USERS\<SID>` source, and merges its state under `_persistentStateGate`.
+## 回收站 Pin to Start 合成项
 
-## Recycle Bin Pin to Start synthetic projection
+`special:recyclebin:pintostart` 仅在有前端 SID、且机器 `HKLM\SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen` 默认值有合法 CLSID 时投影。它是继承 Shell Extension，不是 pintohome 的 AppliesTo filter。
 
-`special:recyclebin:pintostart` appears only with a frontend-user SID and a valid CLSID in the machine `HKLM\SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen` default value. Unlike `pintohome`, this is an inherited Shell Extension handler, not an `AppliesTo` ShellVerb filter. Disabling creates a no-default-value shadow at `HKEY_USERS\<SID>\Software\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen` and registers the discovered machine handler at the corresponding `Directory\shellex\ContextMenuHandlers\PintoStartScreen` key. This preserves Pin to Start for ordinary filesystem directories while suppressing it for Recycle Bin.
+禁用在 `HKU\<SID>\Software\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen` 建无默认值 shadow，同时在对应 Directory handler 注册机器 CLSID，保留普通目录 Pin to Start。两用户键作为一个逻辑事务：捕获写前状态，两个写后均核对 managed generation，再保存独立 per-SID provenance。启用只恢复该 SID 原两键，不影响其它用户；现存用户键不认领/覆盖，reset 后也不能认领遗留 shadow。
 
-The two user keys are one logical transaction: pre-change snapshots and managed-generation readback are saved as dedicated, per-SID provenance after both writes verify. Enabling restores the original two-key state for that SID without changing another user's record. Existing user keys are never adopted or overwritten, and a reset state database cannot claim an existing shadow. Failure before state commit rolls back only keys still matching this transaction's writes; external changes produce a rollback conflict. These managed implementation keys and the synthetic ID do not enter ordinary monitoring and approval identities. The service uses the frontend SID, never its own HKCU. Other virtual namespaces that inherit `Folder` but not `Directory` require separate Explorer validation.
+写前/后与 state commit 失败仅回滚仍匹配本次写入的键，外部改动报 conflict。实现键/合成 Id 不进入普通监控审核身份。若进程在两写间硬崩溃而无最终归属，下次保留遗留键并在切换时报 override conflict；检查两 HKU 键与状态证据，只人工移除能确认由中断操作建立的键，不推测归属。其它继承 Folder 而非 Directory 的虚拟 namespace 仍需 Explorer 验证。
 
-If the service process crashes between the two registry writes, no final ownership record exists. The next run leaves any surviving user key untouched and reports an override conflict when toggled. Recovery requires inspecting both `HKEY_USERS\<SID>` keys and the state file before manually removing only a key confirmed to have been created by the interrupted operation.
+## 增强菜单与详细规则
 
+### 静态增强菜单字典
 
-增强菜单字典的条件/语言选择、命令编译与 CLI 校验统一在 `EnhanceMenuDictionary`；catalog 只调用该实现执行注册表写入与事务。CLI 校验不通过测试专用编译入口访问生产代码。
+`EnhanceMenusDic.xml` 中的内置增强菜单是静态 shell 命令字典。ContextMenuMgr 只负责把这些字典项安装、禁用或移除到当前前端用户的 `Software\Classes` 下；菜单项被启用后，运行时执行必须完全由注册表中的命令、系统工具和生成的 `.vbs` / `.bat` / `.cmd` 文件完成。
 
-维护决定：保留上文 v1.7.5 可见性签名恢复，直至明确停止支持所有仍带该签名、且没有物理 provenance 的持久状态升级；不能仅因项目已经生成新版 provenance 就移除它。迁移成功的单项自然转入当前事务格式，不引入永久兼容开关。
+增强菜单字典的源码只保留在 `ContextMenuMgr.Frontend/Resources/EnhanceMenusDic.xml`。前端构建时会把它复制到输出目录，前端读取该文件并把选中项的定义 XML 传给后端；后端不维护第二份增强菜单字典，也不在运行时重新读取项目内的字典副本。
 
-OpenWith 的按扩展名来源检查复用 ContextMenuRegistryCatalog.ReadOpenWithProgIdReferences，保留 OpenWithProgIDs 的物理来源与无 command ProgID；传统菜单的 AddAssociatedClassRoot/HasAnyContextMenuSubkey 策略不变。来源检查不写 ProgID、默认关联或常规菜单状态；详见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。
+增强菜单命令不得调用 `ContextMenuMgr` 前端、后端服务、TrayHost、Named Pipe、服务 RPC/IPC 或任何要求本程序仍在运行的宿主进程。迁移 BluePointLilac / ContextMenuManager 内置项时，应优先保持 `EnhanceMenusDic.xml` 的 `KeyName`、`SubKey`、`Command Default`、`ShellExecute`、`FileName`、`Arguments`、`PowerShellScript` 和 `CreateFile` 脚本内容语义一致；新增翻译节点只能影响显示文本，不能改变命令语义。
 
-## OpenWith monitoring boundary (#136)
+当 `Command` 没有 `Default` 时，后端按 BluePointLilac 的规则由 `FileName` + `Arguments` 生成注册表默认值；`FileName` 或 `Arguments` 为空且包含 `CreateFile` 时，会写入 `RuntimePaths.GeneratedProgramsDirectory` 下的持久脚本文件。`.bat` / `.cmd` 使用系统默认编码，其它生成文件（包括 `.ps1`）使用 Unicode。启用后的注册表命令必须直接指向系统工具或这些持久生成文件，而不是依赖后端服务继续运行。
 
-The six classic monitoring rules above do not apply to Applications registrations. OpenWith uses a separate schema-3 section and settled per-SID physical-path baseline in ContextMenuStateStore, not synthetic classic entries. Its runtime and offline new registrations are review-only by default; a preexisting NoOpenWith never implies enforcement. Only explicit, fingerprint-bound HKU protection authorizes safe verified NoOpenWith correction, including across restarts. HKLM is manual-only. The store gate merges OpenWith updates with ordinary classic saves; reset removes both sections and their backup. Details, limits, migration and manual verification are in [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136). Classic mutation methods and registry ACL protection are unchanged.
+`AllFilesystemObjects\shell\CopyAsPath` 直接使用注册表中的 PowerShell 命令，将 `%1` 放在单引号 here-string 的独立行中，再把完整路径写入剪贴板，不添加双引号。路径不能以 `-Command` 的位置参数传入，否则含空格或 PowerShell 特殊字符的路径会被重新解析。已启用的旧版菜单需在“其他规则”中关闭后重新启用，才能重写原有命令。
+
+`ShellExecute` 只在确实需要 ShellExecute 专属行为时才保留旧的 `mshta vbscript:createobject("shell.application").shellexecute(...)` 包装，例如显式非空 `Directory` 或未知 ShellExecute 属性。空 `<ShellExecute/>`、`Verb="open"`，以及只有 `WindowStyle` 的增强菜单项会直接写成 `<FileName> <Arguments>`，避免多层 XML / C# / 注册表 / mshta / VBScript 转义导致简单命令失效。`Verb="runas"` / 管理员增强菜单项默认编译为独立的 `powershell.exe ... Start-Process -Verb RunAs -Wait -PassThru ...` 命令；复杂管理员动作可在字典中使用 `PowerShellScript`，由后端生成提升后的 PowerShell command block，并把提升子进程的 exit code 传回调用方。`PowerShellScript` 默认提升；仅当脚本必须留在调用它的 Explorer 用户上下文（例如停止后重启该用户的 Explorer）时，才可显式使用 `Elevate="false"`。缓存刷新会优先让 Winlogon 的 `AutoRestartShell` 自动恢复 Explorer，仅在该设置明确为 `0` 时才手动启动，避免双重启动和额外的文件管理器窗口。脚本中的环境变量保留到 Explorer 实际调用命令时才解析，不能在服务注册命令时展开为 SYSTEM profile 路径。启用后的命令仍然只依赖系统工具、注册表命令值和必要的持久生成脚本，不依赖 ContextMenuMgr 前端、后端、TrayHost 或 pipe。
+
+增强菜单字典和后端写入层会把直接作为可执行文件使用的裸 `cmd` / `cmd.exe` 规范化为 `C:\Windows\System32\cmd.exe`，把裸 `explorer` / `explorer.exe` 规范化为 `C:\Windows\explorer.exe`；`Command Default` 只在命令开头是这些安全前缀时改写可执行文件部分。`Arguments` 和生成脚本中直接启动 Explorer 的低风险位置也应使用 `C:\Windows\explorer.exe`，但不要把 `taskkill /im explorer.exe`、`tskill explorer`、图标引用或进程名匹配参数误改成路径。写入普通 `MUIVerb` 等可见标签时会移除 Win32 菜单加速键 `&`，但保留 `&&` 表示的字面量 `&`，并且不处理 `@shell32.dll,-...` 这类资源引用。
+
+动态扩展的详细编辑只接受 `DetailedEditDic.xml` 明确列出的厂商配置，不把任意 COM 子菜单变成可写项。字典条件/语言和命令编译统一由 `EnhanceMenuDictionary` 承担，catalog 保留注册表及状态事务。
+
+## 调试、验证与维护
+
+源码入口：[catalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs)、[ShellVerbVisibility](../ContextMenuMgr.Backend/Services/ShellVerbVisibility.cs)、[ProtectedRegistryMutation](../ContextMenuMgr.Backend/Services/ProtectedRegistryMutation.cs)、[RegistryProtectionAcl](../ContextMenuMgr.Backend/Services/RegistryProtectionAcl.cs)、[备份](../ContextMenuMgr.Backend/Services/RegistryBackupService.cs)。状态机与并发持久化唯一说明见[状态与监控](state-and-monitoring.md)，IPC 超时/迟到通知见[进程与权限](process-and-privilege-flows.md)。
+
+保护设置不是 ACL 事实的完整替代。检查 `RegistryProtectionTransitionStarted/Completed`、失败 target、persisted value 和实际 DACL；禁止手改 JSON false 绕过失败。受保护写入按 token acquisition、privilege enable、registry write、descriptor restoration 分阶段定位；error 5 不等于 privilege 缺失。详见[排错](troubleshooting.md#注册表权限与受保护写入)。
+
+已有永久回归覆盖 ShellVerb 原值/代际、handler move、多来源、ACL transition、protected token、副作用/回滚、激活保护和 Pin to Start。真实 VM 仍需普通前端→LocalSystem Pipe、两个 SID、删除/Undo、Explorer 可见性、拒绝 DELETE/SetValue 的差异、外部并发改值/ACL、持久保存失败后物理回滚与重启；测试临时键成功不能证明某第三方受保护键已修复。
+
+更改扫描根、visibility/provenance、删除、子菜单、ACL、字典或恢复策略时更新本文，并检查对应持久格式兼容；不得删除仍受支持的 v1.7.5 严格签名恢复。

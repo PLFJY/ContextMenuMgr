@@ -1,12 +1,12 @@
 # Deep Analysis 与 ProbeHost 实现说明
 
-## 1. Deep Analysis 的目的
+## Deep Analysis 的目的
 
 Deep Analysis 用于尝试解析 Shell Extension 实际插入到右键菜单中的菜单文字、图标、canonical verb 和帮助文本。它不是普通菜单开关功能，也不是审核流程的必要条件。
 
 普通 snapshot 只能看到注册表中的 handler、CLSID、命令和路径；第三方 Shell Extension 真正添加哪些菜单项，需要在进程中创建 COM handler 并调用 `IContextMenu.QueryContextMenu`。这一步风险高，所以放到 ProbeHost。
 
-## 2. 为什么需要 ProbeHost
+## 为什么需要 ProbeHost
 
 第三方 Shell Extension 通常是 in-process COM DLL。直接在前端或后端加载会带来这些风险：
 
@@ -19,7 +19,7 @@ Deep Analysis 用于尝试解析 Shell Extension 实际插入到右键菜单中�
 
 `ContextMenuMgr.ProbeHost` 是短生命周期 native C++ Win32 隔离进程。它可以崩溃或超时，而不影响前端、后端服务和普通菜单管理。
 
-## 3. ProbeHost 的边界
+## ProbeHost 的边界
 
 ProbeHost 必须保持边界清晰：
 
@@ -33,7 +33,7 @@ ProbeHost 必须保持边界清晰：
 
 不要把 ProbeHost 当提权链路。它由前端启动，解决的是第三方 COM 隔离和架构匹配，不解决管理员权限。
 
-## 4. 架构选择
+## 架构选择
 
 当前前端 `ContextMenuDeepAnalysisService` 会根据 handler DLL 的 PE machine type 选择 ProbeHost：
 
@@ -48,7 +48,7 @@ ARM64 Windows 上也可能需要 x64 或 x86 ProbeHost，因为第三方 handler
 
 Debug 和 Release 构建产物都要验证目录标签与实际 PE machine type 一致。`Scripts/Verify-ProbeHostArchitecture.ps1` 会检查 `x86`、`x64`、`arm64` 目录中的 `ContextMenuMgr.ProbeHost.exe` 是否对应预期 machine 值。
 
-## 5. SpecificHandler 与 WholeContextMenu
+## SpecificHandler 与 WholeContextMenu
 
 | 模式 | 说明 | 注意事项 |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Debug 和 Release 构建产物都要验证目录标签与实际 PE machine type 
 
 不要自动把 `SpecificHandler` 失败后 `WholeContextMenu` 成功解释成“当前 handler 成功”。这两个模式回答的问题不同。
 
-## 6. 请求与结果流程
+## 请求与结果流程
 
 ```text
 Frontend
@@ -77,7 +77,7 @@ Frontend
 
 结果中的菜单项可选包含 `iconPngBase64`。该字段只表示 ProbeHost 已成功把菜单项的运行时图标编码为 PNG base64；缺失或为空表示没有可用图标或图标提取失败。旧结果 JSON 不包含该字段时仍应正常反序列化。
 
-## 7. 菜单项图标
+## 菜单项图标
 
 ProbeHost 在枚举 `HMENU` 时通过 `MENUITEMINFO.hbmpItem` best-effort 读取标准菜单位图图标，并在能安全转换时把 PNG base64 写入 `iconPngBase64`。图标提取失败只影响单个菜单项图标，不应导致 `QueryContextMenu` 结果失败，也不应让 ProbeHost 进程失败。
 
@@ -90,7 +90,7 @@ ProbeHost 在枚举 `HMENU` 时通过 `MENUITEMINFO.hbmpItem` best-effort 读取
 
 缺少图标是正常现象，不能单独视为 Deep Analysis 或普通菜单管理 Bug。
 
-## 8. 失败分类
+## 失败分类
 
 很多失败是正常限制，不应直接提示用户报告 Bug。
 
@@ -105,32 +105,20 @@ ProbeHost 在枚举 `HMENU` 时通过 `MENUITEMINFO.hbmpItem` best-effort 读取
 | `QueryContextMenuFailed` | 调用 `IContextMenu.QueryContextMenu` 失败。 |
 | `SpecificHandlerReturnedNoItems` | handler 成功返回但没有可显示项。 |
 | `ProbeHostNativeCrash` / `ProbeHostNativeAccessViolation` / `ProbeHostStackBufferOverrun` | ProbeHost 被第三方 native 代码拖崩。 |
-| `Timeout` | 超过默认或传入超时时间，前端会尝试结束进程。 |
+| `Timeout` | 超过默认 5 秒或传入超时时间，前端会尝试结束进程。 |
 | `InvalidProbeHostJson` / `InvalidProbeHostOutput` | ProbeHost 未返回合法 JSON。 |
 
-## 9. 构建与部署注意事项
+## 构建、验证与维护
 
-ProbeHost 必须随前端部署多架构目录。当前 `ContextMenuMgr.Frontend.csproj` 会用 MSBuild 构建 native C++ ProbeHost。Debug 本地开发默认构建并复制 x86 / x64，以便未安装 ARM64 C++ 工具链的开发机可以直接运行前端；Release / Beta 和发布构建仍默认构建并复制 x86 / x64 / arm64。需要在 Debug 中强制构建三架构时可传入 `-p:NativeProbeHostPlatforms=Win32,x64,ARM64`。
+Native build、Debug/Release 架构集合、许可与打包规则仅在[构建发布](build-and-release.md#probehost-架构与许可)维护；这里负责运行时选择/隔离。源码入口：[前端分析服务](../ContextMenuMgr.Frontend/Services/ContextMenuDeepAnalysisService.cs)、[ProbeHost main](../ContextMenuMgr.ProbeHost/src/main.cpp)、[ShellProbe](../ContextMenuMgr.ProbeHost/src/ShellProbe.cpp)、[协议](../ContextMenuMgr.ProbeHost/src/Protocol.cpp)、[契约](../ContextMenuMgr.Contracts/ContextMenuDeepAnalysisContracts.cs)。
 
-构建后复制：
+前端优先读取 result file，再尝试 stdout JSON；记录 exit code、stdout/stderr 和 DiagnosticDetails。超时后尝试结束进程，取消/关闭时清理临时请求/结果；第三方 DLL 的进程内操作不受本产品“只读探测”契约约束，因此这是崩溃/架构隔离，不是安全沙箱。不能保证第三方代码无外部副作用。
 
-- `ContextMenuMgr.ProbeHost.exe`
+手验应记录 DLL/ProbeHost PE、实际 sample 类型、模式、进程退出/超时及 result/stderr，对照 SpecificHandler 与 WholeContextMenu；空/自绘图标不得使菜单失败。实际第三方 COM、Explorer 依赖、32/64/ARM64 和卡死/崩溃必须在可恢复 Windows 环境检查，构建和序列化测试不证明具体扩展可探测。
 
-到 `ProbeHost\x86`、`ProbeHost\x64`、`ProbeHost\arm64`。ProbeHost 不再携带 `.dll`、`.deps.json`、`.runtimeconfig.json` 或 `ContextMenuMgr.Contracts.dll`。
+修改架构选择、request/result、错误分类、图标/超时清理时更新本文，布局变化同步构建文档；不得将隔离失败修成 Frontend/Backend 直接加载 DLL。
 
-ProbeHost 的 JSON 解析使用 vendored `nlohmann/json` 单头文件依赖：
-
-- 源文件位置：`ContextMenuMgr.ProbeHost\third_party\nlohmann\json.hpp`；
-- 不使用 vcpkg、Conan、NuGet 或 Git submodule；
-- `json.hpp` 不复制到 runtime output；
-- MIT license 复制到 `ThirdPartyNotices\nlohmann-json-LICENSE.MIT`；
-- header-only 代码会编译进 `ContextMenuMgr.ProbeHost.exe`。
-
-ProbeHost 的菜单图标 PNG 编码使用 Windows 内置 WIC，并链接 `windowscodecs.lib`；不引入第三方图片库或新的运行时文件。
-
-Release 发布由 `Scripts/Build.Common.psm1` 的 `Get-ProbeHostArchitectureMap` 决定携带哪些架构。`win-x86` 只带 x86，`win-x64` 带 x64 和 x86，`win-arm64` 带 arm64、x64 和 x86。脚本使用 MSBuild 构建 `ContextMenuMgr.ProbeHost.vcxproj`，不再对 ProbeHost 运行 `dotnet restore` 或 `dotnet publish`。
-
-## 10. 常见坑
+## 常见坑
 
 | 坑 | 正确处理 |
 | --- | --- |
@@ -140,5 +128,5 @@ Release 发布由 `Scripts/Build.Common.psm1` 的 `Get-ProbeHostArchitectureMap`
 | 把 menu accelerator `&` 当乱码 | `&` 是 Windows 菜单助记符语义。 |
 | 把缺失图标当作错误 | 图标提取是 best-effort；自绘、回调或无法转换的图标可能为空。 |
 | 把 ProbeHost crash 当作普通菜单开关失败 | Deep Analysis 失败不应影响开关、删除、审核。 |
-| 忘记设置 `WorkingDirectory` | framework-dependent 依赖解析可能失败。 |
+| 忘记设置 `WorkingDirectory` | 偏离当前启动契约，可能影响扩展的相对依赖；ProbeHost 自身是 native，不需要 managed runtimeconfig。 |
 | 把 x86 binary 放进 arm64 目录 | 架构验证会失败，运行时也会误判。 |

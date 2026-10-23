@@ -1,274 +1,71 @@
 # AGENTS.md
 
-This repository is **Context Menu Manager Plus / ContextMenuMgr**.
+This is **Context Menu Manager Plus / ContextMenuMgr**, a Windows utility with a WPF frontend, LocalSystem Backend Service, user-session TrayHost, native ProbeHost, Registry operations and Named Pipe IPC. The solution is [ContextMenuMgr.slnx](ContextMenuMgr.slnx); version properties live in [Directory.Build.props](Directory.Build.props).
 
-It is a Windows system utility involving a WPF frontend, Windows Service backend, TrayHost, ProbeHost, Windows Registry operations, user SIDs, session IDs, Named Pipe IPC, multi-architecture build artifacts, and multiple privilege/user-context flows.
+## Start with the affected responsibility
 
-This file is the main entry point for AI coding agents and human maintainers.
+Read this file, identify the subsystem, read its authoritative document, then inspect current code/interfaces. Read adjacent documents only for affected contracts; do not pre-read every general guide. Detailed docs are Simplified Chinese and must not be skipped. README is user-facing, not the implementation specification. Full routing: [docs/README.md](docs/README.md).
 
-Before analyzing bugs, adding features, refactoring, or changing behavior, read this file first, then read the relevant documents under `docs/`.
-
-Most detailed documents under `docs/` are written in Simplified Chinese. Do not skip them because of language. Read and translate them internally if needed.
-
----
-
-## 1. Required Reading
-
-Before starting any task, read at least:
-
-1. `docs/ai-maintainer-playbook.md`
-2. `docs/process-and-privilege-flows.md`
-3. `docs/developer-guide.md`
-
-For module-specific work, also read the matching topic document:
-
-| Task type | Required document |
+| Task | Primary document / starting owners |
 | --- | --- |
-| Classic context menus / registry menu model | `docs/registry-model.md` |
-| ShellNew / SendTo / WinX / SpecialMenu | `docs/special-menus.md` |
-| Windows 11 modern context menu | `docs/windows11-context-menu.md` |
-| Deep Analysis / ProbeHost / Shell Extension probing | `docs/deep-analysis-probehost.md` |
-| Frontend UI / WPF-UI / theme / NavigationView / AutoSuggestBox | `docs/frontend-wpf-ui.md` |
-| Build, release, installer, multi-architecture ProbeHost | `docs/build-and-release.md` |
-| Unclear bugs, user reports, runtime failures | `docs/troubleshooting.md` |
-| New agent handoff, fault attribution, pre-change checklist | `docs/ai-maintainer-playbook.md` |
-
-Do not rely only on `README.md`. The README is user-facing. Development decisions must be based on `docs/` and the current code.
-
----
-
-## 2. Identify the Correct Flow Before Editing
-
-This project is not a single “run as administrator” model. Every bug or feature must first be mapped to the correct process, privilege, and user-context flow.
-
-| Flow | Shape | Main purpose |
-| --- | --- | --- |
-| Flow A | Frontend -> Backend Pipe -> Backend Service | Normal runtime menu operations, scans, approvals, Win11 blocking, SpecialMenu operations, runtime AutoStart read/write |
-| Flow B | Frontend -> UAC runas -> BackendServiceBootstrapper | Install/repair/uninstall/stop service, set service startup mode |
-| Flow C | Backend Service -> WTS User Token -> CreateProcessAsUser | Launch TrayHost or Frontend inside the interactive user session |
-| Flow D | Frontend -> ProbeHost -> Shell Extension COM | Deep Analysis only; isolated third-party Shell Extension probing |
-
-Before modifying code, answer:
-
-- Which process is involved?
-- Which flow should handle this task?
-- Does it need the frontend user SID?
-- Does it need a session ID?
-- Does it touch `HKCU` or `HKEY_USERS\<SID>`?
-- Does it require elevated registry writes?
-- Does it load or probe a third-party Shell Extension?
-- Is this only a frontend UI state problem?
-
-If you cannot answer these questions, stop and read the relevant docs or inspect the code first.
-
----
-
-## 3. Hard Rules
-
-### User context
-
-- Do not use the service process `HKCU` as the frontend user’s `HKCU`.
-- User-scoped registry reads/writes must check whether they need `HKEY_USERS\<SID>`.
-- Privilege and user context are different problems. LocalSystem is highly privileged, but it is not the interactive frontend user.
-- Win11 user blocked lists, SpecialMenu, AutoStart policy, Restart Explorer, and user-profile paths may require frontend user context.
-
-### Privilege flows
-
-- Normal runtime operations should go through the Backend Pipe. Do not route them through the UAC bootstrapper.
-- The UAC bootstrapper is only for service lifecycle and startup-mode operations.
-- A Windows Service must not directly show UI. Launch TrayHost or Frontend through the interactive user session.
-- Restart Explorer must target the frontend user session. Do not blindly kill all `explorer.exe` processes.
-
-### Tray icon, notifications, and shell integration
-
-- For tray icon, notification, and shell integration work, use Win32/PInvoke only.
-- Do not introduce Windows App SDK, WinUI, AppNotificationManager, packaged activation, or Microsoft.WindowsAppSDK for tray notifications.
-- Do not change project TFMs to versioned Windows SDK TFMs such as `net10.0-windows10.0.xxxxx.0` for tray or notification work.
-- TrayHost is the user-session notification agent. The backend service must not show user notifications directly.
-- Hiding the tray icon must not remove or stop the TrayHost process; TrayHost must keep receiving backend notifications and handling notification activation.
-
-### Frontend UI and WPF-UI
-
-- Frontend UI bugs are not automatically backend, registry, or service bugs.
-- For WPF-UI, theme, NavigationView, AutoSuggestBox, Popup, XAML style, or Page/UserControl issues, read `docs/frontend-wpf-ui.md` before changing code.
-- Do not fix UI state, template, or binding bugs by changing Backend Service, registry scanning, or privilege flows unless there is evidence the backend is involved.
-
-### SpecialMenu
-
-- ShellNew, SendTo, and WinX are not ordinary `shell` / `shellex` entries.
-- For SpecialMenu bugs, inspect `SpecialMenuService` and the related ViewModel first. Do not start by changing `ContextMenuRegistryCatalog`.
-- Registry Write Protection and ShellNew ACL Lock are different features and must not be mixed.
-
-### Windows 11 modern context menu
-
-- Windows 11 modern context menu entries are not classic context menu entries.
-- Win11 snapshot and block/unblock operations must preserve the correct user context.
-- If a Win11 item appears enabled again after refresh, first verify whether the snapshot used the correct `HKEY_USERS\<SID>` blocked list.
-
-### State database and external-change rules
-
-- An absent or reset state database must adopt the current regular-menu, Win11, and WPS/Office state without pending approvals, external-change badges, or saved-state mismatch warnings.
-- Regular menus and WPS/Office use separate explicit baseline markers. Never infer one source's baseline from unrelated state records, and never commit a first baseline from a snapshot without an interactive user context.
-- During runtime, an unknown item is disabled and sent to approval; a known enabled item that becomes disabled is `Modified`; a known disabled item observed changing to enabled between settled monitor snapshots is silently disabled again.
-- At startup with an existing baseline, an offline unknown item is `Added` without quarantine, and either direction of a known item's switch-state change is `Modified`; startup/offline disabled-to-enabled drift must not be silently reconciled.
-- A confirmed missing registry item must be removed from the active monitoring baseline regardless of its previous desired state. Delete/Undo backup metadata is recovery-only and must not participate in Added/Modified identity comparisons.
-- Ordinary enabled-state differences are classified changes or reconciliation work, not generic consistency issues. Generic consistency is reserved for actual registry-structure conflicts.
-- If active and disabled `ContextMenuHandlers` keys coexist for one stable Id, compare their registry last-write timestamps, keep the newer side, and remove the older side automatically. Timestamp ties fall back to persisted desired state, then active. Do not surface this repair as a generic consistency warning; log failures and retry.
-- State-store read/merge/write sequences from snapshots, WPS refresh, approvals, deletion/restore, and reconciliation must remain serialized so concurrent flows cannot overwrite each other's state.
-
-### ProbeHost / Deep Analysis
-
-- ProbeHost is not an elevation path. It is an isolation path.
-- Do not directly load third-party Shell Extension DLLs inside the Frontend or Backend Service.
-- ProbeHost must not write registry data, execute menu commands, or participate in normal scans.
-- Deep Analysis failures are often expected limitations and do not imply normal menu management is broken.
-
-### Fault attribution
-
-- Do not attribute third-party software, installer, or driver failures to this project without evidence.
-- If Registry Write Protection is suspected, first verify:
-  - whether the relevant protection was enabled;
-  - whether logs exist at the same timestamp;
-  - whether there is `Access Denied`, `UnauthorizedAccessException`, or equivalent evidence;
-  - whether the target registry path is within this project’s protection scope;
-  - whether the issue can be reproduced after disabling protection or stopping the service.
-- Do not assume “driver install failed” means “context menu interception caused it.”
-
----
-
-## 4. Common Task Routing
-
-| Task | Inspect first | Do not start with |
-| --- | --- | --- |
-| Classic menu enable/disable bug | `ContextMenuRegistryCatalog`, `NamedPipeBackendServer`, `docs/registry-model.md` | UAC bootstrapper |
-| Win11 menu state bug | `Windows11ContextMenuCatalog`, `Windows11BlocksService`, `docs/windows11-context-menu.md` | classic `shell` / `shellex` toggle logic |
-| ShellNew ordering / lock / unlock bug | `SpecialMenuService`, `docs/special-menus.md` | `ContextMenuRegistryCatalog` |
-| SendTo / WinX modification bug | `SpecialMenuService`, related ViewModel | classic menu scanning logic |
-| Service install / repair failure | `BackendServiceManager`, `BackendServiceBootstrapper` | `NamedPipeBackendServer` |
-| Start with Windows not working | `AutoStartService`, `BackendServiceBootstrapper`, `FrontendAutostartLauncher` | legacy Run-key assumptions |
-| TrayHost not appearing | `FrontendAutostartLauncher`, `BackendWindowsService`, WTS flow | frontend window logic |
-| Restart Explorer not working | user session context / `ExplorerRestartService` | registry menu logic |
-| Deep Analysis failure | `ContextMenuDeepAnalysisService`, ProbeHost, `docs/deep-analysis-probehost.md` | normal toggle logic |
-| Global search bug | `ContextMenuGlobalSearchService`, `GlobalSearchNavigationFilterService`, `ShellViewModel`, `docs/frontend-wpf-ui.md` | backend scanner |
-| Theme / WPF-UI / NavigationView / AutoSuggestBox issue | `FrontendThemeService`, `MainWindow.xaml`, `MainWindow.xaml.cs`, `docs/frontend-wpf-ui.md` | backend service or registry logic |
-| Build / release / architecture issue | `Scripts/Build.Common.psm1`, frontend csproj, `docs/build-and-release.md` | runtime business logic |
-
----
-
-## 5. Pre-Change Checklist
-
-Before editing code, verify:
-
-- [ ] I have read `docs/ai-maintainer-playbook.md`.
-- [ ] I have identified the correct flow for this task.
-- [ ] I know whether this task needs a user SID.
-- [ ] I know whether this task needs a session ID.
-- [ ] I am not using the service `HKCU` as the frontend user `HKCU`.
-- [ ] I am not using the UAC bootstrapper as the normal runtime backend.
-- [ ] I am not trying to show UI directly from the service session.
-- [ ] I am not mixing Registry Write Protection with ShellNew ACL Lock.
-- [ ] I am not loading third-party Shell Extension DLLs inside the Frontend or Backend Service.
-- [ ] If this is a frontend UI/WPF-UI issue, I have read `docs/frontend-wpf-ui.md`.
-- [ ] I have checked relevant logs, or I can explain why logs are unavailable.
-- [ ] I can explain which files need changes and why.
-- [ ] I can provide manual verification steps.
-- [ ] I have read the Code Hygiene, Refactoring, and Test Retention rules below and identified the implementations this change replaces.
-
----
-
-## 6. Build and Verification
-
-Common local frontend build:
-
-```powershell
-dotnet build .\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj
-```
-
-Before full build/release work, read:
-
-- `docs/build-and-release.md`
-
-When changing ProbeHost, architecture folders, or build scripts, verify:
-
-- x86 / x64 / arm64 ProbeHost artifacts are placed in the correct directories;
-- native ProbeHost build outputs match the current scripts;
-- architecture verification scripts are used when applicable;
-- x86 binaries are not accidentally copied into arm64 directories.
-
----
-
-## 7. Documentation Maintenance Rules
-
-If you change any of the following, update `docs/` in the same change:
-
-| Change | Update |
-| --- | --- |
-| Add or change `PipeCommand` | `docs/process-and-privilege-flows.md`, `docs/developer-guide.md` |
-| Change privilege flow or user context behavior | `docs/process-and-privilege-flows.md`, `docs/ai-maintainer-playbook.md` |
-| Change classic menu scan/toggle strategy | `docs/registry-model.md` |
-| Add or change `SpecialMenuKind` | `docs/special-menus.md` |
-| Change Win11 blocked list or Packaged COM logic | `docs/windows11-context-menu.md` |
-| Change Registry Write Protection | `docs/registry-model.md`, `docs/troubleshooting.md` |
-| Change ShellNew ACL Lock | `docs/special-menus.md` |
-| Change ProbeHost selection or Deep Analysis behavior | `docs/deep-analysis-probehost.md` |
-| Change Frontend theme, WPF-UI styles, NavigationView, AutoSuggestBox, or Page/UserControl composition | `docs/frontend-wpf-ui.md` |
-| Change `build.ps1`, release scripts, or csproj copy targets | `docs/build-and-release.md` |
-| Change `RuntimePaths` or log paths | `docs/troubleshooting.md`, `docs/developer-guide.md` |
-| Change global search coverage | `docs/developer-guide.md`, `docs/troubleshooting.md`, `docs/frontend-wpf-ui.md` |
-
-Documentation must describe the current code, not old README assumptions.
-
----
-
-## 8. When Evidence Is Insufficient
-
-If the root cause is not proven, say:
-
-> Current evidence is insufficient to determine the root cause.
-
-Then list the files, logs, registry paths, or reproduction steps that still need to be checked.
-
-Do not invent causes.
-Do not expand the patch scope just to make progress.
-
----
-
-## 9. Code Hygiene, Refactoring, and Test Retention
-
-These rules bind all Codex/AI development in this repository. Favor less code to maintain while preserving behavior and state safety.
-
-### Refactoring means replacement
-
-- A completed refactor must remove the implementation it replaces and update all active callers, resources, configuration, and documentation.
-- Do not retain parallel Old/New/V1/V2/Legacy/Compat/Backup implementations, commented-out code, reference copies, fallbacks, or pass-through wrappers without a demonstrated compatibility requirement. Use Git history as the archive.
-- Reuse or replace existing implementations instead of copying them. Search for the replaced types, methods, paths, and terminology before finishing.
-- Windows terminology such as Legacy Context Menu is legitimate; released persisted-state compatibility must be assessed by behavior, not naming.
-
-### Temporary tests must be removed
-
-Tests are development tools, not automatically permanent deliverables. Temporary tests may be created freely, but classify every new test before completion:
-
-- Permanent: protects an important, nontrivial invariant against realistic future regressions.
-- Temporary: validates an implementation or reproduces an incident; delete it before completing the task.
-
-Passing, effort invested, or being generated alongside a feature is not a retention reason. Do not default to one permanent test class per Issue. Prefer a few meaningful regressions over repetitive assertions. Remove tests of framework behavior, trivial accessors/constructors/enums, ordinary localization, simple GUID/string comparisons, private implementation structure, repeated UI Busy/Loading/Toggle properties, and historical reproductions already covered by an invariant. WPF experiments requiring real hardware belong in manual verification.
-
-### Permanent tests require justification
-
-Retain meaningful coverage for registry mutation/read-back, rollback/conflicts/provenance/recovery, ACL preservation, SID/hive isolation, persistence corruption/migration, mutation concurrency/IPC/timeouts/late notifications, malformed external inputs, and release/artifact/publishing safety. These are examples, not a checklist requiring new tests. Do not add tests merely to satisfy this list.
-
-### Tests must not distort production architecture
-
-Do not add test-only properties, fault callbacks, simulation services, DI registrations, exposed internal/public methods, or alternate execution paths to production. A production-useful abstraction may also be tested; otherwise temporary infrastructure stays outside production and is removed afterward. Debug tools must not affect Beta/Release behavior.
-
-### Verify actual behavior
-
-Logs, no exception, process launch, a successful write API, fabricated snapshots, and mock call counts alone do not prove functional success. For critical mutations distinguish request success, physical state, authoritative read-back, persistence, and user-visible results. For workflows distinguish execution, artifact creation, validation, publication, and platform acceptance. Local tests are not end-to-end verification.
-
-### Compatibility retirement
-
-For necessary bridges document the released version or persisted format, supported historical data/behavior, observable safe-removal condition, and tracking Issue or defined maintenance decision. Do not invent removal versions or create a tracking document per helper. Preserve uncertain upgrade paths until their requirements are verified.
-
-### Required completion cleanup
-
-Every Codex task must finish by removing temporary tests, superseded paths, unused helpers/imports/resources/scaffolding, and test-only production hooks; searching for abandoned debug/compatibility code and replaced names; consolidating repeated logic; updating relevant docs; reviewing the diff for unrelated changes; and reporting what was deleted and why. Complete applicable builds/checks and provide manual verification steps, clearly separating executed tests from runtime or hardware checks still pending.
+| New maintainer / module boundaries | [Architecture](docs/architecture-overview.md) |
+| IPC, SID/hive, impersonation, privilege/session flow | [Process and IPC](docs/process-and-privilege-flows.md); NamedPipeBackendServer, BackendUserContextResolver |
+| Baselines, approval, external changes, state schema/reset/recovery | [State and monitoring](docs/state-and-monitoring.md); catalog, monitor, ContextMenuStateStore |
+| Classic shell/shellex, backups, Registry Write Protection | [Registry model](docs/registry-model.md); ContextMenuRegistryCatalog, mutation/ACL helpers |
+| Windows 11 / Blocked / Packaged COM | [Win11](docs/windows11-context-menu.md); Windows11ContextMenuCatalog, Windows11BlocksService |
+| ShellNew discovery/order/ACL | [ShellNew](docs/shellnew.md); SpecialMenuService, FrontendUserClassesRoot, ShellNewOrderTransaction |
+| OpenWith registrations/inspection/monitoring/authorization | [OpenWith](docs/openwith.md); SpecialMenuService, OpenWithRegistration, OpenWithMonitoringService |
+| SendTo, WinX, other SpecialMenu, WPS/Office | [SpecialMenu](docs/special-menus.md) |
+| WPF-UI/theme/navigation/search/async UI | [Frontend](docs/frontend-wpf-ui.md); App, MainWindow, related ViewModel |
+| Service install/repair/AutoStart/TrayHost/Explorer/close | [Lifecycle](docs/runtime-lifecycle.md); bootstrapper, BackendWindowsService, FrontendAutostartLauncher |
+| RuntimePaths/logging/rolling/Locks/migration/data ACL | [Runtime data](docs/runtime-data-and-logging.md) |
+| Deep Analysis/native isolation | [ProbeHost](docs/deep-analysis-probehost.md) |
+| Build/release/version/architectures/GitCode | [Build and release](docs/build-and-release.md) |
+| Inno deployment/upgrade/runtime cleanup | [Installer](docs/installer-deployment.md) |
+| Scoop/winget/dry-run/external publication | [Package managers](docs/package-managers.md) |
+| Unclear report / runtime failure | [Troubleshooting](docs/troubleshooting.md); verification practice in [Maintainer workflow](docs/maintainer-workflow.md) |
+
+## Non-negotiable boundaries
+
+- Before changing behavior identify the process, flow, SID, SessionId, physical hive/view, elevation needs, third-party COM exposure, and whether this is only UI state. Inspect code/docs until these are clear.
+- Flow A is Frontend → Backend Pipe → Service for normal runtime operations. Flow B is UAC → bootstrapper for service lifecycle/startup mode, with only the existing narrow data-ACL-repair fallback. Flow C is Service → WTS token → CreateProcessAsUser for interactive UI. Flow D is Frontend → ProbeHost for isolated analysis, never elevation.
+- Never use service HKCU as frontend HKCU. User operations require the correct `HKEY_USERS/<SID>` and loaded hive; privilege does not supply user identity. Validate physical source and authenticated SID. SessionId locates a desktop, not a registry identity. Do not silently select another user for strict-auth operations.
+- Never show UI/notifications directly from the service session. Restart Explorer must target only the frontend session, never all explorer.exe processes.
+- Tray/notification/shell integration uses Win32/PInvoke only: no Windows App SDK, WinUI, AppNotificationManager, packaged activation or Microsoft.WindowsAppSDK. Do not change TFMs to versioned SDK TFMs **for tray/notification work**; current existing WinRT discovery TFM is a separate requirement. TrayHost remains running when its icon is hidden so notification delivery/activation continues.
+- Never load/probe third-party Shell Extension DLLs inside Frontend or Backend. ProbeHost does not write registry data, execute menu commands or participate in normal scans. Expected analysis failures do not imply normal management failure.
+- UI/template/binding/theme/navigation/search bugs start in the frontend. Do not change backend/registry/privilege behavior without evidence it is involved. Keep WPF Page in proper navigation hosts; embedded content uses UserControl.
+- ShellNew/SendTo/WinX/OpenWith are SpecialMenu responsibilities. ShellNew ACL Lock and Registry Write Protection are separate mechanisms. Do not generalize protected-machine-ShellVerb token/ACL fallback to user hives, ShellNew or ordinary reads.
+- Win11 declarations are distinct from classic registrations. Preserve authenticated SID/native read-back and application-versus-CLSID control domains. Registry success does not prove Explorer compatibility; shared/incomplete discovery does not prove an incident's cause.
+
+## State and mutation invariants
+
+- Missing/reset state adopts current regular/Win11/WPS state without pending, Added/Modified badges or ordinary switch mismatch warnings. Regular and WPS have separate explicit baseline markers; never infer either from unrelated records or establish a first baseline without complete interactive-user context.
+- Runtime unknown items are disabled and sent to approval only after successful quarantine. Known enabled→disabled is Modified. Known disabled→enabled between settled runtime snapshots is silently disabled again. Existing-baseline startup/offline unknown is Added without quarantine; either switch direction is Modified, never silently reconciled.
+- Confirmed missing physical items leave the active baseline regardless of desired state. Delete/Undo recovery metadata does not participate in Added/Modified identity. Ordinary switch differences are classification/reconciliation, not generic consistency warnings.
+- Active/disabled ContextMenuHandlers duplicates keep the side with newer registry last-write time; ties use desired state, then active. Remove the older side automatically; log/retry failures without generic consistency warnings.
+- Serialize full state read/merge/write across snapshots, WPS, approval, deletion/restore and reconciliation. Preserve schema migrations, corruption/backup behavior and uncertain outcomes; OpenWith uses its own section and explicit authorization, never classic quarantine.
+- Capture original values/types/provenance before mutation, verify physical and logical state and persistence, and preserve external changes during conditional rollback. A successful API/log/response alone is insufficient. Never blindly retry an uncertain write.
+
+## Evidence and change discipline
+
+Check logs or explain why unavailable. State what files need changes and why. For third-party installer/driver failures verify protection was enabled, timestamped logs, Access Denied/equivalent, target within scope, and reproduction with protection disabled/service stopped before attributing fault. When unproven say **“Current evidence is insufficient to determine the root cause.”** and identify missing logs/paths/reproduction evidence; do not expand a patch to guess.
+
+Refactoring is replacement: remove superseded implementations and update every caller/resource/config/doc. No parallel Old/New/V1/V2/Legacy/Compat/Backup code, reference copies, commented code, unnecessary fallback or pass-through wrappers without demonstrated compatibility. Search replaced names/paths before finishing. Windows “Legacy Context Menu” terminology is legitimate; persisted compatibility is judged by behavior.
+
+Keep necessary bridges until released format/behavior, supported historical data, observable safe-removal condition and tracking Issue or explicit maintenance decision are documented. Do not invent removal versions, discard uncertain upgrade paths or create a tracking document per helper. Git history is the archive.
+
+## Tests, verification and completion
+
+- Classify every new test: permanent only for an important nontrivial invariant with realistic regression value; temporary incident/implementation checks must be removed. Passing or effort invested is not justification; no default one-class-per-Issue retention.
+- Retain meaningful registry/read-back/rollback/provenance/recovery, ACL/SID/hive, corruption/migration, mutation concurrency/IPC/timeout/late-notification, malformed-input and artifact/publication safety coverage when justified. These examples do not mandate new tests.
+- Remove framework/trivial accessor/constructor/enum/localization/GUID/string/private-structure checks, repetitive Busy/Loading/Toggle tests and historical reproductions already covered by an invariant. Hardware-dependent WPF experiments belong in manual checks.
+- No test-only production properties, fault callbacks, simulation services, DI registrations, exposed methods or alternate paths. Only production-useful abstractions may also support tests; temporary infrastructure stays outside production. Debug tools must not affect Beta/Release.
+- Distinguish request completion, physical state, authoritative read-back, persistence and user-visible result. For publishing distinguish execution, artifact creation, validation, remote publication and platform acceptance. Fabricated snapshots/mock counts/process launch/local tests do not establish end-to-end success.
+- Run applicable checks/builds. Common frontend build: `dotnet build .\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj`. Build/release/native changes require the build guide and x86/x64/arm64 PE/layout verification; never copy x86 binaries into arm64 directories. Documentation-only work normally needs link/source/diff checks, not full application execution.
+- Finish by removing temporary tests/artifacts, superseded code, unused helpers/imports/resources/scaffolding and test hooks; search abandoned names/debug/compatibility paths, consolidate duplicates, update authoritative docs and review unrelated diff/status. Report what was deleted and why, checks actually executed, and manual Windows/hardware/external checks still pending.
+
+## Documentation maintenance
+
+Update only affected authoritative responsibilities with behavior/contract changes: PipeCommand/identity→process guide, state→state guide, registry/ACL→registry, SpecialMenuKind→SpecialMenu plus its owner, Win11→Win11, UI/search→frontend, RuntimePaths/logs→runtime data, SCM/Tray→lifecycle, ProbeHost→analysis/build, scripts/csproj→build/installer/package-manager guide. Link adjacent contracts instead of copying them.
+
+Use Chinese for detailed docs, current source as implementation authority, and explicit labels for design constraints, historical compatibility, unresolved evidence and integration checks. Integrate current behavior into architectural sections; no chronological issue appendices, temporary audit reports or backup copies. New documents need independent long-term ownership. Keep [docs/README.md](docs/README.md) task routing and all local links/source paths valid.

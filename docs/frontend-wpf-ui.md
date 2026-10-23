@@ -1,543 +1,97 @@
-# 前端与 WPF-UI 实现说明
+# 前端、WPF-UI 与异步交互
 
-相关文档：
+本文负责 UI/MVVM、资源、本地化、导航/滚动、搜索和请求结果呈现。注册表事务不属于 ViewModel；ShellNew、OpenWith、Win11 的专有 UI/核对契约分别见其[文档](README.md)。单实例与进程关闭协调见[生命周期](runtime-lifecycle.md)。
 
-- [ContextMenuMgr 开发者指南](./developer-guide.md)
-- [进程、权限与用户上下文链路](./process-and-privilege-flows.md)
-- [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)
-- [排错指南](./troubleshooting.md)
+## 入口与所有权
 
-## 1. 本文目的
-
-本文记录 ContextMenuMgr 前端层的 WPF / WPF-UI 实现经验，补充 `developer-guide.md` 中的前端概览。
-
-很多前端问题看起来像后端状态、注册表刷新或服务链路问题，实际根因可能是 WPF / WPF-UI 控件组合方式、主题资源、模板、Popup、NavigationView 或 Page/UserControl 边界不正确。遇到按钮颜色、搜索下拉、页面滚动、Popup 绑定、页面初始化崩溃等问题时，优先按本文排查前端结构，不要直接改 Backend Service、Registry catalog 或权限链路。
-
-## 2. 前端主要入口
-
-| 文件 / 类型 | 职责 | 注意事项 |
-| --- | --- | --- |
-| `App.xaml` | 应用级资源字典、WPF-UI `ThemesDictionary` / `ControlsDictionary`、全局样式、语言资源、通用 converter | 主题相关资源优先用 `DynamicResource`；全局样式不要强行覆盖控件模板内部状态。 |
-| `App.Services.xaml.cs` | 前端 DI 注册入口 | 新增前端服务或 ViewModel 时优先通过 DI 注入。 |
-| `MainWindow.xaml` | `ui:FluentWindow` 主窗口、标题栏、全局搜索、InfoBar、NavigationView | 标题栏 hit test、AutoSuggestBox、NavigationView 都在这里汇合。 |
-| `MainWindow.xaml.cs` | 导航初始化、InfoBar 初始化、全局搜索事件、标题栏按钮、导航滚动 reset | 可以协调控件行为，但不应承载菜单业务逻辑。 |
-| `ShellViewModel.cs` | 主窗口级状态、导航文本、全局搜索命令、刷新和重启 Explorer 命令 | 只负责前端协调和命令入口，不直接写注册表。 |
-| `NavigationPages.cs` | WPF-UI NavigationView 使用的页面类型 | 导航项的 `TargetPageType` 应指向 Page 类型。 |
-
-前端是 UI 层。它通过 `NamedPipeBackendClient` 请求 Backend Service，通过 `BackendServiceManager` 触发服务安装/修复等 UAC bootstrapper 操作，通过 `ContextMenuDeepAnalysisService` 启动 ProbeHost。前端不应该直接执行高权限注册表操作，也不应该直接加载第三方 Shell Extension DLL。
-
-菜单详情的注册表定位由 `ContextMenuItemActionsService` 在前端用户 Session 发起：优先打开真实 `BackendRegistryPath`，缺少物理路径时才使用展示路径的 HKCR fallback；已经是完整 hive 的路径不能重复加 `HKEY_CLASSES_ROOT`。Regedit 的 `LastKey` 使用完整 hive 路径，不依赖应用语言生成计算机根名称。同 Session 已有 Regedit 时强制 `-m` 新实例，因为唤醒旧实例不会重读 LastKey；保留用户已有窗口，未开启多开偏好时也适用这一定位要求。仅写前端用户自己的 Regedit 偏好，不通过服务启动 UI，也不加载第三方扩展。
-
-人工验证：Windows 英文/应用中文及相反组合，分别在无 Regedit、已有 Regedit、已有多个 Regedit 时点击定位；确认新窗口地址栏和选中键与真实 HKLM/HKU active/disabled 路径一致。验证 CLSID 定位和导出，以及 UAC 取消后错误提示；`FrontendLocalActionEnd Success=true` 只代表动作完成，不能代替对选中键的观察。
-外部变化或一致性提示的“忽略/确认”按钮只有在后端 `AcknowledgeItemState` 成功后才在当前界面隐藏提示；请求失败时保留提示，避免 UI 显示已确认而状态库仍未采纳。
-
-## 3. App.xaml 资源字典与全局样式
-
-`App.xaml` 是 WPF-UI 主题和全局样式的核心入口。当前结构中包含：
-
-- `ui:ThemesDictionary Theme="Light"`
-- `ui:ControlsDictionary`
-- `AccentButtonForeground` / `AccentButtonForegroundPointerOver` / `AccentButtonForegroundPressed`
-- `CurrentLanguage`
-- 全局 `Window` / `Page` / `Label` / `TextBlock` 样式
-- `CardBorderStyle`
-- `ChromeTitleBarButton`
-- `ScrollableListBoxItemStyle`
-- `DisplayOnlyListViewItemStyle`
-
-### 3.1 主题资源必须用 DynamicResource
-
-WPF-UI 的主题资源会在运行时切换。凡是颜色、Brush、控件前景色、背景色、边框色，只要希望跟随主题变化，就应使用 `DynamicResource`。
-
-推荐：
-
-```xml
-Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-```
-
-避免在普通 UI 中硬编码黑色、白色或固定背景色。只有非常明确的特殊状态才应硬编码颜色。
-
-### 3.2 不要用根容器 Foreground 解决所有文字颜色
-
-WPF 的 `Foreground` 继承对普通 `TextBlock` 有效，但 WPF-UI 控件内部往往有自己的模板、状态资源和触发器。把 `Foreground` 放在 `Page`、`Grid` 或根容器上，不一定能影响：
-
-- `ui:Button` 内部文字；
-- `ui:ToggleSwitch` 的状态文字；
-- `ui:AutoSuggestBox` Popup 内项目；
-- `ui:NavigationViewItem`；
-- 控件模板中的 `TextBlock`。
-
-如果某个 WPF-UI 控件文字颜色不对，优先检查控件自身的 `Appearance`、WPF-UI 主题资源、项目全局样式是否 `BasedOn` 正确，以及是否把专用 style 用到了错误场景。
-
-### 3.3 场景专用 Style 不要跨场景复用
-
-`ChromeTitleBarButton` 是标题栏按钮样式，适合最小化、最大化、关闭按钮，不应该复用到普通页面按钮、Popup 里的按钮或 AutoSuggestBox item template 中。
-
-`ScrollableListBoxItemStyle` 和 `DisplayOnlyListViewItemStyle` 适合“列表只负责展示、选中视觉由内部卡片控制”的场景。它们移除了默认外壳，不应无脑套到需要默认选中、键盘焦点或辅助功能反馈的列表。
-
-如果出现类似 `PressedForeground property not found on ContentPresenter` 的绑定错误，优先检查是否把依赖特定 `TemplatedParent` 的 Button style 放进了 Popup 或 DataTemplate。
-
-## 4. 主题系统
-
-主题由 `FrontendThemeService` 统一管理。它负责读取 `FrontendSettingsService` 中保存的主题偏好、启动时应用主题、手动切换 Light / Dark、跟随系统时启用 `SystemThemeWatcher`，并在切换时写日志。
-
-### 4.1 启动时必须应用一次保存主题
-
-`App.xaml` 里的 `ThemesDictionary Theme="Light"` 只是初始资源字典。真正的用户偏好由 `FrontendThemeService.Initialize(Window mainWindow)` 在主窗口创建时应用。
-
-规则：
-
-- 固定 Light：调用 `ApplicationThemeManager.Apply(ApplicationTheme.Light, WindowBackdropType.Mica, updateAccent: true)`；
-- 固定 Dark：调用 `ApplicationThemeManager.Apply(ApplicationTheme.Dark, WindowBackdropType.Mica, updateAccent: true)`；
-- 跟随系统：调用 `ApplicationThemeManager.ApplySystemTheme(updateAccent: true)`，并启用 `SystemThemeWatcher.Watch(...)`。
-
-如果启动后短暂显示错误主题，优先检查 `themeService.Initialize(this)` 调用时机、保存设置是否读取正确、是否有其它代码后续调用 `ApplySystemTheme()`，以及相关 Brush 是否使用 `DynamicResource`。
-
-### 4.2 SystemThemeWatcher 不能无条件启用
-
-`SystemThemeWatcher` 只应在用户选择“跟随系统”时启用。如果用户选择固定 Light 或固定 Dark，却仍然保持 system watcher，系统主题变化可能覆盖用户设置。
-
-新增主题相关 UI 时不要绕过 `FrontendThemeService` 直接调用 WPF-UI 主题 API。
-
-## 5. FluentWindow 与自定义 TitleBar
-
-主窗口使用 `ui:FluentWindow`，并启用：
-
-- `ExtendsContentIntoTitleBar="True"`
-- `WindowStyle="None"`
-- `WindowBackdropType="Mica"`
-- 自定义 `TitleBarRoot`
-- `WindowChromeTitleBarFactory.Apply(this, 44)`
-
-标题栏区域有特殊 hit test 行为。放在标题栏里的按钮、搜索框、链接或其它可交互控件，必须设置：
-
-```xml
-shell:WindowChrome.IsHitTestVisibleInChrome="True"
-```
-
-否则可能表现为按钮点不了、搜索框无法聚焦、窗口拖动异常、hover / pressed 状态不触发。
-
-### 5.1 标题栏布局不要互相覆盖
-
-`MainWindow.xaml` 的标题栏布局应保持清晰的列分配：
-
-```text
-Icon | Title | GlobalSearchBox | HeaderActions | WindowButtons
-```
-
-不要用过大的 `Grid.ColumnSpan` 让全局搜索框覆盖右侧按钮或窗口控制按钮。遇到标题栏点击异常时，优先检查 `Grid.Column` / `Grid.ColumnSpan`、`Width` / `MaxWidth`、hit test 属性，以及控件是否被透明元素盖住。
-
-### 5.2 主窗口位置持久化
-
-`MainWindow` 的位置和大小通过 `FrontendSettingsService` 持久化到前端设置文件。窗口关闭时保存 normal restore bounds；最大化关闭时保存 `RestoreBounds` 和 `Maximized` 状态，启动时先恢复 normal bounds，再恢复最大化状态。不要保存或恢复 `Minimized` 状态，恢复前必须用当前 virtual screen 校验保存坐标，避免外接显示器断开后窗口出现在不可见区域。
-
-## 6. NavigationView 与页面导航
-
-主导航容器使用前端本地的 `ModernNavigationView`，并通过实现 WPF-UI `INavigationView` 保持现有导航服务兼容。入口在 `MainWindow.xaml`：
-
-- `RootNavigation.SetServiceProvider(serviceProvider)`；
-- `navigationService.SetNavigationControl(RootNavigation)`；
-- 菜单声明仍使用 WPF-UI `NavigationViewItem`，其 `TargetPageType` 指向页面类型；
-- `NavigationPages.cs` 定义各个导航页类型。
-
-`ModernNavigationView` 位于 `Controls/Modern/Navigation`，递归适配 `NavigationViewItem.MenuItems` / `MenuItemsSource`，保留嵌套展开、`Visibility`、`InfoBadge`、图标和原始 Binding。页面只由 `Controls/Modern/Frame/ModernFrame` 承载；页面创建顺序是 `IServiceProvider`、`INavigationViewPageProvider`、`Activator.CreateInstance`。不要把导航菜单改成 ViewModel 集合，也不要绕过 `INavigationService`。
-
-File Types 的批量管理是 `FileTypesPageView` 内部的隐藏 `UserControl` 子视图，不是 NavigationView 页面，也不是 TabControl 中可直接选择的额外 TabItem。`FileTypesPageViewModel.IsBatchManagementActive` 控制正常 scene tabs 与 `FileTypeBatchManagementView` 的显隐；返回时只关闭隐藏子视图，保留原来的 tab 选择。Scene item 卡片里的“批量管理”入口只在 File Types host opt-in 且 item 具备文件类型注册表路径、ShellVerb 命令程序+key 或 ShellExtension CLSID 时显示。批量页标题展示源菜单项图标，列表行必须把扩展名、ProgID 或 `SystemFileAssociations` 来源提出来显示，完整注册表路径只作为次要诊断信息。删除后的相关项仍留在批量页中显示撤销入口；批量页提供单项撤销和全部撤销。文件类型 `open` / `edit` 这类核心 verb 不允许在批量页删除，只允许通过开关禁用。
-
-`ModernFrame` 使用旧内容和新内容双 Presenter 播放导航过渡，支持 Entrance、Fade、SlideLeft、SlideRight、SlideBottom 和 Suppress；后退导航使用反向动画。转场沿用 neo 的分阶段时序：旧内容退出并清理后，新内容再进入，避免两个页面叠加位移；主窗口通过较短的 `TransitionDuration` 保持响应速度。`ModernNavigationView.Transition` / `TransitionDuration` 必须映射到本地 Frame，pane 开合使用独立的 EaseOut 宽度动画。动画被快速导航打断时必须清理旧 Storyboard、旧 PageHost 和过期的导航完成回调。
-
-重复点击当前导航项或再次 `Navigate` 到当前页面时，应在创建 Page 之前短路，不产生动画或 journal 记录。带可导航子项的父级条目默认是分组：点击父级只展开/折叠，页面导航由子项负责。
-
-### 6.1 导航页用 Page，可嵌入内容用 UserControl
-
-WPF 的 `Page` 不是普通控件。`Page` 应由 `Window`、`Frame` 或导航容器承载，不应直接塞进 `Border.Child`、`Grid.Children`、`TabItem.Content` 或普通 `ContentControl`。
-
-如果把 `Page` 当普通控件嵌入，可能在 `InitializeComponent()` 阶段抛出：
-
-```text
-InvalidOperationException: Page can only have Window or Frame as parent.
-```
-
-正确模式：
-
-```text
-SpecialMenuContentView : UserControl  // 可嵌入、可复用
-SpecialMenuPageView    : Page         // 导航页 wrapper
-```
-
-一套 UI 如果既要作为导航页显示，又要嵌进其它页面的 TabItem，应拆成 UserControl 内容层 + Page wrapper。不要用 `Frame` 包一层来逃避这个问题，除非确实需要嵌套导航。
-
-## 7. NavigationView 滚动与页面内部滚动
-
-本地 `ModernFrame` 内容区域有一个共享的外层 `ModernScrollViewer`。如果不处理，切换页面后可能出现“新页面继承上一页滚动位置”的现象。
-
-当前实现的规则是：
-
-- `ModernFrame` 在内容实际呈现后重置自己的外层 `ContentScrollHost`；
-- `ModernScrollViewer` 与启用了 `ModernListScroll` 的模板列表共用 `WheelScrollController` / `WheelScrollPolicy`；目标始终相对实际可见 `VerticalOffset` 有界，不能无限累加旧动画目标；
-- 滚轮位于可继续滚动的页面内层 `ScrollViewer`、打开的 ComboBox 或 Popup 时，外层必须让渡输入；内层到达边界后才允许外层接管；
-- 导航 reset 只重置共享外层，不重置页面内部自己的 `ListBox`、`ListView`、`ScrollViewer`。
-
-### 7.1 三种输入路径（#131）
-
-- **触摸屏**：`ModernScrollViewer` 通过 `PanningModeProperty.OverrideMetadata` 默认使用 `VerticalOnly`，仍允许 Style / XAML 覆盖。模板列表使用共用 `ModernScrollableListBoxStyle` 设置 `ScrollViewer.PanningMode="VerticalOnly"`。保留 WPF 自带的手势阈值、触摸提升、惯性、`PanningRatio` 和 `PanningDeceleration`，不添加 TouchMove、不把手指移动变成滚轮事件。原生 manipulation 开始时只取消旧滚轮动画，不修改事件 Handled。
-- **Precision Touchpad / 高分辨率滚轮流**：保留 `Delta / 120.0` 的小数，不把小 delta 当一整格。只有观察到非 120 整数倍 delta 才进入连续模式；同一流中的整数刻度也沿用连续模式，直到相邻非零事件间隔超过 120ms。时间使用 WPF event timestamp，处理 signed tick wrap。连续模式的未完成目标最多领先实际 viewport 一格配置距离，动画时长不超过 60ms。该规则依据输入形状而非设备识别；只发送完整刻度的触摸板也会使用普通滚轮路径，需实际设备验证。
-- **普通离散鼠标滚轮**：完整的 ±120 或其整数倍输入，即使事件密集，也保留默认 220ms EaseOut 和可配置 multiplier / duration / easing。同向 pending movement 可以累加，但最多领先三格配置距离；一般也不超过一屏（至少保留系统配置的一格距离）。停止输入后继续完成剩余的缓出动画，不额外生成滚动距离。反向输入舍弃旧方向 pending target，直接从可见 offset 反向。动画目标相同时不重新启动计时，结束/卸载后解除 Rendering handler；计时使用单调 Stopwatch。
-
-曾经仅因事件间隔不超过 40ms 就进入连续模式，导致快速普通鼠标滚轮同样被限制到 60ms / 一格 lead：松开后几乎立刻停下，密集输入的待滚动距离也更早被截断。当前移除这一时间单独触发条件；不通过全局增加动画时长、取消目标上限或修改触屏原生惯性来补偿。
-
-一格距离使用 Windows `SystemParameters.WheelScrollLines`：正数按现有 16 DIP/line 换算，0 表示不滚动，`WHEEL_PAGESCROLL` 在 WPF int API 中为 -1，按 `ViewportHeight` 换算。page-scroll 模式的 lead 上限为一格屏幕距离，multiplier 仍生效。全部目标同时限制在 `[0, ScrollableHeight]`。`ClientAreaAnimation` 关闭、render tier 0 或 duration 0 时仍走已有立即偏移 fallback；`IsSmoothScrollingEnabled=False` 保留原生滚轮处理并取消旧动画。Ctrl / Shift 输入不被自定义滚轮路径接管。
-
-左侧导航 `PART_MenuList`、`ModernNavigationSelector`、Category / Win11 / Approvals 列表使用同一 opt-in Style。它设置 `VirtualizingPanel.ScrollUnit="Pixel"`，保留 `CanContentScroll=True` 与虚拟化，**不**全局改成 CanContentScroll=False。`ModernListScroll` 沿事件来源的 ancestor path 找到该列表模板中的 ScrollViewer，共用有界策略，不在每个滚轮事件扫描整棵视觉树，也不缓存过期模板的 viewer。File Types 的 Scene / 批量管理和 Other Rules 详情 / SpecialMenu 已使用 ModernScrollViewer，无需改页面结构。
-
-所有应用显式创建的滚动容器统一使用 `ModernScrollViewer`，包括 `DetailedEditMenuWindow`、`ShellSubMenuWindow`、`ContextMenuDeepAnalysisWindow`、Debug 专用 `DebugToolsWindow`，以及 `MenuItemFormDialog` 的菜单项和 ShellNew 表单。新增 XAML 或代码创建的滚动容器也须复用该控件，自动沿用平滑滚轮、触摸 panning 和卸载时取消动画的行为；列表模板继续复用上述 Style，不额外包装滚动容器。TextBox、ComboBox、TreeView 等控件内部模板保留原有编辑、选择和弹出层行为。
-
-### 7.2 内外层 ownership 与 Popup
-
-`Auto / Frame / Self` 的 Frame 选择、导航 reset 和页面声明不变。`WheelScrollEventGuard` 只把实际声明的 ownership 节点当成边界；继承值不能在每个子元素上提前截断 ancestor 查找。否则 File Types / Other Rules 的 Self 会阻止自身 ModernScrollViewer 的 delta-aware 路径，而继承的 Frame 会抢走内层输入。
-
-内层能向当前方向滚动时外层跳过；到达**实际**偏移边界后，外层可在同一个 PreviewMouseWheel 路由中处理一次，不重放事件。未到边界的动画目标不能提前触发交接。反向输入在实际边界交接时，guard 取消内层旧方向动画，避免外层处理后内层还在追赶旧目标。显式 Self 边界仍隔离共享 Frame，打开的 ComboBox、Popup、ContextMenu / PopupRoot 仍独占其输入。触摸路由和惯性由 WPF 自己处理，与这些 mouse-wheel 判断独立。
-
-### 7.3 验证 #131（硬件验证待执行）
-
-自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、密集完整刻度保持离散路径及三格 lead、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。导航模板、panning、虚拟化及嵌套路由直接按下表进行人工验证；不保留一次性 STA 模板实验。
-
-在 Windows 11 25H2 笔记本上，用 Precision Touchpad、触摸屏（如有）和普通鼠标分别执行以下步骤，并记录 OS、缩放比例、Windows wheel lines/page 设置与结果。自动测试通过不能替代这层验证。
-
-| 区域 | 手动操作与预期 |
+| 入口 | 职责 |
 | --- | --- |
-| 左侧导航（缩小窗口使列表溢出） | 慢速/小幅、快速连续双指滑动；立即反向；抬指后应迅速停下且没有远目标追赶。单指上下滑动和惯性；轻点/点击条目、展开分组应正常，轻微移动不能误导航。 |
-| File Types | 各 Scene tab 的列表及隐藏批量管理视图分别执行三种输入；反向、顶部/底部、刷新后滚动和返回。内层有空间时外层不动；在存在可滚动外层的嵌套区域检查边界交接无重复跳动。 |
-| Other Rules | Enhance / Detailed Edit 左侧 selector 与右侧详情、复用 SpecialMenuContentView、CommandStore / GuidBlock / DragDrop 分别执行三种输入；触摸轻点 ToggleSwitch / Button 与滑动必须区分。 |
-| 普通导航页 | 使用 ModernFrame.ContentScrollHost 的 Settings / Application Groups 等页面验证离散 ±120 和多格滚轮平滑、切页 reset；Category / Win11 / Approvals 验证模板列表与大列表虚拟化布局。 |
-| 普通鼠标连续滚轮 | 在列表中部慢转、快转后松开，均应有短暂自然缓出；快速转动不能突然切为急停。立即反向应响应新方向；到边界、切页或关闭窗口应停止。只发送整数刻度的触摸板也须检查抬指后没有明显长距离追赶。 |
-| 独立窗口与表单 | 缩小详细编辑、级联子菜单、深入分析、菜单项 / ShellNew 表单窗口和 Debug 工具窗口，使内容溢出；分别验证滚轮、触摸板、触摸滑动、滚动条拖动及关闭时停止动画。表单输入、文本选择、下拉选择、树节点展开及按钮操作应正常。 |
-| 嵌套触摸 | 在内层开始单指滑动，父层不能提前抢走；抵达边界后检查原生 WPF panning / boundary feedback 的实际交接表现（含新手势和惯性）。 |
-| 可交互内容 | TextBox caret、选择文本、Button / AsyncToggleSwitch 点击与触摸轻点正常；水平拖动不滚动竖直内容；已打开 ComboBox 下拉、ContextMenu、带滚动内容 flyout 只操作自身，底层页面不滚动。 |
-| 设置与 fallback | wheel lines=1/3、one screen at a time、Ctrl / Shift；关闭 Windows client-area animations、duration=0 / disabled smooth mode 时检查既有 fallback。滚动中切页/关闭窗口后不能继续滚动或保留动画。 |
+| [App.Services.xaml.cs](../ContextMenuMgr.Frontend/App.Services.xaml.cs) | DI 注册服务、页面与 ViewModel，按现有生命周期管理 |
+| [App.xaml](../ContextMenuMgr.Frontend/App.xaml) | ThemesDictionary、ControlsDictionary、动态 brush、Language、共用控件样式 |
+| [MainWindow.xaml](../ContextMenuMgr.Frontend/MainWindow.xaml)、[code-behind](../ContextMenuMgr.Frontend/MainWindow.xaml.cs) | FluentWindow、自定义 TitleBar、InfoBar、搜索事件、导航协调；不承载 registry 业务 |
+| [ShellViewModel](../ContextMenuMgr.Frontend/ViewModels/ShellViewModel.cs) | 主窗口命令、导航状态、刷新/Explorer restart/attention |
+| [ContextMenuWorkspaceService](../ContextMenuMgr.Frontend/Services/ContextMenuWorkspaceService.cs) | 连接、常规快照、通知与操作；scene-only 项不加入全局池 |
+| [NavigationPages](../ContextMenuMgr.Frontend/Views/Pages/NavigationPages.cs) | 导航 Page wrappers；可复用内容是 UserControl |
 
-尚未证明实际设备上的 tap 阈值、触摸文本选择、nested touch boundary feedback 和各 touchpad 驱动所发送的 delta/timing 行为；这些必须由上述硬件测试确认。此实现不添加自定义 touch inertia，也不提供设备识别。
+workspace 区分 Pipe reachability 和单次加载错误。Ping 成功、GetSnapshot 失败不触发 UAC 安装修复。主快照 Apply 后即清 IsLoading，WPS 审核后台刷新不阻塞主列表；WPS 启动延迟/重试不能演变成每次输入的后端查询。
 
-需要在导航后定位共享外层滚动区域的页面应实现 `INavigationScrollTarget`。内容真正呈现后，`ModernFrame` 先 reset 外层 `ContentScrollHost`，再把该 `ScrollViewer` 传给当前内容或其可视树中的定位目标。定位回调执行完毕后才触发 `ModernFrame.NavigationCompleted`，`ModernNavigationView` 会转发该事件；需要等待页面就位的功能应订阅事件，不要使用固定 `Task.Delay`。`MainWindow` 不再查找 WPF-UI `NavigationViewContentPresenter`。
+## 主题、模板与本地化
 
-`ApplicationGroupsPage` 不再使用导航后滚动定位。分类页跳转到按应用管理页面时，页面通过 `GlobalSearchNavigationFilterService` 携带的 item id 进入精确筛选模式，显示目标项所属分组（同一应用在其它场景下注册的全部菜单项）。这样避免首次进入时全量渲染后再调用 `UpdateLayout` / 查找可视树。
+`FrontendThemeService.Initialize` 在窗口创建/显示阶段应用保存主题，App.xaml 的初始 Light 不能代替用户偏好。固定 Light/Dark 调用 ApplicationThemeManager 并停止 SystemThemeWatcher；System 才 ApplySystemTheme/Watch。新增主题入口复用该服务。
 
-边界规则：
+颜色/brush 使用 DynamicResource，如 `TextFillColorPrimaryBrush`、`CardBackgroundFillColorDefaultBrush`。根 Foreground 不保证覆盖 WPF-UI 模板、Popup 与状态触发器；检查 Appearance、BasedOn 和模板资源。标题栏 `ChromeTitleBarButton` 不跨用到普通按钮或 Popup。启用 badge 用 accent 与 TextOnAccentFillColorPrimaryBrush，禁用用中性背景与次要前景；badge 高度/垂直对齐一致，避免 WrapPanel 按其它按钮高度拉伸。
 
-```text
-外层 NavigationView 滚动：可以在导航后重置
-页面内部列表滚动：由页面自己控制，不要被 MainWindow 乱动
-```
+Popup/Flyout/AutoSuggestBox 建议项脱离普通视觉树。DataTemplate 以 item VM 属性为主，不依赖 Window ancestor、ElementName=RootNavigation 或错误 TemplatedParent。选择处理放外层事件或 item 明确命令；`PressedForeground ... ContentPresenter` 等绑定报错先查 Style/Template。
 
-OtherRules 这类复杂页面要区分外层导航滚动、TabControl 页面滚动、左侧列表滚动和右侧详情滚动。不要因为滚动异常去改后端、注册表或菜单状态逻辑。
+TitleBar 布局是 Icon、Title、GlobalSearchBox、HeaderActions、WindowButtons，避免 ColumnSpan 互相覆盖；可交互控件设 `WindowChrome.IsHitTestVisibleInChrome=True`。`MainWindowPlacementService` 保存 normal RestoreBounds/Maximized，不保存 Minimized；恢复校验 virtual screen，防断开显示器后窗口不可见。
 
-OtherRules 和 FileTypes 页面自身声明 `ModernScroll.Ownership="Self"`，由 Tab 内容管理内部滚动。OtherRules 的两个规则详情面板、`DragDrop` / `CommandStore` / `GuidBlock` 复用的 `SpecialMenuContentView`、以及 FileTypes 的 `SceneBrowserView` 和文件类型批量管理视图，必须以 `ModernScrollViewer` 承载可增长的内容；不要依赖 `ListBox` 的默认滚动条。
+`LocalizationService` 支持 System/zh-CN/en-US/zh-TW，更新 culture 和 CurrentLanguage。长期用户文本同步 `Strings.resx`、`Strings.zh-CN.resx`、`Strings.zh-TW.resx`，托盘资源也独立维护，切语言通知 TrayHost reload。回收站 Pin to Start 等系统名称使用 `TranslateSystem` 的用户 Windows UI 语言，不能用服务语言替代。
 
-其它导航页面没有声明 `Ownership="Self"`，因此继续使用 `ModernFrame.ContentScrollHost` 这一共享的 `ModernScrollViewer`。不要在这些页面再包一层无约束的滚动宿主，否则会产生嵌套滚动或无限测量，反而使滚动失效。
+## 导航与页面组合
 
-SpecialMenu 的首次加载必须先让 UI 呈现加载占位和 `ProgressBar`，再请求后端快照。`CommandStore` 等结果较多的快照仅在首次加载时分批加入绑定集合，并异步提取图标；后续刷新必须原地差量更新，不能清空集合后重新添加。`CommandStore` 不启用定时全量刷新，依赖用户手动刷新和后端通知更新，避免持续重建列表造成滚动和布局卡顿。
+本地 [ModernNavigationView](../ContextMenuMgr.Frontend/Controls/Modern/Navigation/ModernNavigationView.xaml.cs) 实现 WPF-UI INavigationView；仍用 INavigationService、NavigationViewItem/TargetPageType，递归保留 MenuItems/Source、Binding、Visibility、InfoBadge、图标与展开。不另造平行导航集合。
 
-按应用管理页（`ApplicationGroupsPageView`）**不要通过 `Ownership="Self"` 换虚拟化**：虚拟化 ListBox 会丢失 `ModernFrame.ContentScrollHost`（`ModernScrollViewer`）的平滑滚动动画，且分页/懒加载若使用 `Dispatcher.Yield(Background)` 会在渲染期间被饿死，导致列表一直"加载中"并卡顿。该页的"延迟异步加载 + 非完整加载"采用：
-- 页面继续挂在 `ContentScrollHost` 下，保留外层平滑滚动；
-- 首次重建同步渲染前 `InitialVisibleGroupCount`（40）组，页面立即可交互；
-- 剩余组由 `DispatcherTimer`（`DispatcherPriority.Normal`，避免 Background 饿死）每 60ms 追加 12 组，直到全部渲染完成；
-- 所有重建触发点（集合变化、条目属性变化、搜索、语言切换）走 ~120ms 防抖；新调度会停止旧追加定时器并重新开始；
-- 分组计算（`GroupBy` + 搜索匹配）在 UI 线程快照 `Items` 和搜索文本后交给 `Task.Run` 在后台执行，UI 线程只负责首屏渲染与定时追加，避免搜索框每次输入都在 UI 线程同步全量重建造成输入阻塞；
-- 搜索时组内子项同步过滤：只保留匹配的子项卡片（空搜索显示整组），避免每次按键把整个应用组的全部子项重新渲染一遍；子项匹配走 `ContextMenuSearchMatcher.MatchesFields`，字段与 token 的标点规范化各只计算一次；
-- `IsLoading` 只在重建入口同步置位并在首屏填充后同步复位，不会出现"一直加载"；`IsEmpty` 在 `IsLoading` 期间不显示空占位。
+[ModernFrame](../ContextMenuMgr.Frontend/Controls/Modern/Frame/ModernFrame.cs) 是 Page 宿主，依次尝试 IServiceProvider、INavigationViewPageProvider、Activator 创建。Page 不直接放 Border/Grid/TabItem/普通 ContentControl；复用内容用 `SpecialMenuContentView : UserControl` + `SpecialMenuPageView : Page`，不靠嵌套 Frame 掩盖组合错误。
 
-Win11 菜单页（`Windows11ContextMenuItemViewModel`）的卡顿来自**分组项构造时同步读盘**：`Windows11ContextMenuService.LoadLogo` 是 async 方法但方法体在首个 `await` 前同步执行 `FileStream` + `BitmapImage` 解码，且无缓存，`RebuildItems` 一次性构造全部分组项时所有 Logo 都在 UI 线程串行读盘。修复：
-- Logo 改为后台加载（`Task.Run` + 静态 `ConcurrentDictionary` 按 LogoPath 缓存），`LogoSource` 任务未完成返回 null、完成后 `OnPropertyChanged` 刷新，占位图标与真图标正常切换；
-- `RebuildItems` 的触发源 `ItemsChanged` 事件走 ~120ms 防抖，避免扫描期间反复全量重建分组项（`Dispose` + 清空 + 重建）造成卡顿与 `CollectionChanged(Reset)` 引起的滚动跳动。
+转场支持 Entrance/Fade/Slide/Suppress，旧内容退出清理后新内容进入，后退反向；快速导航取消旧 Storyboard/PageHost/过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；等待就位订阅事件，不固定 Task.Delay。
 
-### 7.4 列表刷新时阻止 BringIntoView 冒泡到外层滚动宿主
+File Types 批量管理是内部隐藏 UserControl，不新增导航 Page/TabItem；返回保留原 tab。按需查询 scene-only 相关项，单项/批量操作复用后端安全和备份，删除项仍留供 Undo；物理匹配范围见[注册表模型](registry-model.md)。
 
-绑定到 `ListCollectionView`（`ItemsView`）的 ListBox 在运行时调用 `ItemsView.Refresh()`（例如传统菜单页开关菜单项、Win11 页 `RebuildItems`）会触发 `CollectionChanged(Reset)`，导致 ListBox 重新生成所有 item 容器。容器重新生成期间，WPF 框架的焦点恢复 / 选中项恢复逻辑会引发 `FrameworkElement.RequestBringIntoView` 路由事件。此时 ListBox 内部 ScrollViewer 因容器尚未完成布局无法正确处理该事件，事件会继续**冒泡**到外层 `ModernScrollViewer`，外层滚动到让 ListBox 顶部可见——表现为页头标题与筛选框被滚出视野、列表顶部对齐窗口顶部。
+## 滚动、输入与渲染
 
-修复方式是在对应 ListBox 上启用 `Behaviors.SuppressBringIntoViewBehavior`：
+共享外层为 `ModernFrame.ContentScrollHost` 的 [ModernScrollViewer](../ContextMenuMgr.Frontend/Controls/Modern/Scrolling/ModernScrollViewer.cs)。OtherRules/FileTypes 声明 `ModernScroll.Ownership=Self`、内部 ModernScrollViewer 自管；其它页沿用 Frame，不另包无约束宿主。导航只 reset 外层，不改内层列表 offset。
 
-```xml
-<ListBox
-    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-    ItemsSource="{Binding ItemsView}"
-    ...>
-```
+| 输入/条件 | 当前策略 |
+| --- | --- |
+| 触摸屏 | VerticalOnly panning（Style/XAML 可覆盖）；WPF 原生阈值/惯性/ratio/deceleration；manipulation 开始只取消旧滚轮动画，不改 Handled，不造 TouchMove/惯性 |
+| 小 delta/Precision Touchpad 形状 | 保留 Delta/120 小数；观察非 120 整倍才进入连续模式，间隔超过 120 ms 退出，处理 timestamp wrap；lead 至多一格、duration 至多 60 ms |
+| 普通完整刻度 | 默认 220 ms EaseOut，multiplier/duration/easing 可配置；同向 pending 至多三格且通常一 viewport（至少系统一格）；反向从当前可见 offset 起，目标相同不重启计时 |
+| 系统设置 | WheelScrollLines 正数按 16 DIP/line，0 不滚，-1 按 viewport；限制到 0..ScrollableHeight。关闭动画/render tier 0/duration 0 立即偏移；禁用 smooth 保留原生路径，Ctrl/Shift 不接管 |
 
-该附加属性以 `handledEventsToo: true` 注册 `RequestBringIntoViewEvent`，在列表控件层标记 `Handled = true`，阻止事件冒泡到外层滚动宿主。由于 ListBox 内部 ScrollViewer 位于 ListBox 之下（事件先到达内层），列表自身的滚动行为不受影响。当前在传统菜单页（`CategoryPageView`）、Win11 菜单页（`Windows11ContextMenuPageView`）的 ListBox，以及 ShellNew 等 SpecialMenu 所用的 `SpecialMenuContentView` ItemsControl 上启用。其它运行时刷新或回写条目的列表如出现同样的“开关后滚动跳动”现象，可同样启用。
+输入形状不是设备识别，完整刻度触摸板仍走离散路径。内层还能沿当前方向滚动时外层让渡，抵达**实际**边界才在同次 PreviewMouseWheel 交接一次，不重放事件；反向边界交接取消内层旧动画。ownership 查找只认显式声明，不在继承值处提前截断。打开的 ComboBox/Popup/ContextMenu 独占输入；触摸边界由 WPF 路由决定。
 
-## 8. AutoSuggestBox 与全局搜索
+`ModernListScroll`、WheelScrollController/Policy 共用上述策略；沿 source ancestor 找模板 viewer，不每次扫描整树/缓存过期模板。opt-in 列表保持 CanContentScroll=True、Pixel ScrollUnit 与虚拟化，不全局改成 False。所有应用显式创建的滚动容器（含独立窗口/表单/Debug）复用 ModernScrollViewer，控件内部 TextBox/ComboBox/TreeView 模板保留原生交互。完成/卸载移除 Rendering handler，用单调 Stopwatch 计时。
 
-标题栏全局搜索使用 WPF-UI `AutoSuggestBox`，但本项目不使用 WPF-UI 的默认过滤逻辑。
+刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
 
-原因是本项目需要多字段搜索、自定义评分、经典菜单和 Win11 菜单合并、菜单项真实图标、跳转目标页面，以及跳转后给目标页面设置筛选文本。
+Application Groups 保留 Frame 平滑滚动：后台对 UI 快照分组/搜索，约 120 ms 防抖，先呈现 40 组，再 Normal 优先级 DispatcherTimer 每 60 ms 追加 12 组，重建取消旧 timer；避免 Background yield 饥饿。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
 
-传统菜单分类页、标题栏全局搜索和按应用管理页面都使用 `ContextMenuSearchMatcher` 的宽松匹配；标点、分隔符和符号不影响匹配。全局搜索候选来自已加载的 workspace/Win11 缓存，并包含传统菜单项与 Win11 菜单项的本地用户备注，输入时不得访问后端、注册表或文件系统。
+## 搜索、筛选与集合归属
 
-### 8.1 必须拦截 TextChanged 默认过滤
+[ContextMenuGlobalSearchService](../ContextMenuMgr.Frontend/Services/ContextMenuGlobalSearchService.cs) 只搜索已加载 workspace 传统分类和 Windows11ContextMenuService.CurrentItems。**不覆盖** ShellNew/SendTo/WinX/OpenWith、FileTypes、OtherRules、Approvals、Settings。Win11 以应用 family 分组但保留声明字段，传统应用分组不包含 Win11。
 
-WPF-UI `AutoSuggestBox` 在用户输入后会触发 `TextChanged`。如果事件没有设置 `args.Handled = true`，控件会使用 `OriginalItemsSource` 做默认过滤，并重新设置自己的 `ItemsSource`。
+候选随集合、显示/状态/备注、语言、设置变化重建。字段含名称、key、registry/backend/source path、command、CLSID、file、备注、分类/状态与 package/publisher/context。ContextMenuSearchMatcher 忽略标点/分隔符，如 7zip→7-Zip。输入只本地评分，不查 backend、registry 或磁盘；icon best-effort 使用 IconPreviewService，缺失用分类 fallback。
 
-本项目的规则：
+AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，更新结果/ItemsSource/IsSuggestionListOpen，避免默认 OriginalItemsSource 过滤覆盖。SuggestionChosen 用 SelectedItem，QuerySubmitted 仅 QueryText，Enter 打开首项；UpdateTextOnSelect=False。建议行仅展示，不放依赖外层 VM/标题栏模板的复杂按钮。
 
-```csharp
-if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
-{
-    args.Handled = true;
-    viewModel.UpdateGlobalSearchText(args.Text);
-    sender.ItemsSource = viewModel.GlobalSearchResults;
-    sender.IsSuggestionListOpen = !string.IsNullOrWhiteSpace(args.Text)
-                                  && viewModel.GlobalSearchResults.Count > 0;
-}
-```
+`GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。早期只显示目标子项的描述已不符合当前 `RebuildNavigationFilterGroup`。不以滚动定位或新扫描补救。
 
-如果“搜索结果已经算出来，按 Enter 也能跳转，但下拉框不显示”，优先检查 `TextChanged` 是否绑定、`args.Handled` 是否设置、`ItemsSource` 是否被默认过滤覆盖、`IsSuggestionListOpen` 是否被过早关闭。
+workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。
 
-### 8.2 SuggestionChosen 和 QuerySubmitted 的区别
+## 异步操作与结果
 
-WPF-UI `AutoSuggestBoxSuggestionChosenEventArgs` 使用 `SelectedItem`。
+`DelayedLoadingPresentation` 在真实 loading 超过 140 ms 才显示，显示后至少约 250 ms；新状态/Dispose 取消旧回调。快加载不人为延长 IsLoading；Busy 不等于整页加载。Application Groups 本地筛选不激活全页加载，placeholder 时折叠列表、隐藏 empty。
 
-WPF-UI `AutoSuggestBoxQuerySubmittedEventArgs` 只有 `QueryText`，不要假设它有 WinUI/UWP 风格的 `ChosenSuggestion`。
+`AsyncToggleSwitch` 在固定槽显示开/关或 ProgressRing，单项 Busy 同步置位，`ToggleBusyPresentation.WaitForFirstFrameAsync` 最多 100 ms/两个渲染事件后再写入；隐藏窗口有超时。写入期间禁重复操作，不因 Busy 折叠本来存在的按钮。普通开关仅 HideDisabled 开启时在完成后刷新过滤，避免全表 Reset 阻挡首帧。
 
-本项目规则：
+classic SetEnabled 的 request→独立物理状态核对、20/10 秒预算和迟到广播见 [IPC](process-and-privilege-flows.md#请求迟到通知与不确定结果)。ProgressRing 覆盖核对阶段。权威 requested state 成功、旧 state 回退；无法确认保留当前乐观值并锁操作，直到 fresh update。item version 防旧失败覆盖新结果。Win11 核对应用全部目标，OpenWith 页串行门/IsStateUncertain 和 ShellNew 三态分别在各主文档定义，不重发写入猜结果。
 
-- 鼠标或键盘选择下拉项：走 `SuggestionChosen`，从 `args.SelectedItem` 取 `GlobalSearchResultViewModel`；
-- 直接按 Enter：走 `QuerySubmitted`，打开当前结果列表第一项；
-- `UpdateTextOnSelect="False"`，避免选择后控件自动把文本改成 item string；
-- 跳转由 `ShellViewModel.OpenGlobalSearchResultCommand` 处理。
+`DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` **必须先 Acknowledge 成功才本地隐藏**，失败保留提示。成功后同时设置本地 dismissed；结构冲突可能仍存在，`ApplyEntry` 保持相同 issue signature 的本地忽略，签名变化重新提示。旧文档“无论后端成功与否都忽略”与当前实现不符。
 
-### 8.3 搜索结果行不要放复杂按钮
+SpecialMenu 首屏先呈现加载再请求；CommandStore 首次分批加入、图标异步，后续差量更新且不做定时全量刷新。其它 SpecialMenu 的定时刷新见各责任文档。新 Loading/Empty 不能引入全局模拟服务；DebugToolsWindow/强制更新入口仅 Debug 编译。
 
-AutoSuggestBox 的建议列表在 Popup / 内部 ListView 中渲染。Popup 不在普通视觉树里，DataTemplate 内不应依赖：
+## 本地动作、错误与清理
 
-- `RelativeSource AncestorType=Window`
-- `ElementName=RootNavigation`
-- 从 Popup 里找 `ShellViewModel`
-- 标题栏专用 Button style
-- 依赖错误 `TemplatedParent` 的复杂 Button 模板
+`ContextMenuItemActionsService` 在前端 Session 打开真实 BackendRegistryPath，只有缺物理路径才 HKCR fallback。Regedit LastKey 为完整 hive，不拼应用语言的计算机根名称；同 Session 已有 Regedit 则 -m 新窗口，不杀用户旧窗口。启动成功只证明请求，实际定位需看选中键。
 
-当前搜索结果行右侧“跳转”只是文本提示。真正跳转由选择整行触发。
+InfoBarService 承载简短非阻塞反馈；详细错误码/堆栈/路径写日志，不向普通用户暴露堆栈。只有需求/规则明确要求 Explorer restart 的设置，成功后通过单例 ExplorerRestartStateService.MarkRequired 联动顶部按钮，由用户执行并 Clear。Win11 应用开关不标 restart；全局经典菜单 tweak 有独立语义。重置软件设置须先完整禁用 Registry Write Protection，失败保留 authoritative toggle 并停止 reset。
 
-## 9. Popup / DataTemplate / Binding 边界
+ViewModel Dispose/页面卸载取消刷新、debounce、加载回调与动画，解除 LanguageChanged/SettingsChanged/workspace/filter 等订阅；不能靠窗口关闭推断静态事件无泄漏。控制 Pipe/DI/单实例退出见[生命周期](runtime-lifecycle.md)。
 
-WPF 的 Popup 通常会脱离原视觉树。WPF-UI 的 AutoSuggestBox、Flyout、InfoBar 内部也可能引入额外模板边界。
+## 验证与维护
 
-在 Popup / Flyout 的 DataTemplate 内，推荐只绑定 item ViewModel 自身属性：
+构建只能验证 XAML/类型，WheelScrollPolicyTests 等只保护算法。Windows 真机须测浅/深/系统主题切换、窄窗口、中文/英文 Windows 与应用交叉语言、已有 Regedit 的真实选中键、Popup/AutoSuggest 选择与 Enter、导航快速打断/重复点击、筛选/返回、busy 首帧、迟到响应/刷新竞态和关闭清理。
 
-```xml
-Text="{Binding DisplayName}"
-Source="{Binding IconSource}"
-Text="{Binding StateLabel}"
-```
+滚动分别用普通鼠标密集完整刻度、小 delta 触摸板、触屏；测停止/反向、内外边界、触摸文本选择/轻点按钮、ComboBox/Popup 独占、大列表虚拟化、wheel lines/page/0、关闭动画和切页/关闭停止。当前尚不能证明所有驱动 delta/timing、触摸 tap 阈值与 nested boundary feedback；合成事件不替代硬件。
 
-不推荐依赖外层窗口或 NavigationView 的 ancestor binding。更稳的做法是让 item template 只负责显示，选择事件在外层控件 code-behind 处理，或把必要命令明确放到 item ViewModel。
-
-如果出现 `PressedForeground property not found on ContentPresenter`，通常说明某个 Button style 或模板被放到了错误上下文中。排查方向是 XAML Style / Template，而不是后端业务逻辑。
-
-## 10. Button、Badge 与 Foreground
-
-WPF-UI Button 的前景色由控件模板、`Appearance` 和主题资源共同决定。
-
-Primary / Accent Button 的文字颜色应该使用 WPF-UI 的 accent text 资源，例如：
-
-```xml
-Color="{DynamicResource TextOnAccentFillColorPrimary}"
-```
-
-不要试图通过根容器 `Foreground="White"` 解决所有 Primary Button 的文字颜色。那通常只会影响普通文本，不一定影响 Button 模板内部状态。
-
-状态标签建议使用 `Border + TextBlock`，并显式绑定动态资源。启用 / 禁用状态可以明确绑定不同 brush。不要硬编码黑白，也不要依赖父级 Foreground 继承。
-
-同一菜单项上的多个状态标签（启用状态、待审核、检测到变更等）必须使用相同的外形：`Height` 固定为同一值（如 23）并配合 `VerticalAlignment="Center"`，文字也垂直居中。不能有的标签固定高度、有的标签不设高度：标签所在的 `WrapPanel` 行高由行内最高元素决定，若同一行还放有更高的控件（例如“深度分析”按钮），不设固定高度的标签会被 `WrapPanel` 拉伸到行高，导致“外部新增 / 待审核”标签比“已启用”标签高出一截。
-
-状态标签的文字颜色同样要按状态显式区分并跟随 WPF-UI 主题资源：启用态（accent 背景）文字用 `TextOnAccentFillColorPrimaryBrush`，禁用态（中性背景）文字用 `TextFillColorSecondaryBrush`（与正常管理页一致）。这样浅色模式下启用态为白字、禁用态为灰字，深色模式下两者随主题资源自动反色。不要把文字颜色写死，也不要依赖父级 `Foreground` 继承（accent 背景上会变成黑字看不清）。
-
-## 11. 图标
-
-按应用管理页、传统分类页和复用 `SceneBrowserView` 的 Legacy 页面，对可管理菜单项均在既有 ToggleSwitch 左边显示一个无文字的 `Apps24` WPF-UI 按钮。该按钮对注册表级联 Shell Verb（`CanManageSubMenuItems`）打开按需子菜单窗口；对 CLSID 命中 `DetailedEditDic.xml` 白名单的动态 Shell Extension（例如 7-Zip、Bandizip）打开独立的应用设置窗口。后者只改字典中明确列出的软件配置项，不把任意 COM 动态子项伪装成可控制的注册表子项。Tooltip 使用 `ManageSubMenuItems` 本地化资源，任何一种入口都不能把子项平铺进主列表。
-
-本项目有两类图标：
-
-| 图标类型 | 来源 | 用途 |
-| --- | --- | --- |
-| 导航 / 分类图标 | WPF-UI `SymbolIcon` | NavigationView、按钮、fallback 图标 |
-| 菜单项真实图标 | `IconPreviewService` | 菜单项卡片、全局搜索结果 |
-| Deep Analysis 运行时图标 | ProbeHost `iconPngBase64` | Deep Analysis 结果窗口 |
-
-全局搜索结果应优先显示菜单项真实图标，而不是分类图标。
-
-真实菜单项图标通常来自：
-
-- `ContextMenuEntry.IconPath`
-- `ContextMenuEntry.IconIndex`
-- `ContextMenuEntry.FilePath` fallback
-- `IconPreviewService.GetIcon(...)`
-
-`SymbolIcon` 只能作为 fallback 或导航分类图标。
-
-Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单项图标。前端只解码 `ContextMenuDeepAnalysisMenuItem.IconPngBase64` 中的 PNG base64；为空或解码失败时不显示图标，也不提示错误。缺少图标通常表示 Shell Extension 使用自绘、回调图标或没有通过标准菜单位图暴露图标。
-
-## 12. 页面筛选、占位状态与加载状态
-
-常规菜单的 `ContextMenuWorkspaceService.IsLoading` 只表示主菜单 snapshot 尚未就绪：`ApplySnapshot()` 后立即清除，再刷新次要的 WPS/Office 审核数据。SpecialMenu 的 `IsLoading` 也只表示当前列表 snapshot 加载；页面级 `IsBusy` 或单项 `IsBusy` 不能单独激活整页加载占位。
-
-列表页通过共用的 `DelayedLoadingPresentation` 将真实加载与显示状态分离：加载持续超过 140ms 才显示进度条；显示后至少保持约 250ms。新一轮状态更新会取消旧回调，ViewModel 销毁时也取消回调。显示加载占位时，列表内容折叠，空状态不显示；快加载直接显示内容，不人为延长真实 `IsLoading`。Application Groups 只在首次分组加载使用该状态，本地搜索与筛选不激活整页加载。
-
-`SpecialMenuContentView` 的加载/空状态小卡片根据进度条、图标或文字的实际高度和内边距自适应，不设置固定最小高度；它仍位于列表区域中央。
-
-普通菜单项使用 `ContextMenuItemCardStyle`，与页头的通用 `CardBorderStyle` 分开。启用/禁用状态标签共用 `ContextMenuEnabledBadgeStyle` 与文字样式：启用态为 accent 和 accent 前景，禁用态为中性色与次要文字前景，均跟随动态主题资源。
-
-后端写入型菜单开关共用 `AsyncToggleSwitch`：普通状态显示本地化的开/关，单项 Busy 时在同一布局槽显示 WPF-UI `ProgressRing` 并禁用重复操作。传统菜单、Win11、SpecialMenu、增强菜单和详细编辑布尔规则沿用各自 ViewModel 的 Busy 状态及原有失败回滚。详细编辑的数值/字符串 Apply 在写入期间也禁用重复提交。ShellNew 的图标来源使用同一个 `WrapPanel` 内互斥的两个 `RadioButton`，不设置跨视图共用的 `GroupName`；`SelectedDocumentIconProvider` 是唯一来源状态，首次读取后刷新选中绑定，写入失败恢复旧选项。
-
-开关点击后先同步设置单项 Busy，再通过 `ToggleBusyPresentation.WaitForFirstFrameAsync()` 等待至多 100ms 的两个 WPF 渲染事件（隐藏窗口有超时兜底），之后才启动后端写入。传统分类页与 Scene 页不在普通 `IsEnabled` 属性变化时对整个 `ItemsView.Refresh()`；只有“隐藏已禁用项”开启时，才在单项操作结束后刷新筛选结果。Application Groups 直接通知当前组的批量操作按钮；普通单项开关不重建所有分组，只有当前搜索可能受状态文字影响时才在操作结束后重算。这些同步列表操作曾挡住 ProgressRing 的首帧。
-
-页面内筛选和全局搜索不是同一个状态。
-
-| 功能 | 位置 | 作用 |
-| --- | --- | --- |
-| 全局搜索 | MainWindow TitleBar | 搜索已加载候选项并跳转到对应页面 |
-| 页面筛选 | Category / Win11 页面内部 | 在当前页面中过滤列表 |
-| 加载 / 空状态 | 页面 UI | 告诉用户当前正在加载或确实没有数据 |
-
-全局搜索跳转后，通过 `GlobalSearchNavigationFilterService` 请求目标页面把筛选框设置为选中菜单项名称。这样用户进入目标页面后尽可能只看到该项。
-
-加载中 / 空状态是前端 UI 状态，不应触发后端状态修改。
-
-`ContextMenuWorkspaceService.Items` 只代表常规全局 snapshot。后端 `ItemDetected` 表示 registry monitor 发现了新的常规项，可以加入该集合；generic `ItemStateChanged` 只允许更新集合中已存在的稳定 Id，不能以通知 payload 为依据创建未知全局项。File Types / scene 项即使使用 `ContextMenuCategory.File`，其归属仍由 scene snapshot 决定，不能因为开关操作的广播进入普通“文件”页。
-
-传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。各页监听同一个 SettingsChanged，同步选中状态；切换模式只影响展示，不重新扫描菜单。传统菜单的精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。Win11 页固定为详细视图，保留应用名、适用位置、备注和开关，并显示发布者、应用标识和文件位置，缺少字段隐藏；不参与视图模式设置。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
-
-同一处还提供“隐藏已禁用项”，它直接使用 `FrontendSettings.HideDisabledItems`。开启后只隐藏未删除且已禁用的项目；已删除项目必须继续可见，以便撤销或永久删除。切换视图模式不会刷新后端、重建 workspace 或清空搜索文本；切换此筛选只刷新当前 `ItemsView`，不修改注册表。排序固定为 attention、deleted-state、display name，不能加入 `IsEnabled`，否则用户开关项目时会造成列表跳位。
-
-SpecialMenu 行内操作的结构性可见性不能依赖临时 `IsBusy` 状态。例如可移动项目在 Busy 时仍显示 Move Up/Down 按钮，只通过 `CanMoveUp` / `CanMoveDown` 禁用它们；只有项目不支持移动、已删除或不存在可用方向时才折叠按钮。这样右侧 `Auto` 宽度操作区在异步操作期间保持稳定，不会发生横向跳动。
-
-一致性问题提示只用于无法自动归一化的注册表结构冲突、CLSID 位于 legacy 全局 Blocked 列表等诊断。active/disabled `ContextMenuHandlers` 双键由后端按最后写入时间自动修复，不能进入这一提示。普通菜单开关状态与状态库记录不同必须走 `Modified` 或静默重新禁用，不能显示泛化的“当前注册表状态与软件记录不一致”。该结构冲突提示的 ❌ 忽略按钮绑定 `DismissDetectedChangeCommand` / `DismissConsistencyIssueCommand`。忽略动作分为两层：
-- 尽力调用后端 `AcknowledgeItemState`（只对齐持久化的 desired/observed 状态），
-- **无论后端确认成功与否都执行本地忽略**（`IsConsistencyIssueDismissed` / `IsDetectedChangeDismissed`）。
-
-不能只在后端确认成功时才本地忽略：无法自动修复的注册表冲突和 legacy 全局 Blocked 诊断来自真实注册表状态，`Acknowledge` 无法消除，重新快照仍可能带回 `HasConsistencyIssue=true`。若成功路径跳过本地忽略，用户点 ❌ 后提示立刻恢复，永远无法关掉。本地忽略通过 `ApplyEntry` 的签名机制（`HasConsistencyIssue|ConsistencyIssue` 签名不变时保持 dismissed）在后续快照刷新中持续生效，只有问题签名变化才重新提示。
-
-## 13. InfoBar、错误提示与用户友好失败
-
-`MainWindow.xaml` 中的 `RootInfoBar` 由 `InfoBarService` 管理。它适合展示全局、非阻塞、用户可读的状态，例如服务状态提醒、需要重启 Explorer、更新提示或某些操作失败的简短说明。
-
-Deep Analysis 失败、ProbeHost crash、Shell Extension 不兼容等属于可预期的 best-effort 失败，前端应展示用户友好文案，而不是默认提示“请报告 Bug”。
-
-规则：
-
-- 用户界面展示简短、可理解的原因；
-- 详细诊断放日志或诊断区域；
-- 不把完整堆栈直接暴露给普通用户；
-- 但不要吞掉对开发者有价值的错误码、路径、架构信息。
-
-设置页“增强”卡片包含 Registry Write Protection 和 Win11 全局恢复经典右键菜单两个独立开关。前者有单独风险确认 flyout；后者只通过说明文字提示需要重启 Explorer 或重新登录，不应在切换时自动重启 Explorer，也不应复用 Registry Write Protection 的确认逻辑。
-
-“重置软件设置”必须先等待 Registry Write Protection 的 disable transition 成功；后端返回失败时应保留 authoritative toggle、显示错误并停止后续 reset，不能吞掉异常后显示“已恢复默认值”。
-
-只有开发者需求、目标参考代码或规则字典明确标注“需要重启 Explorer / 资源管理器后生效”的设置，才应联动主窗口已有的全局重启按钮；不要只凭经验推断生效条件，也不要在各页面重复添加按钮。当前约定是注入单例 `ExplorerRestartStateService`，操作成功后调用 `MarkRequired()`；`MainWindow.xaml` 通过 `ShellViewModel.NeedsExplorerRestart` 显示顶部全局“重启资源管理器”按钮，用户点击后由 `ShellViewModel.RestartExplorerCommand` 调用后端并在成功后 `Clear()`。
-
-Win+X 页面固定显示新版 Windows 兼容性提示，并通过 Tooltip 说明：快捷方式在应用中可见但未出现在实际 Win+X 菜单时，可能是新版 Windows 的额外筛选限制，而不是创建或 hash 写入失败。
-
-## 14. 本地化
-
-回收站 `special:recyclebin:pintostart` 是 Windows 系统菜单项；其显示名称通过 `LocalizationService.TranslateSystem` 按交互用户的 Windows UI 语言选择资源，与应用内手动选择的语言无关。前端进程读取 Windows 用户 UI 语言，不能用 LocalSystem 服务的语言替代。
-
-`App.xaml` 中通过 `CurrentLanguage` 资源和全局 Style 给 `Window` / `Page` / `Label` / `TextBlock` 设置 `Language`。
-
-新增用户可见文本时应：
-
-- 放入 `Resources/Strings.resx`；
-- 同步 `Strings.zh-CN.resx`；
-- 同步 `Strings.zh-TW.resx`；
-- 在 ViewModel 或 LocalizationService 中引用；
-- 不要在 XAML 或 C# 中硬编码长期用户可见文本。
-
-技术日志可以保留英文 key，但面向用户的窗口标题、按钮、提示、错误消息应走本地化资源。
-
-## 15. 前端排错速查表
-
-| 现象 | 优先检查 | 不要先改 |
-| --- | --- | --- |
-| 主题启动时不对 | `FrontendThemeService.Initialize`、保存的 theme preference、`DynamicResource` | 后端服务 / 注册表菜单逻辑 |
-| TextBlock 前景色是黑色 | `App.xaml` 全局 `TextBlock` style、资源 key、是否在控件模板内 | Registry / Backend |
-| Primary Button 文字颜色不对 | WPF-UI Button theme resources、Accent foreground resource、Button style `BasedOn` | 根容器强制 Foreground |
-| AutoSuggestBox 搜得到但不显示下拉 | `TextChanged.Handled`、`ItemsSource`、`OriginalItemsSource` 默认过滤 | 后端扫描 |
-| AutoSuggestBox 点击不跳转 | `SuggestionChosen.SelectedItem`、`QuerySubmitted.QueryText`、`OpenGlobalSearchResultCommand` | 搜索候选池重建逻辑 |
-| Popup 里 Binding 报错 | DataTemplate ancestor binding、错误 Button style、Popup 视觉树边界 | Backend / Registry |
-| NavigationView 切页滚动位置继承 | `ModernFrame.ContentScrollHost` 的导航完成 reset | 页面数据加载 |
-| “Page 只能具有 Window 或 Frame 父级” | 是否把 `Page` 嵌进 `Border` / `TabItem`；应拆 `UserControl` | 滚动代码 / 后端 |
-| OtherRules 双栏滚动异常 | 页面内部 ScrollViewer、外层 NavigationView scroll reset、TabControl selection handling | Registry catalog |
-| 全局搜索跳转后目标页面未筛选 | `GlobalSearchNavigationFilterService`、目标页面 ViewModel 订阅 | 后端 snapshot |
-| 图标显示成分类图标 | `IconPreviewService`、`IconPath` / `IconIndex` / `FilePath` | NavigationView symbol 配置 |
-| 加载中 / 空状态显示不对 | 页面 loading/empty state property、placeholder binding、调试状态服务 | 后端菜单开关 |
-
-## 16. 开发规则
-
-修改前端时请先检查：
-
-- [ ] 新页面如果用于导航，根类型可以是 `Page`。
-- [ ] 可嵌入复用的内容必须是 `UserControl`，不要把 `Page` 塞进普通容器。
-- [ ] 主题相关颜色和 Brush 使用 `DynamicResource`。
-- [ ] 标题栏里的可交互控件设置 `WindowChrome.IsHitTestVisibleInChrome=True`。
-- [ ] 修改 AutoSuggestBox 时确认 `TextChanged` 对自定义过滤设置 `Handled=True`。
-- [ ] Popup / Flyout / AutoSuggestBox DataTemplate 不依赖外层视觉树 ancestor。
-- [ ] 不把 `ChromeTitleBarButton` 这类专用 Style 用到普通按钮或 Popup item。
-- [ ] 不用根容器 `Foreground` 强行修 WPF-UI 控件内部文字颜色。
-- [ ] 不因为 UI 状态问题去改 Backend Service、Registry catalog 或权限链路。
-- [ ] 新增用户可见文本同步 Resources。
-- [ ] 新增全局搜索展示字段时不引入每次输入后端查询或文件 IO。
-- [ ] 修改滚动逻辑时区分 NavigationView 外层滚动和页面内部滚动。
-
-## 17. 什么时候需要更新本文
-
-如果修改以下内容，应同步更新本文：
-
-- WPF-UI 版本；
-- `App.xaml` 全局样式；
-- 主题服务；
-- 主窗口标题栏；
-- NavigationView 页面结构；
-- Page / UserControl 复用结构；
-- AutoSuggestBox 全局搜索；
-- Popup / Flyout 模板；
-- 全局搜索结果 item template；
-- 页面加载 / 空状态；
-- 图标解析和展示策略；
-- 前端本地化规则。
-
-前端问题的排查文档要以当前 XAML 和 ViewModel 实现为准，不要只复述 WPF-UI 官方文档。
-
-## Ordinary toggle outcome verification
-
-The per-item `AsyncToggleSwitch` ProgressRing stays active throughout a `SetEnabled` request and any timeout verification. A timed-out direct response is reconciled against the original physical source before the ViewModel receives a definitive failure. An uncertain result keeps the optimistic value and disables a second toggle until a notification or refresh supplies an authoritative item. A late authoritative `Update` increments the item version so an older failed task cannot roll it back.
-
-OpenWith 复用既有页面说明、错误对话框及 `StatusText`，没有新页面。`SpecialMenuPageViewModel` 只对 OpenWith 用同一 semaphore 串行快照与操作；失败 / 超时后独立读取快照，不重试写入。无法核对时 `SpecialMenuItemViewModel.IsStateUncertain` 禁止开关、编辑、Delete / Undo / Purge；后续 `Update` 清除此状态。迟到通知只触发 fresh snapshot，不直接 Upsert 过期 DTO。SpecialMenu item 的更新版本保护防止旧失败任务覆盖新权威状态。页面说明明确所选物理 Applications / NoOpenWith 范围及 Explorer 仍显示其它来源候选的可能性；新增文本同步三种资源语言。
-
-列表占位只由真实加载状态、延迟加载呈现和当前筛选结果决定，不提供全局 Loading/Empty 模拟服务或命令。DebugToolsWindow 及强制更新提示入口仅编译进 Debug；Beta/Release 不包含此窗口。WorkspaceNotificationState 独立保存普通菜单与 WPS/Office 的通知基线，工作区仍负责菜单项与后端操作。
-
-## OpenWith 来源与只读展示（#136）
-
-SpecialMenuContentView 复用原页面，在 OpenWith 页头增加扩展名输入、异步检查/取消按钮与可选择复制的有界只读结果区；不新增 Page 或导航项。查询有独立 CancellationToken，不在页面加载、定时刷新或每次输入时扫描关联。来源 DTO 和 Applications switch 状态分离，分组保留独立物理路径，明确说明 Resolved 不是 Explorer 可见性验证。用户/机器 Applications 卡片展示来源及作用域，正常项不重复显示“开关仅表示此物理注册状态”说明，OpenWith 非标准只读项保留显示禁用的开关，用 SystemFillColorCautionBrush 黄色文字标注“受系统保护”，详细只读原因移入 tooltip；编辑/删除仍不可用。仅 OpenWith 的 ItemsView 按 IsReadOnlyOpenWith、DisplayName、Id 实时排序，正常项在前、受保护只读项在后，覆盖初次加载、刷新、增量新增和支持状态变化。该标签是界面提示，不代表后端新增了 ACL 保护。
-
-归属未知/被改写的 NoOpenWith 显示保留原因及导出/人工核查说明。编辑表单打开前捕获 EditStamp；失败或 Pipe 超时继续沿用串行门、物理快照核对和 IsStateUncertain，迟到通知触发重读。Create/Update 成功缺失 SpecialItem 也按不确定结果处理。英文、简体中文、繁体中文资源同时更新。
-
-## OpenWith review and persistent protection (#136)
-
-The existing OpenWith cards show localized monitoring status and Accept current state / Keep this registration disabled / Stop persistent protection controls. The usual switch supplies the explicit disable action; no separate page is added. Protection is offered only on Owned-disabled, manageable HKU entries; HKLM stays manual. Conflict/Uncertain status explains that automatic action is suspended. Missing registrations retain a rule-only card with removal control, not a fake mutable registration or a system-protected badge.
-
-ReviewOpenWithRegistration persists the decision before success is displayed. The operation shares the existing OpenWith UI semaphore, then reads an authoritative backend snapshot; failures/timeouts use independent read-back and IsStateUncertain, never retries. Explicit Enable revokes the saved rule before enabling. OpenWithChanged carries the authenticated user SID and only triggers snapshot refresh; ordinary page loading does not establish the monitoring baseline. Existing periodic page refresh remains a UI convergence path and does not run extension-specific association inspection. The workspace shows localized aggregate attention, and Win32 TrayHost notification activation opens OpenWith through the existing frontend control channel. All text is maintained in English, Simplified Chinese and Traditional Chinese resources. Timing, identity limits and manual checks are in [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136).
-
-## ShellNew 锁三态与刷新（#141）
-
-`SpecialMenuPageViewModel.IsShellNewOrderLocked` 为 nullable bool；Unknown 显示明确错误并禁用 Toggle/移动，不推断成 false。独立 `GetShellNewOrderLock` 仅读取物理 ACL；snapshot 不再从条目 `OrderLocked` 推断状态。写操作 Busy 立即禁用重复点击，响应超时/错误后另发查询；只有 fresh query 可以确定 Locked/Unlocked。无法核对保持 Unknown，后续刷新可恢复；不重试写入。新状态版本保护旧查询和旧快照，完成后刷新列表。发现失败时不能启用排序；如果 ACL 已独立确认 Locked，仍允许解锁以便恢复。UI 状态与真实 Explorer 展示仍须分别验收。
-
-ShellNew 自动刷新改为上次请求结束后等待 30 秒，操作期间跳过调度，后端另有 single-flight 防止已断开的前端造成积压。其它 SpecialMenu 保持完成后 5 秒间隔。锁状态和发现错误均通过已有 StatusText，新增三种语言的 Unknown / mismatch 文案；不新增页面或导航框架。
-
-## Win11 应用列表与恢复
-
-Win11 页按 package family 合并为应用行，固定显示详细视图：普通应用名、文件/文件夹等适用位置、发布者、应用标识、文件位置、开关和备注按钮。备注按钮同时显示铅笔图标及本地化的“编辑备注”文字，复用 EditUserNoteLabel，不只依赖图标或悬停提示。移除视图切换控件及对应 ViewModel 属性、设置事件订阅，不读取或修改经典菜单的 ContextMenuListViewMode。混合状态显示“部分开启”并提供“全部开启 / 全部关闭”两个直接动作；系统命令独立。搜索和全局搜索采用同一应用分组，保留全部声明供匹配，通知/审核仍按 CLSID 控制域去重。不在卡片上展示 GUID、来源标签、诊断展开区或批量风险文案，移除文件夹按钮。
-
-应用切换只调用一次 service，后端完成全应用事务。旧禁用值的备份、恢复和重复别名清理均由后端处理，用户无需编辑注册表。只有影响其他具名应用、或恢复所有用户菜单时才确认实际影响。读取不完整不阻止手动开关。
-
-失败信息内联使用普通语言，完整异常写日志；提供刷新入口，结果未确认时暂停重复写入，成功刷新后恢复。成功时直接合并后端已核验的 Items；结果缺失、不完整或失败才查询。旧服务拒绝新增应用命令时提示在设置中修复服务，不执行旧式多请求 fallback。Win11 菜单开关不标记或执行 Explorer 重启，重新打开右键菜单即可查看。旧 Id 备注继续兼容读取。实际 WPF 页面须验证浅/深色、混合状态、窄窗口、固定详细展示及与经典菜单视图偏好相互独立、搜索、备注、故障刷新。
+修改资源/模板、WPF-UI、本地 Modern 控件、搜索范围、导航、async outcome 或清理时更新本文；子系统专有 UI 仅链接其契约，避免再追加 issue 附录。

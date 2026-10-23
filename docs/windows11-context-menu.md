@@ -1,170 +1,84 @@
-# Windows 11 新右键菜单实现说明
+# Windows 11 应用菜单与控制域
 
-Win11 页面按应用管理菜单，经新增的 `SetWin11ApplicationEnabled` 进入 `ContextMenuRegistryCatalog.SetWindows11EnabledAsync`。同 package family 的所有声明由后端在一个持久状态 gate 内准备、备份、写入、回读并保存，任何一步失败均条件回滚已写入的值。前端只发一个应用操作请求，不循环发送多个开关。
+本文负责 Win11 来源、声明身份、应用/CLSID mutation、blocked 恢复和特有 UI。入口：[Windows11ContextMenuCatalog](../ContextMenuMgr.Backend/Services/Windows11ContextMenuCatalog.cs)、[Windows11BlocksService](../ContextMenuMgr.Backend/Services/Windows11BlocksService.cs)、[Windows11BlockMutation](../ContextMenuMgr.Backend/Services/Windows11BlockMutation.cs)、[Windows11ClsidImpactIndex](../ContextMenuMgr.Backend/Services/Windows11ClsidImpactIndex.cs)、[ContextMenuRegistryCatalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs) 的 SetWindows11EnabledAsync，及前端 [Windows11ContextMenuService](../ContextMenuMgr.Frontend/Services/Windows11ContextMenuService.cs) / [页面 VM](../ContextMenuMgr.Frontend/ViewModels/Windows11ContextMenuPageViewModel.cs)。
 
-原 `SetWin11BlockedItem` / `RemoveWin11BlockedItem` 仍是单 CLSID（或单 System CommandStore）操作，审核、隔离和纠偏也维持单项控制域。新增命令追加在 PipeCommand 末尾，旧服务不认识时拒绝整个请求，前端提示在设置中修复服务，不 fallback 成部分成功的旧式循环。 对 v1.7.10 及以前服务的旧式 missing-required-data 响应，前端仅在新应用命令上解释为需要更新服务；当维护者明确停止支持这类旧服务后，可移除此文案桥接（#114）。
-## 1. Windows 11 新菜单和传统菜单的区别
+## 来源、发现与身份
 
-Windows 11 新右键菜单不等同于传统 `shell` / `shellex\ContextMenuHandlers`。当前实现区分两类可管理的新菜单来源：
-
-- `PackagedCom`：菜单声明和 COM 信息来自前端用户已安装 AppX / MSIX package 的 manifest，禁用状态通过 Shell Extensions blocked list 表达。
-- `SystemCommandStore`：Windows 内置命令来自 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell`，例如 `Windows.SendToMyPhone`、`Windows.Share`。这类命令不是 packaged COM 菜单项，不能按 GUID Block / GUID Lock 处理。
-
-传统菜单可以在 `ContextMenuRegistryCatalog` 的 `MonitoredRoots` 中扫描；Windows 11 新菜单由 `Windows11ContextMenuCatalog` 单独枚举，并通过 `IsWindows11ContextMenu = true` 标记。不要把 packaged COM、System CommandStore 和 GUID Block 混为同一种禁用模型。
-
-## 2. 扫描来源
-
-当前后端扫描主要基于以下来源。package full name 会在读取 manifest 前去重；单个 package 缺少 manifest、XML 损坏、CLSID 无效或 COM class 无法与 verb CLSID 关联时只跳过该声明/package，不中断整个 snapshot：
-
-| 来源 | 作用 |
+| 来源 | 模型/控制域 |
 | --- | --- |
-| `PackageManager.FindPackagesForUser(frontendSid)` | 按前端用户 SID 枚举该用户实际安装的 AppX / MSIX package；这是 packaged menu 的权威候选来源，不使用服务进程的合并 HKCR 代替用户 package context。 |
-| `AppxManifest.xml` | package 主 manifest。 |
-| `AppxMetadata\AppxBundleManifest.xml` | 主 manifest 不存在时的 fallback。 |
-| `Extension Category="windows.fileExplorerContextMenus"` / `FileExplorerContextMenus` | manifest 中声明 Explorer context menu verb 的位置。解析按 AppX manifest namespace family、`Category` 和元素 `LocalName` 定位，兼容 `desktop4` 等版本化 namespace。 |
-| `Extension Category="windows.comServer"` / `ComServer` | manifest 中声明 COM server 和 class 的位置。兼容未版本化 `com` 及 `com4` 等版本化 namespace，当前支持 `SurrogateServer` 和 `ExeServer`。 |
-| `ContextTypes` | 由 manifest 的 item type 映射到项目的 `ContextMenuCategory`。 |
-| `HKLM\...\Explorer\CommandStore\shell` | 读取明确支持的 Windows 内置系统命令，当前包括 `Windows.SendToMyPhone` 和 `Windows.Share`；命令还必须带有 `MUIVerb`、`ExplorerCommandHandler`、`command` 子键或其它 shell 命令元数据。不要把所有 `Windows.*` CommandStore 项都放进 Win11 页面。 |
+| PackagedCom | 认证用户安装的 AppX/MSIX manifest 声明；CLSID 的用户/机器 Blocked 值 |
+| SystemCommandStore | HKLM Explorer CommandStore 白名单 Windows.SendToMyPhone、Windows.Share；ShellVerbVisibility，不是 GUID Block |
 
-manifest 解析是 best-effort。缺少命名空间、manifest 不存在、XML 结构变化或包数据异常时，当前代码会跳过或记录 warning，而不是让整个 snapshot 失败。
+支持门槛为 Windows >=10.0.22000。无用户上下文 catalog 跳过；专用 Pipe 与 GetSnapshot、通用 Win11 SetEnabled/ApplyDecision 使用认证 SID，不 fallback 到其它登录用户。mutation 需有效 account SID 与 loaded hive/native view，不用服务 HKCU；blocked mutation 不需要 SessionId。前端 DI 始终注册页面/服务，正常导航按 OS 隐藏，防意外导航解析崩溃；不用 HKCR/PackagedCom 存在性作支持门槛。
 
-## 3. Windows11ContextMenuCatalog
+[PackagedContextMenuDiscovery](../ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs) 用 PackageManager.FindPackagesForUser(SID)，按 full name 去重，读 AppxManifest.xml（缺失时 bundle manifest fallback）。按 AppX namespace family、Extension Category 与元素 LocalName 解析 windows.fileExplorerContextMenus、windows.comServer，关联 SurrogateServer/ExeServer class CLSID 与 verb。缺 manifest/XML/无效 CLSID/无法关联等局部跳过/告警，不证明完整发现。
 
-`Windows11ContextMenuCatalog` 位于 `ContextMenuMgr.Backend/Services/Windows11ContextMenuCatalog.cs`。当前流程如下：
+声明保留 package full/family/display/publisher/install metadata、context types、Verb ID、server/class metadata；未声明 server path 则 FilePath 为空，不能用 package 目录伪造。manifest 标题不是 IExplorerCommand.GetTitle 的 Explorer 动态结果。
 
-```text
-检查 Windows 版本 >= 10.0.22000
--> 获取 frontend user SID
--> PackageManager.FindPackagesForUser(frontendSid)
--> 按 package full name 去重并取得安装路径
--> 读取 AppxManifest.xml 或 AppxBundleManifest.xml
--> PackagedContextMenuDiscovery 按 Category + LocalName 解析 FileExplorerContextMenus
--> 解析版本无关的 ComServer / SurrogateServer / ExeServer
--> 匹配 CLSID
--> 根据 ContextTypes 映射 ContextMenuCategory
--> 根据 blocked list 判断 IsEnabled
--> 创建 ContextMenuEntry
-```
+Packaged Id 为 `win11|{clsid}|{category}|{packageFamily}`；不同 family 同 CLSID/category 不覆盖，同 family 共存 full names 保存在引用元数据。RegistryPath 是逻辑 PackagedCom/Package/.../Class，BackendRegistryPath 是用户 Blocked 共享键，**不能按单菜单 key 删除**。普通 Delete/审核 Remove 拒绝；package 卸载由 Windows 管理。
 
-`PackagedContextMenuDiscovery` 位于 `ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs`，负责 SID-scoped package 枚举、manifest 加载、verb 与 COM class 的 CLSID 关联。`Windows11ContextMenuCatalog` 通过 `PackagedContextMenuScanCache` 对同一 SID 的包发现结果做 30 秒缓存；并发快照复用正在进行的扫描，单个调用方超时不会取消共享扫描。blocked list 不进入缓存，每次投影仍按当前用户 SID 重新读取。常规快照与手动刷新重新建立 registry 引用索引；手动开关可复用最近 30 秒同 SID 的声明及引用元数据，不因此缓存开关状态，也不强制失效 package cache。后台自动隔离/纠偏仍使用常规扫描的影响证据。新安装/卸载的 package 最多延迟约 30 秒进入常规快照；已有手动操作发现缓存可能再沿用至其 30 秒到期。单包读取异常按轮次汇总为 `PackagedContextMenuPackagesSkipped`，记录总数及少量带 package、阶段、HRESULT 的样本，避免异常包刷满日志。
+System 项为 `win11-system|{commandKey}`，真实 HKLM CommandStore 路径；必须有 MUIVerb/ExplorerCommandHandler/command 等命令元数据，不将任意 Windows.* 加入页面。显示名用 ShellMetadataResolver。
 
-手动开关在 regular baseline 尚未建立时先完整采纳当前常规菜单；已有明确 baseline 时只构建 Win11 mutation snapshot，不扫描经典菜单。写后复用声明元数据重新打开 native blocked list / CommandStore 投影，并保存所有受影响声明。成功响应 `Items` 返回已经回读且持久化的关联项，前端合并这些结果，无需再次全量查询。响应丢失、不完整或失败时才做额外查询，不重复提交。整个状态读、改、存仍处于原持久 gate 内；局部操作不清理经典菜单 baseline。`Win11ToggleCompleted` 记录后端总耗时。
+### 缓存与性能边界
 
-生成的 packaged COM `ContextMenuEntry` 使用 `win11|{clsid}|{category}|{packageFamilyName}` 形态的 `Id`，`RegistryPath` 指向逻辑上的 `PackagedCom\Package\...\Class\{CLSID}`，`BackendRegistryPath` 指向当前用户的 blocked list。契约保留 package full/family/display/publisher/install metadata、manifest context type、Verb ID、handler CLSID、COM server/class display metadata 和 manifest 明确声明的 server path。manifest 没有建立 server path 时 `FilePath` 保持为空，不用 package 目录伪造 COM 路径。manifest display metadata 只是诊断/展示候选，不等于 `IExplorerCommand::GetTitle()` 在 Explorer 中动态返回的最终标题。
+[PackagedContextMenuScanCache](../ContextMenuMgr.Backend/Services/PackagedContextMenuScanCache.cs) 按 SID 缓存 package 发现 30 秒，并发复用正在扫描；调用方取消不取消共享扫描。Blocked 不缓存，每次投影重开。常规快照重建 registry impact，手动 mutation 可复用最近 30 秒同 SID 声明/引用，缓存不保证刚安装/卸载立即可见。部分 package 错误汇总日志，不改变发现语义。
 
-packaged COM 条目的 `BackendRegistryPath` 是共享 blocked list，不能当作单条菜单注册表键删除。普通删除命令对 Win11 条目会拒绝；待审核界面也不提供这类项目的“移除”，应使用“保持禁用”或在 Windows 中卸载对应 package。
+已有 regular baseline 时 mutation 只构建 Win11 projection，不扫 classic；首次缺 baseline 仍完整采纳常规来源，不能建立局部 baseline。查询、手动/审批/隔离/纠偏与 state 保存共用 catalog 持久 gate；不由局部操作清理 classic 状态。状态分类统一见[状态与监控](state-and-monitoring.md)。
 
-System CommandStore `ContextMenuEntry` 使用 `win11-system|{commandKey}` 形态的 `Id`，`KeyName` 是命令名（如 `Windows.SendToMyPhone`），`RegistryPath` / `BackendRegistryPath` 指向 HKLM CommandStore 命令键，`HandlerClsid` 来自 `ExplorerCommandHandler` 或等价的 GUID 值，`Windows11SourceKind = SystemCommandStore`。显示名通过 `ShellMetadataResolver.ResolveVerbDisplayName` 解析 `MUIVerb` 等资源字符串。
+## 应用操作与单 CLSID 操作
 
-## 4. 启用 / 禁用模型
+页面/搜索按 package family 一行，混合状态显示部分开启并提供全部开启/关闭。`SetWin11ApplicationEnabled` 的 ItemId 是已存在声明，Enable 为目标，后端从已验证 snapshot 解析同 family 全部目标，按 CLSID 去重并在一个 gate 内完成；前端只发一个请求，不循环写每个声明。
 
-Win11 新菜单通过 blocked list 启用或禁用：
+旧 SetWin11BlockedItem/RemoveWin11BlockedItem 仍针对单 CLSID 或单 SystemCommandStore，审核/监控按单项控制域。相同 CLSID 在其它 family/category 的关联声明也需同步状态，不代表它们拥有独立 Blocked 值。若共享影响其它具名应用/传统菜单，前端用普通语言确认真实影响；不把内部风险索引直接变成不可用开关。
 
-| 范围 | 路径 | 说明 |
-| --- | --- | --- |
-| 机器级 | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` | 对所有用户生效；页面恢复时说明影响并由用户确认，然后只清理所选应用的值。 |
-| 用户级 | `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` | 对指定用户生效，必须带正确用户 SID。 |
+新增命令在 PipeCommand 末尾，旧服务拒绝整个应用操作，不 fallback 多次旧命令造成部分成功。对于 v1.7.10 及以前 missing-required-data 响应，仅新命令解释为需修复/更新服务；维护者明确不再支持旧服务后才可移除此文案桥接。
 
-禁用在当前用户 CLSID 下创建本程序的版本化标记 `ContextMenuMgrPlus.Win11Blocked.v1|<SID>|<CLSID>`；已有第三方禁用值已经满足关闭目标，保留原值，不接管。仅本程序重复别名可在关闭操作中归一化。启用是用户明确的恢复意图：自动处理所选菜单的旧版友好名称、无花括号/重复 GUID 名称和不同 value kind，不再让用户打开注册表或停止服务。
+## Packaged COM Blocked 写入与恢复
 
-`Windows11BlockMutation` 准备同一 CLSID 的用户/可选机器级计划，复用 RegistryValueMutationTransaction 的单值条件事务。恢复前把准确的物理路径、SID、CLSID、原始 value 名称/类型/数据写入对应状态的 `Windows11BlockBackups`，该恢复日志不参与 identity/Added/Modified 比较；备份保存失败则不修改任何值。备份采用增量属性，兼容当前 schema 3，重复原始数据不重复积累。它不因普通状态保存而被清空，显式重置状态库仍按已有规则清除。
-
-应用操作先准备所有目标并保存备份，再逐项写入；native registry view 重新打开核对全部值及所有声明后，才提交开关状态和通知 monitor。失败则逆序条件回滚，保留外部并发改值。机器级恢复只在用户确认影响所有用户后传 `UnblockMachine=true`，普通禁用仍只写当前用户；`BlockMachine=true` 拒绝。不会清空整个 Blocked 键，也不会把 GUID Block 编辑器作为恢复入口。读扫描不自动删除未知来源的策略。
-
-索引不完整或传统菜单共用只影响后台自动隔离/纠偏，不能据此锁死用户开关。手动操作按用户明确选择执行；存在其他应用共用时用应用名称说明真实影响，由用户一次确认。注册表回读依旧不是 Explorer 真实菜单验证，也不是与第三方程序共享的原子锁。
-System CommandStore 项不使用 blocked list。`Windows.SendToMyPhone`、`Windows.Share` 等命令通过 `ShellVerbVisibility` 的普通 shell verb 可见性值启用 / 禁用：
-
-- snapshot 使用 `ShellVerbVisibility.IsEnabled(commandKey)` 判断状态；
-- 禁用使用 `ShellVerbVisibility.SetEnabled(commandKey, registryPath, false)`；
-- 启用使用 `ShellVerbVisibility.SetEnabled(commandKey, registryPath, true)`。
-
-运行时新增项隔离及已知禁用项的静默纠偏也按此路径处理 System CommandStore；不可写的受保护命令标记为不可切换，不进入自动禁用尝试。Packaged COM 项仍按用户 blocked list 处理。
-
-如果 HKLM CommandStore 命令键受 Windows 保护，后端不接管所有权、不修改 ACL、不使用 TrustedInstaller hack，而是返回结构化失败：`This Windows 11 system command is protected by Windows and cannot be safely modified by ContextMenuMgr.` 前端应显示受保护、不可切换状态，而不是通用权限错误。
-
-Win11 页面中的菜单开关更改后，关闭并重新打开右键菜单查看结果；不设置 Explorer 待重启状态，也不要求重启或重新登录。此行为与下面的全局经典菜单设置分开。
-
-## 4.1 GUID Block / GUID Lock 风险
-
-`Other Rules / GuidBlock` 写的是 `Shell Extensions\Blocked`，适用于明确要阻止的 shell extension CLSID。它不是 Windows 11 内置 CommandStore 命令的推荐管理方式。
-
-不要把 `Windows.SendToMyPhone` / `Windows.Share` 的 `ExplorerCommandHandler` GUID 加入 GUID Lock。Windows 11 内置命令可能共享 Explorer 命令处理器或依赖系统级处理链，阻止错误 GUID 可能导致 Windows 11 现代右键菜单整体不可用，Explorer 回退到经典菜单。对这些命令应使用 Win11 页面中的 `System Command / CommandStore` 项；如果命令受保护，则保持不可切换并提示原因。
-
-## 4.2 全局恢复经典右键菜单设置
-
-设置页“增强”卡片中的“禁用 Win11 新版右键菜单”不是 packaged COM 条目的 blocked list，也不是传统 `shell` / `shellex` 开关。它使用 Windows 11 常见的每用户注册表 tweak：
-
-| 状态 | 注册表行为 |
+| 作用域 | native registry 路径 |
 | --- | --- |
-| 启用经典菜单 / 禁用新版精简菜单 | 创建 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32`，并把默认值设置为空字符串。 |
-| 恢复 Windows 11 默认新版菜单 | 删除 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}`。 |
+| 用户 | `HKEY_USERS/<SID>/Software/Microsoft/Windows/CurrentVersion/Shell Extensions/Blocked` |
+| 机器 | `HKLM/SOFTWARE/Microsoft/Windows/CurrentVersion/Shell Extensions/Blocked` |
 
-该功能通过链路 A 进入 `Win11ClassicContextMenuService`。后端必须从 pipe 客户端解析前端用户上下文，并写 `HKEY_USERS\<sid>`；不要写服务进程的 `Registry.CurrentUser`，不要写 HKLM，也不要复用 `Windows11BlocksService`。更改后需要重启 Explorer 或重新登录才会可靠生效，当前实现不会在切换时自动重启 Explorer。
+禁用只写当前用户版本化归属字符串 `ContextMenuMgrPlus.Win11Blocked.v1|<SID>|<CLSID>`；已有第三方禁用值满足关闭目标，保留不认领，仅本程序重复别名可归一。开启是用户明确恢复意图，允许自动清理选定 CLSID 的旧友好名、无花括号/重复 GUID 别名及其它类型值；与 OpenWith Unknown NoOpenWith 的拒绝启用语义不同。
 
-因为该功能的开发需求和对应 registry tweak 行为都明确要求重启 Explorer 或重新登录后才会可靠生效，前端设置页在写入成功后只调用 `ExplorerRestartStateService.MarkRequired()`，让主窗口顶部已有的全局“重启资源管理器”按钮显示出来。不要在设置页新增独立重启按钮，也不要在切换开关时直接调用 `RestartExplorer` pipe 命令；真正的重启动作仍由用户点击全局按钮触发，成功后由 `ShellViewModel` 清除 `NeedsRestart` 状态。
+1. 准备全部 CLSID 用户/可选机器计划，捕获原始名称、类型、精确数据、路径、SID/CLSID。
+2. 修改前将恢复记录保存到 PersistedContextMenuState.Windows11BlockBackups。增量属性兼容 schema 3，普通保存保留、相同原数据不重复积累、显式 reset 会清除；恢复元数据不参与 Added/Modified。备份保存失败则无 registry mutation。
+3. 按目标使用 RegistryValueMutationTransaction 条件写入，native 新句柄回读全部值及所有关联声明，再一次提交 desired/observed 并通知 monitor。
+4. catchable 写入/回读/最终保存失败逆序条件回滚已完成值；第三方改值保留，不能假定比较/写入与第三方原子互斥。持久备份是恢复证据，不是已实现所有进程崩溃阶段自动 replay 的保证。
 
-## 5. 为什么 userContext 必须正确
+恢复机器值需前端说明所有用户影响并确认后 UnblockMachine=true；BlockMachine=true 拒绝。普通关闭不写 HKLM，开启不清整个 Blocked 键，不删无关 policy。只读扫描/自动关闭不接管已有外部禁用；用户恢复不要求旧值带本程序归属。成功 Items 是已回读且已保存的全部受影响结果，前端直接合并；响应缺失/不完整/失败才额外查询，不重复 mutation。
 
-Win11 新菜单的 snapshot 和开关都依赖用户上下文：
+## SystemCommandStore 与全局经典菜单
 
-| 场景 | userContext 错误的后果 |
-| --- | --- |
-| snapshot | `IsEnabled` 可能读取错误用户 hive，刷新后显示状态错误。 |
-| 禁用 | blocked value 写到错误 SID 下，前端看似成功但 Explorer 对当前用户不生效。 |
-| 恢复 | 从错误 SID 删除 value，当前用户仍被禁用。 |
-| 审核 | 待审核项和逻辑 identity 可能与真实用户状态不一致。 |
+SystemCommandStore 使用 ShellVerbVisibility 读写，不进入上述 Blocked application transaction。不可写 Windows 保护命令返回 structured protected failure，标记不可切换；不 take ownership/改 ACL/TrustedInstaller hack。也不能套用 classic HKLM Classes fallback，其物理路径并非 machine Classes ShellVerb。该分支没有 packaged Blocked 多目标回滚日志，不能由应用事务说明推断所有 Win11 来源都有同等恢复能力。
 
-Win11 专用查询和开关只接受认证 Pipe 用户，不 fallback 到另一交互用户。常规 GetSnapshot 同样解析认证用户；通用 SetEnabled / ApplyDecision 的 Win11 请求也禁用 fallback。catalog 缺少上下文时不枚举用户菜单，写入要求有效 account SID 和已加载 hive。SID 决定 registry scope，SessionId 不参与 blocked value mutation。
+OtherRules/GuidBlock 是机器 CLSID 全局规则。不要将 Windows.Share/SendToMyPhone 的 ExplorerCommandHandler GUID 加入 GUID Lock 来绕过保护；系统 handler 共享/链路可能使现代菜单不可用或回落 classic，需具体 Explorer 证据，不能保证安全。
 
-## 6. 前端服务和页面
+[Win11ClassicContextMenuService](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuService.cs) 是另一个设置：在前端 HKU `Software/Classes/CLSID/{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}/InprocServer32` 写空默认值启用经典菜单；恢复默认删除该 CLSID。不写服务 HKCU/HKLM、不复用 BlocksService。前端成功后 MarkRequired，用户点击顶部 Explorer restart 或重新登录；不自动重启，也不宣称所有将来 Windows build 继续支持该 tweak。
 
-前端由 `ContextMenuMgr.Frontend/Services/Windows11ContextMenuService.cs` 和 `Windows11ContextMenuPageViewModel.cs` 负责展示与操作：
+Win11 **应用开关**本身不标记/执行 Explorer restart，关闭并重新打开菜单观察效果；这描述当前 UI 契约，不是保证 Windows 无缓存或每个 build 都即时表现正确。
 
-| 组件 | 职责 |
-| --- | --- |
-| `Windows11ContextMenuService` | 通过后端 snapshot 构建 `Windows11ContextMenuItemDefinition`，维护 `CurrentItems`，调用 `SetWin11BlockedItemAsync` 和 `RemoveWin11BlockedItemAsync`。 |
-| `Windows11ContextMenuPageViewModel` | 展示条目、分组、筛选、刷新、处理全局搜索跳转。 |
-| `CurrentItems` | 前端缓存的 Win11 条目池，避免页面每次筛选都访问后端。 |
-| `ContextMenuSearchMatcher` | 全局搜索和页面筛选共用匹配逻辑。 |
-| `GlobalSearchNavigationFilterService` | 搜索结果跳转到 Win11 页面后设置页面筛选文本和目标项。 |
+## 影响索引、兼容与 UI
 
-`Windows11ContextMenuPageViewModel` 和导航 Page 在 DI 中始终注册，避免 Win10 或其它不支持环境被意外导航到该页面时因服务解析失败而崩溃。正常导航项仍由 `ShellViewModel.IsWindows11ContextMenuSupported` 按 Windows 版本隐藏；`Windows11ContextMenuService.RefreshAsync` / `EnsureLoadedAsync` 在不支持时直接返回。前端不再用 `HKCR\PackagedCom` 是否存在作为支持门槛，否则会在后端能够从用户 package context 发现项目时跳过 snapshot。
+Windows11ClsidImpactIndex 不加载 COM。保留 package/Verb/context/server 和 HKLM/当前 HKU Classes/CommandStore 引用，遍历 class/ProgID、SystemFileAssociations、CLSID、Background、shell/shellex、ExplorerCommandHandler/DelegateExecute/DropTarget；shell 深度 8，存在子键预算 50000，诊断样本 8。IsComplete 只表示这些步骤完成，不等于穷尽运行时依赖。
 
-Win11 页面筛选是前端内存筛选。只有刷新 snapshot 或执行开关操作时才需要访问后端。
+共享或不完整证据会暂停**后台自动禁用**，不直接禁止手动管理。日志 Win11TogglePlan/ApplicationMutationPlan/BlockedMutationPlan/ReadBack/PhysicalVerified/rollback 带 ExplorerValidated=False。不能仅凭引用相同 CLSID 证明 #114 根因。
 
-Win11 菜单项支持与传统菜单一致的本地用户备注：`Windows11ContextMenuItemViewModel` 暴露 `UserNote` / `HasUserNote` / `UserNoteDisplay` / `EditUserNoteCommand`，备注通过 `FrontendSettingsService.GetContextMenuItemNote` / `UpdateContextMenuItemNote` 持久化，以 `Windows11ContextMenuItemDefinition.Id` 为键，不写入注册表、不访问后端。备注内容参与页面筛选与全局搜索匹配；全局搜索候选在 `FrontendSettingsService.SettingsChanged`（备注编辑触发）时重建。
+v1.7.10 及以前无 family 的状态按原 family 迁移，保留 desired/pending；早先被覆盖来源采纳当前物理状态，只读 snapshot 不提交迁移。旧 Id 本地备注继续兼容读取，在明确停止支持旧格式升级前保留。备注仍存 FrontendSettings.ContextMenuItemNotes，不写 registry。
 
-## 7. 常见坑
+页面固定详细视图，不读/写经典 ContextMenuListViewMode；展示应用名、适用位置、发布者、标识、文件位置、备注和开关，缺字段隐藏。备注入口图标+本地化文字，不用 GUID 作应用名。技术诊断写日志，不在卡片堆风险报告。服务/VM 串行刷新与操作，mutation 等待45秒、query20秒；核对应用全部目标，失败内联普通语言+刷新入口，Uncertain 阻止重复写，fresh query 才解除。
 
-| 坑 | 正确处理 |
-| --- | --- |
-| 用传统 `shell` / `shellex` 策略禁用 Win11 新菜单 | 使用 blocked list。 |
-| 在 snapshot 中丢掉 userContext | `IsEnabled` 会读错用户 hive。 |
-| 禁用写到服务 `HKCU` | 写 `HKEY_USERS\<sid>\...\Blocked`。 |
-| 假设一个 CLSID 只对应一个 context type | manifest 中一个 CLSID 可能声明多个类型，项目会映射到多个 `ContextMenuCategory`。 |
-| 假设 Win11 项一定有普通 DLL 图标 | packaged COM 的图标和 server 路径解析都是 best-effort。 |
-| 把 manifest 解析失败当严重错误 | AppxManifest 解析是 best-effort，应记录并跳过异常 package。 |
+## 诊断、验收与维护
 
+**Current evidence is insufficient to determine the root cause.** #114 的 Terminal/Notepad Blocked 恢复观察不证明共享 CLSID、Explorer 版本或第三方依赖是哪一项根因。尚缺报告者现场的完整 A/B 验收，不能将读回/事务实现宣称为 Explorer 问题已修复。
 
-## 8. #114 的诊断、页面与验收
+VM 验收应记录 OS build、SID/native view、package/full family/CLSID/context、前后原始 Blocked 名称/类型/数据、state journal、请求/transaction 时间线与真实新旧菜单：
 
-Current evidence is insufficient to determine the root cause. 用户报告删除 Terminal/Notepad 的用户 Blocked 值后恢复，但尚不能证明共享 CLSID、Explorer 版本或第三方依赖中哪一项是根因。诊断只写日志，不把这类未证实的风险变成页面上成段警告或不可用开关。
+1. 固定文件/目录/背景，单 CLSID A/B 后再做应用操作；观察 Terminal/Notepad 及其它应用/显示更多选项，不以注册表成功替代 Explorer。
+2. 旧值/重复别名/多类型开启自动备份恢复，仅清选定目标；多 CLSID 后一项或最终保存失败时前项回滚，外部改值保留，备份失败不得开始写。
+3. 两用户和 HKLM block；取消所有用户确认无更改，确认只恢复选定应用，不触动无关 policy；x86-on-x64 native view 和 RDP 需真实服务验证。
+4. 一个应用请求、完整 Items 成功不额外 snapshot；timeout/response loss 查询全部目标且不重写；旧服务拒绝新命令无部分写入。缓存冷/热、首次 baseline、gate 排队分别计时。
+5. WPF 浅/深/窄窗、混合状态、备注/搜索、固定详细视图与经典偏好独立；Windows 系统命令保护失败无 ACL hack。
 
-`Windows11ClsidImpactIndex` 保留 Package full/family/display identity、Verb、ContextType、COM server path 以及物理 HKLM / frontend HKU Classes/CommandStore 引用。遍历顶层 class/ProgID、SystemFileAssociations、CLSID、Background、shell、shellex、ExplorerCommandHandler、DelegateExecute 和 DropTarget；不加载 COM。shell 深度最多 8 层，最多读取 50000 个存在子键，诊断样本最多 8 条。`IsComplete` 表示这些发现步骤完成，不证明全部运行时依赖已穷尽。共享/不完整证据暂停自动禁用，用户手动管理仍可用。
-
-不同 family 的相同 CLSID/category 保留独立声明 Id，同 family 共存版本的 full name 来源保留在引用元数据。v1.7.10 及以前无 family 的状态按原 package family 迁移，保留 desired/pending；先前被覆盖的来源采纳当前物理状态。只读 snapshot 不提交迁移。旧 Id 备注仍兼容读取；在维护者明确停止支持旧格式升级前保留此桥接。
-
-Win11 页面固定使用详细视图，展示应用名、适用位置、发布者、应用标识、文件位置、备注入口和开关，缺少的字段隐藏。页面不提供精简/详细切换，也不读取或修改经典菜单的 `FrontendSettings.ContextMenuListViewMode`。同 family 合并一行，混合状态显示“部分开启”并提供“全部开启 / 全部关闭”两个直接动作。系统命令保持独立。影响索引仅保留在 `Win11TogglePlan` / `Win11ApplicationMutationPlan` / `Win11BlockedMutationPlan` / `Win11BlockedReadBack` / `Win11BlockedPhysicalVerified` / 回滚日志，标记 `ExplorerValidated=False`。跨应用/“显示更多选项”共用或恢复所有用户设置时，才显示一次普通语言的实际影响确认。
-
-后端查询与 mutation 共用持久 gate；前端串行操作和刷新（写入等待上限 45 秒、查询等待上限 20 秒），核对应用内每个目标，超时不自动重复写入。上限不是操作延时。查询失败、目标消失或超时后未确认全部目标时保留当前显示状态，给出普通语言的状态与刷新入口。成功刷新解除不确定状态；Win11 开关不触发 Explorer 重启入口。
-
-参考项目同样采用 Blocked；独立 MenuCapture 的动态探测不能直接移入服务。此次不加载第三方 DLL、不增加探测进程，未来动态探测仍须复用 ProbeHost 链路 D。
-
-### 人工验收
-
-1. 正常进入页面，检查每个应用只出现一行，固定显示发布者、应用标识和文件位置等详细信息，缺失字段隐藏，页头没有视图切换控件。切换经典菜单的精简/详细模式后再进入 Win11 页，确认详细信息始终显示，经典菜单偏好保持原值。验证浅色、深色及窄窗口下开关与备注入口可用。
-2. 在可恢复 VM 中，对旧版禁用记录、不同类型及重复 GUID 别名直接开启应用。无需 Regedit 或停止服务；核对已自动保存准确备份、目标值已清除、刷新和状态库均为开启，不相关菜单保持原样。
-3. 一个应用声明多个 CLSID 时只发送一个请求，核对全部目标；人为让后一个目标写入/回读或最终保存失败，确认前面已修改目标回滚。备份写入失败必须在首次 registry mutation 前停止；外部并发改值不得覆盖。
-4. 对机器级禁用确认只提示一次普通语言说明；取消不写入，确认后只清理所选应用。真正受 Windows 保护的系统命令仍显示不可更改，无 ACL/所有权 hack。
-5. 对 #114 在固定文件、目录、背景上下文下进行单 CLSID 的底层 A/B，再比较软件的应用操作；记录 OS build、目标清单、Before/After、状态保存，重新打开真实新旧菜单核对，无需重启 Explorer。测量点击到完成的耗时，检查成功时只有一个操作请求而无额外快照，且不出现待重启提示。物理回读/隔离测试不替代这个现场验证。
-6. 验证响应丢失只回读不重复提交；不同应用不互相遮挡状态；服务旧版本拒绝新应用命令且没有部分写入。真实多用户、SCM、x86-on-x64 仍需部署验收。
+已有 Windows11BlockedMutationTests、PackagedContextMenuDiscoveryTests/ScanCacheTests、ContextMenuStateStoreTests 保护物理写入/回滚/发现/恢复元数据，不证明 Explorer/SCM/真实升级。修改发现、Id、Blocked/备份、impact、应用控制域、旧格式或页面核对更新本文；动态探测必须走 [ProbeHost](deep-analysis-probehost.md)，不直接移入服务。

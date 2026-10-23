@@ -131,7 +131,7 @@ scoop install PLFJY/ContextMenuMgrPlus-Beta
 
 - Intercept First, Review Second
 
-  This is the most important design goal of the project. When a new context menu item is detected, the app tries not to let it silently become active. It disables or intercepts the item first, then places it on the approvals page for the user to review.
+  This is the most important design goal of the project. With an established runtime baseline, newly detected regular entries that support safe disabling are disabled and sent for review. First run/reset adopts current state; offline additions are marked as changes. New OpenWith registrations are review-only by default, with persistent protection requiring explicit authorization.
 
   Available actions:
 
@@ -153,13 +153,13 @@ scoop install PLFJY/ContextMenuMgrPlus-Beta
 - **Classic context menu management**: browse file, folder, directory background, desktop background, drive, library, This PC, Recycle Bin, and related scenes; enable, disable, delete, undo delete, edit some display names, inspect commands, and open registry / CLSID / file locations.
 - **Windows 11 modern menu management**: enumerate modern entries, inspect package / publisher / context type / COM Server information, and enable or disable user-level entries.
 - **Approval queue and notifications**: new items appear on the approvals page, grouped by logical item when needed; TrayHost can show a notification and open the frontend.
-- **External change tracking**: detects third-party additions, restored or deleted known items, and registry state that diverges from the local state store.
+- **External change tracking**: distinguishes runtime and offline additions, modifications, and re-enabling; confirmed missing entries leave the monitoring baseline, while deletion backups remain recovery-only.
 - **File type and rule pages**: covers shortcuts, UWP shortcuts, executables, custom extensions, perceived types, directory types, Enhance Menu, Detailed Edit, and custom registry paths.
 - **Settings page**: language, theme, log level, start with Windows, service install / repair / uninstall, Explorer restart, data folder shortcuts, and registry protection switches.
 
 ## 📖 Documentation - Chinese Only
 
-Architecture, development, build, release, and troubleshooting notes are available in [Development Docs](./docs/README.md). Chinese only.
+Use the [Maintainer Documentation Index](./docs/README.md) for architecture, menu mechanisms, frontend, runtime, build/release, and diagnostics. Detailed technical documents are in Simplified Chinese; contributors start with [AGENTS.md](./AGENTS.md).
 
 ## ⚠️ Notes
 
@@ -205,4 +205,4 @@ This project draws heavily from the following repositories:
 ## ⭐ Stargazers over time
 [![Stargazers over time](https://starchart.cc/PLFJY/ContextMenuMgr.svg?variant=adaptive)](https://starchart.cc/PLFJY/ContextMenuMgr)
 
-​                    
+​

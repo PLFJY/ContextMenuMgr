@@ -1,295 +1,66 @@
-# 进程、权限与用户上下文链路
+# 进程、权限、用户上下文与 IPC
 
-相关文档：
+本文负责权限/身份通道和 Named Pipe 契约；具体业务事务见各子系统。源码从 [NamedPipeBackendServer](../ContextMenuMgr.Backend/Services/NamedPipeBackendServer.cs)、[NamedPipeBackendClient](../ContextMenuMgr.Frontend/Services/NamedPipeBackendClient.cs)、[BackendUserContextResolver](../ContextMenuMgr.Backend/Services/BackendUserContextResolver.cs) 开始。
 
-- [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)
-- [ContextMenuMgr 开发者指南](./developer-guide.md)
-- [排错指南](./troubleshooting.md)
-- [SpecialMenu 实现说明](./special-menus.md)
-- [Windows 11 新右键菜单实现说明](./windows11-context-menu.md)
-- [Deep Analysis 与 ProbeHost 实现说明](./deep-analysis-probehost.md)
+## 四条链路
 
-## 1. 为什么需要这份文档
-
-ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普通 WPF 前端、LocalSystem 后端服务、一次性的 UAC elevated bootstrapper、用户 Session 中的 UI 进程、ProbeHost 隔离进程、`HKCU` / `HKEY_USERS\<SID>` 和 `SessionId`。
-
-这些概念不能互相替代：权限、用户身份、用户注册表 hive、桌面 Session 是不同概念。LocalSystem 有高权限，但 LocalSystem 的 `HKCU` 不是当前前端用户的 `HKCU`；服务知道某个用户的 SID，也不代表它能直接在这个用户桌面显示窗口；拿到 SessionId 也不代表应该用它写注册表。
-
-维护权限相关代码时，先判断要解决的是“权限不够”、“用户 hive 错了”，还是“进程启动到了错误桌面”。这三类问题在本项目里分别走不同链路。
-
-## 2. 核心概念
-
-| 概念 | 本项目中的含义 |
-| --- | --- |
-| 进程权限 | 进程当前 token 拥有的系统权限。后端服务通常是 LocalSystem，UAC bootstrapper 是 elevated 进程，前端通常不提权。 |
-| 用户身份 | 发起操作的交互式用户。前端 pipe 连接会通过 `NamedPipeServerStream.RunAsClient` 和客户端进程解析用户。 |
-| 用户 SID | 用户 hive 的稳定标识，例如 `S-1-5-21-...`。用户级注册表写入必须基于 SID。 |
-| 用户注册表 hive | `HKEY_USERS\<SID>` 下的用户配置。服务进程写用户级配置时应打开这里，而不是写服务自己的 `HKCU`。 |
-| `HKCU` | 当前进程 token 对应的 Current User。前端里的 `HKCU` 是前端用户，LocalSystem 服务里的 `HKCU` 是 SYSTEM 账户。 |
-| `HKEY_USERS\<SID>` | 服务端定位前端用户注册表的明确路径。`AutoStartService`、`SpecialMenuService`、`Windows11BlocksService` 都依赖这种方式。 |
-| `SessionId` | Windows 登录会话/桌面位置。重启 Explorer 和服务拉起 TrayHost/Frontend 需要它。 |
-| 服务 Session | Windows Service 运行的非交互式 Session。服务不能直接在这里显示用户 UI。 |
-| 交互式桌面 Session | 用户可见的桌面，例如 `winsta0\default`。TrayHost 和 Frontend 必须在这里启动。 |
-| TrayHost / SessionHost | 运行在交互式用户 Session 中的通知与点击激活代理。后端服务通过 IPC 把通知交给 TrayHost；后端服务不直接显示用户通知。 |
-| LocalSystem | 高权限服务身份。它能修改很多机器级资源，但不等于“当前用户”。 |
-| Named Pipe client identity | 后端 pipe 通过客户端连接解析出来的前端用户身份，是运行时用户级操作的首选上下文来源。 |
-| WTS user token | 通过 `WTSQueryUserToken` 从 SessionId 取得的用户 token，用于 `CreateProcessAsUser`。它解决的是在用户桌面启动进程。 |
-
-## 3. 四条主要链路总览
-
-| 链路 | 形式 | 主要用途 | 是否提权 | 是否需要用户 SID | 是否需要 SessionId | 典型文件 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 链路 A | Frontend -> Backend Pipe -> Service | 快照、传统菜单开关、审核、SpecialMenu、Win11 blocked list、AutoStart 运行时读写、Restart Explorer、运行时数据目录 ACL 修复 | 前端不提权，服务执行高权限部分 | 用户级操作需要 | 仅 Session 相关操作需要 | `NamedPipeBackendClient.cs`、`NamedPipeBackendServer.cs`、`BackendUserContextResolver.cs` |
-| 链路 B | Frontend -> UAC Bootstrapper | 安装/修复服务、卸载服务、停止服务、设置服务启动模式；仅在 backend pipe 不可用时作为运行时数据目录 ACL 修复 fallback | 是，通过 `Verb=runas` | `install-or-repair` 和 `set-startup-mode` 需要 `--user-sid`；ACL 修复不需要 | 通常不需要 | `BackendServiceManager.cs`、`BackendServiceBootstrapper.cs` |
-| 链路 C | Service -> User Session Process | 后端服务拉起 TrayHost、打开 Frontend、登录/解锁后确保 TrayHost | 服务已是 LocalSystem，不是 UAC | 只用于读启动策略时需要 | 需要 | `FrontendAutostartLauncher.cs`、`BackendWindowsService.cs`、`BackendRuntime.cs` |
-| 链路 D | Frontend -> ProbeHost | Deep Analysis，隔离第三方 Shell Extension COM 风险 | 否 | 不需要 | 不需要 | `ContextMenuDeepAnalysisService.cs`、`ContextMenuMgr.ProbeHost/src` |
-
-## 4. 链路 A：Frontend -> Backend Pipe -> Service
-
-前端通过 `NamedPipeBackendClient` 连接 `PipeConstants.PipeName`，发送 `PipeEnvelope` / `PipeRequest`。后端 `NamedPipeBackendServer` 接收请求后按 `PipeCommand` 分发，并返回 `PipeResponse`。订阅通知的连接还会收到 `BackendNotification`，用于新增菜单审核、状态变化和服务停止提示。
-
-`NamedPipeBackendClient` 会为未显式提供 `ClientOperationId` 的普通请求生成一个 operation id，并在写入 pipe 前登记到当前前端实例的短期缓存。`NamedPipeBackendServer` 会在 handler 未显式返回 operation id 时，把请求 id 继承到 `PipeResponse`，随后 generic `ItemStateChanged` 广播继续携带同一 id。发起请求的前端因此会抑制自己的重复广播；其它前端实例没有该 id 的本地缓存，仍会收到更新。独立后端通知保持 `ClientOperationId=null`，不会被这一机制过滤。
-
-典型运行时操作走这条链路：
-
-| 操作 | 后端处理入口 |
-| --- | --- |
-| 传统菜单快照 | `ContextMenuRegistryCatalog.GetSnapshotAsync` |
-| 启用/禁用传统菜单 | `HandleSetEnabledAsync` -> `ApplyDesiredStateAsync` |
-| 文件类型相关项批量管理查询 | `FindRelatedFileTypeMenuItems` -> `ContextMenuRegistryCatalog.FindRelatedFileTypeMenuItemsAsync` |
-| 审核新增项 | `HandleApplyDecisionAsync` -> `ApplyDecisionAsync` |
-| 删除/恢复/清理备份 | `DeleteItemAsync`、`UndoDeleteAsync`、`PurgeDeletedItemAsync` |
-| 重置状态库 | `PipeCommand.ResetStateDatabase` -> 后端串行删除 current / `.bak` / 当前 host 删除备份；下一次带 frontend userContext 的常规与 WPS 快照重建 baseline |
-| Registry Write Protection | `GetRegistryProtectionSettingAsync`、`SetRegistryProtectionSettingAsync` |
-| SpecialMenu | `SpecialMenuService` |
-| Win11 blocked list | `Windows11BlocksService` 和 `Windows11ContextMenuCatalog` |
-| Win11 全局经典右键菜单设置 | `Win11ClassicContextMenuService` |
-| AutoStart / 托盘图标策略运行时读写 | `AutoStartService` |
-| Restart Explorer | `ExplorerRestartService.RestartExplorer` |
-| 运行时数据目录 ACL 修复 | `RuntimeDataAclRepairService` |
-
-Win11 手动开关成功后，响应 `Items` 携带所有受影响声明在 native registry 回读且状态库提交后的投影；前端只合并这些项，超时或响应不完整才查询，不重复写入。已建立 regular baseline 后，操作仅扫描 Win11 范围，最近声明元数据按 SID 复用；缺少 baseline 时仍完整采纳常规菜单。查询、备份、写入、保存继续共用持久 gate。该优化不改变认证 SID / HKU 范围，也不要求 Explorer 重启或 SessionId；全局恢复经典菜单设置的重启语义单独保留。
-
-受保护的机器级 classic ShellVerb 仍走链路 A：先由服务对 `HKLM\SOFTWARE\Classes` 的真实 `BackendRegistryPath` 执行普通写入；仅在该写入因 Windows ACL 被拒绝、且 Registry Write Protection preflight 已通过时，才临时启用 `SeTakeOwnershipPrivilege` / `SeRestorePrivilege` 完成受控 value mutation。这个 fallback 只适用于实际机器级 Classes path，绝不用于 `HKEY_USERS\<SID>\Software\Classes`，并在写入后恢复、验证原 owner/DACL。它不是 UAC bootstrapper、ShellNew ACL lock 或通用注册表 take-ownership 机制。
-
-v1.7.10 的 fallback 通过 `ScopedRegistryPrivileges` 在同步 scope 内使用服务令牌副本：先用 `RunImpersonated(InvalidHandle)` 以进程身份打开 Query/Duplicate，再创建私有 impersonation token，在副本上启用并检查所需权限。进程令牌不申请 Adjust 权限，也不修改共享权限状态；失败或结束时丢弃副本并恢复调用前身份。仅这段已选定物理 HKLM ShellVerb 的工作使用该 scope，不改变 Pipe 认证、前端 SID、用户 hive 路径或 Session 选择。普通前端不需管理员权限。error 5 不能单独证明 privilege 缺失或 RunAsClient 泄漏，排查程序见 troubleshooting.md 的 Issue #140 段落。
-
-Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务快照，并把 visibility provenance 按真实 `BackendRegistryPath` 持久化。物理 read-back、logical reconciliation 或状态库提交失败时，后端只在当前值仍等于本事务写入值时回滚；第三方并发改写产生 conflict，不会被覆盖。File-category 的有效 `open` activation path 在服务端写入前拒绝。HKU/HKLM 同名副本按前端所选物理来源处理，ProgID 与 `SystemFileAssociations` 仍是不同 mutation target；这些规则不调用 Win11 packaged handler blocked-list 流程。
-
-运行时 monitor 在交互用户上下文下发现新项时，把该次 snapshot 的 `BackendUserContext` 随 `ItemDetected` 传给 `BackendRuntime`，再原样传入 `QuarantineNewItemAsync`。缺少上下文或 HKU 物理路径与 SID 不符时隔离会拒绝执行。隔离和后续审核仍走链路 A；服务进程的 `HKCU` 不用于替代交互用户 hive。v1.7.5 classic ShellVerb 的无 provenance 隐藏值仅可通过 `registry-model.md` 所述严格物理路径签名执行一次性恢复。
-常规快照只组合 HKLM 和该次交互用户 SID 的 Classes；无交互用户上下文的监控轮询不执行隔离、纠偏或缺失清理。`AcknowledgeItemState` 也从 Pipe 客户端解析同一前端用户上下文，再采纳该用户的实际项。
-`NamedPipeBackendServer` 会在需要用户上下文时创建 `BackendUserContextResolver`。解析顺序是先从 pipe client 解析，失败时部分场景回退到交互式用户。`BackendUserContext` 包含 `Sid`、`UserName`、`ProfilePath`、`LocalAppDataPath`、`RoamingAppDataPath` 和可选 `SessionId`。
-
-OpenWith 的上下文只接受 `TryResolveFromPipeClient`，认证解析失败时不使用交互用户 fallback；snapshot 和 mutation 都先验证 account SID / 已加载 hive。所选用户路径必须属于同一 SID 的 `Software\Classes\Applications`，机器项只允许真实 `HKLM\SOFTWARE\Classes\Applications`；两者均使用 native registry view。归属、事务提交和回读规则见 [SpecialMenu/OpenWith](./special-menus.md#7-openwith)。InspectOpenWithSources 是新增只读 PipeCommand，ScopeValue 仅接受经校验的扩展名；复用同一个严格认证解析入口（allowInteractiveFallback=false），需要 SID/loaded hive，不需要 SessionId，不改变其它 SpecialMenu 的 fallback。响应 OpenWithInspection 携带来源证据、解析状态、可管理 Applications Id 和不完整诊断；查询不广播 mutation 通知。
-
-必须有 frontend user context 的场景包括：
-
-| 场景 | 原因 |
-| --- | --- |
-| `ShellNew`、`SendTo`、`WinX`、`OpenWith` | 它们分别依赖用户 `Software\Classes`、用户 profile 目录、用户 `LocalAppData` 或用户 OpenWith policy。 |
-| Win11 user blocked list | 用户级 blocked list 位于 `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked`。 |
-| AutoStart policy | 当前实现写 `HKEY_USERS\<sid>\Software\ContextMenuMgr\Frontend`，并清理用户 Run key。 |
-| Restart Explorer | 只应影响前端用户 Session 里的 `explorer.exe`。 |
-| 部分传统菜单状态写入 | `ApplyDesiredStateAsync` 需要区分用户级和机器级注册表路径。 |
-
-常见错误：
-
-- 不要在服务里使用 `Registry.CurrentUser` 读写前端用户设置。
-- 不要把 `HKCU` 和 `HKEY_USERS\<frontend sid>` 混用。
-- 不要为了运行时菜单开关改走 UAC bootstrapper。
-- 不要在 Win11 snapshot 或 Win11 blocked list 操作中丢掉 `userContext`。
-- 不要把 `RestartExplorer` 当成普通注册表写入，它需要 SessionId。
-
-`ContextMenuRegistryMonitor` 的监控循环独立于前端 pipe 连接运行。`ReadSnapshotAsync` 在每次轮询时通过 `BackendUserContextResolver.TryResolveInteractiveUserFallback()` 解析当前交互式用户上下文并传递给 `GetSnapshotAsync`。解析失败的轮询不比较或修改内存基准；用户上下文恢复后重新建立会话基准，避免因用户 hive 暂时不可见而误清理状态或误报新增。
-
-## 5. 链路 B：Frontend -> UAC Bootstrapper
-
-`BackendServiceManager` 在需要服务级维护时解析 `ContextMenuManagerPlus.Service.exe`，用 `ProcessStartInfo.Verb = "runas"` 启动 elevated backend process。这个进程执行 `--service-bootstrap` 命令后退出，不是长期运行的 Backend Service。
-
-Portable 包在 `install-or-repair` 触发 UAC 前会先由前端检查当前应用目录中的运行时文件是否带有 Mark-of-the-Web `Zone.Identifier`。如果检测到被 Windows 阻止的 runtime 文件，前端返回 `PORTABLE_RUNTIME_FILES_BLOCKED` 并提示用户确认后只解除当前 portable 应用目录内运行时文件的阻止状态；不会扫描应用目录外路径，也不会自动修改用户文件。
-
-当前 bootstrapper 支持的命令由 `BackendServiceBootstrapper.Execute` 分发：
-
-| 命令 | 用途 | 用户 SID |
+| 链路 | 用途 | 上下文 |
 | --- | --- | --- |
-| `install-or-repair` | 创建/修复服务、处理旧服务名、按用户自启动策略设置并验证服务启动类型与恢复策略，启动服务并等待真实 pipe Ping 可用 | 需要传 `--user-sid` 才能正确读取用户自启动策略 |
-| `uninstall` | 停止并删除服务 | 不依赖用户 SID |
-| `force-remove-service` | 容错移除当前和旧服务名的 SCM 注册，用于残留 / stale service 修复；不删除用户数据、应用设置或右键菜单注册表项 | 不依赖用户 SID |
-| `stop` | 停止服务 | 不依赖用户 SID |
-| `set-startup-mode` | 关闭时设置并验证 `demand` 后写 policy；开启时复用完整 install/repair 收敛路径，只有启动模式、恢复策略、Running 与真实 pipe Ping 均成功才写 `StartWithWindows=1` | 需要 `--user-sid` |
-| `repair-runtime-data-acl` | 只修复 `RuntimePaths.RootDirectory` 运行时目录 ACL，不安装/卸载/修改服务 | 不依赖用户 SID |
+| A：Frontend → Backend Pipe → Service | 普通扫描、mutation、审核、SpecialMenu、Win11、AutoStart policy、Explorer restart、数据 ACL repair | 服务有权限，用户来源由认证 Pipe/WTS 明确解析 |
+| B：Frontend → UAC runas → BackendServiceBootstrapper | 安装/修复/卸载/停止/startup mode；Pipe 不可用时仅数据 ACL repair fallback | `--user-sid` 指明用户；提升进程 HKCU 不能代替它 |
+| C：Service → WTS token → CreateProcessAsUser | 用户 Session TrayHost/Frontend 启动与激活 | SID 读 policy，SessionId 指向桌面 |
+| D：Frontend → ProbeHost → Shell Extension COM | Deep Analysis 隔离，非提权 | 不进入普通扫描，不写注册表、不执行菜单命令 |
 
-结果通过 `--result-file` 指向的 JSON 文件返回，形状对应 `BootstrapResult(bool Success, string Code, string Detail)`。`BackendServiceManager` 会等待进程退出，读取 result file，然后删除临时文件。bootstrapper 还写 `RuntimePaths.LogsDirectory\bootstrap.log`。
+B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-lifecycle.md)，D 的协议/架构和隔离边界见[ProbeHost](deep-analysis-probehost.md)。不要用一次性 bootstrapper 替代普通 runtime backend，也不要从服务 Session 显示 UI。
 
-`--user-sid` 的意义是让 elevated 进程明确知道前端用户是谁。elevated 进程自己的 `HKCU` 不能当作前端用户 `HKCU` 使用。当前代码在 `BackendServiceBootstrapper` 中验证 SID，并在服务安装/启动模式场景读取或写入 `HKEY_USERS\<sid>\Software\ContextMenuMgr\Frontend`。
+## 身份解析与模拟边界
 
-服务移除使用同一套容错路径：停止服务只是 best-effort，即使 `ServiceController.Status`、`Stop()` 或 `WaitForStatus(Stopped)` 失败，bootstrapper 仍会继续向 SCM 请求删除服务注册，并轮询 SCM 而不是只看注册表。删除返回 `SERVICE_PENDING_DELETE` 时表示 Windows 已标记删除但仍有进程持有服务句柄；用户需要关闭 Services MMC、任务管理器服务页或其它持有句柄的进程，必要时重启后再重试。
+权限、SID、hive 和 SessionId 是四个维度。LocalSystem 的 HKCU 不是前端用户 HKCU；用户写入明确选 `HKEY_USERS/<SID>`，不因权限高而扩大到 HKLM。显示名/路径不是认证依据。
 
-服务创建、Install/Repair 与 Force Repair 重建都会覆盖式配置 SCM failure actions：约 5 秒、15 秒、60 秒重启，失败计数约 1 天后重置，并开启 non-crash failure actions。正常 SCM stop、前端明确请求、卸载/强力修复和 Windows shutdown 保持零退出码；runtime 启动异常或无法解释的 `ServiceBase.Run` 返回使用非零退出码，使 SCM 恢复策略可以生效。移除服务前还会 best-effort 关闭 failure-actions flag，避免修复/升级与恢复动作竞争。
+`TryResolveFromPipeClient` 的同步 `RunAsClient` callback 只取得 token SID；**不能在 callback 中读取 WindowsIdentity.Name 或引入受管理 impersonation helper/异步任务**。显示名在 callback 外 SID.Translate，SessionId 从 Pipe 客户端 PID 解析，profile 从 ProfileList 读取。原 Name 读取可将 token 经 AsyncLocal 流到下一 await；当前边界由真实 Pipe 身份回归保护。该机制不证明历史所有 error 5/1314 都有同一原因。
 
-不要用这条链路做普通菜单开关、Win11 禁用、SpecialMenu 修改、AutoStart 运行时读写或 Restart Explorer。它的主要职责是服务生命周期维护，不是 runtime backend；`repair-runtime-data-acl` 是为了 portable / broken install 自修复保留的窄 fallback，不应扩展成普通运行时操作入口。
-
-## 6. 链路 C：Service -> User Session Process
-
-Windows Service 运行在服务 Session，不能直接在用户桌面显示 UI。需要显示 TrayHost 或 Frontend 时，后端服务必须先找到交互式 Session，再用该 Session 的用户 token 启动进程。
-
-`BackendWindowsService` 设置 `CanHandleSessionChangeEvent = true`，在 `SessionLogon`、`SessionUnlock`、`ConsoleConnect`、`RemoteConnect` 时调用 `BackendRuntime.NotifyInteractiveSessionAvailable(sessionId)`。`BackendRuntime` 再按策略调用 `FrontendAutostartLauncher.TryLaunchTrayHostForActiveSession`。
-
-`FrontendAutostartLauncher` 的关键步骤：
-
-1. 选择目标 Session：优先 `WTSGetActiveConsoleSessionId`，否则枚举 active/connected Session。
-2. 通过 `WTSQueryUserToken` 取用户 token，并从 token 解析 SID。
-3. 若 `requireAutostartPolicy` 为 true，读取 `HKEY_USERS\<sid>\Software\ContextMenuMgr\Frontend\StartWithWindows`。
-4. 读取同一 policy key 下的 `ShowTrayIcon`，缺失时默认为显示；为 `0` 时用 `--hide-tray-icon` 启动 TrayHost。
-5. 检查目标 Session 中是否已有 `ContextMenuManagerPlus.TrayHost.exe` 或 `ContextMenuManagerPlus.exe`。
-6. 使用 `DuplicateTokenEx`、`CreateEnvironmentBlock`、`CreateProcessAsUser`，并设置桌面为 `winsta0\default`。
-
-服务启动本身也会主动执行一次上述 TrayHost 检查，因此即使使用 delayed-auto 且服务在登录 Session 事件之后才启动，也仍能发现当前交互 Session。TrayHost 的“是否已运行”检查与 `CreateProcessAsUser` 在同一锁内执行，避免服务启动和 Session 通知同时触发时创建两个进程。
-
-打开 Frontend 时，已有同 Session 进程但 frontend control pipe 暂时不可用表示该进程可能仍在启动或正在退出。TrayHost 和后端会在有界 startup grace 内重试完整的 pipe handshake；grace 耗尽时不会立即再启动一个 Frontend。只有目标 Session 中没有 Frontend 进程时才创建新进程。每次 pipe 请求的 connect、write 和 response read 共用同一个总超时，调用方不会无限等待。
-
-Frontend 自身仍用全局 mutex 判定单实例。secondary 在 mutex 已被占用时以同一有界策略转发激活请求；如果原 owner 在等待期间退出，secondary 可以安全取得已释放或 abandoned 的 mutex 并成为 primary。pipe 暂时未就绪且 mutex 仍被持有时，secondary 有界退出，不再按一次 IPC 失败杀死同 Session 的 Frontend 进程。
-
-TrayHost 和 Frontend 启动区别：
-
-| 目标 | 触发场景 | 行为 |
-| --- | --- | --- |
-| TrayHost | 服务启动、用户登录/解锁、前端 `EnsureTrayHost` 请求 | 通常受 `StartWithWindows` policy 影响；显式 `EnsureTrayHost` 不重置注册表监控 baseline。 |
-| Frontend | 托盘通知打开主窗口或审核页 | 优先通过 frontend control pipe 唤醒现有前端；不存在时在用户 Session 中启动前端。 |
-
-这条链路不是注册表修改链路。它解决的是“在哪个用户桌面启动进程”。
-
-TrayHost 可以在没有可见托盘图标的情况下运行。隐藏托盘图标只通过 TrayHost 内部的 Win32 `Shell_NotifyIconW` 状态完成，不代表停止 TrayHost，也不代表后端服务可以直接显示通知。新增项检测等后端通知仍然是：
-
-```text
-Backend Service -> backend pipe notification -> user-session TrayHost -> Shell_NotifyIconW notification -> click activation -> Frontend
-```
-
-## 7. 链路 D：Frontend -> ProbeHost
-
-`ProbeHost` 是隔离进程，不是提权进程。它只用于 Deep Analysis，前端在用户点击深入分析时由 `ContextMenuDeepAnalysisService` 启动 `ContextMenuMgr.ProbeHost.exe`，传入 `--request` 和 `--result` 临时文件路径，并捕获 stdout/stderr。
-
-ProbeHost 的边界：
-
-- 不写注册表。
-- 不执行菜单命令。
-- 不作为后端服务使用。
-- 不解决权限问题。
-- 只隔离第三方 Shell Extension COM 加载、初始化和 `IContextMenu.QueryContextMenu` 风险。
-
-架构选择由前端完成。`ContextMenuDeepAnalysisService` 会读取目标 handler DLL 的 PE machine type，选择 `ProbeHost\x86`、`ProbeHost\x64` 或 `ProbeHost\arm64` 下的 native `ContextMenuMgr.ProbeHost.exe`。如果 handler 架构未知，当前实现倾向于回退到当前前端进程架构。启动前会验证 ProbeHost exe 的 PE 架构；ProbeHost 不再有 `.runtimeconfig.json`、`.deps.json` 或 ProbeHost 目录内的 `ContextMenuMgr.Contracts.dll` 运行时依赖。
-
-`SpecificHandler` 和 `WholeContextMenu` 是不同模式：
-
-| 模式 | 行为 | 风险和限制 |
-| --- | --- | --- |
-| `SpecificHandler` | `CoCreateInstance` 指定 handler，尝试 `IShellExtInit` 和 `IContextMenu` | 可能因 handler 不支持接口、初始化失败、返回空菜单或架构不匹配而失败。 |
-| `WholeContextMenu` | 让 Shell 为样本路径创建完整上下文菜单，再枚举菜单项 | 结果更接近真实 Shell，但隔离粒度更粗，失败时也不能视作普通菜单管理失败。 |
-
-深入分析失败通常是预期限制，不是菜单管理失败。常见原因包括 handler 架构不匹配、COM 初始化失败、第三方 DLL 崩溃、样本类型不支持、ProbeHost 依赖缺失或返回非 JSON 输出。
-
-## 8. 功能到链路的选择表
-
-| 功能 | 应走链路 | 需要用户 SID | 需要 SessionId | 备注 |
-| --- | --- | --- | --- | --- |
-| 传统菜单启用/禁用 | 链路 A | 可能需要 | 否 | `SetEnabled` -> `ApplyDesiredStateAsync`，用户级项不能写 SYSTEM 的 `HKCU`。 |
-| 传统菜单删除/恢复 | 链路 A | 可能需要 | 否 | 删除前用 `RegistryBackupService` 导出 `.reg`；恢复后重读用户级/HKCR overlay 项时必须带 frontend user context。 |
-| 文件类型相关菜单批量管理 | 链路 A | 是 | 否 | `FindRelatedFileTypeMenuItems` 只在 File Types 隐藏批量管理视图打开/刷新时扫描 HKLM 与前端用户 `Software\Classes`，不参与服务启动扫描或普通 baseline。后续开关/删除/撤销复用普通 `SetEnabled` / `DeleteItem` / `UndoDelete`，scene-only 项通过请求中的 `ContextMenuEntry` fallback 定位；已删除备份项会合并回批量结果供撤销，文件类型核心 `open` / `edit` verb 不允许删除。 |
-| 编辑菜单显示名 | 链路 A | 可能需要 | 否 | `SetDisplayText`，受 Registry Write Protection preflight 影响。 |
-| 编辑传统 ShellVerb 命令文本 | 链路 A | 可能需要 | 否 | `SetCommandText` -> `ApplyCommandTextAsync`，只允许普通 legacy ShellVerb 写 `<verb>\command` 默认值，不处理 Shell Extension、Win11、SubCommands、DelegateExecute、DropTarget 或 ExplorerCommandHandler。 |
-| 管理经典级联 Shell Verb 子菜单 | 链路 A | 可能需要 | 否 | `GetShellSubMenuItems` 按需读取 `SubCommands`、`ExtendedSubCommandsKey` 或父级 `shell`；`SetShellSubMenuItemEnabled` 由后端重新解析稳定 parent/child identity。`SubCommands` 仅改父级引用并持久化被移除引用的顺序，不修改共享 CommandStore 项。 |
-| Registry Write Protection 设置 | 链路 A | 是 | 否 | 作用于 HKLM 和 frontend SID 的 HKU 受监控传统菜单根 ACL；先验证用户 hive，再串行 apply/read-back verify/persist。 |
-| Win11 新菜单项禁用/恢复 | 链路 A | 是 | 否 | user blocked list 必须带 `BackendUserContext`，机器级另有 HKLM blocked list。 |
-| Win11 全局恢复经典菜单设置 | 链路 A | 是 | 否 | 写 `HKEY_USERS\<sid>\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32`，不得写服务 `HKCU` 或 HKLM；生效需要重启 Explorer 或重新登录。 |
-| Win11 snapshot | 链路 A | 是 | 否 | `Windows11ContextMenuCatalog.EnumerateEntriesAsync` 没有 SID 会跳过。 |
-| ShellNew 枚举 | 链路 A | 是 | 是 | 通过前端 SessionId 的 WTS 用户 token 调用 `RegOpenUserClassesRoot` 读取前端用户的合并 HKCR；同时用 `PackageManager.FindPackagesForUser(sid)` 只读扫描包清单中的 ShellNew FileType 声明；ShellNew order key 仍显式读取 `HKEY_USERS\<sid>`。 |
-| WPS / Microsoft Office 共存保护 | 链路 A | 是 | 否 | 只在 WPS Office 和 Microsoft Office 同时存在时启用；读取 `HKEY_USERS\<sid>\Software\Classes`、ShellNew order key 和 HKLM Office baseline，通过专用管道生成 WPS 关联 / 图标 / ShellNew 注入项。空库/重置时先无提示采纳并写独立 WPS baseline marker；已有 marker 后的新发现才进入待审核。 |
-| 文档图标来源切换 | 链路 A | 是 | 否 | `PipeCommand.SetDocumentIconProvider` 只写当前前端用户 `HKEY_USERS\<sid>\Software\Classes\<ProgID>\DefaultIcon`，不写 HKLM，不修改 UserChoice Hash。 |
-| ShellNew 排序 | 链路 A | 是 | 是 | 写 Explorer ShellNew order key，可能需要临时 unlock/relock ACL。 |
-| ShellNew ACL lock/unlock | 链路 A | 是 | 锁定需要；单独解锁/读锁不需要 | `SetShellNewOrderLock` 事务只改物理 HKU order key；`GetShellNewOrderLock` 独立读取 ACL，失败无 bool 状态。不是 Registry Write Protection。 |
-| SendTo 操作 | 链路 A | 是 | 否 | 操作用户 `%APPDATA%\Microsoft\Windows\SendTo`。 |
-| WinX 操作 | 链路 A | 是 | 否 | 操作用户 `%LOCALAPPDATA%\Microsoft\Windows\WinX`，`.lnk` 需要 hash。 |
-| OpenWith 操作 | 链路 A | 是 | 否 | 枚举 HKU/HKLM Classes `Applications`；新增和用户 policy 写 `HKEY_USERS\<sid>`，机器级项按真实 HKLM 路径修改。 |
-| AutoStart 运行时读写 | 链路 A | 是 | 否 | `PipeCommand.SetAutoStartEnabled` / `GetAutoStartEnabled` 写读用户 `StartWithWindows` policy，并清理旧 Run value。 |
-| 关闭前端时退出后台 | 既有 backend pipe `RequestShutdown` + TrayHost control pipe | 否 | 否 | 仅由 `KeepBackgroundAfterClose=false` 触发；`StartWithWindows` 只影响下次登录，不覆盖本次关闭选择。 |
-| 托盘图标显示策略 | 链路 A + TrayHost control pipe | 是 | 否 | `PipeCommand.SetTrayIconPolicy` 写用户 `ShowTrayIcon` policy；运行中的 TrayHost 通过 Win32 `Shell_NotifyIconW` 隐藏/显示图标。TrayHost 进程继续运行。 |
-| 安装/修复服务 | 链路 B | 是 | 否 | `install-or-repair --user-sid` 用于读取用户启动策略并决定服务启动模式。 |
-| 卸载服务 | 链路 B | 否 | 否 | elevated 一次性进程执行服务删除。 |
-| 设置服务启动模式 | 链路 B | 是 | 否 | `set-startup-mode --enabled ... --user-sid ...`。 |
-| 后端启动 TrayHost | 链路 C | 读取策略时需要 | 是 | 服务用 WTS token 在用户 Session 启动。 |
-| 托盘打开前端 | 链路 C | 否 | 是 | 优先 frontend control pipe，必要时 `CreateProcessAsUser`。 |
-| 重启 Explorer | 链路 A | 是 | 是 | pipe 解析前端用户 Session，只杀同 Session 的 `explorer.exe`。 |
-| 修复运行时数据目录 ACL | 链路 A，pipe 不可用时链路 B fallback | 否 | 否 | 后端启动早期和 `RepairRuntimeDataAcl` pipe 命令都会对 `RuntimePaths.RootDirectory` best-effort 授予 Builtin Users Modify，并修复已有子项继承；bootstrapper fallback 只执行 `repair-runtime-data-acl`。 |
-| Deep Analysis | 链路 D | 否 | 否 | 前端启动 ProbeHost，失败不影响普通菜单管理。 |
-
-## 9. 绝对不要混用的东西
-
-- 不要用服务 `HKCU` 读写前端用户设置。
-- 不要把 UAC bootstrapper 当成普通 runtime backend。
-- 不要从服务 Session 直接显示 UI。
-- 不要用 SpecialMenu helper 处理普通菜单，除非代码已经明确泛化。
-- 不要在 Win11 snapshot 中丢掉 `userContext`。
-- 不要把 ProbeHost crash 当成普通菜单开关失败。
-- 不要把 Registry Write Protection 和 ShellNew Order ACL Lock 混为一谈。
-- 不要把 `SessionId` 当成 SID，也不要把 SID 当成可显示 UI 的位置。
-- 不要为了“权限更高”把用户级操作改成机器级 HKLM 写入。
-- 如果一个问题看起来像第三方软件、驱动或安装器异常，必须先按 Playbook 的故障归因纪律确认是否真的和本项目有关。
-
-## 10. 日志定位
-
-主要日志路径由 `RuntimePaths` 定义。Installer 根目录是 `%ProgramData%\ContextMenuMgr`；Portable 根目录是 `<应用目录>\Data`，包类型来自 `AppContext.BaseDirectory` 下的 `ContextMenuMgr.package.json`。
-
-| 日志 | 位置 | 优先用于 |
-| --- | --- | --- |
-| `frontend-debug.log` | `RuntimePaths.LogsDirectory\frontend-debug.log` | 前端命令、UAC 启动、全局搜索、Deep Analysis 启动和结果解析。 |
-| `frontend-crash.log` | `RuntimePaths.LogsDirectory\frontend-crash.log` | 前端未处理异常。 |
-| `backend.log` | `RuntimePaths.LogsDirectory\backend.log` | pipe 请求、用户上下文解析、注册表操作、Win11、SpecialMenu、Explorer restart。 |
-| `trayhost.log` | `RuntimePaths.LogsDirectory\trayhost.log` | TrayHost 启动、托盘通知、托盘到前端控制。 |
-| `bootstrap.log` | `RuntimePaths.LogsDirectory\bootstrap.log` | `BackendServiceBootstrapper` 的 elevated 服务维护操作。 |
-| `service-startup.log` | `RuntimePaths.LogsDirectory\service-startup.log` | 服务早期启动失败，尤其是 `FileLogger` 尚未可用前。 |
-| `backend-fallback.log` | `RuntimePaths.LogsDirectory\backend-fallback.log` | 普通 Backend 日志写入失败后的独立有界日志。 |
-| bootstrap result file | `%TEMP%\ContextMenuMgr-*.json` | `BackendServiceManager` 临时读取，通常操作后删除。 |
-| ProbeHost stderr / result diagnostics | 前端捕获并写入 `frontend-debug.log`，结果对象含 `DiagnosticDetails` | Deep Analysis 的架构、依赖、COM、崩溃和 JSON 解析问题。 |
-
-排查优先级：
-
-活动文件保持上述命名；各流归档、大小/数量预算和独立 TEMP emergency fallback 见 [日志轮转与收集](./troubleshooting.md#日志轮转与收集134)。Frontend 正常退出后活动文件归档，下次启动重新创建。收集诊断应包含归档。
-
-| 问题类型 | 优先看 |
+| 请求 | 当前身份策略 |
 | --- | --- |
-| 前端连不上后端 | `frontend-debug.log` 中 `BackendServiceManager`、`MainViewModel`、`FrontendOperation` 相关记录，`backend.log` 的 pipe 连接记录，再看 `service-startup.log`。 |
-| 服务安装/修复失败 | `bootstrap.log`、bootstrap result detail、`backend.log`、`service-startup.log`。 |
-| 用户级注册表写错 | `backend.log` 中 `Sid=`、`HKEY_USERS\<sid>`、`OpenUserRegistryRoot`、`OpenUserBlockedKey`。 |
-| TrayHost 不出现 | `backend.log` 的 `TryEnsureTrayHost` 相关记录，`trayhost.log`，确认 `StartWithWindows` policy。 |
-| Restart Explorer 无效 | `backend.log` 的 `RestartExplorerRequest`，检查 `SessionId` 和 `KilledCount`。 |
-| Deep Analysis 失败 | `frontend-debug.log` 的 `ProbeHostSelection`、`ProbeHostExit`、`ProbeHostCapturedOutput` 和结果 diagnostics。 |
+| GetSnapshot、Win11 专用 query/mutation，通用 SetEnabled/ApplyDecision 的 Win11 请求 | 认证 Pipe 用户，不 fallback 到另一登录用户；Win11 blocked mutation 不需要 SessionId |
+| ShellNew | 认证 SID；merged HKCR 另验证 WTS token SID/SessionId、profile/hive loaded；无用户/部分发现拒绝，不回服务 HKCR |
+| OpenWith snapshot/mutation/inspection/review | 仅认证 SID、loaded hive/native view；HKLM 项也不允许缺用户，不需要 SessionId |
+| 部分 classic/其它用户请求 | resolver 仍有交互用户 fallback，必须逐 handler 检查，不宣称全局已禁用 fallback |
+| Restart Explorer | Pipe session context，匹配用户的 session fallback；只处理该桌面 |
+| 后台常规 monitor | 每轮交互用户 fallback；缺上下文保留 baseline，不隔离/纠偏/清理；OpenWith 另维护多 SID |
 
-## Issue #125: ordinary toggle request and outcome flow
+ShellNew 的 `FrontendUserClassesRoot` 在同步退出即恢复的服务 scope 中取 WTS token，不启用进程权限，持有 token/merged handle 至发现结束。WTSQueryUserToken 需要 LocalSystem/SeTcb，RegOpenUserClassesRoot 返回独立状态码并需要已加载 profile；失败必须区分 API 阶段/native error、incoming/process identity、权限 present/enabled 和期望/实际 SID/session，不能从总错误猜缺哪个权限。
 
-Frontend pipe requests use separate connections and are not globally serialized. The backend catalog's `_persistentStateGate` serializes state-store-sensitive work, including `SetEnabled` and `GetContextMenuItemState`. The latter resolves the pipe client's `BackendUserContext`, verifies the original physical HKLM or `HKEY_USERS\<SID>` source and handler identity, and returns a state-store-merged item without scanning Win11 packages for a classic item. It reports a missing original source instead of switching to another hive. `SetEnabled` uses a 20-second response budget, followed by a separate 10-second authoritative query if the response times out. Shutdown cancellation skips that query. Approval decisions retain their 45-second budget and existing verification flow. Successful mutation notifications carry `ClientOperationId` and are published before direct response delivery, so a closed request pipe cannot suppress the state change broadcast.
+受保护 machine ShellVerb 的私有 token、最小 rights 和安全描述符恢复见[注册表模型](registry-model.md#受保护机器-shellverb-的窄写入路径)；不得把该窄 fallback 泛化成 HKU、ShellNew 或普通读取的 ownership reset。
 
-## OpenWith monitoring and authorization (#136)
+## Pipe 格式、权限与演进
 
-`PipeCommand.ReviewOpenWithRegistration` remains Flow A. SpecialItem identifies the physical Applications source and carries the displayed generation. `PipeRequest.OpenWithProtection = true` opts into verified per-user protection, false removes that rule, null accepts the current displayed generation. Requests use only authenticated pipe SID (no interactive fallback), validate a loaded hive and reject automatic HKLM protection. Explicit normal OpenWith Enable first durably revokes its rule. There is no bootstrapper, ACL denial, installer interception, ProbeHost or default-association mutation in this flow.
+[PipeConstants](../ContextMenuMgr.Contracts/PipeConstants.cs) 定义 backend `ContextMenuMgr.Backend`、frontend control 和 TrayHost control 名称。backend 使用 byte-mode async NamedPipeServerStream，UTF-8 一行 JSON `PipeEnvelope`，MessageType/CorrelationId 加 Request、Response 或 Notification。每个普通客户端请求独立连接，通知保持订阅连接。
 
-`BackendRuntime` attaches the coordinator to SpecialMenuService and the existing registry-monitor cycle; shutdown cancels and awaits that cycle. Logged-in WTS token contexts and authenticated client contexts are monitored separately by SID, with a login settling boundary. `BackendNotification.OpenWithChanged` has UserSid, SpecialKind=OpenWith and an optional representative SpecialItem. Subscribers are authenticated before SID filtering; the DTO is only a refresh signal. Frontend and TrayHost localize the attention message, and tray click uses FrontendControlCommand.OpenWith / --open-openwith to open the existing page. Existing Win32 tray APIs remain unchanged, including hidden-icon delivery.
+服务 Pipe ACL 给 LocalSystem/Administrators FullControl，Authenticated Users ReadWrite/CreateNewInstance。它不是仅本产品二进制可访问的能力令牌；请求中的路径/SID/DTO 仍是不可信输入，handler 必须验证物理身份和权限边界。`RuleUserSid` 等字段存在不代表客户端可以冒充任意用户。OpenWith 通知另按认证 SID 过滤，不把这项保护推导成所有通知均按用户隔离。
 
-Authorization/attempt reservation/read-back outcomes share ContextMenuStateStore's serialized schema-3 storage. Offline reapplication is allowed only for explicit matching HKU rules; this intentionally differs from the classic offline Modified rule. Full scope, retry limits and remaining desktop checks: [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136).
+[PipeCommand](../ContextMenuMgr.Contracts/PipeCommand.cs) 以枚举数值传输，当前使用默认 System.Text.Json，没有通用协议版本协商。新增命令追加，不能插入/重排既有值。新增字段考虑缺失/null/旧客户端语义；未知或缺必需字段由服务失败响应，不允许拆成有部分成功风险的兼容写循环。`PipeResponse.Success/Message/ErrorCode` 与 `Item/Items/SpecialItem` 是不同证据，成功需要子系统实际读回/保存；不能把空 payload 当权威状态。
 
-## ShellNew #141：认证、获取与停止边界
+Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
 
-ShellNew snapshot、创建/编辑、移动和锁操作仅使用认证 Pipe SID，不选择其它交互用户。发现保留 WTS -> RegOpenUserClassesRoot 的 Windows 合并 HKCR 语义，固定 native Registry64（64 位系统）；写入始终为明确 HKU/HKLM 物理路径。`FrontendUserClassesRoot` 在同步、退出即恢复的无模拟 service scope 内调用 WTS，不调整进程/令牌权限，不保留 Pipe impersonation。验证返回 token SID/SessionId 和已加载 profile/hive，持有 token 与 merged handle 到发现结束后一起释放。
+## 请求、迟到通知与不确定结果
 
-`GetShellNewOrderLock` 新增在 PipeCommand 末尾，保留已有枚举序号；`PipeResponse.ShellNewOrderLocked` 只有成功读取物理 ACL 时有值，失败表示 Unknown。请求复用认证 SID，仅读 ACL，不枚举经典或 packaged ShellNew。它与锁定/解锁/移动共用 mutation semaphore，因此前端响应超时后的新查询可以等待前一 mutation 完成；列表扫描使用另一个 single-flight gate，不会阻挡独立读锁。正常 backend stop 取消新请求并等待 ShellNew mutation 提交/回滚退出，硬终止不是有保证的事务恢复。
+每个请求有 `CorrelationId`；客户端为未提供的 `ClientOperationId` 生成 ID 并登记。后端响应继承请求 ID，成功状态变化先广播再尝试直响应，因此 Pipe 断开不能吞掉已成功 mutation 通知。独立 monitor 通知没有本地操作 ID。
 
-WTSQueryUserToken 的 [API 要求](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken) 是 LocalSystem 和 SeTcbPrivilege；[RegOpenUserClassesRoot](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenuserclassesroot) 单独返回状态码，并要求目标 profile 已加载。失败日志区分 API 阶段、原生错误、incoming thread identity、process identity、权限 present/enabled、期望和实际 SID/SessionId 以及 profile 可用性。没有部署证据时不得将旧 1314 日志认定为模拟泄漏，不自动启用 SeTcb、不变更 SCM 权限限制或账户策略。
+`RecentClientOperationCache` 在途项不按时间过期，成功结束保留十秒以抑制本实例重复广播；超时/失败删除，使迟到成功通知能到达。其它实例没有该本地缓存仍更新。OpenWith DTO 只失效快照；普通 workspace 的 generic ItemStateChanged 只更新已存在 Id，不引入 scene-only 项。
 
-#141 的 Pipe 身份修复适用于共用 resolver：原回调读取 WindowsIdentity.Name 会经其内部 RunImpersonated 把原生客户端 token 留在受管理 AsyncLocal，下一次 await 可再次模拟。真实 Pipe 独立实验已复现，不能仅凭 RunAsClient 的 native finally 排除。当前 callback 只读取 SID，显示名在回调外通过 SID.Translate 取得，认证和调用者授权不变，无新增权限。此必要边界修复不改变传统菜单业务行为；不能用它推断 #140 的历史主令牌 DACL 错误原因。
+catalog `_persistentStateGate` 串行状态敏感工作，前端多连接不意味后端所有 mutation 并行。`GetContextMenuItemState` 在该 gate 内重新解析原物理 HKLM/HKU 来源与 handler 身份，合并持久状态；classic 查询不枚举 Win11，原来源消失时报缺失，不换另一 hive。
 
-## Win11 #114 的运行时边界
+| 等待预算 | 当前值/处置 |
+| --- | --- |
+| classic SetEnabled | 20 秒；超时后另用 10 秒 GetContextMenuItemState 核对原物理来源 |
+| Win11 应用 mutation / snapshot | 45 / 20 秒；核对全部目标，成功完整 Items 直接合并 |
+| ApplyDecision | 45 秒；超时另读快照核对，未确认时短暂拦截重复提交 |
+| ShellNew / OpenWith | 有各自协作预算、单飞/串行门及 read-back，见主文档 |
 
-Win11 专用查询/开关、GetSnapshot 和通用 SetEnabled/ApplyDecision 的 Win11 请求使用认证 Pipe SID，不 fallback 到其他登录用户。仍属链路 A，无 UAC、无第三方 DLL 加载，不需要 SessionId。用户值写入 loaded HKU/native view，绝不使用服务 HKCU。
+预算定义见 [BackendRequestBudgets](../ContextMenuMgr.Frontend/Services/BackendRequestBudgets.cs)。超时/取消表示停止等待，不证明后端没写；关闭取消可跳过后续查询。确认请求状态才成功，确认旧状态才回退，核对不可用则显示 Uncertain 并阻止再次写；fresh notification/refresh 解除。UI item version 防旧失败任务覆盖新权威结果，细节见[前端](frontend-wpf-ui.md#异步操作与结果)。不可盲重试不确定 mutation。
 
-新增 SetWin11ApplicationEnabled 追加于 PipeCommand 末尾，ItemId 为某个现存声明，Enable 为应用目标状态；后台只由已验证 snapshot 解析同 family 全部目标。旧 Set/RemoveWin11BlockedItem 保持单目标，旧 CLSID 请求继续解析为当前用户声明。新命令让旧服务安全拒绝整次应用操作，前端提示修复服务，不拆成旧命令循环。没有新增权限通道。
+## 验证与维护
 
-手动、审批、隔离、纠偏及 Win11 查询共用持久 gate。应用操作先保存精确恢复日志，再修改所有目标；回读/最终状态保存失败则条件回滚已完成部分。恢复用户明确选择的旧值不要求归属标记；已有外部禁用值在自动扫描/关闭时保留。机器级恢复需前端说明所有用户影响并传 UnblockMachine=true，机器级禁用仍拒绝。后台自动禁用仍受共享/不完整引用约束，手动操作不因此失去可用性。详见 [Windows 11 文档](./windows11-context-menu.md)。
+检查相同 CorrelationId/ClientOperationId 的两端日志、物理路径/native view、请求完成和响应投递，`DirectResponseWriteFailed` 不是 mutation 必败。已有 `MutationOutcomeTests`、`FrontendControlClientTests` 及身份/SID fixture 保护并发/超时/认证边界；真实跨用户 Pipe、SCM、profile unload 和桌面激活仍须 VM 验收。
+
+修改 PipeCommand/DTO、认证/fallback、广播、等待预算或 privilege flow，更新本文及受影响子系统；IPC 不用日志分类 allow-list 决定业务 routing。

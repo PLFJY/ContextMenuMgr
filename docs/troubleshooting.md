@@ -1,403 +1,83 @@
-# 排错指南
+# 排错与证据收集
 
-本文面向开发者和高级用户。ContextMenuMgr 的很多问题不能只看“权限”，还要同时判断用户 SID、用户注册表 hive 和 SessionId。LocalSystem 有高权限，但不等于正确用户；有用户 SID，也不等于进程在正确桌面 Session。
+先定位进程/flow、实际 SID/hive/view 与 Session，用户可见症状不能直接指认权限或 backend。不明确时写 **Current evidence is insufficient to determine the root cause.** 并列待检查项；验证方法见[维护流程](maintainer-workflow.md)。日志路径、预算/归档和 Locks 规则只在[运行时数据与日志](runtime-data-and-logging.md)维护。
 
-如果需要从零排查一个不明确问题，先阅读 [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)，按模板判定链路和证据。
+## 最小证据包
 
-主要日志位于 `RuntimePaths.LogsDirectory`。Installer 包为 `%ProgramData%\ContextMenuMgr\Logs`；Portable 包为应用目录下的 `Data\Logs`：
+记录应用/服务实际版本与 executable 路径、Installer/Portable、SC/FD、Windows build/架构、用户 SID/Session、操作对象 Id/真实 BackendRegistryPath/native view、时间和重现步骤。收集整个 Logs 的活动与归档，必要时该进程 TEMP fallback；可切 Information 复现成功 query 时间线。敏感身份/路径按需脱敏，保留可关联的一致标识。
 
-| 日志 | 用途 |
+区分 request/CorrelationId/ClientOperationId/TransactionId、物理状态、fresh read、state persistence 和 UI/Explorer。日志无异常、进程启动、一次写 API 或 UI 乐观切换均不能代替后几层。
+
+## 连接、数据与服务
+
+| 症状 | 检查顺序 | 权威说明 |
+| --- | --- | --- |
+| 前端连不上 Backend | SCM status/executable，service-startup/bootstrap/backend，Pipe ACL/连接与 Ping | [生命周期](runtime-lifecycle.md)、[IPC](process-and-privilege-flows.md) |
+| Ping 成功而快照失败/超时 | 同一请求的完成时间、package warning/缓存、catalog gate、state load/ACL/JSON；不直接安装/强力修复 | [状态](state-and-monitoring.md)、[Win11](windows11-context-menu.md) |
+| current JSON 损坏 | CorruptionDetected/Quarantined/RecoveredFromBackup/ResetAfterCorruption，Quarantine 原件及 .bak；I/O/未来 schema 不应被重置 | [状态恢复](state-and-monitoring.md#原子保存与损坏恢复) |
+| 新装/reset 出现全部待审核/Modified | 首次是否完整用户上下文，两个 marker 是否独立提交、并发/保存失败；不能手改 desired 掩盖 | [状态矩阵](state-and-monitoring.md) |
+| Portable 搬迁后旧状态/备份不可用 | package marker、host 指纹/quarantine/current scoped backups；首次缓存用户与实际 Pipe 用户可能不同 | [host identity](runtime-data-and-logging.md#portable-host-identity) |
+| 设置无法保存/日志缺失 | 根目录及 Logs/Locks ACL、只读/冲突/reparse path、Data ACL repair/fallback；无日志不是无失败证据 | [数据与日志](runtime-data-and-logging.md) |
+
+服务维护检查 `--result-file`、退出码/BootstrapResult、UAC 取消、--user-sid、SERVICE_PENDING_DELETE；关闭 Services MMC/任务管理器服务页等持有句柄后再试，必要时重启。强力修复删除服务注册不等于清理用户菜单/数据。
+
+Portable 运行文件 Zone.Identifier 可导致 bootstrap 启动/结果缺失。前端只检查当前 runtime 文件，需用户确认才 Unblock，不扫描目录外用户文档。可在下载 zip 属性解除阻止后重解压；检查 PortableMotwScan/Detected/Unblock/ServiceBootstrapBlockedByMotw。不得把所有 UAC 失败归因到 MOTW。
+
+## 请求超时与真实结果
+
+classic 看 FrontendRequestStarted、SetEnabledTimeout、OutcomeVerificationStarted/VerifiedApplied/VerifiedNotApplied/Uncertain；backend 对照操作和 DirectResponseWriteFailed。广播在直响应前，迟到成功应能到达停止等待的客户端。超时不是没写，查询原来源失败不是可安全重试。
+
+ApplyDecision 超时要确认 pending、enabled/deleted、备份/状态；不能因前端等待结束重复 Remove。Win11 核对应用全部目标，ShellNew 独立读锁，OpenWith fresh snapshot；各自契约见主文档，不用同一 bool rollback 表示所有 outcome。
+
+## 注册表权限与受保护写入
+
+先查 Registry Write Protection persisted setting 与 transition 的每个 target/DACL，而非只看 toggle。禁用部分失败可能仍 persisted=true、已成功解锁 root 保持解锁；按具体失败 root 修复再重试，不手改 JSON false。ShellNew order ACL 是另一功能。
+
+classic 查看 ClassicMutationStarted/Completed、真实物理 source、MutationApplied/PhysicalVerification/StateSave 与回滚码：ROLLED_BACK 表示回退并验证；ROLLBACK_CONFLICT 保留外部新值；SECURITY_RESTORE_FAILED 即使值回滚成功仍是失败。FILE_TYPE_ACTIVATION_VERB_PROTECTED 是写前安全拒绝，PROVENANCE_MISSING 是归属不足，不是权限不足。
+
+删除看 ClassicDeleteStarted 的 path/backup 和整树 ReadKey/Delete 检查，再重开同 key/view。当前逐叶 DeleteSubKey 回读，不用会申请 SetValue 且可能静默跳过的 DeleteSubKeyTree(..., false)。这保留 DELETE-only 场景，但真实第三方自保护/并发仍可拒绝。Safe360Ext 名称本身不证明安全软件阻止删除；.reg 不包含 ACL，Undo 导入不代表安全描述符恢复。
+
+### Token 与 descriptor 分阶段诊断
+
+受保护 HKLM Classes ShellVerb 普通写拒绝后才有 ProtectedShellVerbFallback；HKU 不走此路径，Registry Write Protection preflight 不绕过。实现与私有 token/ACL 约束见[注册表模型](registry-model.md#受保护机器-shellverb-的窄写入路径)。
+
+1. 只读收集 `sc.exe qc ContextMenuManagerPlusService`、`sc.exe qprivs ContextMenuManagerPlusService`、`sc.exe qsidtype ContextMenuManagerPlusService`、PID/实际路径/版本/account，不改配置猜测修复。
+2. 重现同一物理项，关联 IncomingContext/ServiceContext、API Phase、native error/HRESULT、privilege present/enabled 与 restoration；不要输出 raw token/凭据/descriptor dump。
+3. OpenProcessToken(Query/Duplicate) error 5 是 token 对象 access 检查失败；EnablePrivilege/PrivilegeAbsent 1300 才是 privilege 不在 token；Duplicate/Attach/OpenPrivateThreadToken、TakeOwnership/GrantValueAccess、RegistrySecurityRestore 是不同阶段。HRESULT 不直接冒充 native error。
+4. 仍失败时在可丢弃 service-context debugger 比较 Query、Query/Duplicate、Query/Adjust 只读打开结果，核查 token DACL/限制、SCM account/RequiredPrivileges 和外部安全事件；不全局 enable privilege、不把前端提权当证明。
+5. 比较物理 value/Owner/Group/DACL、fresh state/pending 与重启；descriptor restoration 不确定则停重复写，保留证据。
+
+历史 #140 记录过 primary token Adjust/Query open error 5；当前代码改用私有副本，#141 又修正过 callback Name 的 managed token flow。这些事实不能证明 #140 机器 token access 拒绝的具体根因。原始失败线程 identity、token DACL/SCM restriction 和安全事件仍不足；仍需取得部署日志验证。
+
+## ShellNew 与 OpenWith
+
+ShellNew 1314 必须从 ShellNewMergedClassesOpenFailed.Stage 区分 SessionValidation/WTSQueryUserToken/TokenValidation/ProfileAvailability/RegOpenUserClassesRoot，检查 token SID/session、profile/hive 与 incoming/process privileges。不能由服务启动 SYSTEM 推断失败线程 token，也不自动启用 SeTcb/改账户策略。ShellNewDiscoveryTiming/SlowCandidate/ApiTiming 区分 WTS/RegOpen/classic/package，8 秒协作预算不是同步 API 硬超时。
+
+读锁 Unknown 不推为 Unlocked；发现失败不能写排序，已独立确认 Locked 可单独解锁。丢失原 Classes 时不能用部分列表/包声明猜重建，停止/卸载服务不会自动恢复旧 ACL。完整安全恢复及 Windows 验收只见 [ShellNew](shellnew.md#恢复与真实-windows-验证)。历史 #141 原始 API/Classes 证据不足，不能由新 repair 实现称全部机器恢复。
+
+OpenWith 开关只代表选定 Applications 的 NoOpenWith；候选仍显示时先检查其它 ProgID/FileExts/Capabilities/AppX 来源，不删 UserChoice/Hash。Unknown/Changed visibility 不自动认领；Uncertain/Conflict 停止纠正需审核。受系统保护 badge 是 UI 只读标签，不证明新增 ACL。授权、重注册/backup 冲突、SID 通知与 source inspection 都只见 [OpenWith](openwith.md)。
+
+## Win11 与 Explorer
+
+刷新后开启先查认证 SID/native HKU/机器 Blocked、GUID aliases、实际所有应用目标和 state journal。其它菜单消失须同一 OS build/文件/目录/背景做单 CLSID A/B，比对真实 modern 与 classic 菜单；共享索引/读回成功都不是 #114 根因或修复证据。当前应用开关不标 Explorer restart，全局 classic tweak 另有要求。看 Win11TogglePlan/ApplicationMutationPlan/BlockedReadBack/PhysicalVerified/rollback 与 ExplorerValidated=False；完整验证见 [Win11](windows11-context-menu.md#诊断验收与维护)。
+
+Restart Explorer 无效查前端 SessionId、同 Session KilledCount 和自动恢复，不全局 kill。TrayHost 不可见先区分隐藏图标、进程缺失、policy、WTS 启动与投递失败。TaskbarCreated 图标重建不重放已提交通知；NIM_MODIFY 成功也不保证用户看到。真实 Explorer 重启、通知点击与普通托盘激活分别验证，见[生命周期](runtime-lifecycle.md)。
+
+SendTo/WinX 修改无效查用户 AppData、物理文件、WinX target/arguments/hash 与实际菜单；WinX 删除无 Undo，单 group restore 有 backup。新版 Windows 可能额外筛选，不由 hash API 成功推导显示成功，见 [SpecialMenu](special-menus.md)。
+
+## 前端、深入分析与发布
+
+| 症状 | 先读/查 |
 | --- | --- |
-| `frontend-debug.log` | 前端启动、导航、pipe 调用、Deep Analysis、全局搜索。 |
-| `frontend-crash.log` | 前端未处理异常。 |
-| `backend.log` | 后端服务、注册表操作、Win11、SpecialMenu、monitor。 |
-| `trayhost.log` | 托盘进程、通知、打开前端、后端断开。 |
-| ProbeHost stderr / result diagnostics | Deep Analysis 结果窗口和 `frontend-debug.log` 中的 ProbeHost 输出摘要。 |
+| 搜索无下拉/不跳转/不筛选 | [前端搜索](frontend-wpf-ui.md#搜索筛选与集合归属)：Handled、ItemsSource、SelectedItem、pending filter/目标 id |
+| 主题/Popup/滚动/Page parent | [前端](frontend-wpf-ui.md)：DynamicResource、watcher、模板边界、ModernFrame ownership 与硬件输入 |
+| 注册表定位不准 | RegistryEditorNavigationRequested/真实 BackendRegistryPath，已有 Regedit 是否 -m 新实例；实际选中键需人工看 |
+| ProbeHost 缺失/架构错/crash/无菜单 | [ProbeHost](deep-analysis-probehost.md)：selection/PE、result/stderr、SpecificHandler 与 WholeContextMenu 不混；不改普通开关 |
+| 发布资产/架构/FD-SC/GitCode | [构建发布](build-and-release.md)、[安装器](installer-deployment.md)：检查实际 YAML、tag/SHA、marker/hash/部分远端成功 |
+| manifest 生成但无法安装/搜索 | [包管理器](package-managers.md)：bucket commit/fork PR/checks/review/CLA/merge/index 各阶段独立 |
 
-### 日志轮转与收集（#134）
+## 第三方安装器与驱动归因
 
-活动文件名保持不变；归档为 `<stream>.archive-<UTC yyyyMMddTHHmmssfffffffZ>-<reason>-<guid>.log`。GUID 防止时间戳碰撞覆盖；每个流只清理自己的精确归档名。
+先验证当时服务/保护是否运行、相关保护开关、同时间日志、Access Denied/UnauthorizedAccessException、目标是否在保护范围，以及关闭保护/停服务 A/B。没有这些证据，不能把驱动安装失败归因“右键菜单拦截”。停服务也不自动撤销既有 ACL，应核对实际状态；同时收第三方自己的安装日志。
 
-| 流 | 每卷上限 | 归档数（活动文件另计） |
-| --- | ---: | ---: |
-| `frontend-debug.log`、`backend.log` | 5 MiB | 各 10 |
-| `trayhost.log`、`frontend-crash.log`、`service-startup.log`、`backend-fallback.log`、`bootstrap.log` | 2 MiB | 各 5 |
-
-Frontend 在取得单实例 ownership 后开始会话；每卷头部记录启动时间、PID、SessionId。正常退出写 shutdown 记录并归档；崩溃/强制终止保留当前卷，下次主实例启动先归档为 `recovered`。会话中达到大小限制仍会分卷，各卷共享会话标识。正常退出后没有活动 Frontend 文件是预期行为。Backend/TrayHost 在写入时轮转，不依赖进程重启；重启继续保留当前卷证据。
-
-写入前按 UTF-8 字节数检查上限。单条超大事件保留开头和结尾（含异常栈尾部），中间用 `LogEntryTruncated` 标明省略；不会生成无限大卷。升级遇到旧巨型活动日志时，只读取至多一卷最近尾部，写 `LegacyOversizedLog` 原大小/尾部保留标记并 flush，再移除旧文件；不永久保留巨型旧卷。此前更早内容按这项明确的大小保留策略淘汰。迁移失败保留原文件、不向巨型文件追加；以后重试。
-
-v1.7.10 起，持久 lease 位于 `RuntimePaths.LocksDirectory`（`RootDirectory\Locks\<active>.lock`），活动日志与归档仍在 `RootDirectory\Logs`。例如 Installer 使用 `%ProgramData%\ContextMenuMgr\Locks\backend.log.lock`，Portable 使用 `<应用目录>\Data\Locks\backend.log.lock`。早期 writer 可自行创建两个目录，不依赖 DI 或提权；服务既有 ACL repair 会预创建并修复 Logs/Locks，均继承 Users Modify。
-
-升级不能假设旧 Frontend、Service、TrayHost 已全部退出。每次 append、recovery、rotation 和 clear 都按固定顺序取得 **Locks lease → 旧 `<active>.lock` lease**，整个操作结束后才释放。即使 Logs 已清理或旧进程暂时没有打开文件，后续新操作仍取得两个 lease，不以一次独占 open 判定旧进程已退出。旧路径因此可能在写入期间短暂出现在 Logs；旧进程仍可能留下它。新进程在完整受保护操作结束时，仅对七个已知 stream 的零字节普通旧 lock 设置删除，再关闭句柄；Windows 在句柄关闭前保持 delete-pending，旧版不能绕过。下次旧版重新创建路径后仍与新 writer 同步。崩溃残留在下次 recovery/write 重试，不移动或复制活跃同步原语。
-
-首次创建共享 writer 时会检查同目录七个已知旧 lock；忙碌/不可访问的流推迟处理，不妨碍其它流或启动。已迁移、半迁移与重复启动可重入；非空旧 lock、未知文件、目录和 reparse point 不删除。Locks 目标若有非空文件或目录冲突，不覆盖，当前流拒绝无锁写入。迁移/锁失败每个进程最多报告 8 条、每条最多 1024 字符的 `LogLockMaintenance` 到 Trace 和可用的独立 TEMP `backend-fallback.log`，TEMP 自身失败只保留 Trace，避免递归。没有日志时还应核查文件系统 ACL 与冲突路径，不能据此宣称迁移成功。
-
-数据句柄每条事件后关闭，避免阻塞维护。普通 append 不扫描目录。归档/删除被锁住或 ACL 拒绝时不突破大小/数量上限，不继续产生更多归档；失败后 30 秒再试，清空活动文件会立即解除等待。异步获取写锁/lease 各最多等 1 秒；同步 best-effort 各最多 250 ms，无后台日志队列或每条 `Task.Run`。迁移诊断只进行有界 best-effort 写入。两处磁盘都失败/等待耗尽时会丢弃该诊断记录，业务异常仍按原路径传播。
-
-早期服务启动、bootstrap、Frontend crash 和 Backend fallback 不依赖普通 Logger/DI。正常目的地不可用时独立尝试该进程的 `%TEMP%\ContextMenuMgr\Logs`，其 lease 使用同级 `%TEMP%\ContextMenuMgr\Locks`，不与正常根共享锁；同样为 2 MiB/5 卷。LocalSystem 的 TEMP 可能位于 Windows 系统临时目录。双方均失败时不递归记录日志失败。TrayHost 磁盘写入失败采用 best-effort 丢弃，不干扰通知。
-
-默认 Warning 不再强制记录成功的 Ping、快照、WPS 待审核等 routine query Start/End；Information 可恢复这些记录。mutation/进程维护操作的 Start/End、失败、超时、不确定结果保持关联 ID、命令、目标及耗时证据，即使配置 Error 也保留 request 失败。内部 Backend Warning/Error 独立按级别处理，不能被 query 分类吞掉。
-
-Package discovery 按 SID 和 metadata/enumeration/manifest 阶段聚合：首个条件立即 Warning；全部失败的 package/stage/异常/HRESULT/消息与数量参与签名，前三个样本用于定位。相同条件每 15 分钟输出 `PackageDiscoveryWarningSummary` 和 `SuppressedOccurrences`；变化、恢复或容量淘汰时汇总已抑制次数。最多保留 32 个 SID/阶段条件，每条件最多 8192 字符样本；部分 enumeration 失败不会宣称其它阶段已恢复。不全局忽略任何 HRESULT，也不改变 package 枚举或 registry 行为。
-
-“清除全部日志”在后台执行一次维护：逐流取得相同双 lease，删除精确归档名、截断活动文件，涵盖上述七种固定文件名、当前用户 emergency TEMP，以及机器 `SystemTemp`（默认 Windows `SystemTemp`）和旧机器 TMP/TEMP（默认 Windows `Temp`）内的应用日志子目录。没有活动日志/归档的流不创建 lease。未知 `.log`、状态库、设置、备份和 reparse-point 文件不处理；不搜索其它用户 profile 或自定义 service-process-only TEMP。锁住/保护或无法检查的目录/文件显示部分失败及具体路径；SYSTEM TEMP 的 ACL 可能拒绝普通前端访问，需管理员单独清理。已清理的文件不会被误报为全部成功；不停止服务，继续记录，Frontend 自动补回会话头。清理不删除 Locks 目录或持久 lease、不删除其它进程持有的旧 lock；仅在本次完整 lease 结束后按上述规则退休自己的旧路径。
-
-设置页“打开日志文件夹”仍创建并打开 `RuntimePaths.LogsDirectory`，不打开根或 Locks；“打开数据文件夹”仍打开原有 `DataDirectory` 根。Portable 从旧 ProgramData 迁移日志时，仅在源/目标两侧取得双 lease 后 copy-if-missing 七种活动日志和精确有效归档，不覆盖、不复制 lock、不递归遍历未知目录；旧日志原件保留。其它设置、备份和 Programs 的既有迁移不变。
-
-Windows 手工验收：分别在 Installer 和 Portable 包启动 Frontend、Service、TrayHost，确认两个同级目录及标准用户/LocalSystem 的实际写入；保留 v1.7.9 进程跨升级运行并触发轮转，确认两版本争用同一旧 lease、归档完整且不超预算；并发“清除全部日志”后继续触发日志，锁住一个归档确认部分失败；在 Logs 缺失时点击“打开日志文件夹”，确认只创建并打开 Logs，再核对“打开数据文件夹”仍是根。另测只读 Portable 根和 SYSTEM TEMP 不可访问时的实际 fallback、进程强制终止后恢复。单元测试和编译不能代替这些 SCM/Explorer/多账号验收。
-
-报错前请收集整个 Logs 文件夹中的活动和归档日志，而非只发送 `backend.log`。复制时若遇到轮转占用可重试；不需要停止服务。正常目录不可用时也收集对应进程 TEMP 中的日志。排查超时应切换 Information 后复现，以获得成功查询的完整关联时间线；涉及未确认 mutation 的证据默认仍保留。
-
-`RuntimePaths` 通过应用目录中的 `ContextMenuMgr.package.json` 明确识别包类型，缺失或无效时按 Installer 处理。Installer 根目录为 `%ProgramData%\ContextMenuMgr`；Portable 根目录为 `<应用目录>\Data`。`frontend-settings.json`、`context-menu-state.json`、`backend-protection-settings.json`、`DeletedBackups`、`Logs` 和 `Locks` 都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；排查历史安装时可以同时检查这些旧位置。
-
-`context-menu-state.json` 使用 `context-menu-state.json.bak` 保存一份最后已知正常状态。正常保存先写入同目录唯一 `.tmp-<guid>` 文件、flush/关闭并按生产格式重新验证，再替换 current；不要手工把临时文件当作 current。current JSON/结构损坏时，后端会将原始文件保存到 `Quarantine\corrupt-state-...`，验证 `.bak` 后自动恢复；没有有效 backup 时则从当前注册表重新采纳 baseline。恢复旧 backup 可能丢失非常新的本地状态更改，但不会直接修改注册表内容。
-
-状态库缺失或在设置页重置后，第一次带交互用户上下文的常规快照必须写入 `internal:baseline:regular:v1`，WPS/Office 刷新必须写入 `internal:baseline:wps-office:v1`。此轮所有现存项都应为已确认状态：没有待审核、没有 `Added` / `Modified`，也没有普通开关差异导致的“当前注册表状态与软件记录不一致”。如果全新安装仍出现这些状态，优先检查 `backend.log` 中 baseline marker 保存前后是否出现无 SID 快照、并发状态保存失败或 Win11/WPS 枚举异常。
-
-传统 Shell Extension 的 active 与 `-ContextMenuHandlers` 双键并存时，后端按 key 最后写入时间保留较新一侧并删除较旧一侧。排查自动修复时查看 `ClassicShellExtensionDuplicateAutoRepaired` / `ClassicShellExtensionDuplicateAutoRepairFailed`；该情况不应再显示泛化的状态库不一致提示。
-
-Portable 包中 `frontend-settings.json` 的语言、主题、颜色等纯偏好可以跨设备保留，但 `context-menu-state.json` 和 `DeletedBackups` 属于设备/用户绑定的注册表运行时状态。后端用 Windows `MachineGuid` 和前端用户 SID 计算 SHA-256 指纹，只把指纹写入 JSON，不保存原始 MachineGuid 或 SID。复制 portable `Data` 到另一台 Windows 或另一个用户配置文件后，旧状态会被移动到 `Data\Quarantine\foreign-host-...`，后端从新的空本地主机状态开始运行。
-
-不要把另一个 Windows 安装或用户配置文件里的 `.reg` 删除备份导入当前系统。Portable 模式下恢复只接受当前 host-scoped `DeletedBackups` 目录里的备份；其它目录或旧指纹下的备份会被隔离或拒绝，并记录 `BackupRestoreBlockedForeignHost`。
-
-## 1. 前端无法连接后端
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 前端显示后端不可达、加载占位数据或等待 pipe 超时。 |
-| 可能原因 | 服务未安装、服务未运行、pipe server 未启动、UAC 安装被取消、pipe ACL 或启动异常。 |
-| 优先查看的代码 | `MainViewModel.EnsureBackendReadyAsync`、`BackendServiceManager.cs`、`NamedPipeBackendClient.cs`、`NamedPipeBackendServer.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`、`backend.log`、bootstrap result file。 |
-| 常见修复方向 | 检查 Windows Service 状态；重新执行 install/repair；确认 `ContextMenuManagerPlus.Service.exe` 路径正确；不要把 runtime pipe 操作改走 UAC bootstrapper。 |
-
-若 SCM 显示服务运行、`Ping` 成功，但菜单仍加载失败，不要直接判断为“安装失败”。对照 `frontend-debug.log` 的 `GetSnapshot` 取消时间和 `backend.log` 中相同 `CorrelationId` 的完成时间：前端先超时而后端稍后成功，说明是快照延迟，不是服务缺失。排查 `PackagedContextMenuPackagesSkipped` 的数量/样本、Win11 枚举摘要、状态库锁等待及同时运行的后台刷新；当前前端快照等待 20 秒，Win11 包发现按 SID 缓存 30 秒。
-
-待审核决策同理：若前端 `ApplyDecision` 超时，但后端稍后记录成功，应先刷新并核对真实条目的 `IsPendingApproval`、`IsEnabled` 或 `IsDeleted`，不要立即重复提交。当前前端审核等待 45 秒，超时后会另发快照核对；结果仍不确定时提示状态未确认并在约 1 分钟内拦截同一条目的重复请求。删除项还应检查状态库和 `DeletedBackups`，避免把“已删除”误报成注册表写入失败。
-
-## 2. 后端服务安装 / 修复失败
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | UAC 后仍无法安装服务，或返回 bootstrap 失败码。 |
-| 可能原因 | 用户取消 UAC、服务路径无效、权限不足、result-file 写入失败、服务启动模式参数错误。 |
-| 优先查看的代码 | `BackendServiceManager.cs`、`BackendServiceBootstrapper.cs`、`AutoStartService.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`、bootstrap result file、bootstrap log 如运行时生成。 |
-| 常见修复方向 | 确认 `Verb=runas` 正常弹出；检查传入命令和 `--user-sid`；安装/修复只走链路 B，不要复用普通后端 pipe。 |
-
-### Portable 包文件被 Windows 阻止 / Mark-of-the-Web
-
-从浏览器下载的 portable zip 可能带有 Mark-of-the-Web。Windows 或解压工具有时会把 `Zone.Identifier` alternate data stream 传播到解压后的 `.exe` / `.dll` 文件。此时文件属性页可能显示“This file came from another computer and might be blocked to help protect this computer.”。如果 `ContextMenuManagerPlus.Service.exe`、`ContextMenuManagerPlus.TrayHost.exe`、`createdump.exe` 或其它运行时文件被阻止，前端通过 `Verb=runas` 启动服务 bootstrapper 时可能表现为 UAC 被拒绝、没有 result file、或等待超时。
-
-当前前端只会检测当前 portable 应用目录中的运行时文件，并且只会在用户确认后删除这些文件上的 `Zone.Identifier` ADS。它不会扫描用户文档、不会扫描应用目录外的路径、不会修改 ACL，也不会自动解除阻止。
-
-推荐的手动修复方式是在解压前处理 zip：右键下载的 zip 文件 -> Properties / 属性 -> Unblock / 解除锁定 -> Apply / 应用，然后重新解压。
-
-也可以对已解压的 portable 目录执行 PowerShell：
-
-```powershell
-Get-ChildItem -LiteralPath "<portable folder>" -Recurse -File | Unblock-File
-```
-
-如果应用检测到此问题，设置页的服务区域会显示 portable 文件阻止警告，并提供“解除便携版文件阻止并重试”操作。失败时优先查看 `frontend-debug.log` 中的 `PortableMotwScanStarted`、`PortableMotwDetected`、`PortableMotwUnblockStarted`、`PortableMotwUnblockSucceeded`、`PortableMotwUnblockFailed` 和 `ServiceBootstrapBlockedByMotw` 记录。
-
-## 3. 前端因为后端异常而退出或无法加载
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 前端启动后退出、页面空白或 snapshot 加载失败。 |
-| 可能原因 | 后端 pipe 返回错误、JSON 契约不兼容、snapshot 中个别注册表路径异常、前端未处理异常。 |
-| 优先查看的代码 | `ContextMenuWorkspaceService.cs`、`NamedPipeBackendClient.cs`、`NamedPipeBackendServer.cs`、`ContextMenuRegistryCatalog.cs`。 |
-| 优先查看的日志 | `frontend-crash.log`、`frontend-debug.log`、`backend.log`。 |
-| 常见修复方向 | 先确认 pipe response 的 `Success`、`ErrorCode` 和 payload；后端枚举异常应局部降级，不应让整个前端崩溃。 |
-
-### Ping 成功但传统菜单快照报 JSON 错误（Issue #91）
-
-如果 `Ping` 成功，但紧接着 `GetSnapshot` 或 `GetWpsOfficePendingApprovals` 出现 `JsonException`（例如 JSON object/array 未闭合），服务和 Named Pipe 仍然可用；不要立即安装、强力修复或重装服务。优先检查 `backend.log` 的 `ContextMenuStateCorruptionDetected`、`ContextMenuStateQuarantined`、`ContextMenuStateRecoveredFromBackup` 或 `ContextMenuStateResetAfterCorruption`。确认 `Quarantine\corrupt-state-...` 中保留了原始文件、current 是否已从 `.bak` 恢复，或是否已由当前注册表安全重建 baseline。普通 I/O/ACL 错误和未来 schema 不会被当作损坏 JSON 自动重置，应按运行时 ACL/兼容性问题排查。
-
-## 4. TrayHost 不出现
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 托盘图标缺失，新增菜单没有通知。 |
-| 可能原因 | 服务没有在用户 Session 启动 TrayHost、StartWithWindows policy 关闭、SessionId 错误、TrayHost 启动后连接后端失败。 |
-| 优先查看的代码 | `FrontendAutostartLauncher.cs`、`BackendWindowsService.cs`、`BackendRuntime.cs`、`TrayHostRunner.cs`。 |
-| 优先查看的日志 | `backend.log`、`trayhost.log`。 |
-| 常见修复方向 | 检查服务是否拿到活动 SessionId；确认 `WTSQueryUserToken` / `CreateProcessAsUser` 结果；不要尝试从服务 Session 直接显示托盘 UI。 |
-
-### Explorer 重启后重复旧审核通知（Issue #133）
-
-先区分 `TaskbarCreated` 图标恢复与新 `ItemDetected` 通知。`NativeTrayHost` 只重试未成功提交给 Shell 的通知，成功的 `NIM_MODIFY` 会清空投递缓存；不得通过 `ShowNotification` 在图标恢复时重新填充缓存。Shell 注册/提交暂时失败使用每秒一次、最多额外五次的有界恢复，失败及丢弃通知写入现有 `trayhost.log`，不改变日志保留逻辑。API 成功不代表通知实际可见。
-
-手动验证：触发真实新增审核通知，处理审核并确认 Approvals 为空，连续两次重启当前用户的 Explorer，确认图标恢复但旧通知不重放；再触发新审核并确认通知正常。分别点击通知、普通托盘图标、托盘菜单，切换隐藏图标和语言；通知点击应打开普通 Approvals 页面，普通托盘点击应打开主窗口。图标重建保留合法通知点击上下文。还需在隔离 Windows 环境验证初始 `NIM_ADD` 失败后预算内恢复、`NIM_MODIFY` 失败后恢复及持续失败后的停止/丢弃。静态检查、编译和人工注入回调均不能替代真实 Explorer 重启与审核流程验证。
-
-本次临时 Windows harness 链接生产 `NativeTrayHost.cs`，使用真实隐藏窗口、Shell API 和 timer，验证成功提交清空缓存、两次人工发送 `TaskbarCreated` 后无缓存回填、鼠标/键盘/通知点击路由、菜单 command 路由、隐藏图标、本地化派发、真实 API 注册/提交失败后的恢复、六次持续提交失败后停止，以及退出释放窗口。失败由重复注册/删除 harness 自己的图标触发；未重启实际 Explorer，未启动后端服务或触发真实审核，也未人工确认通知可见、实际菜单交互或前端导航。此 harness 为临时验证工具，完成后删除，不向生产添加测试钩子。
-
-## 5. 开机启动不生效
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 登录后没有托盘，服务启动模式或前端设置看似正确但无效。 |
-| 可能原因 | 服务启动模式和用户级 `StartWithWindows` policy 不一致；服务处于 Stopped 或 Running 但 pipe 不可用；用户 SID 写错；旧 Run value 干扰；服务 executable 位于开机早期尚未可用的非系统卷。最后一种只是待日志/复现验证的假设，不能仅凭盘符下结论。 |
-| 优先查看的代码 | `AutoStartService.cs`、`BackendServiceBootstrapper.cs`、`FrontendAutostartLauncher.cs`、`SettingsPageViewModel.cs`。 |
-| 优先查看的日志 | `bootstrap.log`、`service-startup.log`、`frontend-debug.log`、`backend.log`、`trayhost.log`。 |
-| 常见修复方向 | 分开检查 policy（用户意图）与 SCM/pipe（系统实现）；确认 `ConfiguredStartType`、`DelayedAutoStart`、`CurrentStatus`、`FailureRecoveryConfigured`、`StopReason`、start attempt 与 pipe readiness。bootstrapper 的 `install-or-repair`、`set-startup-mode` 需要 `--user-sid`。 |
-
-当前实现对非系统卷/UNC 上的服务程序使用 SCM delayed-auto，并同时配置分级 failure recovery；这降低开机早期卷不可用造成服务长期停留在 Stopped 的风险，但不能据此反推历史故障一定由磁盘竞态引起。启用开机启动只有在服务达到 Running 且真实 Ping 成功后才提交 policy。若日志显示 `StopReason=StartupFailure` 或 `UnexpectedProcessExit`，检查后续 SCM 重启；`FrontendRequest`、`WindowsShutdown`、`Uninstall`、`ForceRepair`、`ExplicitServiceStop` 属于有意停止，不应形成重启风暴。
-
-## 6. Win11 新菜单禁用后刷新状态丢失
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 点击禁用后短暂生效，刷新 snapshot 后又显示启用。 |
-| 可能原因 | userContext 丢失、写到了错误用户 hive、只读了 HKLM blocked list、CLSID 规范化不一致。 |
-| 优先查看的代码 | `Windows11ContextMenuCatalog.cs`、`Windows11BlocksService.cs`、`NamedPipeBackendServer.cs`、`Windows11ContextMenuService.cs`。 |
-| 优先查看的日志 | `backend.log` 中 `Win11ContextMenuSetEnabled`、`Win11UserBlockedRead`、`Win11ContextMenuEnumerateSummary`。 |
-| 常见修复方向 | 确认写入路径是 `HKEY_USERS\<frontend sid>\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked`；snapshot 也必须带同一 userContext。 |
-
-## 7. ShellNew 锁定后无法解锁
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | ShellNew order key 锁住后 unlock 失败。 |
-| 可能原因 | ACL deny rule 阻止写入、所有者异常、继承关闭、写到了错误 SID，或 legacy broken ACL 已无法用 `ChangePermissions` 安全修改。 |
-| 优先查看的代码 | `SpecialMenuService.SetShellNewOrderLockAsync`、`RemoveShellNewOrderLock`。 |
-| 优先查看的日志 | `backend.log` 中的 SID 和 `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew` 路径。 |
-| 常见修复方向 | 主程序只做 `ReadPermissions` / `ChangePermissions` simple unlock，不 take ownership、不替换 DACL。无法安全修改时应外部修复或用已知良好的工具切换；不要把它当 Registry Write Protection 的问题处理。 |
-
-## 8. Explorer 有 ShellNew 项但页面未枚举
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | Explorer 的“新建”菜单存在某文件类型，但 ShellNew 页面没有对应项。 |
-| 优先查看的代码 | `SpecialMenuService.GetShellNewItems`、`FrontendUserClassesRoot`。 |
-| 优先查看的日志 | `backend.log` 中 `ShellNewMergedClassesOpenFailed`、`ShellNewDiscovery`、`ShellNewPhysicalSourceUnresolved`。 |
-| 常见修复方向 | 对同一前端 SID/SessionId 比较有效 HKCR 的扩展名→ProgID→ShellNew 链；服务不可用自己的 HKCR/HKCU 代替交互用户。写入仍必须确认日志中的物理 HKU/HKLM ShellNew 路径。 |
-
-## 9. ShellNew 排序失败
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 页面移动顺序后 Explorer “新建”菜单顺序未变。 |
-| 可能原因 | Explorer ShellNew order key 被锁、Classes 排序值不一致、Explorer 缓存未刷新、user SID 错误。 |
-| 优先查看的代码 | `SpecialMenuService.MoveShellNewAsync`、`SetShellNewOrderLockAsync`、`ShellChangeNotifier`。 |
-| 优先查看的日志 | `backend.log`。 |
-| 常见修复方向 | 检查是否临时解锁成功；确认路径是 `HKEY_USERS\<sid>`；必要时刷新 Explorer 或重启 Explorer。 |
-
-## 9. SendTo 或 WinX 修改无效
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | SendTo 项或 WinX 项修改后 Explorer 不显示变化。 |
-| 可能原因 | profile path 错误、RoamingAppData / LocalAppData 错误、`.lnk` hash 无效、软删除目录残留。 |
-| 优先查看的代码 | `SpecialMenuService.cs` 中 SendTo / WinX 相关方法、`BackendUserContext.cs`。 |
-| 优先查看的日志 | `backend.log`。 |
-| 常见修复方向 | 确认 `BackendUserContext` 的 profile path；WinX 修改后确认 `.lnk` hash；SendTo / WinX 是文件系统链路，不是普通注册表链路。 |
-
-## 10. Registry Write Protection 导致编辑失败
-
-### 删除后仍提示注册项存在 / Safe360Ext
-
-2026-10-23 日志中的 `*\shellex\ContextMenuHandlers|Safe360Ext` 删除目标为 `HKLM\SOFTWARE\Classes\*\shellex\-ContextMenuHandlers\Safe360Ext`。旧删除 API 在无法取得 value-write handle 时可能静默跳过；独立测试键已复现“允许 DELETE、拒绝 SetValue，DeleteSubKeyTree 返回但键仍存在”。当前实现按 ReadKey/DELETE 检查整树并逐键删除，不修改 ACL。原日志中另外一次启用的 Access Denied 发生在创建 active 目标，不能据此断言删除也被第三方自保护阻止。
-
-重试时检查 `ClassicDeleteStarted` 的真实路径、备份及失败异常，再实际打开同一路径和视图确认。若仍 Access Denied，应继续核查服务身份、目标权限或外部拦截证据；不能仅凭软件名称判断原因。成功编译和隔离键测试不能替代安装版服务上的真实删除/撤销验证。
-
-“打开注册表位置”应使用卡片的真实 `BackendRegistryPath`，而非猜测 HKCR overlay。前端向当前用户 Regedit `LastKey` 写完整 hive 路径，不拼接应用语言下的“计算机/Computer”；同 Session 已有 Regedit 时使用 `-m` 新窗口，使新路径被读取，不关闭用户原窗口。查看 `RegistryEditorNavigationRequested` 确认请求路径；该事件只代表已请求定位，窗口启动不证明已选中目标。
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 编辑、启用、删除菜单项时报注册表保护错误。 |
-| 可能原因 | Registry Write Protection 开启，阻止对受保护菜单注册表路径写入。 |
-| 优先查看的代码 | `ContextMenuRegistryCatalog.cs`、`RegistryProtectionDialog`、`SettingsPageViewModel.cs`。 |
-| 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
-| 常见修复方向 | 提示用户到设置页解锁并确认 transition 成功；后端 preflight 在 persisted protection 为 true 时继续阻止 mutation。不要和 ShellNew ACL Lock 混用。 |
-
-Registry Write Protection 切换日志使用 `RegistryProtectionTransitionStarted`、`RegistryProtectionTargetFailed` 和 `RegistryProtectionTransitionCompleted`。完成日志会记录 requested/persisted value、verified/failed target count、settings save 和 enable rollback 结果。排查“设置显示关闭但注册表仍 Access Denied”时，应同时检查 `backend-protection-settings.json` 与 HKLM/HKU target 的实际 DACL；不能把一次 `SetAccessControl` 无异常当成成功。
-
-当前切换只有在所有 applicable target fresh read-back 验证成功后才提交设置。禁用部分失败时 authoritative value 仍为 true，但已经成功解锁的 root 保持解锁，用户应修复失败 target 后重试；不要手工把设置 JSON 改成 false。启用部分失败会恢复本次新增语义；若日志显示 rollback failure，说明可能存在 degraded ACL state，需要按日志中的具体 hive/path 检查。设置页“重置软件设置”若无法完整禁用保护会显示失败，不再吞掉错误或报告全部重置成功。
-
-### Protected Windows ShellVerb access denied
-
-For a classic machine ShellVerb that immediately returns its switch to the old state, first inspect `backend.log` for the specific `SetEnabled` request, physical `BackendRegistryPath`, and exception/error code. A frontend rollback alone does not prove Windows restored a value. Confirm whether the item is the machine `HKLM\SOFTWARE\Classes` registration or a frontend-user `HKEY_USERS\<SID>\Software\Classes` registration.
-
-When a machine key denies the ordinary LocalSystem write, the backend records `ProtectedShellVerbFallbackStarted` and uses the controlled fallback documented in `registry-model.md`. It records either `ProtectedShellVerbFallbackSucceeded` or a structured protected-mutation/security-restoration error. User-hive keys do not use this fallback. ContextMenuMgr Registry Write Protection blocks the operation before this flow and must not be confused with Windows ACL/TrustedInstaller protection.
-
-For v1.7.6 classic mutations, correlate `ClassicMutationStarted` and `ClassicMutationCompleted` by `TransactionId`. `REGISTRY_MUTATION_ROLLED_BACK` means a later verification/state-save/cancellation failure occurred but the exact pre-write value was restored and verified. `REGISTRY_MUTATION_ROLLBACK_CONFLICT` means the target changed after ContextMenuMgrPlus wrote it, so conservative rollback left the newer external value untouched. `FILE_TYPE_ACTIVATION_VERB_PROTECTED` is a pre-write refusal for an effective file-association `open` verb, not a registry permission failure. `SHELL_VERB_VISIBILITY_PROVENANCE_MISSING` means the hidden metadata is not known to be owned by ContextMenuMgrPlus and was therefore not deleted.
-
-### Issue #140 / v1.7.10: protected mutation token access
-
-Verified evidence from the report: on 2026-10-21 at 10:37:18 and 10:38:20, `ApplyDecision/Deny` for `HKLM\SOFTWARE\Classes\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\shell\深度清理垃圾` failed during `OpenProcessToken(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)` with Win32 error 5, before the protected write. `MutationApplied=False` and `StateSaveSucceeded=False`. This proves failure to acquire token-object access; it does not prove a missing privilege. [OpenProcessToken](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken) checks requested access against the token DACL; [AdjustTokenPrivileges](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges) reports absent privileges separately with 1300. Other successful writes did not exercise this path, and frontend elevation has not been verified on this identical target.
-
-Trace: `NamedPipeBackendServer.HandleApplyDecisionAsync` → authenticated pipe user resolution → catalog persistent-state gate → `ApplyDecisionCoreAsync` snapshot → `ApplyDesiredStateCoreAsync(false)` → ShellVerb visibility transaction → ordinary write denied → `ProtectedRegistryMutation.Execute`. State/provenance commit follows fresh physical and logical verification; failed mutation leaves pending approval unresolved. `BackendUserContextResolver` uses a synchronous `RunAsClient` callback. Issue #141 subsequently reproduced a managed-token flow leak when that callback read `WindowsIdentity.Name`: native `finally` reverted the thread immediately but did not clear the AsyncLocal token used on a later await. The callback now captures only SID and resolves display name after native impersonation ends; see the #141 section below. This does not establish why the #140 primary-token open itself failed. Service creation uses SCM's default LocalSystem account; existing-registration repair changes the binary/startup/recovery configuration, not the existing account or RequiredPrivileges. The code does not configure token DACLs or a required-privilege allowlist. Deployed SCM/security configuration must be inspected separately.
-
-Verified implementation defects: the old scope unnecessarily required adjusting the primary token and temporarily changed shared process-wide privilege state. Overlapping scopes could restore stale states; a failed restore or partially successful adjustment was not fully verified. The replacement duplicates the service token while unimpersonated and enables/checks both privileges only on its disposable copy. The process token is never adjusted. Descriptor restoration also explicitly limits dirty sections to Owner/Group/Access: the default All overload would mark an uncaptured audit SACL for writing and request unrelated audit-security access. A child-testhost token DACL can reproduce native error 5 for the old Adjust/Query open while allowing the new Query/Duplicate acquisition. This is a controlled reproduction of one cause, not proof of the affected machine's token DACL.
-
-**Current evidence is insufficient to determine the root cause.** Specifically, why that machine denied primary-token access is still unknown: effective thread identity, actual service account, primary-token DACL/restrictions, SCM privilege configuration and endpoint-security events at the two timestamps are not in the supplied evidence. Missing privileges cannot explain an earlier `OpenProcessToken` failure by themselves. Do not change account policies, RequiredPrivileges, security-software settings or frontend elevation to guess at a solution.
-
-Minimal deployed-service diagnostic procedure (use a disposable VM for fixture/ACL tests):
-
-1. Record `sc.exe qc ContextMenuManagerPlusService`, `sc.exe qprivs ContextMenuManagerPlusService`, `sc.exe qsidtype ContextMenuManagerPlusService`, service PID and actual executable version/path. Confirm the running process is LocalSystem; do not infer identity solely from the service name. No configuration changes are needed for collection.
-2. Reproduce once with the ordinary frontend on the same selected physical entry. Correlate the request/transaction ids and `ProtectedShellVerbFallbackStarted`. Record `IncomingContext`/`ServiceContext` (PID, native thread id, IsSystem, impersonation flag/level), phase, native error and restoration outcome. No raw token, credential, SID/name, or binary security-descriptor dump is added by these diagnostics.
-3. `Phase=OpenProcessToken` means Query/Duplicate acquisition failed; `DuplicateServiceToken`, `AttachServiceToken`, or `OpenPrivateThreadToken` distinguish later token-access failures. `EnablePrivilege/PrivilegeAbsent` with 1300 means the named privilege is absent/removed. `EnableFailed` preserves the actual API error; `VerifyPrivilege/PrivilegeNotEnabled` means enabling was not verified. `TakeOwnership`/`GrantValueAccess` are registry-security phases, not token acquisition. `RegistrySecurityRestore` always remains a failure even if value rollback succeeds. Registry failures also include HRESULT and the original exception; do not reinterpret a non-Win32 HRESULT as native error 5.
-4. If token access still fails, use a service-context debugger/read-only diagnostic to compare Query (0x8), Query/Duplicate (0xA), and Query/Adjust (0x28) opens while unimpersonated. Record only success/native error and privilege present/enabled booleans, not raw tokens or security data. Compare token-object access restrictions and read-only SCM RequiredPrivileges inspection with endpoint-security/audit events at the failure time. This distinguishes primary-token access from absent privileges without enabling anything on it.
-5. Verify the exact physical value, owner/group/DACL before/after, fresh snapshot, pending flag, persisted desired state and restart persistence. Do not use a successful request/log or elevated frontend alone as proof. On a failed mutation, pending must remain unresolved. If descriptor restoration is uncertain, retain the failure/logs for targeted investigation instead of repeating writes blindly.
-
-Regression execution: `dotnet test ContextMenuMgr.Tests/ContextMenuMgr.Tests.csproj --filter FullyQualifiedName~ProtectedRegistry` runs disposable HKU decision fixtures and isolated child-token failures under ordinary permissions. The child tests change only their own token objects/default DACL, and the token disappears when the child exits. `ConcurrentAndFailedScopes_LeaveProcessAndCallerTokensUntouched` requires ownership/restore privileges and otherwise explicitly skips. `ProtectedFallback_PreservesSecurityAndRollbackProvenance` is tagged `Category=LocalSystem`, explicitly skips outside LocalSystem, and uses only a GUID-named `HKLM\SOFTWARE\Classes\ContextMenuMgr.Tests.*` tree with a retained cleanup handle. Run these in an explicitly launched disposable LocalSystem testhost/VM; never change the installed service's privileges to make tests pass. Privileged runs cover disabled privileges, failure after acquiring the first privilege, overlapping scopes, exact descriptors, post-write verification failure, rollback denial and external value/ACL conflicts. The ordinary full suite retains real registry transaction/rollback and state-save failure tests.
-
-The actual SCM/Pipe scenario is a separate manual acceptance check: deploy v1.7.10 in a VM, connect an unelevated frontend, submit a pending Deny against a disposable protected ShellVerb fixture, and verify physical state/security, persisted provenance and approval UI after refresh/restart. Repeat using two client connections and a failed write; confirm authenticated user/hive isolation and no residual enabled process privileges. No test installs/reconfigures a service or modifies a real Windows shell entry. A valid privilege whose enabling API is independently blocked by endpoint security still requires that deployed environment; local tests do not fabricate such a failure or prove the reported machine fixed.
-
-## 第三方软件 / 驱动安装异常的归因原则
-
-不要默认把第三方软件、驱动或安装器异常归因到本项目。先确认 Registry Write Protection 或 ShellNew ACL Lock 是否开启，再找对应时间点的 `backend.log` / `frontend-debug.log`，并确认目标注册表路径是否属于本项目保护范围。没有 Access Denied、UnauthorizedAccessException、项目日志或注册表路径证据时，不要下结论。必要时可以关闭相关保护或停止服务做 A/B 验证，详细流程见 [AI 与维护者接手 Playbook](./ai-maintainer-playbook.md)。
-
-## 11. 重启 Explorer 没有效果
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 点击 Restart Explorer 后当前桌面未刷新。 |
-| 可能原因 | SessionId 错误、杀到了其他用户或服务 Session 的 explorer、Explorer 自动重启失败。 |
-| 优先查看的代码 | `BackendRuntime.cs`、`NamedPipeBackendServer.cs`、前端触发重启的 ViewModel。 |
-| 优先查看的日志 | `frontend-debug.log`、`backend.log`。 |
-| 常见修复方向 | 确认请求携带正确前端 SessionId；不要杀所有 `explorer.exe`；这不是注册表写入链路。 |
-
-## 12. ProbeHost 缺失或未构建
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | Deep Analysis 返回 `MissingX86ProbeHost`、`MissingX64ProbeHost`、`MissingArm64ProbeHost` 或 `ProbeHostNotFound`。 |
-| 可能原因 | native ProbeHost 未构建或未复制到 `ProbeHost\<arch>`；本机缺少 Visual Studio Build Tools C++ workload、Windows SDK 或 ARM64 工具链。 |
-| 优先查看的代码 | `ContextMenuDeepAnalysisService.cs`、`ContextMenuMgr.Frontend.csproj`。 |
-| 优先查看的日志 | `frontend-debug.log`、Deep Analysis 诊断详情。 |
-| 常见修复方向 | 重新构建前端；检查 `ProbeHost\<arch>\ContextMenuMgr.ProbeHost.exe`；检查 `ThirdPartyNotices\nlohmann-json-LICENSE.MIT`；确认 C++ toolchain 可用。 |
-
-## 13. ProbeHost 架构不匹配
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 返回 `ProbeHostExecutableArchitectureMismatch` 或 `ArchitectureMismatch`。 |
-| 可能原因 | 目录里的 exe 架构错、目标 handler DLL 架构和 ProbeHost 不一致、发布包缺少目标架构。 |
-| 优先查看的代码 | `ContextMenuDeepAnalysisService.SelectProbeHost`、`PeMachineTypeDetector`、`Scripts/Verify-ProbeHostArchitecture.ps1`。 |
-| 优先查看的日志 | `frontend-debug.log`、Deep Analysis 诊断详情。 |
-| 常见修复方向 | 运行架构验证；检查 `ProbeHost\x86`、`x64`、`arm64`；Release 包按 `Get-ProbeHostArchitectureMap` 携带架构。 |
-
-## 14. Deep Analysis 分析失败
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 返回 `CoCreateHandlerFailed`、`ShellExtInitNotSupported`、`IContextMenuNotSupported`、`QueryContextMenuFailed`、`Timeout` 或 native crash。 |
-| 可能原因 | 第三方 handler 不支持探测场景、依赖 Explorer 环境、崩溃、卡死或架构不匹配。 |
-| 优先查看的代码 | `ContextMenuDeepAnalysisService.cs`、`ContextMenuMgr.ProbeHost/src`、`ContextMenuDeepAnalysisWindowViewModel.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`、ProbeHost stderr / result diagnostics。 |
-| 常见修复方向 | 把失败视为 Deep Analysis 限制；不要影响普通菜单开关；必要时尝试 `WholeContextMenu` 但不要混淆结果语义。 |
-
-## 15. 全局搜索搜得到但不跳转
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | AutoSuggestBox 有结果，回车或点击后页面未切换。 |
-| 可能原因 | 导航目标 key 错误、搜索结果类型和页面不匹配、导航服务未初始化。当前候选池只覆盖传统右键菜单分类和 Win11 项，不覆盖 ShellNew / SendTo / WinX、FileTypes、OtherRules、Approvals、Settings。 |
-| 优先查看的代码 | `ContextMenuGlobalSearchService.cs`、`ShellViewModel.cs`、`GlobalSearchNavigationFilterService.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`。 |
-| 常见修复方向 | 检查搜索结果是否标记 Win11 或普通传统菜单；跳转逻辑应同时导航和传递筛选请求。 |
-
-## 16. 全局搜索跳转后目标页面没有筛选
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 搜索跳转到页面，但列表没有自动筛选到目标项。 |
-| 可能原因 | `GlobalSearchNavigationFilterService` 请求未消费、页面 ViewModel 未订阅、目标页面先后加载顺序问题；按应用管理页面还需要 pending request 携带稳定 item id，不能只依赖显示文本匹配。 |
-| 优先查看的代码 | `GlobalSearchNavigationFilterService.cs`、`CategoryPageViewModel.cs`、`ApplicationGroupsPageViewModel.cs`、`Windows11ContextMenuPageViewModel.cs`、`SpecialMenuPageViewModel.cs`。 |
-| 优先查看的日志 | `frontend-debug.log` 中 `GlobalSearchFilterApplied`。 |
-| 常见修复方向 | 确认页面初始化时消费 pending request；跳转后筛选文本应设置为目标菜单项名称或过滤文本。按应用管理页面的精确筛选应以 item id 找目标项，显示目标项所属分组（同一应用在其它场景下注册的全部菜单项），不应通过导航后滚动定位来补救。 |
-
-## 17. 主题启动时没有应用
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 设置中保存的主题没有在启动时生效。 |
-| 可能原因 | 设置文件未加载、`FrontendThemeService` 未在启动早期应用、WPF-UI `ApplicationThemeManager` 调用顺序问题。 |
-| 优先查看的代码 | `FrontendSettingsService.cs`、`FrontendThemeService.cs`、`App.Services.xaml.cs`、`SettingsPageViewModel.cs`。 |
-| 优先查看的日志 | `frontend-debug.log`。 |
-| 常见修复方向 | 检查 `RuntimePaths.SettingsPath` 当前指向的 `frontend-settings.json`；确认主题服务在窗口显示前应用设置。 |
-
-## 18. 图标 / 显示名 / DLL 路径解析不准确
-
-| 项目 | 内容 |
-| --- | --- |
-| 现象 | 菜单项名称、图标或 DLL 路径显示为推断值、空值或不准确。 |
-| 可能原因 | `MUIVerb` 资源解析失败、COM CLSID 缺少 `InprocServer32`、路径包含环境变量或命令行参数、AppxManifest 数据不完整。 |
-| 优先查看的代码 | `ContextMenuRegistryCatalog.cs`、`IconPreviewService.cs`、`Windows11ContextMenuCatalog.cs`、`ContextMenuDeepAnalysisService.cs`。 |
-| 优先查看的日志 | `backend.log`、`frontend-debug.log`。 |
-| 常见修复方向 | 把解析结果视为 best-effort；不要用显示名或图标路径作为唯一 identity；必要时用 Deep Analysis 辅助确认实际菜单文字。 |
-
-## 19. 传统 Shell Extension 开关影响了其它分类
-
-传统 Shell Extension 的普通开关只移动当前注册项：
-`ContextMenuHandlers\<name>` 与 `-ContextMenuHandlers\<name>` 之间移动。它不应写入
-`Shell Extensions\Blocked`，因为该列表按 CLSID 全局生效。排查时先检查
-`backend.log` 的 `ClassicShellExtensionMoveStarted` / `ClassicShellExtensionMoveSucceeded`，确认
-source 和 destination 均位于同一个 `HKLM\SOFTWARE\Classes` 或
-`HKEY_USERS\<frontend SID>\Software\Classes` 实例。若 active 和 disabled 键同时存在，应用会
-报告一致性问题并拒绝自动覆盖；请先安全地核对两个键的内容。
-
-全局 Blocked 值可能来自旧版应用、管理员或其它工具；它是独立的 CLSID 机制，普通经典
-ShellEx 开关不会自动删除它。升级自 1.7.2 时，如果一个启用中的经典注册项命中这个旧全局值，列表会
-显示一致性警告；如需有意更改该全局状态，请在“其他规则 / GUID 阻止”页面操作。
-`PropertySheetHandlers`（当前仅 Recycle Bin）不是 `ContextMenuHandlers` 的可替换形式，当前会作为只读
-注册项显示，不会有普通开关，也不会自动隔离或 reconciliation。
-Windows 11 packaged context-menu 项仍使用其既有的
-blocked-list 实现。
-
-## Toggle request timed out while the registry changed
-
-For issue #125, compare `FrontendRequestStarted`, `SetEnabledTimeout`, `SetEnabledOutcomeVerificationStarted`, and `SetEnabledOutcomeVerifiedApplied` / `SetEnabledOutcomeVerifiedNotApplied` / `SetEnabledOutcomeUncertain` with backend operation logs. The 20-second response timeout is not proof of mutation failure. A later `ItemStateChanged` with the same `ClientOperationId` must reach a frontend that stopped waiting; the cache removes timed-out operations. `DirectResponseWriteFailed` with `NotificationBroadcastBeforeResponseFailure=True` means the backend completed and broadcast a successful mutation before finding the request pipe closed. Check `BackendRegistryPath` and the frontend SID when comparing physical state. A slow WPS approval request may coexist on another frontend pipe connection; backend persistent-state work still runs through its catalog gate.
-
-
-路径维护：前端日志始终使用当前 `RuntimePaths.FrontendDebugLogPath` / `LogsDirectory`。未被读取的旧 LocalAppData 前端日志目录常量已删除；旧设置、状态库、保护设置及 Portable 数据的 copy-only 迁移仍保留，不删除旧用户数据。
-
-## ShellNew #141：诊断、恢复与验收
-
-已核对用户提供的 `E:\Downloads\Logs.7z`（10 月 21 日 Portable）及 `E:\Downloads\logs (1).zip`（10 月 22 日 Installer）；后者 SHA-256 与 GitHub [#141 附件及报告](https://github.com/PLFJY/ContextMenuMgr/issues/141#issuecomment-6333868603) 中的 ZIP 相同。两个不同 SID 的归档都反复记录 1314。2026-10-22 的 `backend.log` 反复记录 `ShellNewMergedClassesOpenFailed ... 1314`，两个锁请求分别在 13:50:38.851（9,962 ms）和 13:51:33.561（10,331 ms）报告成功；第二次在 13:51:33.564 随即记录响应 Pipe broken。服务启动日志确认相关进程启动为 SYSTEM，但没有失败线程的 token/权限证据。源码确认旧发现吞错后继续包扫描，锁路径仍无条件写 Classes，再改 ACL；前端超时恢复旧 Toggle。附件未记录写前/写后的 Classes，不能声称已经证明写入的确切内容、删除了哪些原始条目或哪个 Win32 API 返回了历史 1314。
-
-**Current evidence is insufficient to determine the root cause.** 此句仅指历史 1314 的确切 API/权限和每台机器的原 Classes；源码及受控实验已经确认独立的身份流动缺陷。对历史 API 原因和原值，仍需新的分阶段日志、实际 service/thread token、SCM RequiredPrivileges、同 SID 的 profile/hive 及用户备份；不能由一个合并错误码推断 SeTcb 缺失或 RunAsClient 泄漏。
-
-已复现的身份缺陷：`BackendUserContextResolver` 原先在 `NamedPipeServerStream.RunAsClient` 回调中读取 `WindowsIdentity.Name`。[.NET Name 实现](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Security.Principal.Windows/src/System/Security/Principal/WindowsIdentity.cs) 内部调用 `RunImpersonated(InvalidHandle)`，把原生 pipe token 放入外层 AsyncLocal；`RunAsClient` 的原生 RevertToSelf 只恢复当前线程，不能清除此受管理上下文。独立真实 Pipe 实验观察到回调后立即 `ifImpersonating=false`，下一次 await 后却为 true；移出 Name 读取后两处均 false。两个归档的服务 OnStop 也记录交互用户身份，退出 ServiceBase.Run 后恢复 SYSTEM，与此缺陷一致，但不是发生 1314 那个 API 调用点的 token 证据。
-
-当前回调只捕获 token SID，退出原生模拟后才通过该 SID 解析显示名；认证 SID、session 解析和身份验证不变，不启用权限。永久真实 Pipe 回归检查新 resolver 在 await 前后的 thread token；临时旧回调复现程序已删除。ShellNew 的 WTS 获取另在同步 service scope 内执行并记录 incoming/process context。这修复了可复现的 token-context 缺陷，仍需受影响服务的分阶段日志确认历史错误 API，不能声称所有 1314 环境均已解决。
-
-当前失败路径会停止权威扫描，不返回空/部分/packaged-only 成功结果，也不会解锁或写排序。锁定/移动不再扫描包清单；这样避免在 merged HKCR 已失败后仍花时间扫描包。旧时间线中耗时约 10 秒的具体阶段仍缺少计时证据，不能仅由总耗时认定是某个包。新 `ShellNewDiscoveryStageStarted` / `ShellNewDiscoveryTiming` / `ShellNewDiscoverySlowCandidate` / `ShellNewApiTiming` 分别标出根获取、WTS、RegOpen、经典扫描、慢扩展名与包清单。每轮 8 秒协作预算，扫描 single-flight；同步 Windows API 内部可能不能被取消，正在阻塞的扫描仍会拒绝新扫描，不堆积重复工作。
-
-诊断时开启 Information，收集活动和归档日志。`ShellNewMergedClassesOpenFailed` 的 Stage 明确区分 SessionValidation、WTSQueryUserToken、TokenValidation、ProfileAvailability 和 RegOpenUserClassesRoot；原生错误与 managed HRESULT 不混用。失败记录同时包含 process identity、incoming thread identity、SeTcb 等实际 present/enabled 权限；成功取得 token 后核对 TokenSid / ExpectedSid、TokenSession / ExpectedSession、profile 目录和 HKU hive。WTS 在恢复即退出的 service scope 调用，不调整权限。当前交互用户测试进程原生复现 WTS 的 1314，并不证明受影响 SYSTEM 服务的同一原因。[WTS 文档](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken) 要求 LocalSystem + SeTcb；[RegOpenUserClassesRoot 文档](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenuserclassesroot) 要求匹配的 token 和已加载 profile。按只读方式采集 `sc.exe qc` / `sc.exe qprivs` / 实际 PID 路径，不修改 SCM 配置或全局启用权限来猜测修复。
-
-安全恢复流程：
-
-1. 暂停反复点击锁/刷新。以受影响的交互用户确认 SID，导出当前 `HKEY_USERS\<SID>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew`，另保存 Owner/Group/DACL（`.reg` 不包含 ACL），记录 Classes 是否存在、类型、完整内容和时间。不要使用 SYSTEM HKCU，也不要导入另一个用户/机器的备份。
-2. 新版本独立读锁如果确认 Locked，即使列表发现失败仍可请求单独解锁；它只移除精确的历史/窄规则，不写 Classes。读锁 Unknown 或未知/损坏 ACL 导致拒绝时，先保留证据，再由管理员使用已核实的外部解锁机制。报告者称 BluePointLilac/ContextMenuManager 的关闭“锁定并排序”恢复了其 Explorer 菜单；这是一台机器的观察，不保证恢复所有机器的历史自定义排序。操作前后必须核对 ACL、值及真实 Explorer 菜单，不能自动套用替换 DACL/接管所有权脚本。
-3. 如果有同一 Windows 安装、同一 SID、故障前的可信注册表备份，解锁并排除并发写入后，仅恢复经过核对的 Classes 原始类型/数据（或备份明确证明的原不存在状态）；不要整体导入可能覆盖其它设置的无关备份。恢复后重新打开物理 key，核对值及 Owner/Group/DACL，再在当前用户桌面检查实际“新建”菜单；必要时通过现有用户 Session 的重启 Explorer 操作刷新。
-4. 没有原始备份时，无法从日志、当前不完整扫描、已安装软件或 packaged 声明可靠重建原 Classes。不要猜测排序、写空列表、删除 Classes 强制重建，或改 ShellNew 注册、文件关联、ProgID、UserChoice。可以仅验证外部解锁后 Explorer 是否自行恢复展示；仍缺项时继续收集物理注册/备份证据。卸载或停止服务不会自动恢复已经存在的 ACL/历史排序。
-
-Windows 验收（尚须在受影响配置执行）：
-
-| 配置 | 必须观察 |
-| --- | --- |
-| Windows 11 24H2 Installer / Portable | 标准前端 + 真实 LocalSystem 服务，经典和包提供项共存；新建列表、启用/解锁、上下移动及实际 Explorer New 菜单。 |
-| Windows 11 26H2 Installer / Portable | 同上，并复现原报告中加载失败→点击锁→超时的时序；确认失败时 Classes 与 ACL 无变化，超时后 Toggle 最终来自独立读锁。 |
-| 两个不同 SID / Session、含 RDP | 各自 HKU 与 merged HKCR 隔离，错 SID/Session、profile/hive 不可用时失败；绝不 fallback 到另一个登录用户或 SYSTEM。 |
-| 故障与并发 | 在隔离 VM 用临时扩展名/测试键验证逐键拒绝读取、RegOpen 失败、成功零经典项和 packaged-only。对非空/异型/含未知 Classes 均确认无丢失。用断点/外部写入验证解锁后写失败、最后加锁失败及回滚前 Classes/ACL 改变；外部值/ACE 保留，rollback uncertain 有明确错误。 |
-| 取消 / Pipe 断开 / 重启 | 最终 mutation 边界前取消无更改；边界后的取消或断 Pipe 不打断同步提交/回滚。快速重复 Toggle、两个前端并发请求不能排队留下迟到写入。正常 SCM stop 等待现有 mutation；重新启动后读实际 ACL/Classes。硬杀进程/断电没有持久回放保证，应人工检查中间状态。 |
-
-每次验收分别记录 request outcome、原始/最终物理 Classes 和类型、ACL、fresh query、前端三态与真实 Explorer 菜单。日志成功、编译或隔离键测试不能代替菜单可见性。值/ACL 比较不是原子 CAS，Windows 比较与写入之间仍有竞态窗口；不能承诺排除所有外部修改，也不能承诺硬崩溃后的自动恢复。
-
-自动回归保留原生 WTS 获取失败/无效 Session 与 fail-closed snapshot、隔离 HKCU 的类型/未知项保留、精确 ACL 循环、解锁后的拒写回滚、捕获后的外部值/ACL 冲突和取消；Dispatcher 下的迟到/丢失响应测试验证 Unknown 及重复点击保护。单独 RegOpen 失败、完整逐键部分读取、真实 Pipe/SCM 和中途外部回滚冲突仍属于上述 VM 验收，不把合成输入测试当作端到端验证。原生 Pipe 回归只检查身份边界，不启动服务或改变 SCM；完整部署仍须按表验收。
-
-本次执行验证：`dotnet build ContextMenuMgr.Frontend/ContextMenuMgr.Frontend.csproj --no-restore -v minimal` 成功，0 warnings / 0 errors，Debug ProbeHost x86/x64 架构检查通过。完整回归 `dotnet test ContextMenuMgr.Tests/ContextMenuMgr.Tests.csproj --no-restore -v minimal` 为 368 passed / 3 skipped（共 371）；skip 为独立子进程入口及需要额外权限/LocalSystem 的既有测试。最终 ShellNew 专项为 28 passed / 0 skipped，包含未知 UI 状态禁止再次写入的最终保护。未执行受影响 24H2/26H2 的真实 Explorer/Installer/Portable/SCM 验收。
-
-## Win11 禁用后其他菜单一起消失（#114）
-
-开关慢时先用同一 OperationId / CorrelationId 对比 BackendOperationStart、Win11TogglePlan、Win11BlockedPhysicalVerified、Win11ToggleCompleted、BackendOperationEnd：区分排队/发现、物理写入、回读/状态保存。已有 baseline 时不应再因 Win11 手动开关扫描全部经典菜单；最近声明元数据可复用，blocked 状态必须重新读。成功响应 Items 完整时前端不再追加 GetWin11ContextMenuSnapshot；超时/失败/缺少目标时查询属于结果核对，不能自动重发开关。冷启动、首次 baseline、缓存到期和后台持久 gate 竞争仍可能增加延迟，不能把单独读值计时当作端到端切换耗时。
-
-Current evidence is insufficient to determine the root cause. 尚缺受影响机器的 OS build、目标 Package/CLSID、同时刻日志和固定上下文 A/B 证据。一次注册表回读不证明 Explorer 所有新旧菜单均正常。
-
-用户恢复通过页面开启应用，由软件自动备份并清理所选菜单的旧 Blocked 值与重复别名；机器级关闭会说明所有用户影响并确认。无需用户手改注册表或停止服务。页面不展示开发诊断、不因无关 package 扫描不完整锁死开关；可确认的异常在操作中处理，真正失败提供普通语言说明与刷新。旧服务拒绝新应用命令时，在设置中修复服务后重试，没有部分执行的旧协议 fallback。
-
-维护者查看 backend.log 中 Win11TogglePlan、Win11ApplicationMutationPlan、Win11BlockedMutationPlan、Win11BlockedReadBack、Win11BlockedPhysicalVerified、失败/回滚结果，核对 SID、应用实际所有目标、原值及状态库 Windows11BlockBackups。日志 ExplorerValidated=False 仍表示未完成真实 Shell 验证。共享引用可能影响多个应用，不能仅凭存在同 CLSID 确认 #114 根因。受控验收见 [Win11 文档](./windows11-context-menu.md)。
+修改错误码、日志关键事件或恢复入口时更新对应主文档和本页诊断路由；不在此再次复制完整事务/状态机。
