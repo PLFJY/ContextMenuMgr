@@ -103,8 +103,9 @@
                                     </DockPanel>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <ui:Button Margin="0,0,14,0" Padding="6" Appearance="Transparent"
+                                    <ui:Button Margin="0,0,14,0" Padding="10,6" Appearance="Transparent"
                                                Command="{Binding EditUserNoteCommand}" ToolTip="{Binding EditUserNoteLabel}"
+                                               Content="{Binding EditUserNoteLabel}"
                                                AutomationProperties.Name="{Binding EditUserNoteLabel}"
                                                Icon="{ui:SymbolIcon Symbol=Edit24}" />
                                     <Grid>
