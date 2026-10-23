@@ -2,6 +2,7 @@
     x:Class="ContextMenuMgr.Frontend.Views.ContextMenuDeepAnalysisWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
     Title="{Binding Title}"
@@ -58,7 +59,7 @@
             Grid.Row="0"
             Title="{Binding Title}" />
 
-        <ScrollViewer PanningMode="VerticalOnly" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <modernScroll:ModernScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="18">
                 <TextBlock
                     FontSize="22"
@@ -239,6 +240,6 @@
                     </StackPanel>
                 </StackPanel>
             </StackPanel>
-        </ScrollViewer>
+        </modernScroll:ModernScrollViewer>
     </Grid>
 </ui:FluentWindow>

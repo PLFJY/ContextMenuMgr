@@ -34,7 +34,7 @@ internal static class WheelScrollPolicy
     }
 }
 
-/// <summary>Small deltas or events <=40ms apart form a continuous stream until a 120ms pause.</summary>
+/// <summary>Fractional notches identify a continuous stream until a 120ms pause.</summary>
 internal sealed class WheelInputSequence
 {
     private int? _lastTimestamp;
@@ -49,8 +49,10 @@ internal sealed class WheelInputSequence
 
         // Unsigned subtraction also handles WPF's signed tick-count wraparound.
         var elapsed = _lastTimestamp is int previous ? unchecked((uint)(timestamp - previous)) : uint.MaxValue;
+        // Timing alone cannot distinguish a touchpad from a quickly turned mouse wheel.
+        // Keep full-notch bursts on the longer ease-out path unless fractional input
+        // has already identified the current stream as high resolution.
         _continuous = delta % WheelScrollPolicy.WheelDeltaPerNotch != 0
-            || elapsed <= 40
             || (_continuous && elapsed <= 120);
         _lastTimestamp = timestamp;
         return _continuous;

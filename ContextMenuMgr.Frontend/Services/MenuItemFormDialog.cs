@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using ContextMenuMgr.Frontend.Controls.Modern.Scrolling;
 using Wpf.Ui.Controls;
 
 namespace ContextMenuMgr.Frontend.Services;
@@ -312,7 +313,7 @@ public class MenuItemFormDialog
             };
             root.Children.Add(titleBar);
 
-            var scrollViewer = new System.Windows.Controls.ScrollViewer
+            var scrollViewer = new ModernScrollViewer
             {
                 VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
                 Content = mainPanel
@@ -578,7 +579,7 @@ public class MenuItemFormDialog
             };
             root.Children.Add(titleBar);
 
-            var scrollViewer = new System.Windows.Controls.ScrollViewer
+            var scrollViewer = new ModernScrollViewer
             {
                 VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
                 Content = mainPanel

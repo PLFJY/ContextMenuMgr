@@ -2,6 +2,7 @@
     x:Class="ContextMenuMgr.Frontend.DebugToolsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Width="460"
@@ -68,7 +69,7 @@
             </StackPanel>
         </Grid>
 
-        <ScrollViewer PanningMode="VerticalOnly" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <modernScroll:ModernScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="16">
                 <Border Style="{StaticResource CardBorderStyle}">
                     <StackPanel>
@@ -87,6 +88,6 @@
                 </Border>
 
             </StackPanel>
-        </ScrollViewer>
+        </modernScroll:ModernScrollViewer>
     </Grid>
 </ui:FluentWindow>

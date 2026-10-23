@@ -182,13 +182,17 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 ### 7.1 三种输入路径（#131）
 
-- **触摸屏**：`ModernScrollViewer` 通过 `PanningModeProperty.OverrideMetadata` 默认使用 `VerticalOnly`，仍允许 Style / XAML 覆盖。模板列表使用共用 `ModernScrollableListBoxStyle` 设置 `ScrollViewer.PanningMode="VerticalOnly"`；独立窗口的普通 ScrollViewer 显式设置同一属性。保留 WPF 自带的手势阈值、触摸提升、惯性、`PanningRatio` 和 `PanningDeceleration`，不添加 TouchMove、不把手指移动变成滚轮事件。原生 manipulation 开始时只取消旧滚轮动画，不修改事件 Handled。
-- **Precision Touchpad / 高分辨率滚轮流**：保留 `Delta / 120.0` 的小数，不把小 delta 当一整格。非 120 整数倍 delta，或相邻事件间隔不超过 40ms 时，进入连续模式；连续模式在间隔超过 120ms 后退出。时间使用 WPF event timestamp，处理 signed tick wrap。该规则只描述输入流，不检测设备厂商；快速普通滚轮也可能进入连续模式。连续模式的未完成目标最多领先实际 viewport 一格配置距离，动画时长不超过 60ms。
-- **普通离散鼠标滚轮**：保留默认 220ms EaseOut 和可配置 multiplier / duration / easing。同向 pending movement 可以累加，但最多领先三格配置距离；一般也不超过一屏（至少保留系统配置的一格距离）。反向输入舍弃旧方向 pending target，直接从可见 offset 反向。动画目标相同时不重新启动计时，结束/卸载后解除 Rendering handler；计时使用单调 Stopwatch。
+- **触摸屏**：`ModernScrollViewer` 通过 `PanningModeProperty.OverrideMetadata` 默认使用 `VerticalOnly`，仍允许 Style / XAML 覆盖。模板列表使用共用 `ModernScrollableListBoxStyle` 设置 `ScrollViewer.PanningMode="VerticalOnly"`。保留 WPF 自带的手势阈值、触摸提升、惯性、`PanningRatio` 和 `PanningDeceleration`，不添加 TouchMove、不把手指移动变成滚轮事件。原生 manipulation 开始时只取消旧滚轮动画，不修改事件 Handled。
+- **Precision Touchpad / 高分辨率滚轮流**：保留 `Delta / 120.0` 的小数，不把小 delta 当一整格。只有观察到非 120 整数倍 delta 才进入连续模式；同一流中的整数刻度也沿用连续模式，直到相邻非零事件间隔超过 120ms。时间使用 WPF event timestamp，处理 signed tick wrap。连续模式的未完成目标最多领先实际 viewport 一格配置距离，动画时长不超过 60ms。该规则依据输入形状而非设备识别；只发送完整刻度的触摸板也会使用普通滚轮路径，需实际设备验证。
+- **普通离散鼠标滚轮**：完整的 ±120 或其整数倍输入，即使事件密集，也保留默认 220ms EaseOut 和可配置 multiplier / duration / easing。同向 pending movement 可以累加，但最多领先三格配置距离；一般也不超过一屏（至少保留系统配置的一格距离）。停止输入后继续完成剩余的缓出动画，不额外生成滚动距离。反向输入舍弃旧方向 pending target，直接从可见 offset 反向。动画目标相同时不重新启动计时，结束/卸载后解除 Rendering handler；计时使用单调 Stopwatch。
+
+曾经仅因事件间隔不超过 40ms 就进入连续模式，导致快速普通鼠标滚轮同样被限制到 60ms / 一格 lead：松开后几乎立刻停下，密集输入的待滚动距离也更早被截断。当前移除这一时间单独触发条件；不通过全局增加动画时长、取消目标上限或修改触屏原生惯性来补偿。
 
 一格距离使用 Windows `SystemParameters.WheelScrollLines`：正数按现有 16 DIP/line 换算，0 表示不滚动，`WHEEL_PAGESCROLL` 在 WPF int API 中为 -1，按 `ViewportHeight` 换算。page-scroll 模式的 lead 上限为一格屏幕距离，multiplier 仍生效。全部目标同时限制在 `[0, ScrollableHeight]`。`ClientAreaAnimation` 关闭、render tier 0 或 duration 0 时仍走已有立即偏移 fallback；`IsSmoothScrollingEnabled=False` 保留原生滚轮处理并取消旧动画。Ctrl / Shift 输入不被自定义滚轮路径接管。
 
 左侧导航 `PART_MenuList`、`ModernNavigationSelector`、Category / Win11 / Approvals 列表使用同一 opt-in Style。它设置 `VirtualizingPanel.ScrollUnit="Pixel"`，保留 `CanContentScroll=True` 与虚拟化，**不**全局改成 CanContentScroll=False。`ModernListScroll` 沿事件来源的 ancestor path 找到该列表模板中的 ScrollViewer，共用有界策略，不在每个滚轮事件扫描整棵视觉树，也不缓存过期模板的 viewer。File Types 的 Scene / 批量管理和 Other Rules 详情 / SpecialMenu 已使用 ModernScrollViewer，无需改页面结构。
+
+所有应用显式创建的滚动容器统一使用 `ModernScrollViewer`，包括 `DetailedEditMenuWindow`、`ShellSubMenuWindow`、`ContextMenuDeepAnalysisWindow`、Debug 专用 `DebugToolsWindow`，以及 `MenuItemFormDialog` 的菜单项和 ShellNew 表单。新增 XAML 或代码创建的滚动容器也须复用该控件，自动沿用平滑滚轮、触摸 panning 和卸载时取消动画的行为；列表模板继续复用上述 Style，不额外包装滚动容器。TextBox、ComboBox、TreeView 等控件内部模板保留原有编辑、选择和弹出层行为。
 
 ### 7.2 内外层 ownership 与 Popup
 
@@ -198,7 +202,7 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 
 ### 7.3 验证 #131（硬件验证待执行）
 
-自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。导航模板、panning、虚拟化及嵌套路由直接按下表进行人工验证；不保留一次性 STA 模板实验。
+自动测试：`WheelScrollPolicyTests` 覆盖 ±120、小 delta、密集完整刻度保持离散路径及三格 lead、长期同向输入的 lead 上限、方向反转、0/ScrollableHeight 边界、multiplier、zero delta、line/page/zero Windows 设置、连续模式 pause/reset/timestamp wrap。导航模板、panning、虚拟化及嵌套路由直接按下表进行人工验证；不保留一次性 STA 模板实验。
 
 在 Windows 11 25H2 笔记本上，用 Precision Touchpad、触摸屏（如有）和普通鼠标分别执行以下步骤，并记录 OS、缩放比例、Windows wheel lines/page 设置与结果。自动测试通过不能替代这层验证。
 
@@ -208,6 +212,8 @@ SpecialMenuPageView    : Page         // 导航页 wrapper
 | File Types | 各 Scene tab 的列表及隐藏批量管理视图分别执行三种输入；反向、顶部/底部、刷新后滚动和返回。内层有空间时外层不动；在存在可滚动外层的嵌套区域检查边界交接无重复跳动。 |
 | Other Rules | Enhance / Detailed Edit 左侧 selector 与右侧详情、复用 SpecialMenuContentView、CommandStore / GuidBlock / DragDrop 分别执行三种输入；触摸轻点 ToggleSwitch / Button 与滑动必须区分。 |
 | 普通导航页 | 使用 ModernFrame.ContentScrollHost 的 Settings / Application Groups 等页面验证离散 ±120 和多格滚轮平滑、切页 reset；Category / Win11 / Approvals 验证模板列表与大列表虚拟化布局。 |
+| 普通鼠标连续滚轮 | 在列表中部慢转、快转后松开，均应有短暂自然缓出；快速转动不能突然切为急停。立即反向应响应新方向；到边界、切页或关闭窗口应停止。只发送整数刻度的触摸板也须检查抬指后没有明显长距离追赶。 |
+| 独立窗口与表单 | 缩小详细编辑、级联子菜单、深入分析、菜单项 / ShellNew 表单窗口和 Debug 工具窗口，使内容溢出；分别验证滚轮、触摸板、触摸滑动、滚动条拖动及关闭时停止动画。表单输入、文本选择、下拉选择、树节点展开及按钮操作应正常。 |
 | 嵌套触摸 | 在内层开始单指滑动，父层不能提前抢走；抵达边界后检查原生 WPF panning / boundary feedback 的实际交接表现（含新手势和惯性）。 |
 | 可交互内容 | TextBox caret、选择文本、Button / AsyncToggleSwitch 点击与触摸轻点正常；水平拖动不滚动竖直内容；已打开 ComboBox 下拉、ContextMenu、带滚动内容 flyout 只操作自身，底层页面不滚动。 |
 | 设置与 fallback | wheel lines=1/3、one screen at a time、Ctrl / Shift；关闭 Windows client-area animations、duration=0 / disabled smooth mode 时检查既有 fallback。滚动中切页/关闭窗口后不能继续滚动或保留动画。 |

@@ -79,26 +79,52 @@ public sealed class WheelScrollPolicyTests
     }
 
     [Fact]
-    public void ClassificationUsesDeltasAndTimingWithPauseAndReset()
+    public void FractionalStreamIncludesWholeNotchesUntilPauseOrReset()
     {
         var sequence = new WheelInputSequence();
         Assert.False(sequence.Observe(-120, 100));
         Assert.False(sequence.Observe(-120, 300));
-        Assert.True(sequence.Observe(-120, 330));
-        Assert.True(sequence.Observe(120, 420));
+        Assert.False(sequence.Observe(-120, 330));
+        Assert.False(sequence.Observe(120, 420));
         Assert.False(sequence.Observe(120, 600));
         Assert.True(sequence.Observe(-1, 800));
         Assert.True(sequence.Observe(-120, 890));
+        Assert.True(sequence.Observe(120, 1010));
+        Assert.False(sequence.Observe(120, 1131));
+        Assert.True(sequence.Observe(-30, 1200));
         sequence.Reset();
-        Assert.False(sequence.Observe(-120, 900));
+        Assert.False(sequence.Observe(-120, 1210));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(8)]
+    [InlineData(16)]
+    [InlineData(30)]
+    [InlineData(40)]
+    public void FastWholeNotchesRetainDiscretePendingMovement(int interval)
+    {
+        var sequence = new WheelInputSequence();
+        double? target = null;
+        for (var i = 0; i < 10; i++)
+        {
+            var continuous = sequence.Observe(-120, 100 + i * interval);
+            Assert.False(continuous);
+            target = Target(200, target, -120, continuous: continuous);
+        }
+
+        // Full-notch bursts may retain three notches of ease-out, rather than
+        // being cut back to the high-resolution stream's one-notch lead.
+        Assert.Equal(344, target);
     }
 
     [Fact]
     public void TimestampWrapAndZeroDeltaDoNotBreakClassification()
     {
         var sequence = new WheelInputSequence();
-        Assert.False(sequence.Observe(-120, int.MaxValue - 5));
+        Assert.True(sequence.Observe(-1, int.MaxValue - 5));
         Assert.True(sequence.Observe(-120, int.MinValue + 5));
+        Assert.False(sequence.Observe(-120, int.MinValue + 126));
         sequence.Reset();
         Assert.False(sequence.Observe(0, 20));
         Assert.False(sequence.Observe(-120, 25));
