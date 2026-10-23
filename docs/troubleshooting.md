@@ -391,3 +391,13 @@ Windows 验收（尚须在受影响配置执行）：
 自动回归保留原生 WTS 获取失败/无效 Session 与 fail-closed snapshot、隔离 HKCU 的类型/未知项保留、精确 ACL 循环、解锁后的拒写回滚、捕获后的外部值/ACL 冲突和取消；Dispatcher 下的迟到/丢失响应测试验证 Unknown 及重复点击保护。单独 RegOpen 失败、完整逐键部分读取、真实 Pipe/SCM 和中途外部回滚冲突仍属于上述 VM 验收，不把合成输入测试当作端到端验证。原生 Pipe 回归只检查身份边界，不启动服务或改变 SCM；完整部署仍须按表验收。
 
 本次执行验证：`dotnet build ContextMenuMgr.Frontend/ContextMenuMgr.Frontend.csproj --no-restore -v minimal` 成功，0 warnings / 0 errors，Debug ProbeHost x86/x64 架构检查通过。完整回归 `dotnet test ContextMenuMgr.Tests/ContextMenuMgr.Tests.csproj --no-restore -v minimal` 为 368 passed / 3 skipped（共 371）；skip 为独立子进程入口及需要额外权限/LocalSystem 的既有测试。最终 ShellNew 专项为 28 passed / 0 skipped，包含未知 UI 状态禁止再次写入的最终保护。未执行受影响 24H2/26H2 的真实 Explorer/Installer/Portable/SCM 验收。
+
+## Win11 禁用后其他菜单一起消失（#114）
+
+开关慢时先用同一 OperationId / CorrelationId 对比 BackendOperationStart、Win11TogglePlan、Win11BlockedPhysicalVerified、Win11ToggleCompleted、BackendOperationEnd：区分排队/发现、物理写入、回读/状态保存。已有 baseline 时不应再因 Win11 手动开关扫描全部经典菜单；最近声明元数据可复用，blocked 状态必须重新读。成功响应 Items 完整时前端不再追加 GetWin11ContextMenuSnapshot；超时/失败/缺少目标时查询属于结果核对，不能自动重发开关。冷启动、首次 baseline、缓存到期和后台持久 gate 竞争仍可能增加延迟，不能把单独读值计时当作端到端切换耗时。
+
+Current evidence is insufficient to determine the root cause. 尚缺受影响机器的 OS build、目标 Package/CLSID、同时刻日志和固定上下文 A/B 证据。一次注册表回读不证明 Explorer 所有新旧菜单均正常。
+
+用户恢复通过页面开启应用，由软件自动备份并清理所选菜单的旧 Blocked 值与重复别名；机器级关闭会说明所有用户影响并确认。无需用户手改注册表或停止服务。页面不展示开发诊断、不因无关 package 扫描不完整锁死开关；可确认的异常在操作中处理，真正失败提供普通语言说明与刷新。旧服务拒绝新应用命令时，在设置中修复服务后重试，没有部分执行的旧协议 fallback。
+
+维护者查看 backend.log 中 Win11TogglePlan、Win11ApplicationMutationPlan、Win11BlockedMutationPlan、Win11BlockedReadBack、Win11BlockedPhysicalVerified、失败/回滚结果，核对 SID、应用实际所有目标、原值及状态库 Windows11BlockBackups。日志 ExplorerValidated=False 仍表示未完成真实 Shell 验证。共享引用可能影响多个应用，不能仅凭存在同 CLSID 确认 #114 根因。受控验收见 [Win11 文档](./windows11-context-menu.md)。

@@ -1,4 +1,4 @@
-﻿using ContextMenuMgr.Contracts;
+using ContextMenuMgr.Contracts;
 
 namespace ContextMenuMgr.Frontend.Services;
 
@@ -134,18 +134,18 @@ public interface IBackendClient : IAsyncDisposable
 
     Task RepairRuntimeDataAclAsync(CancellationToken cancellationToken);
 
-    Task SetWin11BlockedItemAsync(
+    Task<IReadOnlyList<ContextMenuEntry>> SetWin11BlockedItemAsync(
         string handlerClsid,
         string displayName,
         bool blockMachine,
         Guid clientOperationId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken, bool applicationScope = false);
 
-    Task RemoveWin11BlockedItemAsync(
+    Task<IReadOnlyList<ContextMenuEntry>> RemoveWin11BlockedItemAsync(
         string handlerClsid,
         bool unblockMachine,
         Guid clientOperationId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken, bool applicationScope = false);
 
     Task<OpenWithAssociationInspection> InspectOpenWithSourcesAsync(string extension, CancellationToken cancellationToken);
 

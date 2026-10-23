@@ -613,29 +613,55 @@ internal sealed class RegistryValueMutationTransaction
     private RegistryValueMutationTransaction(
         string physicalRegistryPath,
         PersistedRegistryValueSnapshot before,
-        PersistedRegistryValueSnapshot written)
+        PersistedRegistryValueSnapshot written,
+        RegistryView view)
     {
+        View = view;
         PhysicalRegistryPath = physicalRegistryPath;
         _before = before;
         _written = written;
     }
 
+    public RegistryView View { get; }
     public string PhysicalRegistryPath { get; }
     public bool Applied { get; private set; }
 
     public static RegistryValueMutationTransaction Create(
         RegistryKey key,
         string physicalRegistryPath,
-        PersistedRegistryValueSnapshot written)
+        PersistedRegistryValueSnapshot written,
+        PersistedRegistryValueSnapshot? expectedBefore = null,
+        RegistryView view = RegistryView.Default)
         => new(
             physicalRegistryPath,
-            ShellVerbVisibility.CaptureValue(key, written.Name),
-            written);
+            expectedBefore ?? ShellVerbVisibility.CaptureValue(key, written.Name),
+            written, view);
 
     public void Apply(RegistryKey key)
     {
-        ShellVerbVisibility.RestoreValue(key, _written);
-        Applied = true;
+        if (!ShellVerbVisibility.ValueMatches(key, _before))
+            throw new InvalidOperationException("The registry value changed after mutation planning.");
+        try { ShellVerbVisibility.RestoreValue(key, _written); }
+        finally { Applied = ShellVerbVisibility.ValueMatches(key, _written); }
+    }
+
+    public RegistryKey? OpenKey(bool writable) => OpenKey(PhysicalRegistryPath, View, writable);
+
+    internal static RegistryKey? OpenKey(string physicalRegistryPath, RegistryView view, bool writable)
+    {
+        if (view == RegistryView.Default)
+            return ContextMenuRegistryCatalog.OpenRegistryKey(physicalRegistryPath, writable);
+        var separator = physicalRegistryPath.IndexOf('\\');
+        var hiveName = physicalRegistryPath[..separator];
+        var hive = hiveName switch
+        {
+            "HKEY_USERS" => RegistryHive.Users,
+            "HKEY_CURRENT_USER" => RegistryHive.CurrentUser,
+            "HKEY_LOCAL_MACHINE" => RegistryHive.LocalMachine,
+            _ => throw new InvalidOperationException("Unsupported registry mutation hive.")
+        };
+        using var root = RegistryKey.OpenBaseKey(hive, view);
+        return root.OpenSubKey(physicalRegistryPath[(separator + 1)..], writable);
     }
 
     public bool Verify(RegistryKey key) => ShellVerbVisibility.ValueMatches(key, _written);

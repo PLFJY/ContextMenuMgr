@@ -68,6 +68,8 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 | Restart Explorer | `ExplorerRestartService.RestartExplorer` |
 | 运行时数据目录 ACL 修复 | `RuntimeDataAclRepairService` |
 
+Win11 手动开关成功后，响应 `Items` 携带所有受影响声明在 native registry 回读且状态库提交后的投影；前端只合并这些项，超时或响应不完整才查询，不重复写入。已建立 regular baseline 后，操作仅扫描 Win11 范围，最近声明元数据按 SID 复用；缺少 baseline 时仍完整采纳常规菜单。查询、备份、写入、保存继续共用持久 gate。该优化不改变认证 SID / HKU 范围，也不要求 Explorer 重启或 SessionId；全局恢复经典菜单设置的重启语义单独保留。
+
 受保护的机器级 classic ShellVerb 仍走链路 A：先由服务对 `HKLM\SOFTWARE\Classes` 的真实 `BackendRegistryPath` 执行普通写入；仅在该写入因 Windows ACL 被拒绝、且 Registry Write Protection preflight 已通过时，才临时启用 `SeTakeOwnershipPrivilege` / `SeRestorePrivilege` 完成受控 value mutation。这个 fallback 只适用于实际机器级 Classes path，绝不用于 `HKEY_USERS\<SID>\Software\Classes`，并在写入后恢复、验证原 owner/DACL。它不是 UAC bootstrapper、ShellNew ACL lock 或通用注册表 take-ownership 机制。
 
 v1.7.10 的 fallback 通过 `ScopedRegistryPrivileges` 在同步 scope 内使用服务令牌副本：先用 `RunImpersonated(InvalidHandle)` 以进程身份打开 Query/Duplicate，再创建私有 impersonation token，在副本上启用并检查所需权限。进程令牌不申请 Adjust 权限，也不修改共享权限状态；失败或结束时丢弃副本并恢复调用前身份。仅这段已选定物理 HKLM ShellVerb 的工作使用该 scope，不改变 Pipe 认证、前端 SID、用户 hive 路径或 Session 选择。普通前端不需管理员权限。error 5 不能单独证明 privilege 缺失或 RunAsClient 泄漏，排查程序见 troubleshooting.md 的 Issue #140 段落。
@@ -283,3 +285,11 @@ ShellNew snapshot、创建/编辑、移动和锁操作仅使用认证 Pipe SID�
 WTSQueryUserToken 的 [API 要求](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken) 是 LocalSystem 和 SeTcbPrivilege；[RegOpenUserClassesRoot](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenuserclassesroot) 单独返回状态码，并要求目标 profile 已加载。失败日志区分 API 阶段、原生错误、incoming thread identity、process identity、权限 present/enabled、期望和实际 SID/SessionId 以及 profile 可用性。没有部署证据时不得将旧 1314 日志认定为模拟泄漏，不自动启用 SeTcb、不变更 SCM 权限限制或账户策略。
 
 #141 的 Pipe 身份修复适用于共用 resolver：原回调读取 WindowsIdentity.Name 会经其内部 RunImpersonated 把原生客户端 token 留在受管理 AsyncLocal，下一次 await 可再次模拟。真实 Pipe 独立实验已复现，不能仅凭 RunAsClient 的 native finally 排除。当前 callback 只读取 SID，显示名在回调外通过 SID.Translate 取得，认证和调用者授权不变，无新增权限。此必要边界修复不改变传统菜单业务行为；不能用它推断 #140 的历史主令牌 DACL 错误原因。
+
+## Win11 #114 的运行时边界
+
+Win11 专用查询/开关、GetSnapshot 和通用 SetEnabled/ApplyDecision 的 Win11 请求使用认证 Pipe SID，不 fallback 到其他登录用户。仍属链路 A，无 UAC、无第三方 DLL 加载，不需要 SessionId。用户值写入 loaded HKU/native view，绝不使用服务 HKCU。
+
+新增 SetWin11ApplicationEnabled 追加于 PipeCommand 末尾，ItemId 为某个现存声明，Enable 为应用目标状态；后台只由已验证 snapshot 解析同 family 全部目标。旧 Set/RemoveWin11BlockedItem 保持单目标，旧 CLSID 请求继续解析为当前用户声明。新命令让旧服务安全拒绝整次应用操作，前端提示修复服务，不拆成旧命令循环。没有新增权限通道。
+
+手动、审批、隔离、纠偏及 Win11 查询共用持久 gate。应用操作先保存精确恢复日志，再修改所有目标；回读/最终状态保存失败则条件回滚已完成部分。恢复用户明确选择的旧值不要求归属标记；已有外部禁用值在自动扫描/关闭时保留。机器级恢复需前端说明所有用户影响并传 UnblockMachine=true，机器级禁用仍拒绝。后台自动禁用仍受共享/不完整引用约束，手动操作不因此失去可用性。详见 [Windows 11 文档](./windows11-context-menu.md)。

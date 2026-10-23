@@ -1029,34 +1029,10 @@
     <value>Win11 新菜单</value>
   </data>
   <data name="Windows11PageDescription" xml:space="preserve">
-    <value>管理 Windows 11 新版右键菜单中的打包应用项目和 Windows 系统命令。</value>
+    <value>选择要在 Windows 11 右键菜单中显示的应用，更改后重新打开右键菜单即可。</value>
   </data>
   <data name="Windows11NoItems" xml:space="preserve">
     <value>没有找到可管理的 Win11 新菜单项目。</value>
-  </data>
-  <data name="Windows11PackageFamilyLabel" xml:space="preserve">
-    <value>包族名</value>
-  </data>
-  <data name="Windows11PublisherLabel" xml:space="preserve">
-    <value>发布者</value>
-  </data>
-  <data name="Windows11ContextTypesLabel" xml:space="preserve">
-    <value>适用场景</value>
-  </data>
-  <data name="Windows11MachineBlockedText" xml:space="preserve">
-    <value>已被系统范围阻止</value>
-  </data>
-  <data name="Windows11PackagedComSourceLabel" xml:space="preserve">
-    <value>Packaged COM</value>
-  </data>
-  <data name="Windows11SystemCommandSourceLabel" xml:space="preserve">
-    <value>系统命令 / CommandStore</value>
-  </data>
-  <data name="Windows11SystemCommandProtectedText" xml:space="preserve">
-    <value>受 Windows 保护</value>
-  </data>
-  <data name="Windows11SystemCommandGuidLockWarning" xml:space="preserve">
-    <value>不要对 Windows 11 内置命令使用 GUID Lock。阻止错误的 Explorer 命令处理器可能导致 Windows 11 新版右键菜单回退到经典菜单。</value>
   </data>
   <data name="OtherRulesPageTitle" xml:space="preserve">
     <value>其他规则</value>
@@ -1615,4 +1591,21 @@
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>打开方式监控正在等待注册表访问权限或状态存储恢复，请刷新打开方式页面核查当前状态。</value></data>
   <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>无法确认新建菜单排序锁状态。请刷新后再进行更改。</value></data>
   <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>新建菜单排序锁状态与请求不一致。请刷新并检查注册表后再重试。</value></data>
+  <data name="Windows11StateUncertain" xml:space="preserve">
+    <value>暂时无法确认更改结果，请刷新后再试。</value>
+  </data>
+  <data name="Windows11PartiallyEnabled" xml:space="preserve"><value>部分开启</value></data>
+  <data name="Windows11ChangeFailed" xml:space="preserve"><value>未能更改，请稍后重试。</value></data>
+  <data name="Windows11MenuUnavailable" xml:space="preserve"><value>Windows 暂不支持更改此项。</value></data>
+  <data name="Windows11RestoreAllUsersConfirm" xml:space="preserve"><value>此菜单已对所有用户关闭。恢复后，其他用户也能使用它。是否继续？</value></data>
+  <data name="Windows11SharedAppConfirm" xml:space="preserve"><value>此应用与 {0} 共用菜单。更改后，这些应用的菜单会一起变化。是否继续？</value></data>
+  <data name="Windows11ItemCount" xml:space="preserve"><value>{0} 个应用和菜单</value></data>
+  <data name="Windows11LoadFailed" xml:space="preserve"><value>暂时无法读取菜单，请点击“刷新”重试。</value></data>
+  <data name="Windows11ServiceUpdateRequired" xml:space="preserve"><value>请在设置中修复后台服务，然后重试。</value></data>
+  <data name="Windows11MoreOptionsConfirm" xml:space="preserve"><value>“显示更多选项”中的相关菜单也会一起更改。是否继续？</value></data>
+  <data name="Windows11EnableAll" xml:space="preserve"><value>全部开启</value></data>
+  <data name="Windows11DisableAll" xml:space="preserve"><value>全部关闭</value></data>
+  <data name="Windows11Publisher" xml:space="preserve"><value>发布者：{0}</value></data>
+  <data name="Windows11PackageIdentity" xml:space="preserve"><value>应用标识：{0}</value></data>
+  <data name="Windows11FileLocation" xml:space="preserve"><value>文件位置：{0}</value></data>
 </root>

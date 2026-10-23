@@ -1,4 +1,4 @@
-﻿namespace ContextMenuMgr.Contracts;
+namespace ContextMenuMgr.Contracts;
 
 /// <summary>
 /// Represents the context Menu Entry.
@@ -64,6 +64,13 @@ public sealed record ContextMenuEntry
     /// Gets or sets a value indicating whether the entry has a verified normal enable/disable operation.
     /// </summary>
     public bool CanToggle { get; init; } = true;
+
+    /// <summary>Whether background monitoring may disable this registration.</summary>
+    public bool CanAutomaticallyDisable => CanToggle
+        && (!IsWindows11ContextMenu || Windows11SourceKind != Windows11ContextMenuSourceKind.PackagedCom
+            || Windows11ClsidImpact?.AllowsAutomaticDisable == true);
+
+    public Windows11ClsidImpact? Windows11ClsidImpact { get; init; }
 
     /// <summary>Gets whether this classic shell verb has registry-defined children which can be managed on demand.</summary>
     public bool CanManageSubMenuItems { get; init; }

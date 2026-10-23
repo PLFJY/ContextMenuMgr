@@ -1029,34 +1029,10 @@
     <value>Win11 新功能表</value>
   </data>
   <data name="Windows11PageDescription" xml:space="preserve">
-    <value>管理 Windows 11 新版快顯功能表中的封裝應用程式項目和 Windows 系統命令。</value>
+    <value>選擇要在 Windows 11 右鍵選單中顯示的應用程式，變更後重新開啟右鍵選單即可。</value>
   </data>
   <data name="Windows11NoItems" xml:space="preserve">
     <value>沒有找到可管理的 Win11 新功能表項目。</value>
-  </data>
-  <data name="Windows11PackageFamilyLabel" xml:space="preserve">
-    <value>套件系列名稱</value>
-  </data>
-  <data name="Windows11PublisherLabel" xml:space="preserve">
-    <value>發行者</value>
-  </data>
-  <data name="Windows11ContextTypesLabel" xml:space="preserve">
-    <value>適用情境</value>
-  </data>
-  <data name="Windows11MachineBlockedText" xml:space="preserve">
-    <value>已被系統範圍封鎖</value>
-  </data>
-  <data name="Windows11PackagedComSourceLabel" xml:space="preserve">
-    <value>Packaged COM</value>
-  </data>
-  <data name="Windows11SystemCommandSourceLabel" xml:space="preserve">
-    <value>系統命令 / CommandStore</value>
-  </data>
-  <data name="Windows11SystemCommandProtectedText" xml:space="preserve">
-    <value>受 Windows 保護</value>
-  </data>
-  <data name="Windows11SystemCommandGuidLockWarning" xml:space="preserve">
-    <value>不要對 Windows 11 內建命令使用 GUID Lock。封鎖錯誤的 Explorer 命令處理器可能導致 Windows 11 新版快顯功能表回退到傳統功能表。</value>
   </data>
   <data name="OtherRulesPageTitle" xml:space="preserve">
     <value>其他規則</value>
@@ -1615,4 +1591,21 @@
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>開啟方式監控正在等待登錄存取權限或狀態儲存恢復，請重新整理開啟方式頁面檢查目前狀態。</value></data>
   <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>無法確認新增功能表排序鎖狀態。請重新整理後再進行變更。</value></data>
   <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>新增功能表排序鎖狀態與請求不一致。請重新整理並檢查登錄後再重試。</value></data>
+  <data name="Windows11StateUncertain" xml:space="preserve">
+    <value>暫時無法確認變更結果，請重新整理後再試。</value>
+  </data>
+  <data name="Windows11PartiallyEnabled" xml:space="preserve"><value>部分開啟</value></data>
+  <data name="Windows11ChangeFailed" xml:space="preserve"><value>無法變更，請稍後再試。</value></data>
+  <data name="Windows11MenuUnavailable" xml:space="preserve"><value>Windows 暫不支援變更此項。</value></data>
+  <data name="Windows11RestoreAllUsersConfirm" xml:space="preserve"><value>此選單已對所有使用者關閉。還原後，其他使用者也能使用它。是否繼續？</value></data>
+  <data name="Windows11SharedAppConfirm" xml:space="preserve"><value>此應用程式與 {0} 共用選單。變更後，這些應用程式的選單會一起變更。是否繼續？</value></data>
+  <data name="Windows11ItemCount" xml:space="preserve"><value>{0} 個應用程式和選單</value></data>
+  <data name="Windows11LoadFailed" xml:space="preserve"><value>暫時無法讀取選單，請按一下「重新整理」重試。</value></data>
+  <data name="Windows11ServiceUpdateRequired" xml:space="preserve"><value>請在設定中修復背景服務，然後重試。</value></data>
+  <data name="Windows11MoreOptionsConfirm" xml:space="preserve"><value>「顯示更多選項」中的相關選單也會一起變更。是否繼續？</value></data>
+  <data name="Windows11EnableAll" xml:space="preserve"><value>全部開啟</value></data>
+  <data name="Windows11DisableAll" xml:space="preserve"><value>全部關閉</value></data>
+  <data name="Windows11Publisher" xml:space="preserve"><value>發行者：{0}</value></data>
+  <data name="Windows11PackageIdentity" xml:space="preserve"><value>應用程式識別碼：{0}</value></data>
+  <data name="Windows11FileLocation" xml:space="preserve"><value>檔案位置：{0}</value></data>
 </root>

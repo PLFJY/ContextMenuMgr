@@ -425,69 +425,53 @@ public sealed class ContextMenuRegistryCatalog
     public async Task<IReadOnlyList<ContextMenuEntry>> GetWindows11SnapshotAsync(
         CancellationToken cancellationToken = default,
         BackendUserContext? userContext = null)
-    {
-        return _windows11Catalog.IsSupported
+        => await RunPersistentStateOperationAsync(async () => _windows11Catalog.IsSupported
             ? await _windows11Catalog.EnumerateEntriesAsync(cancellationToken, userContext)
-            : [];
-    }
+            : (IReadOnlyList<ContextMenuEntry>)[], cancellationToken);
 
-    public async Task<PipeResponse> SetWindows11SystemCommandEnabledAsync(
-        string commandKey,
-        bool enable,
-        Guid? operationId,
-        CancellationToken cancellationToken = default)
-    {
-        return await _windows11Catalog.SetSystemCommandEnabledAsync(
-            commandKey,
-            enable,
-            operationId,
-            cancellationToken);
-    }
-
-    public async Task<PipeResponse> ExecuteWindows11MutationAsync(
-        Func<Task<PipeResponse>> mutation,
-        string targetId,
-        bool isSystemCommand,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
+    public async Task<PipeResponse> SetWindows11EnabledAsync(
+        string targetId, bool enable, bool machineScope, Guid? operationId,
+        BackendUserContext? userContext, CancellationToken cancellationToken, bool applicationScope = false)
         => await RunPersistentStateOperationAsync(async () =>
         {
-            if (userContext is not null)
-            {
-                // A user command must not create the first regular state record
-                // ahead of the full baseline, or all other entries look Added.
-                _ = await GetSnapshotAsync(cancellationToken, userContext);
-            }
-
-            var response = await mutation();
-            if (!response.Success || userContext is null)
-            {
-                return response;
-            }
-
-            var entries = (await GetWindows11SnapshotAsync(cancellationToken, userContext))
-                .Where(entry => isSystemCommand
-                    ? string.Equals(entry.Id, $"win11-system|{targetId}", StringComparison.OrdinalIgnoreCase)
-                    : entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
-                      && Guid.TryParse(entry.HandlerClsid, out var entryGuid)
-                      && Guid.TryParse(targetId, out var targetGuid)
-                      && entryGuid == targetGuid)
-                .ToArray();
-            if (entries.Length == 0)
-            {
-                return response;
-            }
-
-            var states = await _stateStore.LoadAsync(cancellationToken);
-            foreach (var entry in entries)
-            {
-                RecordVerifiedSwitchState(states, entry, pendingApproval: false, pendingApprovalChangeKind: null);
-            }
-
-            await _stateStore.SaveAsync(states, cancellationToken);
-            VerifiedSwitchCommitted?.Invoke(userContext, entries);
-            return response;
+            if (userContext is null || machineScope && !enable)
+                return CreateFailure("Win11 menu switches require the authenticated frontend user and support only that user's scope.")
+                    with { ClientOperationId = operationId };
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            var snapshot = await GetWindows11MutationSnapshotAsync(cancellationToken, userContext);
+            var item = snapshot.FirstOrDefault(entry => entry.IsWindows11ContextMenu
+                && (string.Equals(entry.Id, targetId, StringComparison.OrdinalIgnoreCase)
+                    || entry.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore
+                       && string.Equals(entry.KeyName, targetId, StringComparison.OrdinalIgnoreCase)
+                    || entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                       && Guid.TryParse(targetId, out var targetGuid)
+                       && Guid.TryParse(entry.HandlerClsid, out var entryGuid) && entryGuid == targetGuid));
+            if (item is null)
+                return CreateFailure("The selected Win11 declaration no longer exists for this user.")
+                    with { ClientOperationId = operationId };
+            _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                $"Win11TogglePlan: OperationId={operationId}, RequestedItemId={targetId}, ItemId={item.Id}, Sid={userContext.Sid}, Enable={enable}, Clsids=[{item.HandlerClsid}], Impact={System.Text.Json.JsonSerializer.Serialize(item.Windows11ClsidImpact)}, ExplorerValidated=False.");
+            var response = await ApplyDesiredStateCoreAsync(item.Id, enable, cancellationToken,
+                userContext, item, resolvedSnapshot: snapshot, userInitiated: true, restoreMachineBlock: machineScope, applicationScope: applicationScope);
+            _logger.LogFireAndForget($"Win11ToggleCompleted: OperationId={operationId}, Success={response.Success}, ElapsedMs={timer.ElapsedMilliseconds}.");
+            return response with { ClientOperationId = operationId };
         }, cancellationToken);
+
+    private async Task<IReadOnlyList<ContextMenuEntry>> GetWindows11MutationSnapshotAsync(
+        CancellationToken cancellationToken, BackendUserContext? userContext)
+    {
+        if (userContext is null) return [];
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        // A first operation must still adopt every regular-menu source. Subsequent
+        // Win11 changes must not rescan or prune unrelated classic registrations.
+        if (!states.ContainsKey(RegularBaselineMarkerId))
+            return await GetSnapshotAsync(cancellationToken, userContext);
+        return await BuildSnapshotAsync(
+            await _windows11Catalog.EnumerateForMutationAsync(cancellationToken, userContext),
+            static state => state.IsWindows11ContextMenu,
+            persistDiscoveredStates: true, persistSnapshotUpdates: true,
+            RegularBaselineMarkerId, allowBaselineInitialization: false, cancellationToken);
+    }
 
     internal async Task<PipeResponse?> CreateRegistryWriteProtectionPreflightFailureAsync(
         string operationName,
@@ -561,7 +545,7 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         var results = new List<ContextMenuEntry>();
-        var dirty = false;
+        var dirty = Windows11ContextMenuCatalog.MigrateStateIdentities(states, actualEntries.Values) && persistSnapshotUpdates;
         var missingStateIdsToRemove = new List<string>();
         // A snapshot carrying an explicit frontend/interactive user context is
         // authoritative for missing-item cleanup. Context-free service snapshots
@@ -773,7 +757,7 @@ public sealed class ContextMenuRegistryCatalog
         BackendUserContext? userContext = null,
         ContextMenuEntry? fallbackItem = null)
         => await RunPersistentStateOperationAsync(
-            () => ApplyDesiredStateCoreAsync(itemId, enable, cancellationToken, userContext, fallbackItem),
+            () => ApplyDesiredStateCoreAsync(itemId, enable, cancellationToken, userContext, fallbackItem, userInitiated: true),
             cancellationToken);
 
     private async Task<PipeResponse> ApplyDesiredStateCoreAsync(
@@ -785,7 +769,10 @@ public sealed class ContextMenuRegistryCatalog
         bool markPendingApproval = false,
         ContextMenuChangeKind? pendingApprovalChangeKind = null,
         IReadOnlyList<ContextMenuEntry>? resolvedSnapshot = null,
-        IReadOnlyDictionary<string, PersistedContextMenuState>? preSnapshotStates = null)
+        IReadOnlyDictionary<string, PersistedContextMenuState>? preSnapshotStates = null,
+        bool userInitiated = false,
+        bool restoreMachineBlock = false,
+        bool applicationScope = false)
     {
         if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
         {
@@ -799,7 +786,9 @@ public sealed class ContextMenuRegistryCatalog
             || itemId.StartsWith("win11|", StringComparison.OrdinalIgnoreCase)
             || itemId.StartsWith("win11-system|", StringComparison.OrdinalIgnoreCase);
         var snapshot = resolvedSnapshot ?? (isWindows11Target
-            ? await GetSnapshotAsync(cancellationToken, userContext)
+            ? userInitiated
+                ? await GetWindows11MutationSnapshotAsync(cancellationToken, userContext)
+                : await GetSnapshotAsync(cancellationToken, userContext)
             : await GetClassicSnapshotAsync(cancellationToken, userContext, persistUpdates: userContext is not null));
         var item = snapshot.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
         if (item is null)
@@ -860,6 +849,11 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"Menu item '{item.DisplayName}' is deleted. Undo the deletion before changing its state.");
         }
 
+        if (!userInitiated && !enable && item.IsWindows11ContextMenu
+            && item.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+            && item.Windows11ClsidImpact?.AllowsAutomaticDisable != true)
+            return CreateFailure("This CLSID has shared registrations or incomplete reference evidence. Disabling it is suspended; inspect its references first.", item);
+
         if (!item.CanToggle)
         {
             return CreateFailure($"Menu item '{item.DisplayName}' uses a Shell Extension registration type without a verified enable/disable operation.", item);
@@ -891,6 +885,14 @@ public sealed class ContextMenuRegistryCatalog
 
         var states = await _stateStore.LoadAsync(cancellationToken);
         var mutationState = GetOrCreateState(states, item);
+        List<Windows11BlockMutation>? win11BlockTransactions = null;
+        var win11Targets = applicationScope && item.IsWindows11ContextMenu
+            && item.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+            && !string.IsNullOrWhiteSpace(item.Windows11PackageFamilyName)
+            ? snapshot.Where(entry => entry.IsWindows11ContextMenu
+                && entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                && string.Equals(entry.Windows11PackageFamilyName, item.Windows11PackageFamilyName, StringComparison.OrdinalIgnoreCase)).ToArray()
+            : [item];
         IShellVerbVisibilityMutation? shellVerbTransaction = null;
         ShellExtensionMutationTransaction? shellExtensionTransaction = null;
         var mutationId = Guid.NewGuid();
@@ -934,12 +936,37 @@ public sealed class ContextMenuRegistryCatalog
             }
             else if (item.IsWindows11ContextMenu)
             {
-                // Win11 packaged verbs do not use the classic shell verb/handler
-                // write paths, so they are toggled through the blocked-extension list.
-                if (!_windows11Catalog.SetEnabled(item.HandlerClsid ?? item.KeyName, item.DisplayName, userContext, enable))
+                _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                    $"Win11ClsidMutation: TransactionId={mutationId}, ItemId={item.Id}, Sid={userContext?.Sid}, Clsids=[{item.HandlerClsid}], Enable={enable}, Automatic={markPendingApproval}, Impact={System.Text.Json.JsonSerializer.Serialize(item.Windows11ClsidImpact)}, ExplorerValidated=False.");
+                win11BlockTransactions = [];
+                foreach (var target in win11Targets.DistinctBy(entry => entry.HandlerClsid, StringComparer.OrdinalIgnoreCase))
                 {
-                    return CreateFailure($"Unable to update the Win11 context menu item '{item.DisplayName}'.");
+                    var transaction = Windows11BlocksService.CreateMutation(
+                        target.HandlerClsid ?? target.KeyName, userContext, enable, _logger, restoreMachineBlock);
+                    win11BlockTransactions.Add(transaction);
+                    var targetState = GetOrCreateState(states, target);
+                    targetState.Windows11BlockBackups ??= [];
+                    foreach (var backup in transaction.Backups)
+                    {
+                        var values = System.Text.Json.JsonSerializer.Serialize(backup.OriginalValues);
+                        if (!targetState.Windows11BlockBackups.Any(existing =>
+                                existing.PhysicalRegistryPath.Equals(backup.PhysicalRegistryPath, StringComparison.OrdinalIgnoreCase)
+                                && System.Text.Json.JsonSerializer.Serialize(existing.OriginalValues) == values))
+                            targetState.Windows11BlockBackups.Add(backup);
+                    }
                 }
+                // Persist exact recovery evidence before changing any selected menu.
+                if (win11BlockTransactions.Any(transaction => transaction.Backups.Count > 0))
+                    await _stateStore.SaveAsync(states, cancellationToken);
+                _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                    $"Win11ApplicationMutationPlan: TransactionId={mutationId}, ApplicationScope={applicationScope}, Targets={System.Text.Json.JsonSerializer.Serialize(win11Targets.Select(entry => new { entry.Id, entry.HandlerClsid, entry.Windows11ClsidImpact }))}.");
+                foreach (var transaction in win11BlockTransactions) transaction.Apply();
+                foreach (var transaction in win11BlockTransactions)
+                    _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                        $"Win11BlockedReadBack: TransactionId={mutationId}, After={transaction.ReadBack()}.");
+                mutationApplied = win11BlockTransactions.Any(transaction => transaction.Applied);
+                _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                    $"Win11BlockedPhysicalVerified: TransactionId={mutationId}, Enable={enable}, TargetCount={win11BlockTransactions.Count}, ExplorerValidated=False.");
             }
             else
                 switch (item.EntryKind)
@@ -994,7 +1021,7 @@ public sealed class ContextMenuRegistryCatalog
 
             physicalVerificationSucceeded = true;
             var postWriteSnapshot = item.IsWindows11ContextMenu
-                ? await GetReadOnlySnapshotAsync(cancellationToken, userContext)
+                ? _windows11Catalog.RefreshStates(snapshot.Where(static entry => entry.IsWindows11ContextMenu), userContext!.Sid, cancellationToken)
                 : await GetClassicSnapshotAsync(cancellationToken, userContext);
             var refreshedLogical = postWriteSnapshot
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
@@ -1020,6 +1047,10 @@ public sealed class ContextMenuRegistryCatalog
                     enable);
                 refreshed = shellExtensionReconciliation.Entry;
             }
+
+            if (applicationScope && win11Targets.Any(target => !postWriteSnapshot.Any(actual =>
+                    actual.Id.Equals(target.Id, StringComparison.OrdinalIgnoreCase) && actual.IsEnabled == enable)))
+                throw new InvalidOperationException("Some menus could not be changed. The changes will be rolled back.");
 
             if (shellVerbReconciliation is { IsVerified: false }
                 || shellExtensionReconciliation is { IsVerified: false }
@@ -1054,7 +1085,11 @@ public sealed class ContextMenuRegistryCatalog
             // For scene-only classic handlers the global snapshot intentionally has
             // no entry. Persist the verified physical projection so a later scene
             // operation retains the mirror path that actually exists.
-            var linkedEntries = GetStateLinkedEntries(postWriteSnapshot, refreshed);
+            var linkedEntries = applicationScope && item.IsWindows11ContextMenu
+                ? win11Targets.SelectMany(target => GetStateLinkedEntries(postWriteSnapshot,
+                    postWriteSnapshot.First(entry => entry.Id.Equals(target.Id, StringComparison.OrdinalIgnoreCase))))
+                    .DistinctBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase).ToArray()
+                : GetStateLinkedEntries(postWriteSnapshot, refreshed);
             foreach (var linkedEntry in linkedEntries)
             {
                 // The post-write projection is the new baseline. The pre-write
@@ -1095,6 +1130,12 @@ public sealed class ContextMenuRegistryCatalog
             {
                 Success = true,
                 Message = $"{(enable ? "Enabled" : "Disabled")} {item.DisplayName}.",
+                Items = item.IsWindows11ContextMenu ? linkedEntries.Select(entry => entry with
+                {
+                    IsPendingApproval = markPendingApproval && string.Equals(entry.Id, item.Id, StringComparison.OrdinalIgnoreCase),
+                    DetectedChangeKind = ContextMenuChangeKind.None,
+                    DetectedChangeDetails = null
+                }).ToArray() : [],
                 Item = refreshed with
                 {
                     IsPendingApproval = markPendingApproval,
@@ -1102,6 +1143,23 @@ public sealed class ContextMenuRegistryCatalog
                     DetectedChangeDetails = null
                 }
             };
+        }
+        catch (Exception ex) when (win11BlockTransactions is not null)
+        {
+            var results = win11BlockTransactions.AsEnumerable().Reverse().Select(transaction => transaction.TryRollback()).ToArray();
+            var rollback = new ShellVerbRollbackResult(results.Any(result => result.Attempted),
+                results.All(result => result.Succeeded), results.Any(result => result.Conflict),
+                string.Join("; ", results.Where(result => result.Error is not null).Select(result => result.Error)));
+            var code = !rollback.Attempted
+                ? PipeErrorCodes.RegistryMutationVerificationFailed
+                : rollback.Succeeded && !rollback.Conflict
+                    ? PipeErrorCodes.RegistryMutationRolledBack : PipeErrorCodes.RegistryMutationRollbackConflict;
+            _logger.LogFireAndForget(RuntimeLogLevel.Warning,
+                $"Win11BlockedMutationFailed: TransactionId={mutationId}, ItemId={item.Id}, PhysicalVerificationSucceeded={physicalVerificationSucceeded}, StateSaveSucceeded={stateSaveSucceeded}, RollbackAttempted={rollback.Attempted}, RollbackSucceeded={rollback.Succeeded}, RollbackConflict={rollback.Conflict}, Exception={ex}, RollbackError={rollback.Error}.");
+            var outcome = !rollback.Attempted ? " No registry write was committed."
+                : rollback.Succeeded ? " Registry rollback was verified."
+                : " Registry outcome is uncertain; refresh and inspect before retrying.";
+            return CreateFailure(ex.Message + outcome, item, code);
         }
         catch (Exception ex) when (shellVerbTransaction is not null)
         {
@@ -1225,10 +1283,10 @@ public sealed class ContextMenuRegistryCatalog
         {
             ContextMenuDecision.Allow => item is null
                 ? CreateFailure($"Menu item '{itemId}' was not found.")
-                : await ApplyDesiredStateCoreAsync(itemId, enable: true, cancellationToken, userContext, null, resolvedSnapshot: snapshot, preSnapshotStates: preSnapshotStates),
+                : await ApplyDesiredStateCoreAsync(itemId, enable: true, cancellationToken, userContext, null, resolvedSnapshot: snapshot, preSnapshotStates: preSnapshotStates, userInitiated: true),
             ContextMenuDecision.Deny => item is null
                 ? await RemovePendingApprovalStateAsync(itemId, cancellationToken)
-                : await ApplyDesiredStateCoreAsync(itemId, enable: false, cancellationToken, userContext, null, resolvedSnapshot: snapshot),
+                : await ApplyDesiredStateCoreAsync(itemId, enable: false, cancellationToken, userContext, null, resolvedSnapshot: snapshot, userInitiated: true),
             ContextMenuDecision.Remove => await RemovePendingApprovalItemAsync(item, itemId, cancellationToken, userContext),
             _ => CreateFailure("Unknown approval decision.")
         };
@@ -3678,13 +3736,15 @@ public sealed class ContextMenuRegistryCatalog
         // is only a Windows global-block identity, never a reason to link classic
         // category switches or persisted state. Packaged Windows 11 entries retain
         // their existing global blocked-list control domain.
-        if (!item.IsWindows11ContextMenu || string.IsNullOrWhiteSpace(item.HandlerClsid))
+        if (!item.IsWindows11ContextMenu || item.Windows11SourceKind != Windows11ContextMenuSourceKind.PackagedCom
+            || string.IsNullOrWhiteSpace(item.HandlerClsid))
         {
             return [item];
         }
 
         return snapshot
             .Where(entry => entry.IsWindows11ContextMenu
+                            && entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom
                             && string.Equals(entry.HandlerClsid, item.HandlerClsid, StringComparison.OrdinalIgnoreCase))
             .Append(item)
             .GroupBy(static entry => entry.Id, StringComparer.OrdinalIgnoreCase)
@@ -4333,12 +4393,12 @@ public sealed class ContextMenuRegistryCatalog
 
     private static void ApplyRegistryValueTransaction(RegistryValueMutationTransaction transaction)
     {
-        using (var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+        using (var key = transaction.OpenKey(writable: true)
                ?? throw new InvalidOperationException($"Unable to open {transaction.PhysicalRegistryPath} for writing."))
         {
             transaction.Apply(key);
         }
-        using var verificationKey = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false)
+        using var verificationKey = transaction.OpenKey(writable: false)
             ?? throw new InvalidOperationException("The registry key disappeared after mutation.");
         if (!transaction.Verify(verificationKey))
         {
@@ -4357,7 +4417,7 @@ public sealed class ContextMenuRegistryCatalog
         try
         {
             ShellVerbRollbackResult result;
-            using (var key = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: true)
+            using (var key = transaction.OpenKey(writable: true)
                    ?? throw new InvalidOperationException("The registry key no longer exists."))
             {
                 result = transaction.TryRollback(key);
@@ -4366,7 +4426,7 @@ public sealed class ContextMenuRegistryCatalog
             {
                 return result;
             }
-            using var verification = OpenRegistryKey(transaction.PhysicalRegistryPath, writable: false)
+            using var verification = transaction.OpenKey(writable: false)
                 ?? throw new InvalidOperationException("The registry key disappeared during rollback verification.");
             return transaction.VerifyRolledBack(verification)
                 ? result

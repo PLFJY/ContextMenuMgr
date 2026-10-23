@@ -43,7 +43,7 @@ ContextMenuMgr 是一个以“审核优先、用户控制”为核心的 Windows
 | ContextMenuStateStore | `ContextMenuStateStore.cs` | `RuntimePaths.StateDatabasePath` 状态库 | 审核状态不是纯 UI 状态。 |
 | SpecialMenuService | `SpecialMenuService.cs` | ShellNew、SendTo、WinX、OpenWith、DragDrop、CommandStore、GuidBlock、IE MenuExt | ShellNew/SendTo/WinX/OpenWith 必须带正确用户上下文。 |
 | Windows11ContextMenuCatalog | `Windows11ContextMenuCatalog.cs` | PackagedCom 和 AppxManifest 枚举、按 blocked list 判断启用状态 | 没有用户 SID 会跳过 Win11 snapshot。 |
-| Windows11BlocksService | `Windows11BlocksService.cs` | HKLM 和用户级 Win11 blocked list 读写 | 用户级 blocked list 不能写 SYSTEM 的 `HKCU`。 |
+| Windows11BlocksService | `Windows11BlocksService.cs` | HKLM/用户级 Win11 blocked list 查询、认证用户应用事务与旧值自动恢复 | 用户级 blocked list 不能写 SYSTEM 的 `HKCU`。 |
 | Win11ClassicContextMenuService | `Win11ClassicContextMenuService.cs` | 每用户 Win11 全局恢复经典右键菜单注册表 tweak | 必须写 `HKEY_USERS\<sid>\Software\Classes`，不能写 SYSTEM `HKCU` 或 HKLM。 |
 | AutoStartService | `AutoStartService.cs` | 用户级 `StartWithWindows` / `ShowTrayIcon` policy 和旧 Run value 清理 | 开机启动同时影响服务启动模式和用户策略；托盘图标显示策略不能写到 SYSTEM `HKCU`。 |
 | FrontendAutostartLauncher | `FrontendAutostartLauncher.cs` | 服务跨 Session 启动 TrayHost/Frontend | UI 进程必须用 WTS token 进用户 Session。 |
@@ -267,7 +267,7 @@ blocked list 有两层：
 | 机器级 | `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` |
 | 用户级 | `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked` |
 
-snapshot 和开关都需要 userContext。没有用户 SID 时，`Windows11ContextMenuCatalog.EnumerateEntriesAsync` 当前会跳过枚举；`Windows11BlocksService` 对用户级写入会返回缺少用户上下文，机器级 fallback 只适用于明确机器级操作。
+snapshot 和开关都需要 userContext。没有用户 SID 时，`Windows11ContextMenuCatalog.EnumerateEntriesAsync` 当前会跳过枚举；`Windows11BlocksService` 对用户级写入会返回缺少用户上下文，普通禁用只写用户级；恢复所选应用会自动备份、清理旧值和别名，机器级恢复须说明所有用户影响。
 
 ## 10. AutoStart 与 TrayHost
 
@@ -312,7 +312,7 @@ Restart Explorer 通过 pipe 命令 `RestartExplorer` 进入后端。`NamedPipeB
 
 不要把每次输入改成后端查询。后端快照应由刷新或通知驱动。
 
-传统菜单项与 Win11 菜单项的用户备注都保存在 `FrontendSettings.ContextMenuItemNotes`，以稳定 item id 为键，不写入注册表；Win11 项以 `Windows11ContextMenuItemDefinition.Id`（如 `win11|{clsid}|{category}` 或 `win11-system|{commandKey}`）为键。`ApplicationGroupsPageViewModel` 只使用已加载的传统菜单 workspace 项，依次按已解析文件路径、命令中的 exe/dll、CLSID、注册表路径 fallback 分组；Win11 modern menu 不参与分组。“全部禁用”复用 `ContextMenuWorkspaceService.SetEnabledAsync`，仅处理当前启用且可切换的项。
+传统菜单项与 Win11 菜单项的用户备注都保存在 `FrontendSettings.ContextMenuItemNotes`，以稳定 item id 为键，不写入注册表；Win11 项以 `Windows11ContextMenuItemDefinition.Id`（如 `win11|{clsid}|{category}|{packageFamily}` 或 `win11-system|{commandKey}`）为键。`ApplicationGroupsPageViewModel` 只使用已加载的传统菜单 workspace 项，依次按已解析文件路径、命令中的 exe/dll、CLSID、注册表路径 fallback 分组；Win11 modern menu 不参与分组。“全部禁用”复用 `ContextMenuWorkspaceService.SetEnabledAsync`，仅处理当前启用且可切换的项。
 
 File Types 页提供隐藏的文件类型相关项批量管理子视图，不作为普通导航页面，也不增加可直接选择的 TabItem。入口在 File Types 的 scene 菜单项卡片上；前端用 `ContextMenuApplicationIdentityService` 生成菜单身份，后端通过 `PipeCommand.FindRelatedFileTypeMenuItems` 按需扫描 HKLM 与前端用户 `Software\Classes` 中的扩展名、ProgId 和 `SystemFileAssociations` 根。ShellVerb 只按规范化命令程序路径加 key name 匹配，ShellExtension 只按 Handler CLSID 匹配，不按显示名匹配。查询结果不写入普通 workspace，也不扩展服务启动检测 baseline；批量启用、禁用和删除复用现有 per-item 操作与备份/保护逻辑。
 
@@ -426,7 +426,7 @@ Portable 删除备份按 host identity 分目录，当前主机目录由 `Runtim
 | 服务安装失败 | `BackendServiceManager.cs`、`BackendServiceBootstrapper.cs` | `bootstrap.log`、bootstrap result detail、`service-startup.log` | 链路 B result-file 或 UAC 被取消。 |
 | 托盘不出现 | `FrontendAutostartLauncher.cs`、`BackendWindowsService.cs`、`TrayHostRunner.cs` | `backend.log`、`trayhost.log` | 链路 C 缺 SessionId 或用户 policy 关闭。 |
 | 开机启动不生效 | `AutoStartService.cs`、`BackendServiceBootstrapper.cs`、`BackendWindowsService.cs`、`FrontendAutostartLauncher.cs` | `bootstrap.log`、`service-startup.log`、`backend.log` | 分别核对用户意图、SCM start type/delayed-auto、recovery、当前状态、真实 pipe Ping、停止原因和 TrayHost Session 启动；不要把任一单层状态当成整体健康。 |
-| Win11 禁用后刷新丢失 | `Windows11ContextMenuCatalog.cs`、`Windows11BlocksService.cs` | `backend.log` 中 `Win11 command` 和 `OpenUserBlockedKey` | 丢了 `userContext`，写到错误用户 hive。 |
+| Win11 禁用后刷新丢失 | `Windows11ContextMenuCatalog.cs`、`Windows11BlocksService.cs` | `backend.log` 中 `Win11TogglePlan`、`Win11BlockedMutationPlan` 和 `Win11BlockedReadBack` | 丢了 `userContext`，写到错误用户 hive。 |
 | ShellNew 锁住后解不开 | `SpecialMenuService.cs` | `backend.log` 中 `ShellNewOrderLockRequest`、`TryReadShellNewOrderLockState` 和 `HKEY_USERS\<sid>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew` | 把 ShellNew ACL Lock 当成 Registry Write Protection，或期待主程序 take ownership 修复 broken ACL。 |
 | SendTo / WinX 修改无效 | `SpecialMenuService.cs`、`DesktopIniStore.cs`、`WinXHasher.cs` | `backend.log` | 缺用户 profile 上下文，或 WinX `.lnk` 没重新 hash。 |
 | 重启 Explorer 没反应 | `NamedPipeBackendServer.cs`、`ExplorerRestartService.cs` | `backend.log` 中 `RestartExplorerRequest` | 没拿到前端用户 SessionId，或目标 Session 没有 explorer。 |
@@ -491,3 +491,13 @@ Automatic scope is deliberately limited to explicitly authorized, manageable HKU
 `SpecialMenuService` 不再吞掉经典发现异常，也不把 token/merged HKCR 不可用解释为空列表。只读扫描保持认证前端 SID/SessionId；未知物理来源、部分读取或取消均拒绝后续排序写入。锁定/移动先捕获物理 Classes 类型/存在性和值及 Owner/Group/DACL，之后用 `ShellNewOrderTransaction` 验证排列、保留未知项、逐步 fresh read-back 和条件回滚；单独解锁不依赖枚举、不写 Classes。完整事务和取消/硬崩溃限制见 [special-menus.md](./special-menus.md)。
 
 前端锁状态由新增 `GetShellNewOrderLock` 查询维护（三态），请求超时后独立查询，不以 10 秒响应预算推断失败。已有刷新用状态版本防止旧查询覆盖，写入 Busy 禁止重复操作；无效发现不能启用锁定或移动，但已验证的锁仍可单独解除。后端 single-flight 扫描、8 秒协作预算和前端完成后 30 秒刷新防止重复扫描堆积，具体 Windows 同步调用仍可能阻塞，计时日志用于部署诊断。
+
+## Win11 应用管理（#114）
+
+后台保留 family + CLSID + Category 声明身份和旧 Id 状态/备注迁移；页面与全局搜索按 family 合并为应用行，审核/监控继续按 CLSID 控制域处理。引用索引仅用于日志和后台自动禁用保护，不用发现不完整锁死用户开关。
+
+页面用新增 PipeCommand.SetWin11ApplicationEnabled 发送一个应用目标。命令在枚举末尾追加，旧服务拒绝且无旧循环 fallback；旧 Set/Remove 命令仍管理单目标。catalog gate 内准备全部目标，恢复前保存 Windows11BlockBackups 精确日志，再写入、native read-back、核对所有声明并一次提交 desired state。失败逆序条件回滚。该 journal 兼容 schema 3，属于恢复元数据，不参与变更分类；普通保存保留，显式重置仍清除。
+
+已有 regular baseline 时，手动开关只投影 Win11 数据，可复用同 SID 最近 30 秒的声明/引用；状态始终重新读取 native registry，不强制重扫 package 或经典菜单。首次缺少 baseline 仍完整采纳常规菜单。成功响应 Items 返回所有受影响项的已回读、已持久化结果，前端直接合并；只有响应缺失、不完整或失败才额外查询。Win11 开关不标记 Explorer 待重启，重新打开菜单查看效果。Win11 页面固定展示详细视图，不提供模式切换，也不读取或修改经典菜单的 ContextMenuListViewMode。
+
+用户开启会自动处理旧版、外部值及重复别名；扫描和关闭不会接管已有外部禁用。用户确认所有用户影响后允许所选机器级值恢复，普通禁用不写 HKLM。失败在页面内联说明并提供刷新，不展示异常堆栈或让用户手改注册表。实际 Explorer A/B、升级、跨用户和故障验收见 [Win11 文档](./windows11-context-menu.md)。

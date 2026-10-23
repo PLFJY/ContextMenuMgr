@@ -1,5 +1,3 @@
-﻿using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.IO;
 using System.Windows.Media.Imaging;
 using System.Windows.Media;
@@ -8,14 +6,23 @@ using ContextMenuMgr.Contracts;
 namespace ContextMenuMgr.Frontend.Services;
 
 /// <summary>
-/// Provides Win11 context menu services.
-/// Note: Registry write operations should be delegated to backend service in future refactoring.
-/// Current implementation maintains backward compatibility while marking areas for improvement.
+/// Projects backend declarations and verifies registry state after user-scoped Win11 changes.
 /// </summary>
 public sealed class Windows11ContextMenuService
 {
     private readonly IBackendClient _backendClient;
     private readonly LocalizationService _localization;
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+    private readonly HashSet<string> _pendingItems = new(StringComparer.OrdinalIgnoreCase);
+    public bool IsOperationPending(string id) => _pendingItems.Contains(id);
+
+    private readonly HashSet<string> _failedItems = new(StringComparer.OrdinalIgnoreCase);
+    public bool RequiresServiceUpdate { get; private set; }
+    public bool HasOperationError(string id) => _failedItems.Contains(id);
+
+    private readonly HashSet<string> _uncertainItems = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsStateUncertain(string id) => _uncertainItems.Contains(id);
 
     /// <summary>
     /// Gets or sets the current items.
@@ -42,47 +49,81 @@ public sealed class Windows11ContextMenuService
     /// <summary>
     /// Sets enabled Async.
     /// </summary>
-    public async Task SetEnabledAsync(string id, string displayName, bool enable, CancellationToken cancellationToken = default)
+    public async Task SetEnabledAsync(string id, string displayName, bool enable, CancellationToken cancellationToken = default, bool applicationScope = false)
     {
         if (!IsSupported || string.IsNullOrWhiteSpace(id))
         {
             return;
         }
 
-        var handlerClsid = ExtractHandlerId(id);
-        if (enable)
-        {
-            await _backendClient.RemoveWin11BlockedItemAsync(handlerClsid, unblockMachine: false, Guid.NewGuid(), cancellationToken);
-        }
-        else
-        {
-            await _backendClient.SetWin11BlockedItemAsync(handlerClsid, displayName, blockMachine: false, Guid.NewGuid(), cancellationToken);
-        }
-
-        UpdateCachedState(handlerClsid, enable);
-    }
-
-    /// <summary>
-    /// Gets is Enabled Async.
-    /// </summary>
-    public async Task<bool> IsEnabledAsync(string id, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            return true;
-        }
-
+        if (!_pendingItems.Add(id))
+            throw new InvalidOperationException("A change to this application is already in progress.");
+        var entered = false;
         try
         {
-            var blockedItems = await _backendClient.GetWin11BlockedItemsAsync(cancellationToken);
-            var normalizedId = NormalizeGuid(ExtractHandlerId(id));
-            return !blockedItems.Any(item =>
-                string.Equals(NormalizeGuid(item.Clsid), normalizedId, StringComparison.OrdinalIgnoreCase));
+            await _operationGate.WaitAsync(cancellationToken);
+            entered = true;
+            if (_uncertainItems.Contains(id))
+                throw new InvalidOperationException(_localization.Translate("Windows11StateUncertain"));
+            var selected = CurrentItems.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            var targetIds = CurrentItems.Where(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase)
+                || applicationScope && selected?.SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                    && item.SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                    && item.Package.FamilyName.Equals(selected.Package.FamilyName, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var restoreMachine = enable && CurrentItems.Any(item => targetIds.Contains(item.Id) && item.IsMachineBlocked);
+            if (targetIds.Count == 0) targetIds.Add(id);
+            Exception? requestError = null;
+            IReadOnlyList<ContextMenuEntry> verified = [];
+            try
+            {
+                var request = enable
+                    ? _backendClient.RemoveWin11BlockedItemAsync(id, restoreMachine, Guid.NewGuid(), cancellationToken, applicationScope)
+                    : _backendClient.SetWin11BlockedItemAsync(id, displayName, blockMachine: false, Guid.NewGuid(), cancellationToken, applicationScope);
+                verified = await request.WaitAsync(BackendRequestBudgets.Windows11Mutation, cancellationToken);
+            }
+            catch (Exception ex) { requestError = ex; }
+            // Successful responses contain physical read-back committed to the
+            // state store. Only missing/lost responses need another snapshot.
+            var returnedIds = verified.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var hasVerifiedResult = requestError is null && targetIds.IsSubsetOf(returnedIds)
+                && verified.Where(entry => targetIds.Contains(entry.Id)).All(entry => entry.IsEnabled == enable);
+            try
+            {
+                if (hasVerifiedResult)
+                {
+                    CurrentItems = CurrentItems.Where(item => !returnedIds.Contains(item.Id))
+                        .Concat(verified.Select(CreateDefinition)).ToArray();
+                    _uncertainItems.Remove(id);
+                    _failedItems.Remove(id);
+                }
+                else await RefreshCoreAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _uncertainItems.Add(id);
+                throw new InvalidOperationException(_localization.Translate("Windows11StateUncertain"), requestError ?? ex);
+            }
+            RequiresServiceUpdate = applicationScope && requestError?.Message.Contains(
+                "The request was missing required data.", StringComparison.OrdinalIgnoreCase) == true;
+            if (requestError is not null && requestError is not TimeoutException) throw requestError;
+            var actual = CurrentItems.Where(item => targetIds.Contains(item.Id)).ToArray();
+            var matched = actual.Length == targetIds.Count && actual.All(item => item.IsEnabled == enable);
+            if (actual.Length != targetIds.Count || requestError is TimeoutException && !matched)
+                _uncertainItems.Add(id);
+            if (!matched)
+                throw requestError ?? new InvalidOperationException(_localization.Translate("Windows11StateUncertain"));
         }
         catch
         {
-            // Fallback to local check if backend is unavailable
-            return true;
+            _failedItems.Add(id);
+            throw;
+        }
+        finally
+        {
+            _pendingItems.Remove(id);
+            if (entered) _operationGate.Release();
+            OnItemsChanged();
         }
     }
 
@@ -96,21 +137,20 @@ public sealed class Windows11ContextMenuService
             return;
         }
 
-        try
-        {
-            var entries = await _backendClient.GetWin11ContextMenuSnapshotAsync(cancellationToken);
-            var definitions = entries
-                .Select(CreateDefinition)
-                .ToList();
+        await _operationGate.WaitAsync(cancellationToken);
+        try { await RefreshCoreAsync(cancellationToken); }
+        finally { _operationGate.Release(); }
+    }
 
-            CurrentItems = definitions;
-            OnItemsChanged();
-            HasLoaded?.Invoke(this, EventArgs.Empty);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Failed to refresh Win11 items: {ex.Message}");
-        }
+    private async Task RefreshCoreAsync(CancellationToken cancellationToken)
+    {
+        var entries = await _backendClient.GetWin11ContextMenuSnapshotAsync(cancellationToken)
+            .WaitAsync(BackendRequestBudgets.Windows11Snapshot, cancellationToken);
+        CurrentItems = entries.Select(CreateDefinition).ToArray();
+        _uncertainItems.Clear();
+        _failedItems.Clear();
+        OnItemsChanged();
+        HasLoaded?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -161,21 +201,6 @@ public sealed class Windows11ContextMenuService
     private void OnItemsChanged()
     {
         ItemsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private static string NormalizeGuid(string guidText) =>
-        Guid.TryParse(guidText, out var guid)
-            ? guid.ToString("B")
-            : guidText.Trim('{', '}');
-
-    private static string ExtractHandlerId(string id)
-    {
-        var parts = id.Split('|');
-        return parts.Length >= 2
-               && (string.Equals(parts[0], "win11", StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(parts[0], "win11-system", StringComparison.OrdinalIgnoreCase))
-            ? parts[1]
-            : id;
     }
 
     internal static Windows11ContextMenuItemDefinition CreateDefinition(ContextMenuEntry entry)
@@ -261,16 +286,6 @@ public sealed class Windows11ContextMenuService
         ContextMenuCategory.Folder or ContextMenuCategory.Directory => "Directory",
         _ => "*"
     };
-
-    private void UpdateCachedState(string handlerClsid, bool isEnabled)
-    {
-        var normalizedClsid = NormalizeGuid(handlerClsid);
-        CurrentItems = CurrentItems
-            .Select(item => string.Equals(NormalizeGuid(ExtractHandlerId(item.Id)), normalizedClsid, StringComparison.OrdinalIgnoreCase)
-                ? item with { IsEnabled = isEnabled }
-                : item)
-            .ToArray();
-    }
 
     #endregion
 }

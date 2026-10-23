@@ -11,6 +11,32 @@ public sealed class ContextMenuStateStoreTests
     // Permanent: independent section merge, recovery and reset protect saved authorization
     // from concurrent ordinary menu saves; schema 2 must migrate without invented rules.
     [Fact]
+    public async Task Win11RecoveryJournal_PreservesAliasesTypesAndScopeAcrossReload()
+    {
+        using var fixture = new StateStoreFixture();
+        var states = CreateStates("menu", false);
+        states["entry"].Windows11BlockBackups = [new()
+        {
+            UserSid = "S-1-5-21-1-2-3-1001", Clsid = "{11111111-1111-1111-1111-111111111111}",
+            PhysicalRegistryPath = @"HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked",
+            OriginalValues = [new() { Name = "11111111-1111-1111-1111-111111111111", Existed = true,
+                Kind = (int)RegistryValueKind.MultiString, StringArrayValue = ["Old setting", "Retain data"] },
+                new() { Name = "{11111111-1111-1111-1111-111111111111}", Existed = true,
+                    Kind = (int)RegistryValueKind.Binary, BinaryBase64 = Convert.ToBase64String([1, 2, 3]) }]
+        }];
+        await fixture.CreateStore().SaveAsync(states, default);
+        var loaded = (await fixture.CreateStore().LoadAsync(default))["entry"];
+        var backup = Assert.Single(loaded.Windows11BlockBackups);
+        Assert.Equal(states["entry"].Windows11BlockBackups[0].PhysicalRegistryPath, backup.PhysicalRegistryPath);
+        Assert.Equal("S-1-5-21-1-2-3-1001", backup.UserSid);
+        Assert.Equal(2, backup.OriginalValues.Count);
+        Assert.Equal(new[] { "Old setting", "Retain data" }, backup.OriginalValues[0].StringArrayValue);
+        Assert.Equal((int)RegistryValueKind.MultiString, backup.OriginalValues[0].Kind);
+        Assert.Equal(new byte[] { 1, 2, 3 }, Convert.FromBase64String(backup.OriginalValues[1].BinaryBase64!));
+        Assert.False(loaded.DesiredEnabled); // Recovery metadata must not change the saved policy.
+    }
+
+    [Fact]
     public async Task OpenWithSection_SurvivesClassicSavesAndRecovery_AndResetRevokesIt()
     {
         using var fixture = new StateStoreFixture();

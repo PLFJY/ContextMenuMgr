@@ -69,12 +69,14 @@ public sealed class ExternalChangeStateMachineTests
             HandlerClsid = "{22222222-2222-2222-2222-222222222222}"
         };
         var second = first with { Id = "win11:second" };
+        var systemCommand = first with { Id = "win11-system|Windows.Share", Windows11SourceKind = Windows11ContextMenuSourceKind.SystemCommandStore };
 
-        var linked = ContextMenuRegistryCatalog.GetStateLinkedEntries([first, second], first);
+        var linked = ContextMenuRegistryCatalog.GetStateLinkedEntries([first, second, systemCommand], first);
 
         Assert.Equal(2, linked.Count);
         Assert.Contains(linked, item => item.Id == first.Id);
         Assert.Contains(linked, item => item.Id == second.Id);
+        Assert.Single(ContextMenuRegistryCatalog.GetStateLinkedEntries([first, second, systemCommand], systemCommand));
     }
 
     private static ContextMenuEntry BuildPresentEntry(

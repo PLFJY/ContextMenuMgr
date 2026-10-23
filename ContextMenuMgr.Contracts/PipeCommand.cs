@@ -61,5 +61,6 @@ public enum PipeCommand
     GetContextMenuItemState,
     InspectOpenWithSources,
     ReviewOpenWithRegistration,
-    GetShellNewOrderLock
+    GetShellNewOrderLock,
+    SetWin11ApplicationEnabled
 }

@@ -1,6 +1,3 @@
-using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 
@@ -13,7 +10,6 @@ internal sealed class Windows11ContextMenuCatalog
 {
     private const string SystemCommandStorePath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell";
     private const string UserBlockedPathSuffix = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-    private const string MachineBlockedPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
     private static readonly HashSet<string> SupportedSystemCommandKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "Windows.SendToMyPhone",
@@ -22,6 +18,8 @@ internal sealed class Windows11ContextMenuCatalog
 
     private readonly FileLogger? _logger;
     private readonly PackagedContextMenuScanCache _packageScanCache;
+    private readonly Dictionary<string, (DateTimeOffset CapturedAt, IReadOnlyList<ContextMenuEntry> Entries)> _mutationDiscovery = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _discoveryLock = new();
 
     public Windows11ContextMenuCatalog(FileLogger? logger = null)
         : this(logger, null)
@@ -37,48 +35,75 @@ internal sealed class Windows11ContextMenuCatalog
 
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
 
+    // Manual changes reuse recent discovery, never cached switch values. Normal
+    // snapshots still rebuild the impact index for automatic policy decisions.
+    public async Task<IReadOnlyList<ContextMenuEntry>> EnumerateForMutationAsync(CancellationToken cancellationToken, BackendUserContext userContext)
+    {
+        IReadOnlyList<ContextMenuEntry>? recent = null;
+        lock (_discoveryLock)
+        {
+            if (_mutationDiscovery.TryGetValue(userContext.Sid, out var cached)
+                && DateTimeOffset.UtcNow - cached.CapturedAt < TimeSpan.FromSeconds(30))
+                recent = cached.Entries;
+        }
+        return recent is null
+            ? await EnumerateEntriesAsync(cancellationToken, userContext)
+            : RefreshStates(recent, userContext.Sid, cancellationToken);
+    }
+
+    public IReadOnlyList<ContextMenuEntry> RefreshStates(IEnumerable<ContextMenuEntry> entries, string userSid, CancellationToken cancellationToken)
+    {
+        var blocked = new Dictionary<string, Windows11BlockedState>(StringComparer.OrdinalIgnoreCase);
+        var commands = EnumerateSystemCommandStoreEntries().ToDictionary(entry => entry.Id, StringComparer.OrdinalIgnoreCase);
+        var result = new List<ContextMenuEntry>();
+        foreach (var entry in entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (entry.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)
+            {
+                if (commands.TryGetValue(entry.Id, out var command)) result.Add(command);
+                continue;
+            }
+            var clsid = entry.HandlerClsid!;
+            if (!blocked.TryGetValue(clsid, out var state))
+                blocked[clsid] = state = Windows11BlocksService.ReadState(clsid, userSid);
+            result.Add(entry with { IsEnabled = state.IsEnabled, IsMachineBlocked = state.IsMachineBlocked });
+        }
+        return result;
+    }
+
     /// <summary>
     /// Executes enumerate Entries Async.
     /// </summary>
     public async Task<IReadOnlyList<ContextMenuEntry>> EnumerateEntriesAsync(CancellationToken cancellationToken, BackendUserContext? userContext = null)
     {
         var userSid = userContext?.Sid;
-        if (string.IsNullOrWhiteSpace(userSid))
-        {
-            // 只有在没有提供用户上下文时才回退到交互式用户检测
-            // 这不应该发生，因为 NamedPipeBackendServer 应该总是传递 userContext
-            userSid = TryGetBestInteractiveUserSid();
-        }
-
         if (!IsSupported || string.IsNullOrWhiteSpace(userSid))
         {
             _logger?.LogFireAndForget($"Win11ContextMenuEnumerate: IsSupported={IsSupported}, UserSid={userSid ?? "<null>"}, Result=Skipped.");
             return [];
         }
 
-        var items = new ConcurrentDictionary<string, ContextMenuEntry>(StringComparer.OrdinalIgnoreCase);
+        var items = new Dictionary<string, ContextMenuEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var commandEntry in EnumerateSystemCommandStoreEntries())
         {
             items[commandEntry.Id] = commandEntry;
         }
 
         var definitions = await _packageScanCache.GetAsync(userSid, cancellationToken);
+        var impactIndex = new Windows11ClsidImpactIndex(definitions);
+        if (definitions.Count > 0) impactIndex.ReadRegistry(userSid, cancellationToken);
         foreach (var definition in definitions)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try
+            var blockedState = Windows11BlocksService.ReadState(definition.Clsid, userSid);
+            foreach (var category in MapCategories(definition.ContextTypes))
             {
-                var blockedState = GetBlockedState(definition.Clsid, userSid);
-                foreach (var category in MapCategories(definition.ContextTypes))
-                {
-                    var entry = CreateEntry(definition, category, blockedState, userSid);
-                    items[entry.Id] = entry;
-                    _logger?.LogFireAndForget($"Win11ContextMenuEntry: PackageFullName={definition.Package.FullName}, DisplayName={definition.DisplayName}, Clsid={definition.Clsid}, HandlerPath={definition.ComServer.Path ?? "<none>"}, IsEnabled={blockedState.IsEnabled}, BlockedSource={blockedState.Source}, LogoPath=<not-resolved>.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogFireAndForget(RuntimeLogLevel.Warning, $"Win11ContextMenuProjectionFailure: PackageFullName={definition.Package.FullName}, Clsid={definition.Clsid}, Exception={ex}");
+                var entry = CreateEntry(definition, category, blockedState, userSid) with
+                { Windows11ClsidImpact = impactIndex.Get(definition.Clsid) };
+                // Family identity survives package updates. Coexisting versions of
+                // that family retain every full-name declaration in the impact index.
+                items.TryAdd(entry.Id, entry);
             }
         }
 
@@ -87,7 +112,8 @@ internal sealed class Windows11ContextMenuCatalog
             .ThenBy(static item => item.Windows11SourceKind)
             .ThenBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        _logger?.LogFireAndForget($"Win11ContextMenuEnumerateSummary: IsSupported={IsSupported}, UserSid={userSid}, PackageCount={definitions.Select(static definition => definition.Package.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count()}, PackagedDefinitionCount={definitions.Count}, EntriesCount={result.Length}, SystemCommandCount={result.Count(static item => item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)}, BlockedMachineCount={GetMachineBlockedCount()}, BlockedUserCount={GetUserBlockedCount(userSid)}.");
+        _logger?.LogFireAndForget($"Win11ContextMenuEnumerateSummary: IsSupported={IsSupported}, UserSid={userSid}, PackageCount={definitions.Select(static definition => definition.Package.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count()}, PackagedDefinitionCount={definitions.Count}, EntriesCount={result.Length}, SystemCommandCount={result.Count(static item => item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)}.");
+        lock (_discoveryLock) _mutationDiscovery[userSid] = (DateTimeOffset.UtcNow, result);
         return result;
     }
 
@@ -158,59 +184,6 @@ internal sealed class Windows11ContextMenuCatalog
         }
     }
 
-    /// <summary>
-    /// Sets enabled.
-    /// </summary>
-    public bool SetEnabled(string handlerClsid, string displayName, BackendUserContext? userContext, bool enable)
-    {
-        var normalizedClsid = NormalizeGuid(handlerClsid);
-        var userSid = userContext?.Sid;
-        if (string.IsNullOrWhiteSpace(userSid))
-        {
-            // 不应该发生，但作为安全措施
-            userSid = TryGetBestInteractiveUserSid();
-        }
-
-        if (!IsSupported || string.IsNullOrWhiteSpace(userSid) || string.IsNullOrWhiteSpace(normalizedClsid))
-        {
-            return false;
-        }
-
-        using var userRoot = Registry.Users.CreateSubKey($@"{userSid}\{UserBlockedPathSuffix}", writable: true);
-        if (userRoot is null)
-        {
-            return false;
-        }
-
-        if (enable)
-        {
-            DeleteGuidValue(userRoot, normalizedClsid);
-            _logger?.LogFireAndForget(DiagnosticLogFormatter.BuildRegistryOperationLog("Win11ContextMenuSetEnabled", $@"HKEY_USERS\{userSid}\{UserBlockedPathSuffix}", normalizedClsid, RegistryValueKind.String, null, writable: true, result: "DeleteValue Success, Enable=true"));
-        }
-        else
-        {
-            userRoot.SetValue(normalizedClsid, displayName, RegistryValueKind.String);
-            _logger?.LogFireAndForget(DiagnosticLogFormatter.BuildRegistryOperationLog("Win11ContextMenuSetEnabled", $@"HKEY_USERS\{userSid}\{UserBlockedPathSuffix}", normalizedClsid, RegistryValueKind.String, displayName, writable: true, result: "SetValue Success, Enable=false"));
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Gets is Enabled.
-    /// </summary>
-    public bool GetIsEnabled(string handlerClsid, BackendUserContext? userContext)
-    {
-        var userSid = userContext?.Sid;
-        if (string.IsNullOrWhiteSpace(userSid))
-        {
-            // 不应该发生，但作为安全措施
-            userSid = TryGetBestInteractiveUserSid();
-        }
-
-        return GetBlockedState(handlerClsid, userSid).IsEnabled;
-    }
-
     internal static ContextMenuEntry CreateEntry(
         PackagedContextMenuDefinition definition,
         ContextMenuCategory category,
@@ -227,7 +200,7 @@ internal sealed class Windows11ContextMenuCatalog
 
         return new ContextMenuEntry
         {
-            Id = $"win11|{normalizedClsid}|{category}",
+            Id = $"win11|{normalizedClsid}|{category}|{definition.Package.FamilyName}",
             Category = category,
             EntryKind = ContextMenuEntryKind.ShellExtension,
             KeyName = normalizedClsid,
@@ -264,6 +237,34 @@ internal sealed class Windows11ContextMenuCatalog
             IsPresentInRegistry = true,
             Notes = notes
         };
+    }
+
+    // v1.7.10 and earlier keyed declarations only by CLSID/category. Preserve the
+    // known package's policy. Previously hidden colliding sources adopt physical
+    // state, without inventing an approval or ownership of a blocked value.
+    internal static bool MigrateStateIdentities(
+        IDictionary<string, PersistedContextMenuState> states, IEnumerable<ContextMenuEntry> entries)
+    {
+        var changed = false;
+        foreach (var group in entries.Where(static entry => entry.IsWindows11ContextMenu
+                     && entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom)
+                     .GroupBy(static entry => $"win11|{entry.HandlerClsid}|{entry.Category}", StringComparer.OrdinalIgnoreCase))
+        {
+            if (!states.TryGetValue(group.Key, out var previous) || !previous.IsWindows11ContextMenu || previous.IsDeleted) continue;
+            var oldPackage = ContextMenuApprovalIdentity.ExtractWin11PackageKey(previous.RegistryPath).Split('_');
+            var oldFamily = oldPackage.Length >= 5 ? oldPackage[0] + "_" + oldPackage[^1] : string.Empty;
+            foreach (var entry in group)
+            {
+                if (states.ContainsKey(entry.Id)) continue;
+                var state = string.Equals(entry.Windows11PackageFamilyName, oldFamily, StringComparison.OrdinalIgnoreCase)
+                    ? previous : PersistedContextMenuState.FromEntry(entry);
+                state.Id = entry.Id;
+                states[entry.Id] = state;
+            }
+            states.Remove(group.Key);
+            changed = true;
+        }
+        return changed;
     }
 
     internal static IEnumerable<ContextMenuCategory> MapCategories(IReadOnlyList<string> contextTypes)
@@ -344,122 +345,6 @@ internal sealed class Windows11ContextMenuCatalog
         return Guid.TryParse(guidText, out var guid)
             ? guid.ToString("B")
             : guidText.Trim();
-    }
-
-    private static bool HasGuidValue(RegistryKey? key, string normalizedClsid)
-    {
-        if (key is null)
-        {
-            return false;
-        }
-
-        if (key.GetValue(normalizedClsid) is not null)
-        {
-            return true;
-        }
-
-        // ContextMenuMgr writes {GUID} values; manual registry edits may omit braces.
-        return key.GetValueNames()
-            .Any(valueName => string.Equals(NormalizeGuid(valueName), normalizedClsid, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static Windows11BlockedState GetBlockedState(string handlerClsid, string? userSid)
-    {
-        var normalizedClsid = NormalizeGuid(handlerClsid);
-        if (string.IsNullOrWhiteSpace(normalizedClsid))
-        {
-            return CreateBlockedState(machineBlocked: false, userBlocked: false);
-        }
-
-        using var machineBlocked = Registry.LocalMachine.OpenSubKey(MachineBlockedPath, writable: false);
-        var machine = HasGuidValue(machineBlocked, normalizedClsid);
-        var user = false;
-        if (!string.IsNullOrWhiteSpace(userSid))
-        {
-            using var userBlocked = Registry.Users.OpenSubKey($@"{userSid}\{UserBlockedPathSuffix}", writable: false);
-            user = HasGuidValue(userBlocked, normalizedClsid);
-        }
-
-        return CreateBlockedState(machine, user);
-    }
-
-    internal static Windows11BlockedState CreateBlockedState(bool machineBlocked, bool userBlocked) =>
-        new(machineBlocked, userBlocked);
-
-    private static int GetMachineBlockedCount()
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(MachineBlockedPath, writable: false);
-        return key?.GetValueNames().Length ?? 0;
-    }
-
-    private static int GetUserBlockedCount(string userSid)
-    {
-        using var key = Registry.Users.OpenSubKey($@"{userSid}\{UserBlockedPathSuffix}", writable: false);
-        return key?.GetValueNames().Length ?? 0;
-    }
-
-    private static void DeleteGuidValue(RegistryKey key, string normalizedClsid)
-    {
-        key.DeleteValue(normalizedClsid, throwOnMissingValue: false);
-
-        foreach (var valueName in key.GetValueNames())
-        {
-            if (string.Equals(NormalizeGuid(valueName), normalizedClsid, StringComparison.OrdinalIgnoreCase))
-            {
-                key.DeleteValue(valueName, throwOnMissingValue: false);
-            }
-        }
-    }
-
-    private static string? TryGetBestInteractiveUserSid()
-    {
-        var consoleSessionId = unchecked((int)NativeMethods.WTSGetActiveConsoleSessionId());
-        if (consoleSessionId != -1 && TryGetUserSid(consoleSessionId, out var consoleSid))
-        {
-            return consoleSid;
-        }
-
-        if (!NativeMethods.WTSEnumerateSessionsW(IntPtr.Zero, 0, 1, out var sessionInfoPtr, out var count))
-        {
-            return null;
-        }
-
-        try
-        {
-            var dataSize = Marshal.SizeOf<NativeMethods.WTS_SESSION_INFO>();
-            string? connectedSid = null;
-
-            for (var index = 0; index < count; index++)
-            {
-                var current = IntPtr.Add(sessionInfoPtr, index * dataSize);
-                var sessionInfo = Marshal.PtrToStructure<NativeMethods.WTS_SESSION_INFO>(current);
-                if (sessionInfo.SessionID == -1)
-                {
-                    continue;
-                }
-
-                if (!TryGetUserSid(sessionInfo.SessionID, out var userSid))
-                {
-                    continue;
-                }
-
-                if (sessionInfo.State == NativeMethods.WTS_CONNECTSTATE_CLASS.WTSActive)
-                {
-                    return userSid;
-                }
-
-                if (connectedSid is null && sessionInfo.State == NativeMethods.WTS_CONNECTSTATE_CLASS.WTSConnected)
-                {
-                    connectedSid = userSid;
-                }
-            }
-
-            return connectedSid;
-        }
-        finally
-        {
-            NativeMethods.WTSFreeMemory(sessionInfoPtr);
-        }
     }
 
     private IEnumerable<ContextMenuEntry> EnumerateSystemCommandStoreEntries()
@@ -596,111 +481,6 @@ internal sealed class Windows11ContextMenuCatalog
         }
     }
 
-    private static bool TryGetUserSid(int sessionId, out string sid)
-    {
-        sid = string.Empty;
-        if (!NativeMethods.WTSQueryUserToken(sessionId, out var tokenHandle))
-        {
-            return false;
-        }
-
-        using var token = new SafeAccessTokenHandle(tokenHandle);
-        try
-        {
-            using var identity = new WindowsIdentity(token.DangerousGetHandle());
-            sid = identity.User?.Value ?? string.Empty;
-            return !string.IsNullOrWhiteSpace(sid);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private sealed class SafeAccessTokenHandle : SafeHandle
-    {
-        /// <summary>
-        /// Executes safe Access Token Handle.
-        /// </summary>
-        public SafeAccessTokenHandle(IntPtr handle)
-            : base(IntPtr.Zero, ownsHandle: true)
-        {
-            SetHandle(handle);
-        }
-
-        public override bool IsInvalid => handle == IntPtr.Zero || handle == new IntPtr(-1);
-
-        protected override bool ReleaseHandle() => NativeMethods.CloseHandle(handle);
-    }
-
-    private static class NativeMethods
-    {
-        /// <summary>
-        /// Executes wTS Get Active Console Session Id.
-        /// </summary>
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern uint WTSGetActiveConsoleSessionId();
-
-        /// <summary>
-        /// Executes wTS Query User Token.
-        /// </summary>
-        [DllImport("wtsapi32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool WTSQueryUserToken(int sessionId, out IntPtr token);
-
-        /// <summary>
-        /// Executes wTS Enumerate Sessions W.
-        /// </summary>
-        [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool WTSEnumerateSessionsW(
-            IntPtr hServer,
-            int reserved,
-            int version,
-            out IntPtr ppSessionInfo,
-            out int pCount);
-
-        /// <summary>
-        /// Executes wTS Free Memory.
-        /// </summary>
-        [DllImport("wtsapi32.dll")]
-        public static extern void WTSFreeMemory(IntPtr memory);
-
-        /// <summary>
-        /// Executes close Handle.
-        /// </summary>
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CloseHandle(IntPtr handle);
-
-        /// <summary>
-        /// Defines the available wTS_CONNECTSTATE_CLASS values.
-        /// </summary>
-        public enum WTS_CONNECTSTATE_CLASS
-        {
-            WTSActive,
-            WTSConnected,
-            WTSConnectQuery,
-            WTSShadow,
-            WTSDisconnected,
-            WTSIdle,
-            WTSListen,
-            WTSReset,
-            WTSDown,
-            WTSInit
-        }
-
-        /// <summary>
-        /// Represents the wTS_SESSION_INFO.
-        /// </summary>
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        public struct WTS_SESSION_INFO
-        {
-            public int SessionID;
-            public string pWinStationName;
-            public WTS_CONNECTSTATE_CLASS State;
-        }
-    }
 
 }
 

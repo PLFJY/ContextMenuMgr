@@ -12,271 +12,151 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-
-        <Border Background="{DynamicResource LayerFillColorAltBrush}" Style="{StaticResource CardBorderStyle}">
-            <StackPanel>
-                <ui:TextBlock
-                    FontSize="22"
-                    FontWeight="SemiBold"
-                    Text="{Binding Title}" />
-                <ui:TextBlock
-                    Margin="0,6,0,0"
-                    Opacity="0.72"
-                    Text="{Binding Description}"
-                    TextWrapping="Wrap" />
-
-                <ui:TextBlock Margin="0,14,0,0" Text="{Binding SearchLabel}" />
-
-                <TextBox
-                    Margin="0,8,0,0"
-                    Padding="10,8"
-                    Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-            </StackPanel>
-        </Border>
-
+        <StackPanel>
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding Title}" />
+            <TextBlock Margin="0,6,0,18" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       Text="{Binding Description}" TextWrapping="Wrap" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:TextBox PlaceholderText="{Binding SearchLabel}"
+                            AutomationProperties.Name="{Binding SearchLabel}"
+                            Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+                <ui:Button Grid.Column="1" Margin="12,0,0,0" Command="{Binding RefreshCommand}"
+                           Content="{Binding RefreshText}" Icon="{ui:SymbolIcon Symbol=ArrowClockwise24}" />
+            </Grid>
+            <TextBlock Margin="0,12,0,8" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       Text="{Binding ItemCountText}" />
+            <TextBlock Margin="0,0,0,10" Text="{Binding LoadErrorText}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                       Visibility="{Binding HasLoadError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+        </StackPanel>
         <Grid Grid.Row="1">
             <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
-                Margin="0,12,0,0"
-                Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}"
-                Background="Transparent"
-                BorderThickness="0"
-                ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
-                ItemsSource="{Binding ItemsView}"
-                behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                ScrollViewer.VerticalScrollBarVisibility="Auto">
+                     Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}"
+                     Background="Transparent" BorderThickness="0"
+                     ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}" ItemsSource="{Binding ItemsView}"
+                     behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type viewModels:Windows11ContextMenuItemViewModel}">
-                        <Border Style="{StaticResource ContextMenuItemCardStyle}">
+                        <Border Style="{StaticResource ContextMenuItemCardStyle}" Padding="16,14">
                             <Grid>
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-
-                                <StackPanel Margin="0,0,16,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Border
-                                            Width="38"
-                                            Height="38"
-                                            Margin="0,0,12,0"
-                                            Background="{DynamicResource ControlFillColorQuarternaryBrush}"
-                                            CornerRadius="10">
-                                            <Grid>
-                                                <Image
-                                                    Width="24"
-                                                    Height="24"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Source="{Binding LogoSource}"
-                                                    Visibility="{Binding HasLogo, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <ui:SymbolIcon
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Symbol="AppsList24"
-                                                    Visibility="{Binding HasLogo, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                                            </Grid>
+                                <Border Width="34" Height="34" VerticalAlignment="Top" CornerRadius="8"
+                                        Background="{DynamicResource ControlFillColorQuarternaryBrush}">
+                                    <Grid>
+                                        <Image Width="24" Height="24" Source="{Binding LogoSource}"
+                                               Visibility="{Binding HasLogo, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <ui:SymbolIcon Symbol="AppsList24" Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                            Visibility="{Binding HasLogo, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                    </Grid>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="8,0,20,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding DisplayName}"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}" />
+                                        <TextBlock Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="12"
+                                                   Text="{Binding PartialStateText}" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{Binding IsPartiallyEnabled, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Border Grid.Column="2" Margin="10,0,0,0" Padding="6,1" CornerRadius="4"
+                                                Background="{DynamicResource AccentFillColorSecondaryBrush}"
+                                                Visibility="{Binding IsPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock FontSize="11" Text="{Binding PendingApprovalText}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                                         </Border>
-
-                                        <StackPanel VerticalAlignment="Center">
-                                            <ui:TextBlock
-                                                FontSize="17"
-                                                FontWeight="SemiBold"
-                                                Text="{Binding DisplayName}" />
-                                            <ui:TextBlock
-                                                Margin="0,4,0,0"
-                                                Opacity="0.72"
-                                                Text="{Binding PackageFamilyName}" />
-                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Margin="0,4,0,0" FontSize="12" Text="{Binding ContextTypesText}"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <StackPanel Margin="0,4,0,0">
+                                        <TextBlock Margin="0,3,0,0" FontSize="12" Text="{Binding PublisherText}" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{Binding HasPublisher, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <TextBlock Margin="0,3,0,0" FontSize="12" Text="{Binding PackageIdentityText}" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{Binding IsSystemCommand, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                        <TextBlock Margin="0,3,0,0" FontSize="11" Text="{Binding FileLocationText}" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{Binding HasFileLocation, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                     </StackPanel>
-
-                                    <ui:TextBlock
-                                        Margin="0,10,0,0"
-                                        Opacity="0.72"
-                                        Text="{Binding PublisherName}"
-                                        Visibility="{Binding HasPublisherName, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                                    <WrapPanel Margin="0,10,0,0">
-                                        <Border
-                                            Margin="0,0,8,8"
-                                            Padding="8,2"
-                                            Background="{DynamicResource AccentFillColorDefaultBrush}"
-                                            CornerRadius="4"
-                                            Visibility="{Binding IsPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ui:TextBlock
-                                                FontSize="11"
-                                                Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
-                                                Text="{Binding PendingApprovalText}" />
-                                        </Border>
-                                        <Border
-                                            Margin="0,0,8,8"
-                                            Padding="8,2"
-                                            Background="{DynamicResource ControlFillColorTertiaryBrush}"
-                                            CornerRadius="4">
-                                            <ui:TextBlock
-                                                FontSize="11"
-                                                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                                Text="{Binding SourceLabel}" />
-                                        </Border>
-                                        <Border
-                                            Margin="0,0,8,8"
-                                            Padding="8,2"
-                                            Background="{DynamicResource AccentFillColorSecondaryBrush}"
-                                            CornerRadius="4">
-                                            <ui:TextBlock
-                                                FontSize="11"
-                                                Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
-                                                Text="{Binding ContextTypesText}" />
-                                        </Border>
-                                        <Border
-                                            Margin="0,0,8,8"
-                                            Padding="8,2"
-                                            Background="{DynamicResource SystemFillColorCriticalBackgroundBrush}"
-                                            CornerRadius="4"
-                                            Visibility="{Binding IsMachineBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ui:TextBlock
-                                                FontSize="11"
-                                                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                                Text="{Binding MachineBlockedText}" />
-                                        </Border>
-                                        <Border
-                                            Margin="0,0,8,8"
-                                            Padding="8,2"
-                                            Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
-                                            CornerRadius="4"
-                                            Visibility="{Binding IsProtected, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ui:TextBlock
-                                                FontSize="11"
-                                                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                                Text="{Binding ProtectedText}" />
-                                        </Border>
-                                    </WrapPanel>
-
-                                    <ui:TextBlock
-                                        Margin="0,2,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="11"
-                                        Opacity="0.72"
-                                        Text="{Binding CommandKey}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding HasCommandKey, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:TextBlock
-                                        Margin="0,4,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="11"
-                                        Opacity="0.68"
-                                        Text="{Binding HandlerGuid}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding HasHandlerGuid, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:TextBlock
-                                        Margin="0,4,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="11"
-                                        Opacity="0.68"
-                                        Text="{Binding RegistryPath}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding HasRegistryPath, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:TextBlock
-                                        Margin="0,2,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="11"
-                                        Opacity="0.68"
-                                        Text="{Binding ComServerPath}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding HasComServerPath, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:TextBlock
-                                        Margin="0,8,0,0"
-                                        Opacity="0.76"
-                                        Text="{Binding GuidLockWarningText}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding ShowGuidLockWarning, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:TextBlock
-                                        Margin="0,8,0,0"
-                                        Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
-                                        Text="{Binding UserNoteDisplay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{Binding HasUserNote, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <TextBlock Margin="0,5,0,0" FontSize="12" Text="{Binding UserNote}" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                               Visibility="{Binding HasUserNote, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <DockPanel Margin="0,5,0,0"
+                                               Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Padding="6,2" Appearance="Transparent"
+                                                   Command="{Binding RetryCommand}" Content="{Binding RetryText}"
+                                                   Visibility="{Binding CanRetry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <TextBlock VerticalAlignment="Center" FontSize="12" Text="{Binding StatusText}" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </DockPanel>
                                 </StackPanel>
-
-                                <StackPanel
-                                    Grid.Column="1"
-                                    Margin="0,0,10,0"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center">
-                                    <controls:AsyncToggleSwitch
-                                        Margin="0,4,0,0"
-                                        HorizontalAlignment="Right"
-                                        Label="{Binding ToggleLabel}"
-                                        IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        CanToggle="{Binding CanToggle}"
-                                        IsBusy="{Binding IsBusy}" />
-                                    <ui:Button
-                                        Grid.Column="1"
-                                        Margin="0,20,0,0"
-                                        Appearance="Secondary"
-                                        Command="{Binding OpenFileLocationCommand}"
-                                        Content="{Binding OpenFileLocationText}"
-                                        Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
-                                        IsEnabled="{Binding CanOpenFileLocation}" />
-                                    <ui:Button
-                                        Grid.Column="1"
-                                        Margin="0,8,0,0"
-                                        HorizontalAlignment="Right"
-                                        Appearance="Secondary"
-                                        Command="{Binding EditUserNoteCommand}"
-                                        Content="{Binding EditUserNoteLabel}"
-                                        Icon="{ui:SymbolIcon Symbol=Edit24}"
-                                        IsEnabled="{Binding CanEditUserNote}" />
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ui:Button Margin="0,0,14,0" Padding="6" Appearance="Transparent"
+                                               Command="{Binding EditUserNoteCommand}" ToolTip="{Binding EditUserNoteLabel}"
+                                               AutomationProperties.Name="{Binding EditUserNoteLabel}"
+                                               Icon="{ui:SymbolIcon Symbol=Edit24}" />
+                                    <Grid>
+                                        <Grid.Style>
+                                            <Style TargetType="Grid">
+                                                <Setter Property="Width" Value="90" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsPartiallyEnabled}" Value="True">
+                                                        <Setter Property="Width" Value="178" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Grid.Style>
+                                        <controls:AsyncToggleSwitch Label="{Binding ToggleLabel}"
+                                            IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            CanToggle="{Binding CanToggle}" IsBusy="{Binding IsBusy}"
+                                            Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="{Binding DisplayName}" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                                    Visibility="{Binding ShowMixedActions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <ui:Button Padding="10,6" Command="{Binding EnableAllCommand}" Content="{Binding EnableAllText}" />
+                                            <ui:Button Margin="6,0,0,0" Padding="10,6" Command="{Binding DisableAllCommand}" Content="{Binding DisableAllText}" />
+                                        </StackPanel>
+                                        <ui:ProgressRing Width="22" Height="22" IsIndeterminate="True"
+                                            Visibility="{Binding ShowMixedBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                         </Border>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
-
-            <Border
-                Panel.ZIndex="100"
-                Padding="24,18"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="12"
-                IsHitTestVisible="False"
-                Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel HorizontalAlignment="Center" MinWidth="180">
-                    <ProgressBar
-                        Width="120"
-                        Height="4"
-                        IsIndeterminate="True"
-                        Visibility="{Binding IsListLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <ui:SymbolIcon
-                        Width="32"
-                        Height="32"
-                        HorizontalAlignment="Center"
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Symbol="FolderOpen24"
-                        Visibility="{Binding IsListEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <ui:TextBlock
-                        Margin="0,10,0,0"
-                        HorizontalAlignment="Center"
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        FontSize="15"
-                        Opacity="0.86">
-                        <ui:TextBlock.Style>
-                            <Style TargetType="ui:TextBlock">
-                                <Setter Property="Text" Value="{Binding EmptyItemsText}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsListLoading}" Value="True">
-                                        <Setter Property="Text" Value="{Binding LoadingItemsText}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ui:TextBlock.Style>
-                    </ui:TextBlock>
-                </StackPanel>
-            </Border>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                        Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <ProgressBar Width="120" Height="4" IsIndeterminate="True"
+                             Visibility="{Binding IsListLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <ui:SymbolIcon Symbol="AppsList24" FontSize="28"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                              Visibility="{Binding IsListEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock Margin="0,12,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Text" Value="{Binding EmptyItemsText}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsListLoading}" Value="True">
+                                    <Setter Property="Text" Value="{Binding LoadingItemsText}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
         </Grid>
     </Grid>
 </Page>

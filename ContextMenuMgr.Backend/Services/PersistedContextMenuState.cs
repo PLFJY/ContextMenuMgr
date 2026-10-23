@@ -7,6 +7,8 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class PersistedContextMenuState
 {
+    /// <summary>Recovery-only journal, saved before explicitly restoring a Win11 blocked value.</summary>
+    public List<PersistedWindows11BlockBackup> Windows11BlockBackups { get; set; } = [];
     /// <summary>
     /// Exact pre-mutation values for ShellVerb visibility changes made by this
     /// application. Entries are keyed by physical registry path and are recovery
@@ -324,6 +326,15 @@ public sealed class PersistedShellVerbVisibilityProvenance
     public string GenerationFingerprint { get; set; } = string.Empty;
     public List<PersistedRegistryValueSnapshot> OriginalValues { get; set; } = [];
     public DateTimeOffset CapturedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class PersistedWindows11BlockBackup
+{
+    public string PhysicalRegistryPath { get; set; } = string.Empty;
+    public string UserSid { get; set; } = string.Empty;
+    public string Clsid { get; set; } = string.Empty;
+    public DateTimeOffset CapturedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public List<PersistedRegistryValueSnapshot> OriginalValues { get; set; } = [];
 }
 
 public sealed class PersistedRegistryValueSnapshot

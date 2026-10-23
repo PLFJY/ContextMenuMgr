@@ -400,7 +400,7 @@ Deep Analysis 结果窗口显示的是 ProbeHost 运行时探测得到的菜单�
 
 `ContextMenuWorkspaceService.Items` 只代表常规全局 snapshot。后端 `ItemDetected` 表示 registry monitor 发现了新的常规项，可以加入该集合；generic `ItemStateChanged` 只允许更新集合中已存在的稳定 Id，不能以通知 payload 为依据创建未知全局项。File Types / scene 项即使使用 `ContextMenuCategory.File`，其归属仍由 scene snapshot 决定，不能因为开关操作的广播进入普通“文件”页。
 
-传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
+传统分类页（`CategoryPageView`）和 File Types / Other Rules 所复用的 `SceneBrowserView` 共享前端设置中的 `ContextMenuListViewMode`：默认是精简视图，用户切换后会全局持久化。各页监听同一个 SettingsChanged，同步选中状态；切换模式只影响展示，不重新扫描菜单。传统菜单的精简视图保留真实菜单项 `DisplayName`、图标、启用开关、更多操作入口以及待审核、检测到变更、一致性问题、注册表缺失和已删除等可操作状态；注册表路径、命令和备注等技术详情改由详细视图或“更多”操作访问。Win11 页固定为详细视图，保留应用名、适用位置、备注和开关，并显示发布者、应用标识和文件位置，缺少字段隐藏；不参与视图模式设置。若已有命令程序路径，精简卡片可以显示其文件名作为来源提示；绝不能以 CLSID、注册表路径或内部 identity 当作应用名称，也不能在渲染时做文件或 PE 元数据扫描。
 
 同一处还提供“隐藏已禁用项”，它直接使用 `FrontendSettings.HideDisabledItems`。开启后只隐藏未删除且已禁用的项目；已删除项目必须继续可见，以便撤销或永久删除。切换视图模式不会刷新后端、重建 workspace 或清空搜索文本；切换此筛选只刷新当前 `ItemsView`，不修改注册表。排序固定为 attention、deleted-state、display name，不能加入 `IsEnabled`，否则用户开关项目时会造成列表跳位。
 
@@ -527,3 +527,11 @@ ReviewOpenWithRegistration persists the decision before success is displayed. Th
 `SpecialMenuPageViewModel.IsShellNewOrderLocked` 为 nullable bool；Unknown 显示明确错误并禁用 Toggle/移动，不推断成 false。独立 `GetShellNewOrderLock` 仅读取物理 ACL；snapshot 不再从条目 `OrderLocked` 推断状态。写操作 Busy 立即禁用重复点击，响应超时/错误后另发查询；只有 fresh query 可以确定 Locked/Unlocked。无法核对保持 Unknown，后续刷新可恢复；不重试写入。新状态版本保护旧查询和旧快照，完成后刷新列表。发现失败时不能启用排序；如果 ACL 已独立确认 Locked，仍允许解锁以便恢复。UI 状态与真实 Explorer 展示仍须分别验收。
 
 ShellNew 自动刷新改为上次请求结束后等待 30 秒，操作期间跳过调度，后端另有 single-flight 防止已断开的前端造成积压。其它 SpecialMenu 保持完成后 5 秒间隔。锁状态和发现错误均通过已有 StatusText，新增三种语言的 Unknown / mismatch 文案；不新增页面或导航框架。
+
+## Win11 应用列表与恢复
+
+Win11 页按 package family 合并为应用行，固定显示详细视图：普通应用名、文件/文件夹等适用位置、发布者、应用标识、文件位置、开关和备注图标。移除视图切换控件及对应 ViewModel 属性、设置事件订阅，不读取或修改经典菜单的 ContextMenuListViewMode。混合状态显示“部分开启”并提供“全部开启 / 全部关闭”两个直接动作；系统命令独立。搜索和全局搜索采用同一应用分组，保留全部声明供匹配，通知/审核仍按 CLSID 控制域去重。不在卡片上展示 GUID、来源标签、诊断展开区或批量风险文案，移除文件夹按钮。
+
+应用切换只调用一次 service，后端完成全应用事务。旧禁用值的备份、恢复和重复别名清理均由后端处理，用户无需编辑注册表。只有影响其他具名应用、或恢复所有用户菜单时才确认实际影响。读取不完整不阻止手动开关。
+
+失败信息内联使用普通语言，完整异常写日志；提供刷新入口，结果未确认时暂停重复写入，成功刷新后恢复。成功时直接合并后端已核验的 Items；结果缺失、不完整或失败才查询。旧服务拒绝新增应用命令时提示在设置中修复服务，不执行旧式多请求 fallback。Win11 菜单开关不标记或执行 Explorer 重启，重新打开右键菜单即可查看。旧 Id 备注继续兼容读取。实际 WPF 页面须验证浅/深色、混合状态、窄窗口、固定详细展示及与经典菜单视图偏好相互独立、搜索、备注、故障刷新。

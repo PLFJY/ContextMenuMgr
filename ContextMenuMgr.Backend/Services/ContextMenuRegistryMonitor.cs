@@ -251,7 +251,7 @@ public sealed class ContextMenuRegistryMonitor
                     // Only genuinely new runtime items enter approval. Modified
                     // items remain visible as external changes, while deleted
                     // identities have already been removed from the baseline.
-                    if (item.CanToggle
+                    if (item.CanAutomaticallyDisable
                         && item.DetectedChangeKind == ContextMenuChangeKind.Added)
                     {
                         await _logger.LogAsync(
@@ -274,7 +274,7 @@ public sealed class ContextMenuRegistryMonitor
                     // outside knownItems until quarantine has committed its
                     // approval state; a failed write is retried next poll.
                     if (!knownItems.ContainsKey(item.Id)
-                        && item.CanToggle
+                        && item.CanAutomaticallyDisable
                         && item.DetectedChangeKind == ContextMenuChangeKind.Added)
                     {
                         continue;

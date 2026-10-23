@@ -1029,34 +1029,10 @@ Continue anyway? (Not recommended)</value>
     <value>Win11 New Menu</value>
   </data>
   <data name="Windows11PageDescription" xml:space="preserve">
-    <value>Manage packaged-app and Windows system commands that appear in the Windows 11 modern context menu.</value>
+    <value>Choose which apps appear in the Windows 11 context menu. Reopen the context menu to see your changes.</value>
   </data>
   <data name="Windows11NoItems" xml:space="preserve">
     <value>No manageable Windows 11 modern context-menu entries were found.</value>
-  </data>
-  <data name="Windows11PackageFamilyLabel" xml:space="preserve">
-    <value>Package family</value>
-  </data>
-  <data name="Windows11PublisherLabel" xml:space="preserve">
-    <value>Publisher</value>
-  </data>
-  <data name="Windows11ContextTypesLabel" xml:space="preserve">
-    <value>Applies to</value>
-  </data>
-  <data name="Windows11MachineBlockedText" xml:space="preserve">
-    <value>Blocked at machine scope</value>
-  </data>
-  <data name="Windows11PackagedComSourceLabel" xml:space="preserve">
-    <value>Packaged COM</value>
-  </data>
-  <data name="Windows11SystemCommandSourceLabel" xml:space="preserve">
-    <value>System Command / CommandStore</value>
-  </data>
-  <data name="Windows11SystemCommandProtectedText" xml:space="preserve">
-    <value>Protected by Windows</value>
-  </data>
-  <data name="Windows11SystemCommandGuidLockWarning" xml:space="preserve">
-    <value>Do not use GUID Lock for Windows 11 built-in commands. Blocking the wrong Explorer command handler may cause the Windows 11 modern context menu to fall back to the classic menu.</value>
   </data>
   <data name="OtherRulesPageTitle" xml:space="preserve">
     <value>Other Rules</value>
@@ -1615,4 +1591,21 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>Open With monitoring is waiting for registry access or durable storage. Refresh the Open With page to inspect the current state.</value></data>
   <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>ShellNew lock state could not be verified. Refresh before making another change.</value></data>
   <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>The ShellNew lock state differs from the requested state. Refresh and inspect the registry before retrying.</value></data>
+  <data name="Windows11StateUncertain" xml:space="preserve">
+    <value>The change could not be confirmed. Refresh before trying again.</value>
+  </data>
+  <data name="Windows11PartiallyEnabled" xml:space="preserve"><value>Partly on</value></data>
+  <data name="Windows11ChangeFailed" xml:space="preserve"><value>Could not change this menu. Please try again.</value></data>
+  <data name="Windows11MenuUnavailable" xml:space="preserve"><value>Windows does not currently support changing this menu.</value></data>
+  <data name="Windows11RestoreAllUsersConfirm" xml:space="preserve"><value>This menu is turned off for everyone. Restoring it will also make it available to other users. Continue?</value></data>
+  <data name="Windows11SharedAppConfirm" xml:space="preserve"><value>This app shares its menus with {0}. Changing it will also change their menus. Continue?</value></data>
+  <data name="Windows11ItemCount" xml:space="preserve"><value>{0} apps and menus</value></data>
+  <data name="Windows11LoadFailed" xml:space="preserve"><value>Menus could not be loaded. Select Refresh to try again.</value></data>
+  <data name="Windows11ServiceUpdateRequired" xml:space="preserve"><value>Repair the background service in Settings, then try again.</value></data>
+  <data name="Windows11MoreOptionsConfirm" xml:space="preserve"><value>Related menus under Show more options will also change. Continue?</value></data>
+  <data name="Windows11EnableAll" xml:space="preserve"><value>Enable all</value></data>
+  <data name="Windows11DisableAll" xml:space="preserve"><value>Disable all</value></data>
+  <data name="Windows11Publisher" xml:space="preserve"><value>Publisher: {0}</value></data>
+  <data name="Windows11PackageIdentity" xml:space="preserve"><value>App identity: {0}</value></data>
+  <data name="Windows11FileLocation" xml:space="preserve"><value>File location: {0}</value></data>
 </root>

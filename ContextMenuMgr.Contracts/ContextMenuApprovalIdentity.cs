@@ -18,9 +18,8 @@ public static class ContextMenuApprovalIdentity
             }
 
             return CreateWindows11LogicalItemKey(
-                ExtractWin11PackageKey(entry.RegistryPath),
-                entry.DisplayName,
-                entry.FilePath);
+                entry.Windows11PackageFamilyName ?? ExtractWin11PackageKey(entry.RegistryPath),
+                entry.HandlerClsid);
         }
 
         return string.Join("|",
@@ -37,18 +36,9 @@ public static class ContextMenuApprovalIdentity
     /// <summary>
     /// Creates the logical grouping key used for Win11 packaged context-menu items.
     /// </summary>
-    public static string CreateWindows11LogicalItemKey(string? packageKey, string? displayName, string? filePath)
-    {
-        // Win11 packaged menu items can surface under multiple categories and
-        // may even use category-specific COM class IDs while still mapping to
-        // the same user-visible command. Group them by package + display name
-        // + module path instead of category-specific IDs.
-        return string.Join("|",
-            "win11",
-            packageKey ?? string.Empty,
-            displayName ?? string.Empty,
-            filePath ?? string.Empty);
-    }
+    public static string CreateWindows11LogicalItemKey(string? packageKey, string? handlerClsid)
+        => string.Join("|", "win11", packageKey ?? string.Empty,
+            Guid.TryParse(handlerClsid, out var clsid) ? clsid.ToString("B") : handlerClsid ?? string.Empty);
 
     /// <summary>
     /// Extracts the packaged-COM package full name from a Win11 registry path.

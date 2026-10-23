@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -97,17 +96,19 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public string SearchLabel => _localization.Translate("SearchLabel");
 
-    public string NoItemsText => _localization.Translate("Windows11NoItems");
-
     public string LoadingItemsText => _localization.Translate("LoadingItemsText");
 
-    public string EmptyItemsText => _localization.Translate("EmptyItemsText");
+    public string EmptyItemsText => _localization.Translate("Windows11NoItems");
 
-    public string PackageFamilyLabel => _localization.Translate("Windows11PackageFamilyLabel");
+    public string RefreshText => _localization.Translate("Refresh");
+    public string ItemCountText => _localization.Format("Windows11ItemCount", ItemsView.Cast<object>().Count());
+    public string LoadErrorText => _localization.Translate("Windows11LoadFailed");
 
-    public string PublisherLabel => _localization.Translate("Windows11PublisherLabel");
-
-    public string ContextTypesLabel => _localization.Translate("Windows11ContextTypesLabel");
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsListEmpty))]
+    [NotifyPropertyChangedFor(nameof(ShowListContent))]
+    [NotifyPropertyChangedFor(nameof(ShowListPlaceholder))]
+    public partial bool HasLoadError { get; set; }
 
     public bool IsSupported => _service.IsSupported;
 
@@ -115,7 +116,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public bool ShowListContent => !IsListLoading && !IsListEmpty;
 
-    public bool IsListEmpty => !IsListLoading && !IsLoading
+    public bool IsListEmpty => !HasLoadError && !IsListLoading && !IsLoading
         && !ItemsView.Cast<object>().Any();
 
     public bool ShowListPlaceholder => IsListLoading || IsListEmpty;
@@ -132,6 +133,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         }
 
         IsLoading = true;
+        HasLoadError = false;
         try
         {
             await _service.RefreshAsync(CancellationToken.None);
@@ -139,9 +141,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(
-                ex.Message,
-                _localization.Translate("Windows11PageTitle"));
+            HasLoadError = true;
+            FrontendDebugLog.Warning(nameof(Windows11ContextMenuPageViewModel), ex.ToString());
         }
         finally
         {
@@ -209,12 +210,11 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Description));
         OnPropertyChanged(nameof(SearchLabel));
-        OnPropertyChanged(nameof(NoItemsText));
         OnPropertyChanged(nameof(LoadingItemsText));
         OnPropertyChanged(nameof(EmptyItemsText));
-        OnPropertyChanged(nameof(PackageFamilyLabel));
-        OnPropertyChanged(nameof(PublisherLabel));
-        OnPropertyChanged(nameof(ContextTypesLabel));
+        OnPropertyChanged(nameof(RefreshText));
+        OnPropertyChanged(nameof(ItemCountText));
+        OnPropertyChanged(nameof(LoadErrorText));
         ItemsView.Refresh();
         RefreshListPlaceholderState();
     }
@@ -229,9 +229,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         }
         catch (Exception ex)
         {
-            await FrontendMessageBox.ShowErrorAsync(
-                ex.Message,
-                _localization.Translate("Windows11PageTitle"));
+            HasLoadError = true;
+            FrontendDebugLog.Warning(nameof(Windows11ContextMenuPageViewModel), ex.ToString());
         }
         finally
         {
@@ -288,7 +287,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
                      .ThenBy(static group => group.First().DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
             var itemViewModel = new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization, _settingsService);
-            itemViewModel.RefreshPendingApproval(pendingApprovalKeys.Contains(group.Key));
+            itemViewModel.RefreshPendingApproval(group.Any(definition => pendingApprovalKeys.Contains(ApprovalKey(definition))));
             Items.Add(itemViewModel);
         }
 
@@ -303,14 +302,12 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
             return string.Join("|", "win11-system", item.Entry?.KeyName ?? item.Id);
         }
 
-        var filePath = File.Exists(item.ComServer.Path ?? string.Empty)
-            ? item.ComServer.Path
-            : item.Package.InstallPath;
-        return ContextMenuApprovalIdentity.CreateWindows11LogicalItemKey(
-            item.Package.FullName,
-            item.DisplayName,
-            filePath);
+        return "win11-app|" + item.Package.FamilyName;
     }
+
+    private static string ApprovalKey(Windows11ContextMenuItemDefinition item) => item.Entry is not null
+        ? ContextMenuApprovalIdentity.CreateLogicalItemKey(item.Entry)
+        : ContextMenuApprovalIdentity.CreateWindows11LogicalItemKey(item.Package.FamilyName, item.ComServer.Id);
 
     private bool FilterItem(object obj)
     {
@@ -363,7 +360,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         var pendingApprovalKeys = GetPendingApprovalKeys();
         foreach (var item in Items)
         {
-            item.RefreshPendingApproval(pendingApprovalKeys.Contains(CreateLogicalGroupKey(item.Definitions[0])));
+            item.RefreshPendingApproval(item.Definitions.Any(definition => pendingApprovalKeys.Contains(ApprovalKey(definition))));
         }
     }
 
@@ -400,6 +397,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     private void RefreshListPlaceholderState()
     {
+        OnPropertyChanged(nameof(ItemCountText));
         OnPropertyChanged(nameof(IsListLoading));
         OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));

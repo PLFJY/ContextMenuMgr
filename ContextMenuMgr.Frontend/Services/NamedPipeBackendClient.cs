@@ -603,43 +603,47 @@ public sealed class NamedPipeBackendClient : IBackendClient
     /// <summary>
     /// Sets Win11 blocked item Async.
     /// </summary>
-    public async Task SetWin11BlockedItemAsync(
+    public async Task<IReadOnlyList<ContextMenuEntry>> SetWin11BlockedItemAsync(
         string handlerClsid,
         string displayName,
         bool blockMachine,
         Guid clientOperationId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool applicationScope = false)
     {
-        await SendRequestAsync(
+        var response = await SendRequestAsync(
             new PipeRequest
             {
-                Command = PipeCommand.SetWin11BlockedItem,
+                Command = applicationScope ? PipeCommand.SetWin11ApplicationEnabled : PipeCommand.SetWin11BlockedItem,
+                Enable = false,
                 ItemId = handlerClsid,
                 DisplayName = displayName,
                 BlockMachine = blockMachine,
                 ClientOperationId = clientOperationId
             },
             cancellationToken);
+        return response.Items;
     }
 
     /// <summary>
     /// Removes Win11 blocked item Async.
     /// </summary>
-    public async Task RemoveWin11BlockedItemAsync(
+    public async Task<IReadOnlyList<ContextMenuEntry>> RemoveWin11BlockedItemAsync(
         string handlerClsid,
         bool unblockMachine,
         Guid clientOperationId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool applicationScope = false)
     {
-        await SendRequestAsync(
+        var response = await SendRequestAsync(
             new PipeRequest
             {
-                Command = PipeCommand.RemoveWin11BlockedItem,
+                Command = applicationScope ? PipeCommand.SetWin11ApplicationEnabled : PipeCommand.RemoveWin11BlockedItem,
+                Enable = true,
                 ItemId = handlerClsid,
                 UnblockMachine = unblockMachine,
                 ClientOperationId = clientOperationId
             },
             cancellationToken);
+        return response.Items;
     }
 
     /// <summary>

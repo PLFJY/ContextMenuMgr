@@ -1,446 +1,95 @@
-using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text.Json;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Services;
 
-/// <summary>
-/// Manages Win11 context menu blocking entries in the registry.
-/// All operations use the correct user context to ensure multi-user support.
-/// </summary>
-public sealed class Windows11BlocksService
+/// <summary>One user-scoped blocked-value control domain, shared by manual and monitor mutations.</summary>
+public sealed class Windows11BlocksService(FileLogger logger)
 {
-    private const string UserBlockedPathSuffix = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-    private const string MachineBlockedPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-    private const string MissingUserContextMessage = "User context is required for user-level Win11 context menu blocking.";
+    internal const string BlockedPath = @"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
+    private const string OwnershipPrefix = "ContextMenuMgrPlus.Win11Blocked.v1|";
 
-    private readonly FileLogger _logger;
-
-    public Windows11BlocksService(FileLogger logger)
+    internal static Windows11BlockMutation CreateMutation(
+        string handlerClsid, BackendUserContext? context, bool enable, FileLogger logger, bool restoreMachine = false)
     {
-        _logger = logger;
+        if (!Guid.TryParse(handlerClsid, out var clsid))
+            throw new InvalidOperationException("A valid handler CLSID is required.");
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, Windows11ClsidImpactIndex.NativeView);
+        using var user = OpenUser(users, context?.Sid ?? string.Empty, writable: true);
+        using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, Windows11ClsidImpactIndex.NativeView);
+        using var machineBlocked = machine.OpenSubKey(BlockedPath);
+        if (enable && MatchingNames(machineBlocked, clsid).Length > 0 && !restoreMachine)
+            throw new InvalidOperationException("This menu is turned off for all users. Refresh and try restoring it again.");
+        using var blocked = user.CreateSubKey(BlockedPath, writable: true)
+            ?? throw new InvalidOperationException("The user blocked list is unavailable.");
+        return CreateMutation(blocked, clsid, context!.Sid, enable, logger, restoreMachine ? machineBlocked : null);
     }
 
-    /// <summary>
-    /// Adds a CLSID to the blocked list.
-    /// </summary>
-    public async Task<PipeResponse> SetWin11BlockedItemAsync(
-        string handlerClsid,
-        string displayName,
-        bool blockMachine,
-        Guid? operationId,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
+    internal static Windows11BlockMutation CreateMutation(
+        RegistryKey blocked, Guid clsid, string sid, bool enable, FileLogger logger, RegistryKey? machineBlocked = null)
     {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(handlerClsid))
-            {
-                return Failure("Handler CLSID is required.", operationId);
-            }
-
-            var normalizedClsid = NormalizeGuid(handlerClsid);
-            await _logger.LogAsync(
-                $"Win11 command SetWin11BlockedItem: Sid={FormatSid(userContext)}, Machine={blockMachine}, Clsid={normalizedClsid}, Result=started.",
-                cancellationToken);
-
-            if (!blockMachine && userContext is null)
-            {
-                await _logger.LogAsync(
-                    RuntimeLogLevel.Warning,
-                    $"Win11 command SetWin11BlockedItem: Sid=<null>, Machine={blockMachine}, Clsid={normalizedClsid}, Result=failed. {MissingUserContextMessage}",
-                    cancellationToken);
-                return Failure(MissingUserContextMessage, operationId);
-            }
-
-            if (blockMachine)
-            {
-                await AddToMachineBlockedListAsync(normalizedClsid, displayName, cancellationToken);
-            }
-
-            if (userContext is not null)
-            {
-                await AddToUserBlockedListAsync(normalizedClsid, displayName, userContext, cancellationToken);
-            }
-            else
-            {
-                await _logger.LogAsync(
-                    $"Win11 command SetWin11BlockedItem: Sid=<null>, Machine={blockMachine}, Clsid={normalizedClsid}, Result=machine-only.",
-                    cancellationToken);
-            }
-
-            await _logger.LogAsync($"Win11 command SetWin11BlockedItem: Sid={FormatSid(userContext)}, Machine={blockMachine}, Clsid={normalizedClsid}, Result=succeeded.", cancellationToken);
-            return new PipeResponse
-            {
-                Success = true,
-                Message = "Win11 context menu item blocked successfully.",
-                ClientOperationId = operationId
-            };
-        }
-        catch (Exception ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to block Win11 item: {ex}", cancellationToken);
-            return Failure(ex.Message, operationId);
-        }
+        if (!new SecurityIdentifier(sid).IsAccountSid())
+            throw new InvalidOperationException("An authenticated frontend account SID is required.");
+        var marker = OwnershipPrefix + sid + "|" + clsid.ToString("B");
+        var mutation = new Windows11BlockMutation(clsid, sid, enable, marker);
+        mutation.AddTarget(blocked);
+        if (enable && machineBlocked is not null) mutation.AddTarget(machineBlocked);
+        logger.LogFireAndForget(RuntimeLogLevel.Warning,
+            $"Win11BlockedMutationPlan: Sid={sid}, Clsid={clsid:B}, Enable={enable}, Before={JsonSerializer.Serialize(mutation.Backups)}, ExplorerValidated=False.");
+        return mutation;
     }
 
-    /// <summary>
-    /// Removes a CLSID from the blocked list.
-    /// </summary>
-    public async Task<PipeResponse> RemoveWin11BlockedItemAsync(
-        string handlerClsid,
-        bool unblockMachine,
-        Guid? operationId,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
+    internal static Windows11BlockedState ReadState(string handlerClsid, string userSid)
     {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(handlerClsid))
-            {
-                return Failure("Handler CLSID is required.", operationId);
-            }
-
-            var normalizedClsid = NormalizeGuid(handlerClsid);
-            await _logger.LogAsync(
-                $"Win11 command RemoveWin11BlockedItem: Sid={FormatSid(userContext)}, Machine={unblockMachine}, Clsid={normalizedClsid}, Result=started.",
-                cancellationToken);
-
-            if (!unblockMachine && userContext is null)
-            {
-                await _logger.LogAsync(
-                    RuntimeLogLevel.Warning,
-                    $"Win11 command RemoveWin11BlockedItem: Sid=<null>, Machine={unblockMachine}, Clsid={normalizedClsid}, Result=failed. {MissingUserContextMessage}",
-                    cancellationToken);
-                return Failure(MissingUserContextMessage, operationId);
-            }
-
-            if (unblockMachine)
-            {
-                await RemoveFromMachineBlockedListAsync(normalizedClsid, cancellationToken);
-            }
-
-            if (userContext is not null)
-            {
-                await RemoveFromUserBlockedListAsync(normalizedClsid, userContext, cancellationToken);
-            }
-            else
-            {
-                await _logger.LogAsync(
-                    $"Win11 command RemoveWin11BlockedItem: Sid=<null>, Machine={unblockMachine}, Clsid={normalizedClsid}, Result=machine-only.",
-                    cancellationToken);
-            }
-
-            await _logger.LogAsync($"Win11 command RemoveWin11BlockedItem: Sid={FormatSid(userContext)}, Machine={unblockMachine}, Clsid={normalizedClsid}, Result=succeeded.", cancellationToken);
-            return new PipeResponse
-            {
-                Success = true,
-                Message = "Win11 context menu item unblocked successfully.",
-                ClientOperationId = operationId
-            };
-        }
-        catch (Exception ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to unblock Win11 item: {ex}", cancellationToken);
-            return Failure(ex.Message, operationId);
-        }
+        var clsid = Guid.Parse(handlerClsid);
+        using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, Windows11ClsidImpactIndex.NativeView);
+        using var machineBlocked = machine.OpenSubKey(BlockedPath);
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, Windows11ClsidImpactIndex.NativeView);
+        using var user = OpenUser(users, userSid);
+        using var userBlocked = user.OpenSubKey(BlockedPath);
+        var userNames = MatchingNames(userBlocked, clsid);
+        return new(MatchingNames(machineBlocked, clsid).Length > 0, userNames.Length > 0);
     }
 
-    /// <summary>
-    /// Gets all blocked items for the current user and machine.
-    /// </summary>
     public async Task<PipeResponse> GetWin11BlockedItemsAsync(
-        Guid? operationId,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
+        Guid? operationId, BackendUserContext? userContext, CancellationToken cancellationToken)
     {
         try
         {
-            var machineItems = GetMachineBlockedItems();
-            if (userContext is null)
-            {
-                await _logger.LogAsync(
-                    RuntimeLogLevel.Warning,
-                    "Win11 command GetWin11BlockedItems: Sid=<null>, Machine=False, Clsid=<none>, Result=machine-only fallback.",
-                    cancellationToken);
-            }
-
-            var userItems = userContext is not null
-                ? GetUserBlockedItems(userContext)
-                : new List<Win11BlockedItem>();
-
-            var allItems = machineItems.Concat(userItems).ToArray();
-
-            await _logger.LogAsync($"Win11 command GetWin11BlockedItems: Sid={FormatSid(userContext)}, Machine=False, Clsid=<none>, Result=succeeded. Retrieved {allItems.Length} blocked items (Machine={machineItems.Count}, User={userItems.Count}).", cancellationToken);
-            return new PipeResponse
-            {
-                Success = true,
-                Message = $"Retrieved {allItems.Length} blocked items.",
-                ClientOperationId = operationId,
-                Win11BlockedItems = allItems
-            };
+            using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, Windows11ClsidImpactIndex.NativeView);
+            using var user = OpenUser(users, userContext);
+            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, Windows11ClsidImpactIndex.NativeView);
+            var items = ReadItems(machine, "Machine").Concat(ReadItems(user, "User")).ToArray();
+            return new PipeResponse { Success = true, ClientOperationId = operationId, Win11BlockedItems = items };
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to get Win11 blocked items: {ex}", cancellationToken);
-            return Failure(ex.Message, operationId);
+            await logger.LogAsync(RuntimeLogLevel.Warning, $"Win11BlockedReadFailed: {ex}", cancellationToken);
+            return new PipeResponse { Success = false, Message = ex.Message, ClientOperationId = operationId };
         }
     }
 
-    #region Machine-level operations
-
-    private async Task AddToMachineBlockedListAsync(string clsid, string displayName, CancellationToken cancellationToken)
+    private static Win11BlockedItem[] ReadItems(RegistryKey root, string scope)
     {
-        const string fullPath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-        using var key = Registry.LocalMachine.CreateSubKey(MachineBlockedPath, writable: true);
-        if (key is not null)
-        {
-            var regName = NormalizeGuid(clsid);
-            key.SetValue(regName, displayName, RegistryValueKind.String);
-            await _logger.LogAsync(
-                DiagnosticLogFormatter.BuildRegistryOperationLog(
-                    "Win11MachineBlockedSetValue",
-                    fullPath,
-                    regName,
-                    RegistryValueKind.String,
-                    displayName,
-                    writable: true,
-                    result: "Success"),
-                cancellationToken);
-        }
+        using var blocked = root.OpenSubKey(BlockedPath);
+        return blocked?.GetValueNames().Where(name => Guid.TryParse(name, out _))
+            .Select(name => new Win11BlockedItem { Clsid = name, Scope = scope,
+                DisplayName = blocked.GetValue(name)?.ToString() ?? string.Empty }).ToArray() ?? [];
     }
 
-    private async Task RemoveFromMachineBlockedListAsync(string clsid, CancellationToken cancellationToken)
+    private static string[] MatchingNames(RegistryKey? blocked, Guid clsid) => blocked?.GetValueNames()
+        .Where(name => Guid.TryParse(name, out var parsed) && parsed == clsid).ToArray() ?? [];
+
+    private static RegistryKey OpenUser(RegistryKey users, BackendUserContext? context)
+        => OpenUser(users, context?.Sid ?? string.Empty);
+
+    private static RegistryKey OpenUser(RegistryKey users, string sid, bool writable = false)
     {
-        const string fullPath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-        using var key = Registry.LocalMachine.OpenSubKey(MachineBlockedPath, writable: true);
-        if (key is not null)
-        {
-            var regName = NormalizeGuid(clsid);
-            DeleteGuidValue(key, regName, fullPath, cancellationToken);
-            await _logger.LogAsync(
-                DiagnosticLogFormatter.BuildRegistryOperationLog(
-                    "Win11MachineBlockedDeleteValue",
-                    fullPath,
-                    regName,
-                    null,
-                    null,
-                    writable: true,
-                    result: "Success"),
-                cancellationToken);
-        }
+        if (string.IsNullOrWhiteSpace(sid) || !new SecurityIdentifier(sid).IsAccountSid())
+            throw new InvalidOperationException("An authenticated frontend account SID is required.");
+        return users.OpenSubKey(sid, writable)
+            ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
     }
-
-    private IReadOnlyList<Win11BlockedItem> GetMachineBlockedItems()
-    {
-        var items = new List<Win11BlockedItem>();
-        const string fullPath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
-        using var key = Registry.LocalMachine.OpenSubKey(MachineBlockedPath, writable: false);
-        if (key is null)
-        {
-            _logger.LogFireAndForget($"Win11MachineBlockedRead: Path={fullPath}, Count=0, Result=MissingKey.");
-            return items;
-        }
-
-        var valueNames = key.GetValueNames();
-        _logger.LogFireAndForget($"Win11MachineBlockedRead: Path={fullPath}, Count={valueNames.Length}, ValueNames={string.Join(";", valueNames)}.");
-        foreach (var valueName in valueNames)
-        {
-            var displayName = key.GetValue(valueName)?.ToString() ?? string.Empty;
-            items.Add(new Win11BlockedItem
-            {
-                Clsid = valueName,
-                DisplayName = displayName,
-                Scope = "Machine"
-            });
-        }
-
-        return items;
-    }
-
-    #endregion
-
-    #region User-level operations
-
-    private async Task AddToUserBlockedListAsync(string clsid, string displayName, BackendUserContext userContext, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var key = OpenUserBlockedKey(userContext, writable: true, create: true);
-            var fullPath = DiagnosticLogFormatter.FormatUserHivePath(userContext, UserBlockedPathSuffix);
-            
-            if (key is not null)
-            {
-                // Format GUID with braces like reference project does
-                var regName = NormalizeGuid(clsid);
-                key.SetValue(regName, displayName, RegistryValueKind.String);
-                await _logger.LogAsync(
-                    DiagnosticLogFormatter.BuildRegistryOperationLog(
-                        "Win11UserBlockedSetValue",
-                        fullPath,
-                        regName,
-                        RegistryValueKind.String,
-                        displayName,
-                        writable: true,
-                        result: $"Success, Sid={userContext.Sid}"),
-                    cancellationToken);
-            }
-            else
-            {
-                throw new InvalidOperationException("Unable to open or create blocked list registry key.");
-            }
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Permission denied adding to user blocked list: {ex}", cancellationToken);
-            throw new InvalidOperationException(
-                "Cannot write to the registry key. The backend service may not have sufficient permissions to modify the current user's registry. " +
-                "Please ensure the backend service is running with adequate privileges or run the application as administrator.",
-                ex);
-        }
-        catch (Exception ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to add to user blocked list: {ex}", cancellationToken);
-            throw;
-        }
-    }
-
-    private async Task RemoveFromUserBlockedListAsync(string clsid, BackendUserContext userContext, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var key = OpenUserBlockedKey(userContext, writable: true, create: false);
-            var fullPath = DiagnosticLogFormatter.FormatUserHivePath(userContext, UserBlockedPathSuffix);
-            if (key is not null)
-            {
-                var regName = NormalizeGuid(clsid);
-                DeleteGuidValue(key, regName, fullPath, cancellationToken);
-                await _logger.LogAsync(
-                    DiagnosticLogFormatter.BuildRegistryOperationLog(
-                        "Win11UserBlockedDeleteValue",
-                        fullPath,
-                        regName,
-                        null,
-                        null,
-                        writable: true,
-                        result: $"Success, Sid={userContext.Sid}"),
-                    cancellationToken);
-            }
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Permission denied removing from user blocked list: {ex}", cancellationToken);
-            throw new InvalidOperationException(
-                "Cannot write to the registry key. The backend service may not have sufficient permissions to modify the current user's registry. " +
-                "Please ensure the backend service is running with adequate privileges or run the application as administrator.",
-                ex);
-        }
-        catch (Exception ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to remove from user blocked list: {ex}", cancellationToken);
-            throw;
-        }
-    }
-
-    private IReadOnlyList<Win11BlockedItem> GetUserBlockedItems(BackendUserContext userContext)
-    {
-        var items = new List<Win11BlockedItem>();
-        
-        try
-        {
-            using var key = OpenUserBlockedKey(userContext, writable: false, create: false);
-            var fullPath = DiagnosticLogFormatter.FormatUserHivePath(userContext, UserBlockedPathSuffix);
-            if (key is not null)
-            {
-                var valueNames = key.GetValueNames();
-                _logger.LogFireAndForget($"Win11UserBlockedRead: Path={fullPath}, Sid={userContext.Sid}, Count={valueNames.Length}, ValueNames={string.Join(";", valueNames)}.");
-                foreach (var valueName in valueNames)
-                {
-                    var dn = key.GetValue(valueName)?.ToString() ?? string.Empty;
-                    items.Add(new Win11BlockedItem
-                    {
-                        Clsid = valueName,
-                        DisplayName = dn,
-                        Scope = "User"
-                    });
-                }
-            }
-            else
-            {
-                _logger.LogFireAndForget($"Win11UserBlockedRead: Path={DiagnosticLogFormatter.FormatUserHivePath(userContext, UserBlockedPathSuffix)}, Sid={userContext.Sid}, Count=0, Result=MissingKey.");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogAsync(RuntimeLogLevel.Warning, $"Error reading user blocked items for {userContext.Sid}: {ex}, returning empty list.", CancellationToken.None).GetAwaiter().GetResult();
-        }
-
-        return items;
-    }
-
-    #endregion
-
-    #region Helper methods
-
-    private static string NormalizeGuid(string guidText)
-    {
-        return Guid.TryParse(guidText, out var guid)
-            ? guid.ToString("B")
-            : guidText.Trim('{', '}');
-    }
-
-    private static string FormatSid(BackendUserContext? userContext)
-    {
-        return string.IsNullOrWhiteSpace(userContext?.Sid) ? "<null>" : userContext.Sid;
-    }
-
-    private void DeleteGuidValue(RegistryKey key, string normalizedClsid, string fullPath, CancellationToken cancellationToken)
-    {
-        key.DeleteValue(normalizedClsid, throwOnMissingValue: false);
-        _logger.LogFireAndForget($"Win11DeleteGuidValue: Path={fullPath}, ValueName={normalizedClsid}, Variant=Requested, Operation=DeleteValue.");
-
-        // ContextMenuMgr writes {GUID} values; remove matching manual entries without braces too.
-        foreach (var valueName in key.GetValueNames())
-        {
-            if (string.Equals(NormalizeGuid(valueName), normalizedClsid, StringComparison.OrdinalIgnoreCase))
-            {
-                key.DeleteValue(valueName, throwOnMissingValue: false);
-                _logger.LogFireAndForget($"Win11DeleteGuidValue: Path={fullPath}, ValueName={valueName}, Variant=BraceOrNoBraceMatch, Operation=DeleteValue.");
-            }
-        }
-    }
-
-    private RegistryKey? OpenUserBlockedKey(BackendUserContext userContext, bool writable, bool create)
-    {
-        if (string.IsNullOrWhiteSpace(userContext.Sid))
-        {
-            throw new InvalidOperationException("The frontend user SID is not available.");
-        }
-
-        var path = $@"{userContext.Sid}\{UserBlockedPathSuffix}";
-        var fullPath = DiagnosticLogFormatter.FormatUserHivePath(userContext, UserBlockedPathSuffix);
-        try
-        {
-            var key = create
-                ? Registry.Users.CreateSubKey(path, writable)
-                : Registry.Users.OpenSubKey(path, writable);
-            _logger.LogFireAndForget($"OpenUserBlockedKey: Path={fullPath}, Writable={writable}, Create={create}, Result={(key is null ? "Missing" : "Success")}.");
-            return key;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"OpenUserBlockedKey: Path={fullPath}, Writable={writable}, Create={create}, Result=Failure, Exception={ex}");
-            throw;
-        }
-    }
-
-    private static PipeResponse Failure(string message, Guid? operationId) => new()
-    {
-        Success = false,
-        Message = message,
-        ClientOperationId = operationId
-    };
-
-    #endregion
 }

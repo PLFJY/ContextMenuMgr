@@ -9,6 +9,71 @@ public sealed class PackagedContextMenuDiscoveryTests
 {
     private const string PythonClsid = "{C7E29CB0-9691-4DE8-B72B-6719DDC0B4A1}";
 
+    // Permanent: colliding declarations retain their sources and cannot authorize automatic blocking.
+    [Fact]
+    public async Task SharedClsid_PreservesPackagesAndClassicReferences_AndSuspendsAutomaticBlocking()
+    {
+        var first = Assert.Single(PackagedContextMenuDiscovery.ParseManifest(PythonManifest, CreatePackage()));
+        var second = first with { Package = CreatePackage("Other.Package_1.0.0.0_x64__abc", "Other.Package_abc") };
+        var catalog = new Windows11ContextMenuCatalog(null, new PackagedContextMenuScanCache(_ => [first, second]));
+        var context = new BackendUserContext(System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value,
+            Environment.UserName, string.Empty, string.Empty, string.Empty, null);
+        var snapshot = await catalog.EnumerateEntriesAsync(CancellationToken.None, context);
+        var packaged = snapshot.Where(entry => entry.Category == ContextMenuCategory.File
+            && entry.Windows11SourceKind == Windows11ContextMenuSourceKind.PackagedCom).ToArray();
+        Assert.Equal(2, packaged.Length);
+        Assert.All(packaged, entry =>
+        {
+            Assert.False(entry.CanAutomaticallyDisable);
+            Assert.Equal(2, entry.Windows11ClsidImpact!.References.Where(reference => reference.Kind == "Package")
+                .Select(reference => reference.PackageFullName).Distinct().Count());
+            Assert.False(ContextMenuChangeClassifier.ShouldReconcileDisabledState(entry with { IsEnabled = true },
+                PersistedContextMenuState.FromEntry(entry with { IsEnabled = false })));
+        });
+
+        var path = @"Software\ContextMenuMgr.Tests\Win11References\" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using var root = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(path)!;
+            using (var classic = root.CreateSubKey(@"Test.ProgId\shell\Open"))
+                classic.SetValue("ExplorerCommandHandler", PythonClsid);
+            using (var direct = root.CreateSubKey(@"Test.ProgId\shellex\DropHandler"))
+                direct.SetValue(null, PythonClsid);
+            using (var named = root.CreateSubKey($@"Test.ProgId\shellex\ContextMenuHandlers\{PythonClsid}"))
+                named.SetValue(null, "Invalid default; the GUID key is authoritative");
+            var classicIndex = new Windows11ClsidImpactIndex([first]);
+            classicIndex.ReadClasses(root, CancellationToken.None);
+            var impact = classicIndex.Get(PythonClsid);
+            Assert.False(impact.AllowsAutomaticDisable);
+            Assert.Contains(impact.References, reference => reference.Kind == "Classic"
+                && reference.RegistryPath!.EndsWith(@"Test.ProgId\shell\Open"));
+            Assert.Contains(impact.References, reference => reference.RegistryPath!.EndsWith(@"shellex\DropHandler"));
+            Assert.Contains(impact.References, reference => reference.RegistryPath!.EndsWith($@"ContextMenuHandlers\{PythonClsid}"));
+        }
+        finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(path, false); }
+    }
+
+    // Permanent: upgrade must preserve the original package policy without creating false Added/pending states.
+    [Fact]
+    public void LegacyIdentityMigration_PreservesKnownPolicy_AndAdoptsPreviouslyHiddenSources()
+    {
+        var definition = Assert.Single(PackagedContextMenuDiscovery.ParseManifest(PythonManifest, CreatePackage()));
+        var original = Windows11ContextMenuCatalog.CreateEntry(definition, ContextMenuCategory.File, new(false, true), "sid");
+        var other = Windows11ContextMenuCatalog.CreateEntry(definition with
+        { Package = CreatePackage("Other.Package_1.0.0.0_x64__abc", "Other.Package_abc") }, ContextMenuCategory.File, new(false, true), "sid");
+        var legacyId = $"win11|{original.HandlerClsid}|File";
+        var state = PersistedContextMenuState.FromEntry(original with { Id = legacyId });
+        state.IsPendingApproval = true;
+        var states = new Dictionary<string, PersistedContextMenuState>(StringComparer.OrdinalIgnoreCase) { [legacyId] = state };
+        Assert.True(Windows11ContextMenuCatalog.MigrateStateIdentities(states, [original, other]));
+        Assert.False(states.ContainsKey(legacyId));
+        Assert.True(states[original.Id].IsPendingApproval);
+        Assert.False(states[other.Id].IsPendingApproval);
+        Assert.False(states[other.Id].DesiredEnabled);
+        Assert.Equal(ContextMenuChangeKind.None, ContextMenuChangeClassifier.GetDetectedChangeKind(other, states[other.Id], true));
+        Assert.False(Windows11ContextMenuCatalog.MigrateStateIdentities(states, [original, other]));
+    }
+
     [Fact]
     public void ParseManifest_UnversionedComSurrogateServer_RemainsSupported()
     {
@@ -147,25 +212,8 @@ public sealed class PackagedContextMenuDiscoveryTests
 
         var definition = Assert.Single(definitions);
         Assert.Equal(valid.FullName, definition.Package.FullName);
-    }
-
-    [Theory]
-    [InlineData(false, false, true, "None")]
-    [InlineData(false, true, false, "User")]
-    [InlineData(true, false, false, "Machine")]
-    [InlineData(true, true, false, "Both")]
-    public void CreateBlockedState_CombinesMachineAndUserScopes(
-        bool machineBlocked,
-        bool userBlocked,
-        bool expectedEnabled,
-        string expectedSource)
-    {
-        var state = Windows11ContextMenuCatalog.CreateBlockedState(machineBlocked, userBlocked);
-
-        Assert.Equal(expectedEnabled, state.IsEnabled);
-        Assert.Equal(machineBlocked, state.IsMachineBlocked);
-        Assert.Equal(userBlocked, state.IsUserBlocked);
-        Assert.Equal(expectedSource, state.Source);
+        Assert.False(definition.DiscoveryComplete);
+        Assert.False(new Windows11ClsidImpactIndex(definitions).Get(definition.Clsid).AllowsAutomaticDisable);
     }
 
     [Fact]

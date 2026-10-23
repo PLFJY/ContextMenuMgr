@@ -51,7 +51,7 @@ internal static class PackagedContextMenuDiscovery
                     if (string.IsNullOrWhiteSpace(packageName)
                         || string.IsNullOrWhiteSpace(manifestPath))
                     {
-                        continue;
+                        throw new InvalidDataException("Package identity or manifest is unavailable.");
                     }
 
                     stage = "PackageMetadata";
@@ -100,7 +100,11 @@ internal static class PackagedContextMenuDiscovery
             logger,
             cancellationToken,
             userSid,
-            enumerationComplete: enumerationFailure is null);
+            enumerationComplete: enumerationFailure is null)
+            .Select(definition => definition with
+            {
+                DiscoveryComplete = definition.DiscoveryComplete && enumerationFailure is null && skippedPackageCount == 0
+            }).ToArray();
     }
 
     internal static IReadOnlyList<PackagedContextMenuDefinition> Discover(
@@ -143,6 +147,7 @@ internal static class PackagedContextMenuDiscovery
                 skippedManifestCount == 0 ? null : $"PackagedContextMenuManifestSkipped: Sid={userSid}, Count={skippedManifestCount}, Signature={Convert.ToHexString(failureFingerprint)}, Samples=[{string.Join("; ", skippedManifestSamples)}].", logger);
 
         return definitions
+            .Select(definition => definition with { DiscoveryComplete = enumerationComplete && skippedManifestCount == 0 })
             .OrderBy(static definition => definition.Package.FullName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static definition => definition.Clsid, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -403,4 +408,7 @@ internal sealed record PackagedContextMenuDefinition(
     PackagedContextMenuPackage Package,
     IReadOnlyList<PackagedContextMenuVerb> Verbs,
     PackagedComServer ComServer,
-    IReadOnlyList<string> ContextTypes);
+    IReadOnlyList<string> ContextTypes)
+{
+    public bool DiscoveryComplete { get; init; } = true;
+}

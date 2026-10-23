@@ -269,8 +269,11 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
     private Candidate CreateWindows11Candidate(IReadOnlyList<Windows11ContextMenuItemDefinition> definitions)
     {
         var primary = definitions[0];
+        var displayName = primary.SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore
+            ? primary.DisplayName : primary.Package.DisplayName;
         var isEnabled = definitions.All(static definition => definition.IsEnabled);
-        var stateLabel = _localization.Translate(isEnabled ? "Enabled" : "Disabled");
+        var stateLabel = _localization.Translate(!isEnabled && definitions.Any(definition => definition.IsEnabled)
+            ? "Windows11PartiallyEnabled" : isEnabled ? "Enabled" : "Disabled");
         var contextTypesText = string.Join(
             "  ·  ",
             definitions
@@ -285,7 +288,7 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         var result = new GlobalSearchResultViewModel
         {
             Id = primary.Id,
-            DisplayName = primary.DisplayName,
+            DisplayName = displayName,
             StateLabel = stateLabel,
             IsEnabled = isEnabled,
             ScopeLabel = scopeLabel,
@@ -293,7 +296,7 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
             Category = null,
             IsWindows11 = true,
             TargetPageType = typeof(Windows11ContextMenuPage),
-            TargetFilterText = primary.DisplayName,
+            TargetFilterText = displayName,
             RegistryPath = primary.Entry?.RegistryPath,
             CommandText = primary.Entry?.CommandText,
             FilePath = filePath,
@@ -350,15 +353,9 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         };
     }
 
-    private static string CreateWindows11GroupKey(Windows11ContextMenuItemDefinition item)
-    {
-        return string.Join(
-            "|",
-            item.Package.FullName,
-            item.DisplayName,
-            item.ComServer.Id,
-            item.ComServer.Path ?? item.Package.InstallPath);
-    }
+    private static string CreateWindows11GroupKey(Windows11ContextMenuItemDefinition item) =>
+        item.SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore
+            ? item.Id : "win11-app|" + item.Package.FamilyName;
 
     private static Type GetTargetPageType(ContextMenuCategory category) => category switch
     {
