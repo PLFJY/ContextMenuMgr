@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -19,9 +17,14 @@ internal static class ProtectedRegistryMutation
     private static readonly SecurityIdentifier LocalSystemSid = new(WellKnownSidType.LocalSystemSid, null);
 
     internal static bool IsEligibleMachineClassesPath(string path)
-        => !string.IsNullOrWhiteSpace(path)
-           && (path.StartsWith(MachineClassesPrefix, StringComparison.OrdinalIgnoreCase)
-               || path.StartsWith(ShortMachineClassesPrefix, StringComparison.OrdinalIgnoreCase));
+    {
+        if (string.IsNullOrWhiteSpace(path)
+            || !(path.StartsWith(MachineClassesPrefix, StringComparison.OrdinalIgnoreCase)
+                 || path.StartsWith(ShortMachineClassesPrefix, StringComparison.OrdinalIgnoreCase))) return false;
+        var parts = GetMachineClassesSubPath(path).Split('\\');
+        return parts.Length >= 3 && parts[^2].Equals("shell", StringComparison.OrdinalIgnoreCase)
+            && parts.All(part => part.Length > 0 && part is not "." and not ".." && !part.Contains('/'));
+    }
 
     internal static void Execute(
         string absoluteRegistryPath,
@@ -32,11 +35,23 @@ internal static class ProtectedRegistryMutation
         {
             throw new ProtectedRegistryMutationException(
                 PipeErrorCodes.ProtectedRegistryMutationFailed,
-                "Protected registry fallback is only permitted for machine Classes keys.");
+                "Protected registry fallback is only permitted for physical machine Classes ShellVerb keys.");
         }
 
         ArgumentNullException.ThrowIfNull(mutation);
         ArgumentNullException.ThrowIfNull(verify);
+
+        ScopedRegistryPrivileges.Run(() => ExecuteWithPrivileges(absoluteRegistryPath, mutation, verify));
+    }
+
+    private static void ExecuteWithPrivileges(string absoluteRegistryPath, Action<RegistryKey> mutation, Action<RegistryKey> verify)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        if (!identity.IsSystem)
+        {
+            throw new ProtectedRegistryMutationException(PipeErrorCodes.ProtectedRegistryMutationFailed,
+                "Phase=ServiceIdentity; protected registry mutation requires the LocalSystem backend service.");
+        }
 
         var subPath = GetMachineClassesSubPath(absoluteRegistryPath);
         byte[] originalDescriptor;
@@ -54,108 +69,94 @@ internal static class ProtectedRegistryMutation
         {
             throw new ProtectedRegistryMutationException(
                 PipeErrorCodes.ProtectedRegistryMutationFailed,
-                "Windows denied access while reading the protected registry entry.",
+                $"Phase=ReadRegistrySecurity; unable to capture the original registry security. HResult=0x{ex.HResult:X8}; {ScopedRegistryPrivileges.DescribeContext()}",
                 ex);
         }
 
-        ScopedTokenPrivilege takeOwnership;
-        ScopedTokenPrivilege restore;
+        var securityChanged = false;
+        byte[]? ownedDescriptor = null;
+        byte[]? temporaryDescriptor = null;
+        var phase = "TakeOwnership";
+        Exception? mutationFailure = null;
         try
         {
-            takeOwnership = ScopedTokenPrivilege.Enable("SeTakeOwnershipPrivilege");
-            try
+            // SYSTEM has no SetValue or ChangePermissions right on several Windows
+            // shell verbs. Taking ownership is the minimum escalation that permits
+            // a temporary value-only ACE; the original owner is restored below.
+            using (var ownershipKey = OpenWithRights(
+                       subPath,
+                       RegistryRights.ReadPermissions | RegistryRights.TakeOwnership))
             {
-                restore = ScopedTokenPrivilege.Enable("SeRestorePrivilege");
+                var ownershipSecurity = ownershipKey.GetAccessControl(
+                    AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
+                RequireDescriptor(ownershipSecurity, originalDescriptor);
+                ownershipSecurity.SetOwner(LocalSystemSid);
+                ownedDescriptor = ownershipSecurity.GetSecurityDescriptorBinaryForm();
+                // SetAccessControl can fail after a partial native update.
+                securityChanged = true;
+                ownershipKey.SetAccessControl(ownershipSecurity);
             }
-            catch
+
+            phase = "GrantValueAccess";
+            using (var accessKey = OpenWithRights(
+                       subPath,
+                       RegistryRights.ReadPermissions | RegistryRights.ChangePermissions))
             {
-                takeOwnership.Dispose();
-                throw;
+                var temporarySecurity = accessKey.GetAccessControl(
+                    AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
+                RequireDescriptor(temporarySecurity, ownedDescriptor!);
+                EnsureNoExplicitSystemSetValueDeny(temporarySecurity);
+                temporarySecurity.AddAccessRule(new RegistryAccessRule(
+                    LocalSystemSid,
+                    RegistryRights.SetValue,
+                    InheritanceFlags.None,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+                temporaryDescriptor = temporarySecurity.GetSecurityDescriptorBinaryForm();
+                accessKey.SetAccessControl(temporarySecurity);
+            }
+
+            phase = "RegistryMutation";
+            using var writableKey = Registry.LocalMachine.OpenSubKey(
+                $@"SOFTWARE\Classes\{subPath}",
+                RegistryKeyPermissionCheck.ReadWriteSubTree,
+                RegistryRights.ReadKey | RegistryRights.SetValue)
+                ?? throw new InvalidOperationException($"Registry key was not found: {absoluteRegistryPath}");
+            mutation(writableKey);
+            phase = "RegistryVerification";
+            verify(writableKey);
+        }
+        catch (Exception ex)
+        {
+            mutationFailure = ex;
+        }
+        finally
+        {
+            if (securityChanged)
+            {
+                try
+                {
+                    RestoreDescriptor(subPath, originalDescriptor, ownedDescriptor, temporaryDescriptor);
+                    VerifyDescriptor(subPath, originalDescriptor);
+                }
+                catch (Exception restoreFailure)
+                {
+                    throw new ProtectedRegistryMutationException(
+                        PipeErrorCodes.RegistrySecurityRestoreFailed,
+                        $"Phase=RegistrySecurityRestore; registry security restoration failed. HResult=0x{restoreFailure.HResult:X8}; {ScopedRegistryPrivileges.DescribeContext()}",
+                        mutationFailure is null ? restoreFailure : new AggregateException(mutationFailure, restoreFailure));
+                }
             }
         }
-        catch (Exception ex) when (ex is PrivilegeNotHeldException or Win32Exception)
+
+        if (mutationFailure is not null)
         {
             throw new ProtectedRegistryMutationException(
-                PipeErrorCodes.ProtectedRegistryMutationFailed,
-                "Windows did not grant the service the privilege needed to update the protected registry entry.",
-                ex);
-        }
-
-        using (takeOwnership)
-        using (restore)
-        {
-            var securityChanged = false;
-            Exception? mutationFailure = null;
-            try
-            {
-                // SYSTEM has no SetValue or ChangePermissions right on several Windows
-                // shell verbs. Taking ownership is the minimum escalation that permits
-                // a temporary value-only ACE; the original owner is restored below.
-                using (var ownershipKey = OpenWithRights(
-                           subPath,
-                           RegistryRights.ReadPermissions | RegistryRights.TakeOwnership))
-                {
-                    var ownershipSecurity = ownershipKey.GetAccessControl(
-                        AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
-                    ownershipSecurity.SetOwner(LocalSystemSid);
-                    ownershipKey.SetAccessControl(ownershipSecurity);
-                    securityChanged = true;
-                }
-
-                using (var accessKey = OpenWithRights(
-                           subPath,
-                           RegistryRights.ReadPermissions | RegistryRights.ChangePermissions))
-                {
-                    var temporarySecurity = accessKey.GetAccessControl(
-                        AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
-                    EnsureNoExplicitSystemSetValueDeny(temporarySecurity);
-                    temporarySecurity.AddAccessRule(new RegistryAccessRule(
-                        LocalSystemSid,
-                        RegistryRights.SetValue,
-                        InheritanceFlags.None,
-                        PropagationFlags.None,
-                        AccessControlType.Allow));
-                    accessKey.SetAccessControl(temporarySecurity);
-                }
-
-                using var writableKey = Registry.LocalMachine.OpenSubKey(
-                    $@"SOFTWARE\Classes\{subPath}",
-                    RegistryKeyPermissionCheck.ReadWriteSubTree,
-                    RegistryRights.ReadKey | RegistryRights.SetValue)
-                    ?? throw new InvalidOperationException($"Registry key was not found: {absoluteRegistryPath}");
-                mutation(writableKey);
-                verify(writableKey);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException or IOException or PrivilegeNotHeldException)
-            {
-                mutationFailure = ex;
-            }
-            finally
-            {
-                if (securityChanged)
-                {
-                    try
-                    {
-                        RestoreDescriptor(subPath, originalDescriptor);
-                        VerifyDescriptor(subPath, originalDescriptor);
-                    }
-                    catch (Exception restoreFailure)
-                    {
-                        throw new ProtectedRegistryMutationException(
-                            PipeErrorCodes.RegistrySecurityRestoreFailed,
-                            "Registry security restoration failed after the requested visibility change. The operation was not reported as successful.",
-                            restoreFailure);
-                    }
-                }
-            }
-
-            if (mutationFailure is not null)
-            {
-                throw new ProtectedRegistryMutationException(
-                    PipeErrorCodes.ProtectedRegistryMutationFailed,
-                    "Windows denied access to the protected registry entry. No successful visibility change was verified.",
-                    mutationFailure);
-            }
+                mutationFailure is ProtectedRegistryMutationException protectedFailure ? protectedFailure.ErrorCode
+                    : mutationFailure is ShellVerbMutationException transactionFailure ? transactionFailure.ErrorCode
+                    : PipeErrorCodes.ProtectedRegistryMutationFailed,
+                $"Phase={phase}; protected registry mutation failed. HResult=0x{mutationFailure.HResult:X8}; {ScopedRegistryPrivileges.DescribeContext()}",
+                mutationFailure);
         }
     }
 
@@ -166,12 +167,28 @@ internal static class ProtectedRegistryMutation
                rights)
            ?? throw new InvalidOperationException($"Registry key was not found: HKLM\\SOFTWARE\\Classes\\{subPath}");
 
-    private static void RestoreDescriptor(string subPath, byte[] originalDescriptor)
+    private static void RestoreDescriptor(string subPath, byte[] originalDescriptor, byte[]? ownedDescriptor, byte[]? temporaryDescriptor)
     {
+        using var observed = OpenWithRights(subPath, RegistryRights.ReadPermissions);
+        var current = observed.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access)
+            .GetSecurityDescriptorBinaryForm();
+        if (current.AsSpan().SequenceEqual(originalDescriptor)) return;
+        if (!current.AsSpan().SequenceEqual(ownedDescriptor) && !current.AsSpan().SequenceEqual(temporaryDescriptor))
+            throw new SecurityException("Registry security changed concurrently; the newer descriptor was not overwritten.");
         using var key = OpenWithRights(subPath, RegistryRights.ReadPermissions | RegistryRights.ChangePermissions | RegistryRights.TakeOwnership);
+        RequireDescriptor(key.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access), current);
         var security = new RegistrySecurity();
-        security.SetSecurityDescriptorBinaryForm(originalDescriptor);
+        // Only these sections were captured. All would mark the uncaptured SACL
+        // dirty as well, requesting audit changes outside this fallback's scope.
+        security.SetSecurityDescriptorBinaryForm(originalDescriptor,
+            AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
         key.SetAccessControl(security);
+    }
+
+    private static void RequireDescriptor(RegistrySecurity security, byte[] expected)
+    {
+        if (!security.GetSecurityDescriptorBinaryForm().AsSpan().SequenceEqual(expected))
+            throw new SecurityException("Registry security changed concurrently; temporary permissions were not applied.");
     }
 
     private static void VerifyDescriptor(string subPath, byte[] originalDescriptor)
@@ -225,113 +242,4 @@ internal sealed class ProtectedRegistryMutationException : Exception
     }
 
     public string ErrorCode { get; }
-}
-
-internal sealed class ScopedTokenPrivilege : IDisposable
-{
-    private const uint TokenAdjustPrivileges = 0x20;
-    private const uint TokenQuery = 0x8;
-    private const uint SePrivilegeEnabled = 0x2;
-    private const int ErrorNotAllAssigned = 1300;
-    private IntPtr _token;
-    private TOKEN_PRIVILEGES _previous;
-    private bool _restore;
-
-    private ScopedTokenPrivilege()
-    {
-    }
-
-    public static ScopedTokenPrivilege Enable(string privilegeName)
-    {
-        var result = new ScopedTokenPrivilege();
-        if (!OpenProcessToken(GetCurrentProcess(), TokenAdjustPrivileges | TokenQuery, out result._token))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to open the service process token.");
-        }
-
-        try
-        {
-            if (!LookupPrivilegeValue(null, privilegeName, out var luid))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Unable to resolve {privilegeName}.");
-            }
-
-            var enabled = new TOKEN_PRIVILEGES { PrivilegeCount = 1, Privilege = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = SePrivilegeEnabled } };
-            var size = (uint)Marshal.SizeOf<TOKEN_PRIVILEGES>();
-            if (!AdjustTokenPrivileges(result._token, false, ref enabled, size, out result._previous, out _)
-                || Marshal.GetLastWin32Error() == ErrorNotAllAssigned)
-            {
-                throw new PrivilegeNotHeldException(privilegeName);
-            }
-
-            result._restore = true;
-            return result;
-        }
-        catch
-        {
-            result.Dispose();
-            throw;
-        }
-    }
-
-    public void Dispose()
-    {
-        if (_token == IntPtr.Zero)
-        {
-            return;
-        }
-
-        try
-        {
-            if (_restore)
-            {
-                var size = (uint)Marshal.SizeOf<TOKEN_PRIVILEGES>();
-                if (!AdjustTokenPrivileges(_token, false, ref _previous, size, out _, out _))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to restore the service token privilege state.");
-                }
-            }
-        }
-        finally
-        {
-            CloseHandle(_token);
-            _token = IntPtr.Zero;
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LUID
-    {
-        public uint LowPart;
-        public int HighPart;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LUID_AND_ATTRIBUTES
-    {
-        public LUID Luid;
-        public uint Attributes;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct TOKEN_PRIVILEGES
-    {
-        public uint PrivilegeCount;
-        public LUID_AND_ATTRIBUTES Privilege;
-    }
-
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool LookupPrivilegeValue(string? systemName, string name, out LUID luid);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool AdjustTokenPrivileges(IntPtr tokenHandle, bool disableAllPrivileges, ref TOKEN_PRIVILEGES newState, uint bufferLength, out TOKEN_PRIVILEGES previousState, out uint returnLength);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetCurrentProcess();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr handle);
 }

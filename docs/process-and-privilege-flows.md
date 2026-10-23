@@ -70,6 +70,8 @@ ContextMenuMgr 不是单一管理员权限模型。当前实现同时涉及普�
 
 受保护的机器级 classic ShellVerb 仍走链路 A：先由服务对 `HKLM\SOFTWARE\Classes` 的真实 `BackendRegistryPath` 执行普通写入；仅在该写入因 Windows ACL 被拒绝、且 Registry Write Protection preflight 已通过时，才临时启用 `SeTakeOwnershipPrivilege` / `SeRestorePrivilege` 完成受控 value mutation。这个 fallback 只适用于实际机器级 Classes path，绝不用于 `HKEY_USERS\<SID>\Software\Classes`，并在写入后恢复、验证原 owner/DACL。它不是 UAC bootstrapper、ShellNew ACL lock 或通用注册表 take-ownership 机制。
 
+v1.7.10 的 fallback 通过 `ScopedRegistryPrivileges` 在同步 scope 内使用服务令牌副本：先用 `RunImpersonated(InvalidHandle)` 以进程身份打开 Query/Duplicate，再创建私有 impersonation token，在副本上启用并检查所需权限。进程令牌不申请 Adjust 权限，也不修改共享权限状态；失败或结束时丢弃副本并恢复调用前身份。仅这段已选定物理 HKLM ShellVerb 的工作使用该 scope，不改变 Pipe 认证、前端 SID、用户 hive 路径或 Session 选择。普通前端不需管理员权限。error 5 不能单独证明 privilege 缺失或 RunAsClient 泄漏，排查程序见 troubleshooting.md 的 Issue #140 段落。
+
 Classic ShellVerb 的链路 A mutation 在第一次物理写入前建立事务快照，并把 visibility provenance 按真实 `BackendRegistryPath` 持久化。物理 read-back、logical reconciliation 或状态库提交失败时，后端只在当前值仍等于本事务写入值时回滚；第三方并发改写产生 conflict，不会被覆盖。File-category 的有效 `open` activation path 在服务端写入前拒绝。HKU/HKLM 同名副本按前端所选物理来源处理，ProgID 与 `SystemFileAssociations` 仍是不同 mutation target；这些规则不调用 Win11 packaged handler blocked-list 流程。
 
 运行时 monitor 在交互用户上下文下发现新项时，把该次 snapshot 的 `BackendUserContext` 随 `ItemDetected` 传给 `BackendRuntime`，再原样传入 `QuarantineNewItemAsync`。缺少上下文或 HKU 物理路径与 SID 不符时隔离会拒绝执行。隔离和后续审核仍走链路 A；服务进程的 `HKCU` 不用于替代交互用户 hive。v1.7.5 classic ShellVerb 的无 provenance 隐藏值仅可通过 `registry-model.md` 所述严格物理路径签名执行一次性恢复。

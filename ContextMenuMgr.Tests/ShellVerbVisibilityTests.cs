@@ -316,6 +316,9 @@ public sealed class ShellVerbVisibilityTests
     [InlineData(@"HKLM\SOFTWARE\Classes\Directory\Background\shell\Powershell", true)]
     [InlineData(@"HKEY_USERS\S-1-5-21-test\Software\Classes\Directory\Background\shell\Powershell", false)]
     [InlineData(@"Directory\Background\shell\Powershell", false)]
+    [InlineData(@"HKCR\Directory\shell\fixture", false)]
+    [InlineData(@"HKLM\SOFTWARE\Classes\fixture", false)]
+    [InlineData(@"HKLM\SOFTWARE\Classes\fixture\shell\verb\command", false)]
     public void ProtectedFallback_OnlyAllowsPhysicalMachineClassesPaths(string path, bool expected)
         => Assert.Equal(expected, ProtectedRegistryMutation.IsEligibleMachineClassesPath(path));
 

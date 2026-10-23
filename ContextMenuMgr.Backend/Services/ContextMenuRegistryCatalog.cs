@@ -1117,7 +1117,9 @@ public sealed class ContextMenuRegistryCatalog
                 _logger.LogFireAndForget(recoveryEvent == "LegacyShellVerbVisibilityRecoveryRolledBack" ? RuntimeLogLevel.Information : RuntimeLogLevel.Warning,
                     $"{recoveryEvent}: TransactionId={mutationId}, ItemId={item.Id}, BackendRegistryPath={item.BackendRegistryPath}, Reason={ex.GetType().Name}, RollbackError={rollback.Error ?? "<none>"}.");
             }
-            var errorCode = rollback.Conflict || !rollback.Succeeded
+            var errorCode = ex is ProtectedRegistryMutationException { ErrorCode: PipeErrorCodes.RegistrySecurityRestoreFailed }
+                ? PipeErrorCodes.RegistrySecurityRestoreFailed
+                : rollback.Conflict || !rollback.Succeeded
                 ? PipeErrorCodes.RegistryMutationRollbackConflict
                 : mutationApplied
                     ? PipeErrorCodes.RegistryMutationRolledBack
@@ -4254,7 +4256,7 @@ public sealed class ContextMenuRegistryCatalog
         {
             _logger.LogFireAndForget(
                 RuntimeLogLevel.Warning,
-                $"ProtectedShellVerbFallbackStarted: BackendRegistryPath={transaction.PhysicalRegistryPath}, ContextMenuVisible={transaction.RequestedVisible}, InitialException={ex.GetType().Name}: {ex.Message}");
+                $"ProtectedShellVerbFallbackStarted: BackendRegistryPath={transaction.PhysicalRegistryPath}, ContextMenuVisible={transaction.RequestedVisible}, ExecutionContext=[{ScopedRegistryPrivileges.DescribeContext()}], InitialException={ex.GetType().Name}: {ex.Message}");
             ProtectedRegistryMutation.Execute(
                 transaction.PhysicalRegistryPath,
                 transaction.Apply,

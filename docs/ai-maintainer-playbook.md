@@ -93,6 +93,8 @@
 
 受保护 Windows ShellVerb 的正常开关仍属于链路 A。先验证 `BackendRegistryPath` 的物理来源；对 `HKLM\SOFTWARE\Classes` 普通写入发生 Access Denied 时，才可使用保持/恢复安全描述符的窄 fallback。不得对 HKU 用户项、普通读取或每次 open 执行 take ownership；不得绕过 Registry Write Protection preflight。
 
+受保护写入的 `ScopedRegistryPrivileges` 只在私有服务令牌副本上启用权限，禁止改回进程级 enable/restore：多个请求的 previous state 会竞态。`OpenProcessToken` 的 Access Denied 是令牌对象访问失败，不是 `ERROR_NOT_ALL_ASSIGNED`。检查阶段、Win32Error、IncomingContext/ServiceContext，再判断身份、令牌 DACL、SCM privilege restriction 或外部安全软件；没有部署环境证据时不得宣称模拟泄漏。副本的失败清理依赖同步 `RunImpersonated` 退出，不向 callback 引入异步/后台任务。安全描述符恢复失败必须保留为失败，不能被值回滚成功掩盖。
+
 Registry Write Protection 自身也属于链路 A，但同时覆盖 HKLM 与 frontend `HKEY_USERS\<SID>`。切换前必须一次性验证 SID/user hive，并使用独立串行 transition 完成 DACL observe、apply、fresh read-back verification 和 setting persistence；不能因部分 root 失败仍提交请求值。
 
 ## 6. Bug 排查模板
