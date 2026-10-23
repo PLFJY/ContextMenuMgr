@@ -1613,4 +1613,6 @@
   <data name="OpenWithProtectionRequiresDisabled" xml:space="preserve"><value>请先禁用此注册，刷新后再启用保护。已有第三方可见性值不能自动转为保护规则。</value></data>
   <data name="OpenWithUserProtectionOnly" xml:space="preserve"><value>自动保护仅适用于已认证用户的注册，机器级注册需手动管理。</value></data>
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>打开方式监控正在等待注册表访问权限或状态存储恢复，请刷新打开方式页面核查当前状态。</value></data>
+  <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>无法确认新建菜单排序锁状态。请刷新后再进行更改。</value></data>
+  <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>新建菜单排序锁状态与请求不一致。请刷新并检查注册表后再重试。</value></data>
 </root>

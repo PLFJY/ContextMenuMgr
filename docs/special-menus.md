@@ -53,7 +53,7 @@ WPS / Microsoft Office 共存保护不会在 ShellNew 或 OpenWith 普通页面�
 | Explorer ShellNew order key | `Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew`，控制 Explorer 侧排序信息。 |
 | Classes 排序值 | 排序会同时考虑扩展名、Explorer order key 和 Classes 相关数据。 |
 
-ShellNew 快照发现通过 `RegOpenUserClassesRoot` 打开前端交互用户的合并 HKCR（`HKU\<SID>\Software\Classes` + `HKLM\SOFTWARE\Classes`），而不是服务进程的 `Registry.ClassesRoot` 或手工叠加两棵树。它从这个有效视图枚举扩展名、解析 ProgID、`ShellNew`/`-ShellNew`、显示名和图标；因此用户扩展名关联到机器 ProgID 的跨 hive 注册也能与 Explorer 一致。服务使用请求携带的 SessionId 取得 WTS 用户 token，以只读方式打开句柄；无法取得 token、profile 未加载或 API 失败时记录 `ShellNewMergedClassesOpenFailed`，不退回到 LocalSystem 的 HKCR。64 位系统请求 64 位 Classes view，以匹配 64 位 Explorer。
+ShellNew 快照发现通过 `RegOpenUserClassesRoot` 打开前端交互用户的合并 HKCR（`HKU\<SID>\Software\Classes` + `HKLM\SOFTWARE\Classes`），而不是服务进程的 `Registry.ClassesRoot` 或手工叠加两棵树。它从这个有效视图枚举扩展名、解析 ProgID、`ShellNew`/`-ShellNew`、显示名和图标；因此用户扩展名关联到机器 ProgID 的跨 hive 注册也能与 Explorer 一致。服务使用请求携带的 SessionId 取得 WTS 用户 token，以只读方式打开句柄；无法取得 token、profile 未加载或 API 失败时分阶段记录 `ShellNewMergedClassesOpenFailed` 并使发现失败，不退回到 LocalSystem 的 HKCR。WTS token 的 SID 和 TokenSessionId 必须与认证 Pipe 用户一致；ShellNew 不使用另一交互用户 fallback。64 位系统请求 64 位 Classes view，以匹配 64 位 Explorer。
 
 每个发现项同时解析实际提供 `ShellNew` 值的物理来源：优先用户 `HKU\<SID>\Software\Classes\...`，否则机器 `HKLM\SOFTWARE\Classes\...`，并将该物理路径作为 `RegistryPath` 和 `DisabledRegistryPath` 返回。合并视图只用于发现和有效元数据，绝不作为写入目标；开关、软删除、恢复、导出/定位和 ShellNew-local 编辑都使用此物理来源。扩展名/ProgID 的元数据来源可以不同于 ShellNew 的可变来源。
 
@@ -71,11 +71,23 @@ ShellNew 开关会在同一物理来源的 `ShellNew` 与 `-ShellNew` sibling ke
 
 当 WPS 与 Microsoft Office 共存时，新建菜单页的“文档图标提供方”开关通过后端 Pipe 写入当前前端用户 `HKEY_USERS\<SID>\Software\Classes` 下的 Office ProgID `DefaultIcon` 覆盖。这是用户主动选择；成功写入后，后端会确认对应的 `special:wps-office-icon:document-icons` 合成检测项，不能把这次写入重新送入待审核。来自 WPS 或其他程序的关联修改和 ShellNew 注入仍保持原有检测规则。
 
-新建菜单排序锁开关在写入 ACL 成功后，会等待已经开始的旧快照刷新完成，再应用请求目标状态并启动一次新的刷新，避免自动刷新把操作前的锁状态写回界面。
+新建菜单排序锁使用独立的 `GetShellNewOrderLock` 读取物理 ACL，不依赖昂贵的项目/包枚举或条目的 `OrderLocked` metadata。前端保留 Unknown / Locked / Unlocked，写入期间禁用重复切换和移动；超时或失败后用独立请求核对实际锁状态。无法核对时显示明确错误并保持 Unknown，不恢复旧 Toggle。刷新用状态版本阻止较旧的查询覆盖新的核对结果。
 
-排序复杂的原因是 Explorer “新建”菜单不是简单按注册表子键自然顺序显示。`SpecialMenuService` 的 `MoveShellNewAsync` 要求 ShellNew order lock 已启用；移动时会用简单 unlock 临时移除 WorldSid deny 规则，更新 `Classes` 排序值，再按原锁定状态重新加锁。
+`GetShellNewItems` 只有完整的经典发现成功后才返回列表；成功的零项与失败不同。WTS token、合并 HKCR、逐扩展名读取、物理来源解析、枚举期间候选集合变化或取消均使整个发现失败，不返回部分列表，也不继续用 packaged-only 结果充当经典发现。枚举只读，不修复注册或关联。包声明仍按原有只读/best-effort 方式发现，但必须先完成经典扫描，包失败不能为经典结果背书。
 
-ShellNew ACL lock / unlock 只针对 ShellNew order key 相关保护。当前实现使用 v2 narrow lock：锁定时读取现有 DACL，移除重复的显式 WorldSid deny 规则和可读取的旧版 broad `WriteKey` deny 规则，再添加一个 WorldSid `Deny SetValue | CreateSubKey | Delete` 规则。v2 故意不使用 `RegistryRights.WriteKey`，因为 .NET 中 `WriteKey` 过宽，可能阻止后续读取 / 修改 ACL，导致本程序无法正常解锁。解锁时会移除旧版 WorldSid `WriteKey` deny 规则和 v2 narrow deny 规则。它只请求 `ReadPermissions` / `ChangePermissions`，不 deny `ReadPermissions`、`ChangePermissions`、ownership 修改或 `FullControl`，保留现有继承和显式 allow 规则，不合成替换 DACL，不调用 take ownership，也不启用高危所有权 / 还原类权限修复 ShellNew ACL。这里即使服务是 LocalSystem，也不能把用户级路径写到 SYSTEM 的 `HKCU`；用户级 Classes 和 Explorer order key 必须定位到 `HKEY_USERS\<sid>`。
+排序锁定和 `MoveShellNewAsync` 共用 `ShellNewOrderTransaction`，替代原先分开的 unlock / 无条件覆盖 Classes / relock 路径：
+
+1. 串行化本服务的锁定、解锁、移动和锁状态查询；发现前捕获同一用户物理 HKU order key 的 Classes 是否存在、原始类型/数据及 Owner、Group、DACL。锁定/移动必须取得完整且非空的经典发现，不扫描包清单；单独解锁不依赖发现，也不创建或清空 Classes。
+2. proposed entries 必须是权威经典条目的完整排列，不允许未知/缺失/重复输入。Classes 用原生 value API 捕获/比较原始类型及字节；已有类型异常、非规范 MULTI_SZ 或含歧义空条目时拒绝排序，不自动规范化；已有未知项保留原文和相对槽位，已发现项在其槽位中排列，新增已发现项追加。不会删除未确定归属的现有项，不会写空列表。候选减少时也不会据此删除原列表中的其它项。
+3. 先验证 ACL 可读/可修改及目标规则，不提前解锁。最后一次取消检查之后，同步完成提交或回滚，不让 Pipe 断开/取消中断两次写入之间的状态。正常服务停止会等待已经开始的 ShellNew mutation 退出，并拒绝新的 mutation。
+4. 每次值或 DACL 修改前检查捕获的值和描述符仍匹配，之后通过新句柄回读；最终再次验证值和实际锁状态。DACL 只添加/移除明确匹配的 WorldSid `Deny SetValue | CreateSubKey | Delete` 和历史精确 `WriteKey` 规则（无继承/传播）；通过 RegGetKeySecurity / RegSetKeySecurity 仅读取 Owner/Group/DACL 并仅写原始 DACL，避免 .NET 合并同 SID deny ACE 而丢失第三方规则边界；保留其它 ACE、DACL 保护/继承和 Owner/Group，不写所有者，不请求 SACL，不 take ownership、不重置 DACL、不启用权限。未知 World deny 阻止操作时拒绝，留给外部核查。
+5. catchable failure 时，仅在实际值和 ACL 同时匹配本操作已知中间/目标状态时恢复原值（含不存在）和原 DACL，并重新回读。外部变更或读回失败则停止回滚，记录 `ShellNewOrderRollbackUncertain` 并返回错误。Windows 写回 unprotected DACL 时自动计算的 `SE_DACL_AUTO_INHERITED` 位不作为冲突；Owner/Group、DACL protected 标志、每个 ACE 及其继承/传播位仍参与比较。
+
+这是逐步验证的条件事务，不是 Windows 原子 compare-and-swap，也不是持久崩溃恢复日志。外部写入仍可能发生在比较与写 API 之间；硬杀进程/断电可能留下中间状态，不能宣称自动恢复。对原本不存在的 order key，失败时恢复 Classes 的不存在状态，但保留新建的空键并记录，避免删除并发新增的数据。旧版已经丢失的 Classes 无法从发现结果可靠还原；恢复步骤见 [#141 排错与恢复](./troubleshooting.md#shellnew-141诊断恢复与验收)。
+
+所有 ShellNew 发现共用 single-flight gate，已有扫描尚未结束时拒绝新扫描，不排队堆积；每轮有 8 秒协作取消预算，扩展名及包之间检查取消。WTS、RegOpenUserClassesRoot、经典扫描、包清单和慢扩展名/慢包均有窄范围计时。Windows 同步注册表/资源/PackageManager API 本身可能不可取消，因此预算不是硬终止承诺。前端 ShellNew 自动刷新在上轮结束后等待 30 秒；其它 SpecialMenu 仍等待 5 秒。锁状态查询不等待包扫描，仅在独立 8 秒预算内等待 mutation；并发写请求直接拒绝，不排队等待到前端超时后才写入。
+
+兼容维护决定（#141）：保留历史精确 WorldSid `Deny WriteKey`、无继承/传播的 ACL 格式；其最早发布版本未核实，不捏造版本下限。只有维护者明确停止支持该 ACL 格式并验证受支持安装已完成外部修复后，才能删除此窄迁移识别。包含额外未知 rights 的 broad deny 不属于可删除签名。
 
 如果旧版本 broad `WriteKey` lock 或外部工具留下的 broken ACL 无法通过 `ReadPermissions | ChangePermissions` 安全修改，本程序会返回明确错误：需要先用 BluePointLilac / ContextMenuManager 或系统工具解锁 / 修复，然后重试。主后端不再执行 take ownership、replacement DACL 或自动 ACL reset。
 

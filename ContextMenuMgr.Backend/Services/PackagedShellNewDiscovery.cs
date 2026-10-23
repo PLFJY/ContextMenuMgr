@@ -13,16 +13,21 @@ internal static class PackagedShellNewDiscovery
 {
     internal const string ProviderType = "PackagedShellNew";
 
-    public static IReadOnlyList<PackagedShellNewDeclaration> FindForUser(string userSid, FileLogger logger)
+    public static IReadOnlyList<PackagedShellNewDeclaration> FindForUser(string userSid, FileLogger logger, CancellationToken cancellationToken = default)
     {
         var declarations = new List<PackagedShellNewDeclaration>();
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var packageManager = new PackageManager();
             foreach (var package in packageManager.FindPackagesForUser(userSid))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                var packageName = "<unknown>";
                 try
                 {
+                    packageName = package.Id.FullName;
                     var manifestPath = Path.Combine(package.InstalledLocation.Path, "AppxManifest.xml");
                     if (!File.Exists(manifestPath))
                     {
@@ -36,13 +41,20 @@ internal static class PackagedShellNewDiscovery
                         package.Id.Name,
                         manifestPath));
                 }
+                catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
                     logger.LogFireAndForget(RuntimeLogLevel.Warning,
                         $"PackagedShellNewPackageSkipped: Sid={userSid}, Exception={ex.GetType().Name}: {ex.Message}");
                 }
+                finally
+                {
+                    if (timer.ElapsedMilliseconds >= 250)
+                        logger.LogFireAndForget($"ShellNewDiscoveryTiming: Stage=PackageManifest, Sid={userSid}, Package={packageName}, ElapsedMs={timer.ElapsedMilliseconds}.");
+                }
             }
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             logger.LogFireAndForget(RuntimeLogLevel.Warning,

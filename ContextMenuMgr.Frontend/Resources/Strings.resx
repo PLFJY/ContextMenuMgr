@@ -1613,4 +1613,6 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithProtectionRequiresDisabled" xml:space="preserve"><value>Disable this registration first, then refresh and enable protection. Existing third-party visibility values cannot become protection rules.</value></data>
   <data name="OpenWithUserProtectionOnly" xml:space="preserve"><value>Automatic protection is available only for the authenticated user registration. Machine registrations require manual action.</value></data>
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>Open With monitoring is waiting for registry access or durable storage. Refresh the Open With page to inspect the current state.</value></data>
+  <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>ShellNew lock state could not be verified. Refresh before making another change.</value></data>
+  <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>The ShellNew lock state differs from the requested state. Refresh and inspect the registry before retrying.</value></data>
 </root>

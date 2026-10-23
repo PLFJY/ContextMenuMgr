@@ -203,8 +203,8 @@ ProbeHost 的边界：
 | ShellNew 枚举 | 链路 A | 是 | 是 | 通过前端 SessionId 的 WTS 用户 token 调用 `RegOpenUserClassesRoot` 读取前端用户的合并 HKCR；同时用 `PackageManager.FindPackagesForUser(sid)` 只读扫描包清单中的 ShellNew FileType 声明；ShellNew order key 仍显式读取 `HKEY_USERS\<sid>`。 |
 | WPS / Microsoft Office 共存保护 | 链路 A | 是 | 否 | 只在 WPS Office 和 Microsoft Office 同时存在时启用；读取 `HKEY_USERS\<sid>\Software\Classes`、ShellNew order key 和 HKLM Office baseline，通过专用管道生成 WPS 关联 / 图标 / ShellNew 注入项。空库/重置时先无提示采纳并写独立 WPS baseline marker；已有 marker 后的新发现才进入待审核。 |
 | 文档图标来源切换 | 链路 A | 是 | 否 | `PipeCommand.SetDocumentIconProvider` 只写当前前端用户 `HKEY_USERS\<sid>\Software\Classes\<ProgID>\DefaultIcon`，不写 HKLM，不修改 UserChoice Hash。 |
-| ShellNew 排序 | 链路 A | 是 | 否 | 写 Explorer ShellNew order key，可能需要临时 unlock/relock ACL。 |
-| ShellNew ACL lock/unlock | 链路 A | 是 | 否 | 只锁 ShellNew order key，不等于 Registry Write Protection。 |
+| ShellNew 排序 | 链路 A | 是 | 是 | 写 Explorer ShellNew order key，可能需要临时 unlock/relock ACL。 |
+| ShellNew ACL lock/unlock | 链路 A | 是 | 锁定需要；单独解锁/读锁不需要 | `SetShellNewOrderLock` 事务只改物理 HKU order key；`GetShellNewOrderLock` 独立读取 ACL，失败无 bool 状态。不是 Registry Write Protection。 |
 | SendTo 操作 | 链路 A | 是 | 否 | 操作用户 `%APPDATA%\Microsoft\Windows\SendTo`。 |
 | WinX 操作 | 链路 A | 是 | 否 | 操作用户 `%LOCALAPPDATA%\Microsoft\Windows\WinX`，`.lnk` 需要 hash。 |
 | OpenWith 操作 | 链路 A | 是 | 否 | 枚举 HKU/HKLM Classes `Applications`；新增和用户 policy 写 `HKEY_USERS\<sid>`，机器级项按真实 HKLM 路径修改。 |
@@ -273,3 +273,13 @@ Frontend pipe requests use separate connections and are not globally serialized.
 `BackendRuntime` attaches the coordinator to SpecialMenuService and the existing registry-monitor cycle; shutdown cancels and awaits that cycle. Logged-in WTS token contexts and authenticated client contexts are monitored separately by SID, with a login settling boundary. `BackendNotification.OpenWithChanged` has UserSid, SpecialKind=OpenWith and an optional representative SpecialItem. Subscribers are authenticated before SID filtering; the DTO is only a refresh signal. Frontend and TrayHost localize the attention message, and tray click uses FrontendControlCommand.OpenWith / --open-openwith to open the existing page. Existing Win32 tray APIs remain unchanged, including hidden-icon delivery.
 
 Authorization/attempt reservation/read-back outcomes share ContextMenuStateStore's serialized schema-3 storage. Offline reapplication is allowed only for explicit matching HKU rules; this intentionally differs from the classic offline Modified rule. Full scope, retry limits and remaining desktop checks: [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136).
+
+## ShellNew #141：认证、获取与停止边界
+
+ShellNew snapshot、创建/编辑、移动和锁操作仅使用认证 Pipe SID，不选择其它交互用户。发现保留 WTS -> RegOpenUserClassesRoot 的 Windows 合并 HKCR 语义，固定 native Registry64（64 位系统）；写入始终为明确 HKU/HKLM 物理路径。`FrontendUserClassesRoot` 在同步、退出即恢复的无模拟 service scope 内调用 WTS，不调整进程/令牌权限，不保留 Pipe impersonation。验证返回 token SID/SessionId 和已加载 profile/hive，持有 token 与 merged handle 到发现结束后一起释放。
+
+`GetShellNewOrderLock` 新增在 PipeCommand 末尾，保留已有枚举序号；`PipeResponse.ShellNewOrderLocked` 只有成功读取物理 ACL 时有值，失败表示 Unknown。请求复用认证 SID，仅读 ACL，不枚举经典或 packaged ShellNew。它与锁定/解锁/移动共用 mutation semaphore，因此前端响应超时后的新查询可以等待前一 mutation 完成；列表扫描使用另一个 single-flight gate，不会阻挡独立读锁。正常 backend stop 取消新请求并等待 ShellNew mutation 提交/回滚退出，硬终止不是有保证的事务恢复。
+
+WTSQueryUserToken 的 [API 要求](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken) 是 LocalSystem 和 SeTcbPrivilege；[RegOpenUserClassesRoot](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenuserclassesroot) 单独返回状态码，并要求目标 profile 已加载。失败日志区分 API 阶段、原生错误、incoming thread identity、process identity、权限 present/enabled、期望和实际 SID/SessionId 以及 profile 可用性。没有部署证据时不得将旧 1314 日志认定为模拟泄漏，不自动启用 SeTcb、不变更 SCM 权限限制或账户策略。
+
+#141 的 Pipe 身份修复适用于共用 resolver：原回调读取 WindowsIdentity.Name 会经其内部 RunImpersonated 把原生客户端 token 留在受管理 AsyncLocal，下一次 await 可再次模拟。真实 Pipe 独立实验已复现，不能仅凭 RunAsClient 的 native finally 排除。当前 callback 只读取 SID，显示名在回调外通过 SID.Translate 取得，认证和调用者授权不变，无新增权限。此必要边界修复不改变传统菜单业务行为；不能用它推断 #140 的历史主令牌 DACL 错误原因。

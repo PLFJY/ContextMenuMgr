@@ -520,6 +520,12 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task<bool> GetShellNewOrderLockAsync(CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.GetShellNewOrderLock }, cancellationToken);
+        return response.ShellNewOrderLocked ?? throw new InvalidOperationException("ShellNew lock state is unknown.");
+    }
+
     public async Task SetShellNewOrderLockAsync(bool locked, Guid clientOperationId, CancellationToken cancellationToken)
     {
         await SendRequestAsync(

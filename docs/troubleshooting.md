@@ -228,7 +228,7 @@ For v1.7.6 classic mutations, correlate `ClassicMutationStarted` and `ClassicMut
 
 Verified evidence from the report: on 2026-10-21 at 10:37:18 and 10:38:20, `ApplyDecision/Deny` for `HKLM\SOFTWARE\Classes\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\shell\深度清理垃圾` failed during `OpenProcessToken(TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY)` with Win32 error 5, before the protected write. `MutationApplied=False` and `StateSaveSucceeded=False`. This proves failure to acquire token-object access; it does not prove a missing privilege. [OpenProcessToken](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken) checks requested access against the token DACL; [AdjustTokenPrivileges](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges) reports absent privileges separately with 1300. Other successful writes did not exercise this path, and frontend elevation has not been verified on this identical target.
 
-Trace: `NamedPipeBackendServer.HandleApplyDecisionAsync` → authenticated pipe user resolution → catalog persistent-state gate → `ApplyDecisionCoreAsync` snapshot → `ApplyDesiredStateCoreAsync(false)` → ShellVerb visibility transaction → ordinary write denied → `ProtectedRegistryMutation.Execute`. State/provenance commit follows fresh physical and logical verification; failed mutation leaves pending approval unresolved. `BackendUserContextResolver` uses a synchronous identity-only `RunAsClient` callback; the [.NET 10 implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.IO.Pipes/src/System/IO/Pipes/NamedPipeServerStream.Windows.cs) reverts in `finally`. There is no observed evidence of leaked impersonation. Service creation uses SCM's default LocalSystem account; existing-registration repair changes the binary/startup/recovery configuration, not the existing account or RequiredPrivileges. The code does not configure token DACLs or a required-privilege allowlist. Deployed SCM/security configuration must be inspected separately.
+Trace: `NamedPipeBackendServer.HandleApplyDecisionAsync` → authenticated pipe user resolution → catalog persistent-state gate → `ApplyDecisionCoreAsync` snapshot → `ApplyDesiredStateCoreAsync(false)` → ShellVerb visibility transaction → ordinary write denied → `ProtectedRegistryMutation.Execute`. State/provenance commit follows fresh physical and logical verification; failed mutation leaves pending approval unresolved. `BackendUserContextResolver` uses a synchronous `RunAsClient` callback. Issue #141 subsequently reproduced a managed-token flow leak when that callback read `WindowsIdentity.Name`: native `finally` reverted the thread immediately but did not clear the AsyncLocal token used on a later await. The callback now captures only SID and resolves display name after native impersonation ends; see the #141 section below. This does not establish why the #140 primary-token open itself failed. Service creation uses SCM's default LocalSystem account; existing-registration repair changes the binary/startup/recovery configuration, not the existing account or RequiredPrivileges. The code does not configure token DACLs or a required-privilege allowlist. Deployed SCM/security configuration must be inspected separately.
 
 Verified implementation defects: the old scope unnecessarily required adjusting the primary token and temporarily changed shared process-wide privilege state. Overlapping scopes could restore stale states; a failed restore or partially successful adjustment was not fully verified. The replacement duplicates the service token while unimpersonated and enables/checks both privileges only on its disposable copy. The process token is never adjusted. Descriptor restoration also explicitly limits dirty sections to Owner/Group/Access: the default All overload would mark an uncaptured audit SACL for writing and request unrelated audit-security access. A child-testhost token DACL can reproduce native error 5 for the old Adjust/Query open while allowing the new Query/Duplicate acquisition. This is a controlled reproduction of one cause, not proof of the affected machine's token DACL.
 
@@ -354,3 +354,40 @@ For issue #125, compare `FrontendRequestStarted`, `SetEnabledTimeout`, `SetEnabl
 
 
 路径维护：前端日志始终使用当前 `RuntimePaths.FrontendDebugLogPath` / `LogsDirectory`。未被读取的旧 LocalAppData 前端日志目录常量已删除；旧设置、状态库、保护设置及 Portable 数据的 copy-only 迁移仍保留，不删除旧用户数据。
+
+## ShellNew #141：诊断、恢复与验收
+
+已核对用户提供的 `E:\Downloads\Logs.7z`（10 月 21 日 Portable）及 `E:\Downloads\logs (1).zip`（10 月 22 日 Installer）；后者 SHA-256 与 GitHub [#141 附件及报告](https://github.com/PLFJY/ContextMenuMgr/issues/141#issuecomment-6333868603) 中的 ZIP 相同。两个不同 SID 的归档都反复记录 1314。2026-10-22 的 `backend.log` 反复记录 `ShellNewMergedClassesOpenFailed ... 1314`，两个锁请求分别在 13:50:38.851（9,962 ms）和 13:51:33.561（10,331 ms）报告成功；第二次在 13:51:33.564 随即记录响应 Pipe broken。服务启动日志确认相关进程启动为 SYSTEM，但没有失败线程的 token/权限证据。源码确认旧发现吞错后继续包扫描，锁路径仍无条件写 Classes，再改 ACL；前端超时恢复旧 Toggle。附件未记录写前/写后的 Classes，不能声称已经证明写入的确切内容、删除了哪些原始条目或哪个 Win32 API 返回了历史 1314。
+
+**Current evidence is insufficient to determine the root cause.** 此句仅指历史 1314 的确切 API/权限和每台机器的原 Classes；源码及受控实验已经确认独立的身份流动缺陷。对历史 API 原因和原值，仍需新的分阶段日志、实际 service/thread token、SCM RequiredPrivileges、同 SID 的 profile/hive 及用户备份；不能由一个合并错误码推断 SeTcb 缺失或 RunAsClient 泄漏。
+
+已复现的身份缺陷：`BackendUserContextResolver` 原先在 `NamedPipeServerStream.RunAsClient` 回调中读取 `WindowsIdentity.Name`。[.NET Name 实现](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Security.Principal.Windows/src/System/Security/Principal/WindowsIdentity.cs) 内部调用 `RunImpersonated(InvalidHandle)`，把原生 pipe token 放入外层 AsyncLocal；`RunAsClient` 的原生 RevertToSelf 只恢复当前线程，不能清除此受管理上下文。独立真实 Pipe 实验观察到回调后立即 `ifImpersonating=false`，下一次 await 后却为 true；移出 Name 读取后两处均 false。两个归档的服务 OnStop 也记录交互用户身份，退出 ServiceBase.Run 后恢复 SYSTEM，与此缺陷一致，但不是发生 1314 那个 API 调用点的 token 证据。
+
+当前回调只捕获 token SID，退出原生模拟后才通过该 SID 解析显示名；认证 SID、session 解析和身份验证不变，不启用权限。永久真实 Pipe 回归检查新 resolver 在 await 前后的 thread token；临时旧回调复现程序已删除。ShellNew 的 WTS 获取另在同步 service scope 内执行并记录 incoming/process context。这修复了可复现的 token-context 缺陷，仍需受影响服务的分阶段日志确认历史错误 API，不能声称所有 1314 环境均已解决。
+
+当前失败路径会停止权威扫描，不返回空/部分/packaged-only 成功结果，也不会解锁或写排序。锁定/移动不再扫描包清单；这样避免在 merged HKCR 已失败后仍花时间扫描包。旧时间线中耗时约 10 秒的具体阶段仍缺少计时证据，不能仅由总耗时认定是某个包。新 `ShellNewDiscoveryStageStarted` / `ShellNewDiscoveryTiming` / `ShellNewDiscoverySlowCandidate` / `ShellNewApiTiming` 分别标出根获取、WTS、RegOpen、经典扫描、慢扩展名与包清单。每轮 8 秒协作预算，扫描 single-flight；同步 Windows API 内部可能不能被取消，正在阻塞的扫描仍会拒绝新扫描，不堆积重复工作。
+
+诊断时开启 Information，收集活动和归档日志。`ShellNewMergedClassesOpenFailed` 的 Stage 明确区分 SessionValidation、WTSQueryUserToken、TokenValidation、ProfileAvailability 和 RegOpenUserClassesRoot；原生错误与 managed HRESULT 不混用。失败记录同时包含 process identity、incoming thread identity、SeTcb 等实际 present/enabled 权限；成功取得 token 后核对 TokenSid / ExpectedSid、TokenSession / ExpectedSession、profile 目录和 HKU hive。WTS 在恢复即退出的 service scope 调用，不调整权限。当前交互用户测试进程原生复现 WTS 的 1314，并不证明受影响 SYSTEM 服务的同一原因。[WTS 文档](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsqueryusertoken) 要求 LocalSystem + SeTcb；[RegOpenUserClassesRoot 文档](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenuserclassesroot) 要求匹配的 token 和已加载 profile。按只读方式采集 `sc.exe qc` / `sc.exe qprivs` / 实际 PID 路径，不修改 SCM 配置或全局启用权限来猜测修复。
+
+安全恢复流程：
+
+1. 暂停反复点击锁/刷新。以受影响的交互用户确认 SID，导出当前 `HKEY_USERS\<SID>\Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew`，另保存 Owner/Group/DACL（`.reg` 不包含 ACL），记录 Classes 是否存在、类型、完整内容和时间。不要使用 SYSTEM HKCU，也不要导入另一个用户/机器的备份。
+2. 新版本独立读锁如果确认 Locked，即使列表发现失败仍可请求单独解锁；它只移除精确的历史/窄规则，不写 Classes。读锁 Unknown 或未知/损坏 ACL 导致拒绝时，先保留证据，再由管理员使用已核实的外部解锁机制。报告者称 BluePointLilac/ContextMenuManager 的关闭“锁定并排序”恢复了其 Explorer 菜单；这是一台机器的观察，不保证恢复所有机器的历史自定义排序。操作前后必须核对 ACL、值及真实 Explorer 菜单，不能自动套用替换 DACL/接管所有权脚本。
+3. 如果有同一 Windows 安装、同一 SID、故障前的可信注册表备份，解锁并排除并发写入后，仅恢复经过核对的 Classes 原始类型/数据（或备份明确证明的原不存在状态）；不要整体导入可能覆盖其它设置的无关备份。恢复后重新打开物理 key，核对值及 Owner/Group/DACL，再在当前用户桌面检查实际“新建”菜单；必要时通过现有用户 Session 的重启 Explorer 操作刷新。
+4. 没有原始备份时，无法从日志、当前不完整扫描、已安装软件或 packaged 声明可靠重建原 Classes。不要猜测排序、写空列表、删除 Classes 强制重建，或改 ShellNew 注册、文件关联、ProgID、UserChoice。可以仅验证外部解锁后 Explorer 是否自行恢复展示；仍缺项时继续收集物理注册/备份证据。卸载或停止服务不会自动恢复已经存在的 ACL/历史排序。
+
+Windows 验收（尚须在受影响配置执行）：
+
+| 配置 | 必须观察 |
+| --- | --- |
+| Windows 11 24H2 Installer / Portable | 标准前端 + 真实 LocalSystem 服务，经典和包提供项共存；新建列表、启用/解锁、上下移动及实际 Explorer New 菜单。 |
+| Windows 11 26H2 Installer / Portable | 同上，并复现原报告中加载失败→点击锁→超时的时序；确认失败时 Classes 与 ACL 无变化，超时后 Toggle 最终来自独立读锁。 |
+| 两个不同 SID / Session、含 RDP | 各自 HKU 与 merged HKCR 隔离，错 SID/Session、profile/hive 不可用时失败；绝不 fallback 到另一个登录用户或 SYSTEM。 |
+| 故障与并发 | 在隔离 VM 用临时扩展名/测试键验证逐键拒绝读取、RegOpen 失败、成功零经典项和 packaged-only。对非空/异型/含未知 Classes 均确认无丢失。用断点/外部写入验证解锁后写失败、最后加锁失败及回滚前 Classes/ACL 改变；外部值/ACE 保留，rollback uncertain 有明确错误。 |
+| 取消 / Pipe 断开 / 重启 | 最终 mutation 边界前取消无更改；边界后的取消或断 Pipe 不打断同步提交/回滚。快速重复 Toggle、两个前端并发请求不能排队留下迟到写入。正常 SCM stop 等待现有 mutation；重新启动后读实际 ACL/Classes。硬杀进程/断电没有持久回放保证，应人工检查中间状态。 |
+
+每次验收分别记录 request outcome、原始/最终物理 Classes 和类型、ACL、fresh query、前端三态与真实 Explorer 菜单。日志成功、编译或隔离键测试不能代替菜单可见性。值/ACL 比较不是原子 CAS，Windows 比较与写入之间仍有竞态窗口；不能承诺排除所有外部修改，也不能承诺硬崩溃后的自动恢复。
+
+自动回归保留原生 WTS 获取失败/无效 Session 与 fail-closed snapshot、隔离 HKCU 的类型/未知项保留、精确 ACL 循环、解锁后的拒写回滚、捕获后的外部值/ACL 冲突和取消；Dispatcher 下的迟到/丢失响应测试验证 Unknown 及重复点击保护。单独 RegOpen 失败、完整逐键部分读取、真实 Pipe/SCM 和中途外部回滚冲突仍属于上述 VM 验收，不把合成输入测试当作端到端验证。原生 Pipe 回归只检查身份边界，不启动服务或改变 SCM；完整部署仍须按表验收。
+
+本次执行验证：`dotnet build ContextMenuMgr.Frontend/ContextMenuMgr.Frontend.csproj --no-restore -v minimal` 成功，0 warnings / 0 errors，Debug ProbeHost x86/x64 架构检查通过。完整回归 `dotnet test ContextMenuMgr.Tests/ContextMenuMgr.Tests.csproj --no-restore -v minimal` 为 368 passed / 3 skipped（共 371）；skip 为独立子进程入口及需要额外权限/LocalSystem 的既有测试。最终 ShellNew 专项为 28 passed / 0 skipped，包含未知 UI 状态禁止再次写入的最终保护。未执行受影响 24H2/26H2 的真实 Explorer/Installer/Portable/SCM 验收。

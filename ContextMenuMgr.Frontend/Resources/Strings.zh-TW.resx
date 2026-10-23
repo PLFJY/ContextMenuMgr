@@ -1613,4 +1613,6 @@
   <data name="OpenWithProtectionRequiresDisabled" xml:space="preserve"><value>請先停用此註冊，重新整理後再啟用保護。現有第三方可見性值不能自動轉為保護規則。</value></data>
   <data name="OpenWithUserProtectionOnly" xml:space="preserve"><value>自動保護僅適用於已驗證使用者的註冊，電腦層級註冊需手動管理。</value></data>
   <data name="OpenWithMonitoringUnavailable" xml:space="preserve"><value>開啟方式監控正在等待登錄存取權限或狀態儲存恢復，請重新整理開啟方式頁面檢查目前狀態。</value></data>
+  <data name="ShellNewLockStateUnknown" xml:space="preserve"><value>無法確認新增功能表排序鎖狀態。請重新整理後再進行變更。</value></data>
+  <data name="ShellNewLockStateMismatch" xml:space="preserve"><value>新增功能表排序鎖狀態與請求不一致。請重新整理並檢查登錄後再重試。</value></data>
 </root>

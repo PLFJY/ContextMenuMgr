@@ -68,9 +68,10 @@ public sealed class NamedPipeBackendServer
     /// <summary>
     /// Executes stop.
     /// </summary>
-    public void Stop()
+    public async Task StopAsync()
     {
         _acceptLoopCts?.Cancel();
+        await _specialMenuService.StopShellNewMutationsAsync();
     }
 
     /// <summary>
@@ -494,6 +495,8 @@ public sealed class NamedPipeBackendServer
                     request.ClientOperationId,
                     await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
                     cancellationToken),
+            PipeCommand.GetShellNewOrderLock => await _specialMenuService.GetShellNewOrderLockAsync(
+                await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false), cancellationToken),
             PipeCommand.SetShellNewOrderLock when request.ShellNewLock is not null
                 => await _specialMenuService.SetShellNewOrderLockAsync(
                     request.ShellNewLock.Lock,
@@ -902,7 +905,7 @@ public sealed class NamedPipeBackendServer
         }
 
         return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken,
-            allowInteractiveFallback: kind != SpecialMenuKind.OpenWith);
+            allowInteractiveFallback: kind is not (SpecialMenuKind.OpenWith or SpecialMenuKind.ShellNew));
     }
 
     private static bool RequiresSpecialMenuUserContext(SpecialMenuKind kind)

@@ -496,7 +496,7 @@ public sealed class BackendRuntime : IDisposable
             _frontendAutostartLauncher.KillFrontendProcessesForActiveSession(null);
         }
 
-        _pipeServer.Stop();
+        await _pipeServer.StopAsync();
         await _logger.LogAsync("========== Backend stop ==========");
         await _logger.LogAsync("Backend stopped.");
         await _logger.LogAsync("========== Backend stopped ==========");

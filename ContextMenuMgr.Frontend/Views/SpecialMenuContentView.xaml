@@ -49,6 +49,7 @@
                     <WrapPanel Margin="0,0,0,14" HorizontalAlignment="Right" VerticalAlignment="Bottom">
                         <ui:ToggleSwitch
                             Margin="8,0,0,0"
+                            IsEnabled="{Binding CanToggleShellNewOrderLock}"
                             IsChecked="{Binding IsShellNewOrderLocked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                             ToolTip="{Binding LockNewMenuDescription}"
                             Visibility="{Binding ShowShellNewOrderLock, Converter={StaticResource BooleanToVisibilityConverter}}">

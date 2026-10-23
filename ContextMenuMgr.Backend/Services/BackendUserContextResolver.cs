@@ -28,14 +28,24 @@ public sealed class BackendUserContextResolver
         try
         {
             string? sid = null;
-            string? userName = null;
             stream.RunAsClient(() =>
             {
                 using var identity = WindowsIdentity.GetCurrent();
                 sid = identity.User?.Value;
-                userName = identity.Name;
+                // Do not read WindowsIdentity.Name here. Its managed
+                // RunImpersonated caches this native pipe token in AsyncLocal;
+                // RunAsClient's native RevertToSelf cannot clear that cache.
+                // A later await would then impersonate the client again.
             });
 
+            // Name is display metadata, resolved only after native impersonation
+            // has ended. Authentication continues to use the captured token SID.
+            var userName = sid;
+            if (!string.IsNullOrWhiteSpace(sid))
+            {
+                try { userName = new SecurityIdentifier(sid).Translate(typeof(NTAccount)).Value; }
+                catch (IdentityNotMappedException) { }
+            }
             var sessionId = TryResolvePipeClientSessionId(stream);
             var context = string.IsNullOrWhiteSpace(sid)
                 ? null

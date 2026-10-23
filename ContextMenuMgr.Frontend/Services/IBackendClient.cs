@@ -115,6 +115,8 @@ public interface IBackendClient : IAsyncDisposable
         Guid clientOperationId,
         CancellationToken cancellationToken);
 
+    Task<bool> GetShellNewOrderLockAsync(CancellationToken cancellationToken);
+
     Task SetShellNewOrderLockAsync(bool locked, Guid clientOperationId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<FileTypeAnalysisResult>> AnalyzeFileTypeContextAsync(string path, CancellationToken cancellationToken);

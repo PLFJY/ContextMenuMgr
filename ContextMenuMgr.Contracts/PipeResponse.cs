@@ -74,6 +74,8 @@ public sealed record PipeResponse
     /// </summary>
     public bool? Win11ModernContextMenuDisabled { get; init; }
 
+    public bool? ShellNewOrderLocked { get; init; }
+
     public OfficeSuiteCoexistenceStatus? OfficeSuiteCoexistence { get; init; }
 
     public OpenWithAssociationInspection? OpenWithInspection { get; init; }

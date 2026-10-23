@@ -226,8 +226,8 @@ ShellNew 由文件扩展名下的 `ShellNew` 子键和 Explorer 的排序键共�
 | --- | --- |
 | ShellNew 子键 | 典型位置是用户或机器 Classes 下的 `.<ext>\ShellNew`，可能有 `NullFile`、`Data`、`Command`、`Config\BeforeSeparator` 等值。 |
 | Explorer ShellNew order key | `Software\Microsoft\Windows\CurrentVersion\Explorer\Discardable\PostSetup\ShellNew`，用于排序和锁定。 |
-| Classes 排序 | `MoveShellNewAsync` 会基于当前 real items 和 order key 重写顺序。 |
-| ACL lock / unlock | `SetShellNewOrderLockAsync` 给 order key 加或移除显式 Deny 规则，防止 Explorer 或第三方改排序。 |
+| Classes 排序 | `MoveShellNewAsync` 在发现前捕获 order key，要求完整非空经典扫描并用条件事务重排已发现项，保留未知现有 Classes。 |
+| ACL lock / unlock | `SetShellNewOrderLockAsync` 用窄 DACL 条件事务加/移除精确 Deny；`GetShellNewOrderLock` 独立返回 `PipeResponse.ShellNewOrderLocked`，失败为 Unknown，不依赖列表 metadata。 |
 | ACL 修改范围 | ShellNew lock/unlock 只请求 `ReadPermissions` / `ChangePermissions`。v2 lock 添加显式 WorldSid `Deny SetValue | CreateSubKey | Delete`，并保留现有 inherited / explicit allow 规则。 |
 
 显示名解析与 BluePointLilac / ContextMenuManager 对齐：先读取可解析的 `ShellNew\MenuText` 间接资源字符串，再读取默认 ProgID 的 `FriendlyTypeName`，再读取默认 ProgID 默认值，最后回退到扩展名。普通用户输入的显示名不写纯文本 `ShellNew\MenuText`；创建和编辑都会写到 `HKU\<sid>\Software\Classes\<ProgID>\FriendlyTypeName`。如果 ShellNew 项来自 HKLM，后端优先创建 `HKU\<sid>\Software\Classes\...` 用户覆盖层并修改覆盖层中的 ShellNew-local 值，避免默认修改机器范围。没有有效默认 ProgID 时，显示名不能安全保存为 FriendlyTypeName；创建可继续生成扩展名级 ShellNew，但刷新显示可能回退到扩展名。
@@ -485,3 +485,9 @@ ContextMenuStateStore schema 3 adds an independent openWith section. Existing sc
 OpenWithChanged notifications are authenticated-SID filtered, aggregated per monitor cycle and treated only as snapshot invalidation. The frontend uses its existing operation semaphore/failure read-back; TrayHost uses Win32 notification delivery and opens the existing OpenWith page. WTS enumeration covers simultaneous logged-in sessions, while SID/path/hive validation stays separate from SessionId.
 
 Automatic scope is deliberately limited to explicitly authorized, manageable HKU Applications sources with identical full command generation, executable path and SHA-256. New registrations and HKLM sources remain review/manual only. Binary updates, versioned paths, foreign visibility and uncertain outcomes suspend to review. There are at most three corrections per authorization. No association/default ownership changes are made; other sources may still show the app. See [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136) for timing/budgets, recovery semantics and manual Windows checks.
+
+## ShellNew 安全边界（#141 / v1.7.10）
+
+`SpecialMenuService` 不再吞掉经典发现异常，也不把 token/merged HKCR 不可用解释为空列表。只读扫描保持认证前端 SID/SessionId；未知物理来源、部分读取或取消均拒绝后续排序写入。锁定/移动先捕获物理 Classes 类型/存在性和值及 Owner/Group/DACL，之后用 `ShellNewOrderTransaction` 验证排列、保留未知项、逐步 fresh read-back 和条件回滚；单独解锁不依赖枚举、不写 Classes。完整事务和取消/硬崩溃限制见 [special-menus.md](./special-menus.md)。
+
+前端锁状态由新增 `GetShellNewOrderLock` 查询维护（三态），请求超时后独立查询，不以 10 秒响应预算推断失败。已有刷新用状态版本防止旧查询覆盖，写入 Busy 禁止重复操作；无效发现不能启用锁定或移动，但已验证的锁仍可单独解除。后端 single-flight 扫描、8 秒协作预算和前端完成后 30 秒刷新防止重复扫描堆积，具体 Windows 同步调用仍可能阻塞，计时日志用于部署诊断。

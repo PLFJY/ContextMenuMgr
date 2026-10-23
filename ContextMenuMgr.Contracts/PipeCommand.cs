@@ -60,5 +60,6 @@ public enum PipeCommand
     SetDocumentIconProvider,
     GetContextMenuItemState,
     InspectOpenWithSources,
-    ReviewOpenWithRegistration
+    ReviewOpenWithRegistration,
+    GetShellNewOrderLock
 }

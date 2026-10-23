@@ -235,3 +235,9 @@ Registry Write Protection 自身也属于链路 A，但同时覆盖 HKLM 与 fro
 ## OpenWith monitoring maintenance (#136)
 
 OpenWith persistent protection is Flow A and lives in its own schema-3 state section. New Applications registrations are review-only; classic Added/quarantine/desired-disabled rules must never be applied to them. Only a user-explicit HKU rule can authorize correction, after exact physical SID/path, command generation and executable SHA-256 validation. HKLM remains manual-only. Existing NoOpenWith values are not policies. Persist intent/attempt reservation before writes, use existing transactional SetEnabled plus fresh read-back, and suspend uncertain/conflicting outcomes instead of blindly retrying. Explicit Enable revokes the rule durably first. Preserve sibling .deleted backups. WTS/pipe identities identify each user; loaded hive validation and native registry view remain mandatory. Full behavior and upgrade/reset/verification decisions are documented in [SpecialMenu/OpenWith monitoring](./special-menus.md#openwith-registration-monitoring-and-explicit-protection-136).
+
+## ShellNew #141 接手边界
+
+ShellNew 只信任认证 Pipe 用户，WTS token SID/SessionId 必须匹配，不 fallback 到另一登录用户或服务 HKCR。发现不可用/不完整必须抛错，包结果不能代替经典发现。锁定/移动的值和 ACL 改动共用条件事务，单独解锁和读锁不依赖发现。未知 ACL/Classes 保留，不通过所有权/权限提升猜测修复；旧 1314 无 API 阶段证据时不能认定模拟泄漏或缺少哪一权限。此前 Classes 无原始备份时不能可靠重建。具体诊断、恢复限制和 Windows 验收见 [troubleshooting.md](./troubleshooting.md#shellnew-141诊断恢复与验收)。
+
+#141 已用真实 Pipe 复现 Name-in-RunAsClient 的 AsyncLocal token 泄漏（立即 native revert 后看似正常，下次 await 又模拟客户端）。因此认证 callback 只读取 SID，不读取 WindowsIdentity.Name，也不调用受管理 impersonation helper；显示名解析移到 callback 外。此已验证机制与旧日志没有记录失败 API/thread token 是两个事实，仍不可宣称每个历史 1314 或 #140 的 error 5 均因此而起。

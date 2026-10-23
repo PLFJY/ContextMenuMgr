@@ -31,6 +31,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private bool _hasLoaded;
     private bool _disposed;
     private bool _suppressShellNewLockSync;
+    private int _shellNewStateVersion;
+    private bool _shellNewDiscoveryValid;
     private bool _suppressDropEffectSync;
     private bool _suppressDocumentIconProviderSync;
     private bool _hasDocumentIconProviderChanged;
@@ -235,7 +237,23 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     public bool ShowDocumentIconProviderChangedHint => ShowDocumentIconProvider && _hasDocumentIconProviderChanged;
 
     [ObservableProperty]
-    public partial bool IsShellNewOrderLocked { get; set; }
+    public partial bool? IsShellNewOrderLocked { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggleShellNewOrderLock))]
+    public partial bool IsShellNewLockBusy { get; private set; }
+
+    public bool CanToggleShellNewOrderLock => !IsShellNewLockBusy && IsShellNewOrderLocked.HasValue
+        && (_shellNewDiscoveryValid || IsShellNewOrderLocked == true);
+
+    private void ApplyShellNewLockState(bool? locked)
+    {
+        _suppressShellNewLockSync = true;
+        try { IsShellNewOrderLocked = locked; }
+        finally { _suppressShellNewLockSync = false; }
+        OnPropertyChanged(nameof(CanToggleShellNewOrderLock));
+        UpdateShellNewMoveAvailability();
+    }
 
     [ObservableProperty]
     public partial string StatusText { get; set; } = string.Empty;
@@ -300,14 +318,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private void OnLoadingPresentationChanged(object? sender, PropertyChangedEventArgs e) => RefreshListPlaceholderState();
 
-    partial void OnIsShellNewOrderLockedChanged(bool oldValue, bool newValue)
+    partial void OnIsShellNewOrderLockedChanged(bool? oldValue, bool? newValue)
     {
-        if (_suppressShellNewLockSync || oldValue == newValue || Kind != SpecialMenuKind.ShellNew)
+        if (_suppressShellNewLockSync || oldValue == newValue || Kind != SpecialMenuKind.ShellNew) return;
+        if (IsShellNewLockBusy || !oldValue.HasValue || newValue is not bool requested || (!_shellNewDiscoveryValid && requested))
         {
+            ApplyShellNewLockState(oldValue);
             return;
         }
-
-        ObserveFireAndForget(SetShellNewOrderLockAsync(oldValue, newValue), "SetShellNewOrderLockAsync");
+        ObserveFireAndForget(SetShellNewOrderLockAsync(requested), "SetShellNewOrderLockAsync");
     }
 
     partial void OnSelectedDropEffectChanged(DefaultDropEffect oldValue, DefaultDropEffect newValue)
@@ -363,6 +382,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     {
         lock (_refreshSync)
         {
+            if (Kind == SpecialMenuKind.ShellNew && IsShellNewLockBusy) return Task.CompletedTask;
             if (_refreshTask is { IsCompleted: false })
             {
                 return _refreshTask;
@@ -376,6 +396,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private async Task RefreshCoreAsync(int generation, bool markLoaded, bool showBusy)
     {
+        var shellNewVersion = _shellNewStateVersion;
         var openWithGateHeld = false;
         if (showBusy)
         {
@@ -391,10 +412,12 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 await _openWithOperationGate.WaitAsync(_disposeCts.Token);
                 openWithGateHeld = true;
             }
+            if (Kind == SpecialMenuKind.ShellNew)
+                await VerifyShellNewLockStateAsync(shellNewVersion);
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _disposeCts.Token);
             var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, linkedCts.Token);
-            if (!IsCurrentRefreshGeneration(generation))
+            if (!IsCurrentRefreshGeneration(generation) || (Kind == SpecialMenuKind.ShellNew && shellNewVersion != _shellNewStateVersion))
             {
                 FrontendDebugLog.Info(
                     "SpecialMenuPageViewModel",
@@ -402,15 +425,22 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            await ApplySnapshotAsync(snapshot);
+            if (Kind == SpecialMenuKind.ShellNew)
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    if (shellNewVersion != _shellNewStateVersion) return;
+                    _shellNewDiscoveryValid = true;
+                    OnPropertyChanged(nameof(CanToggleShellNewOrderLock));
+                });
+            await ApplySnapshotAsync(snapshot, Kind == SpecialMenuKind.ShellNew ? shellNewVersion : null);
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
-                if (!IsCurrentRefreshGeneration(generation))
+                if (!IsCurrentRefreshGeneration(generation) || (Kind == SpecialMenuKind.ShellNew && shellNewVersion != _shellNewStateVersion))
                 {
                     return;
                 }
 
-                StatusText = string.Empty;
+                if (Kind != SpecialMenuKind.ShellNew || IsShellNewOrderLocked.HasValue) StatusText = string.Empty;
                 if (markLoaded)
                 {
                     _hasLoaded = true;
@@ -439,6 +469,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException ex)
         {
+            InvalidateShellNewDiscovery(shellNewVersion);
             FrontendDebugLog.Warning(
                 "SpecialMenuPageViewModel",
                 $"RefreshAsync canceled by timeout or caller. Kind={Kind}, Generation={generation}, Message={ex.Message}");
@@ -449,6 +480,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            InvalidateShellNewDiscovery(shellNewVersion);
             FrontendDebugLog.Warning(
                 "SpecialMenuPageViewModel",
                 $"RefreshAsync failed. Kind={Kind}, Generation={generation}, Message={ex.Message}");
@@ -1221,16 +1253,18 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         return null;
     }
 
-    private async Task ApplySnapshotAsync(IEnumerable<SpecialMenuEntry> snapshot)
+    private async Task ApplySnapshotAsync(IEnumerable<SpecialMenuEntry> snapshot, int? shellNewVersion = null)
     {
         var entries = snapshot.ToArray();
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         if (!dispatcher.CheckAccess())
         {
-            await dispatcher.InvokeAsync(() => ApplySnapshotCoreAsync(entries)).Task.Unwrap();
+            await dispatcher.InvokeAsync(() => shellNewVersion is int version && version != _shellNewStateVersion
+                ? Task.CompletedTask : ApplySnapshotCoreAsync(entries)).Task.Unwrap();
             return;
         }
 
+        if (shellNewVersion is int version && version != _shellNewStateVersion) return;
         await ApplySnapshotCoreAsync(entries);
     }
 
@@ -1476,41 +1510,77 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         RefreshListPlaceholderState();
     }
 
-    private async Task SetShellNewOrderLockAsync(bool oldValue, bool newValue)
+    private void InvalidateShellNewDiscovery(int version)
+    {
+        if (Kind != SpecialMenuKind.ShellNew) return;
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            if (version != _shellNewStateVersion) return;
+            _shellNewDiscoveryValid = false;
+            OnPropertyChanged(nameof(CanToggleShellNewOrderLock));
+            UpdateShellNewMoveAvailability();
+        });
+    }
+
+    private async Task<bool> VerifyShellNewLockStateAsync(int version)
     {
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await _backendClient.SetShellNewOrderLockAsync(newValue, Guid.NewGuid(), cts.Token);
-            // An automatic refresh may already be reading the pre-operation ACL state.
-            // Do not reuse that stale in-flight task as the post-operation refresh.
-            await WaitForCurrentRefreshAsync();
-            await RefreshAsync();
-
-            _suppressShellNewLockSync = true;
-            try
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, _disposeCts.Token);
+            var locked = await _backendClient.GetShellNewOrderLockAsync(linked.Token);
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
-                IsShellNewOrderLocked = newValue;
-            }
-            finally
-            {
-                _suppressShellNewLockSync = false;
-            }
+                if (version == _shellNewStateVersion) ApplyShellNewLockState(locked);
+            });
+            return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!_disposeCts.IsCancellationRequested)
         {
-            _suppressShellNewLockSync = true;
+            FrontendDebugLog.Warning("SpecialMenuPageViewModel", $"ShellNewLockStateUncertain: {ex}");
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (version != _shellNewStateVersion) return;
+                ApplyShellNewLockState(null);
+                StatusText = _localization.Translate("ShellNewLockStateUnknown");
+            });
+            return false;
+        }
+    }
+
+    private async Task SetShellNewOrderLockAsync(bool requested)
+    {
+        IsShellNewLockBusy = true;
+        var version = ++_shellNewStateVersion;
+        _shellNewDiscoveryValid = false;
+        UpdateShellNewMoveAvailability();
+        Exception? failure = null;
+        try
+        {
             try
             {
-                IsShellNewOrderLocked = oldValue;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, _disposeCts.Token);
+                await _backendClient.SetShellNewOrderLockAsync(requested, Guid.NewGuid(), linked.Token);
             }
-            finally
+            catch (Exception ex) when (!_disposeCts.IsCancellationRequested)
             {
-                _suppressShellNewLockSync = false;
+                failure = ex;
+                FrontendDebugLog.Warning("SpecialMenuPageViewModel", $"ShellNewLockRequestOutcomePending: {ex}");
             }
-
-            StatusText = ex.Message;
+            // The query waits behind the backend mutation, but never behind expensive
+            // packaged discovery. A timed-out response says nothing about physical state.
+            if (!await VerifyShellNewLockStateAsync(version)) return;
+            await WaitForCurrentRefreshAsync();
         }
+        finally
+        {
+            IsShellNewLockBusy = false;
+            UpdateShellNewMoveAvailability();
+        }
+        await RefreshAsync();
+        if (version == _shellNewStateVersion && (failure is BackendRequestException || (IsShellNewOrderLocked.HasValue && IsShellNewOrderLocked != requested)))
+            StatusText = failure?.Message ?? _localization.Translate("ShellNewLockStateMismatch");
     }
 
     private async Task WaitForCurrentRefreshAsync()
@@ -1644,20 +1714,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private void UpdatePageStateFromSnapshot(IEnumerable<SpecialMenuEntry> snapshot)
     {
-        if (Kind == SpecialMenuKind.ShellNew)
-        {
-            var lockedText = snapshot.Select(item => item.Metadata.GetValueOrDefault("OrderLocked")).FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
-            _suppressShellNewLockSync = true;
-            try
-            {
-                IsShellNewOrderLocked = bool.TryParse(lockedText, out var locked) && locked;
-            }
-            finally
-            {
-                _suppressShellNewLockSync = false;
-            }
-        }
-
         if (Kind == SpecialMenuKind.DragDrop)
         {
             var effectText = snapshot.FirstOrDefault(static item => item.Metadata.GetValueOrDefault("EntryType") == "DefaultDropEffect")?.Notes;
@@ -1857,8 +1913,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         for (var index = 0; index < movableItems.Length; index++)
         {
             movableItems[index].SetMoveAvailability(
-                IsShellNewOrderLocked && index > 0,
-                IsShellNewOrderLocked && index < movableItems.Length - 1);
+                IsShellNewOrderLocked == true && _shellNewDiscoveryValid && !IsShellNewLockBusy && index > 0,
+                IsShellNewOrderLocked == true && _shellNewDiscoveryValid && !IsShellNewLockBusy && index < movableItems.Length - 1);
         }
 
         foreach (var item in Items.Where(static item => !item.Entry.CanMove))
@@ -1970,12 +2026,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private async Task AutoRefreshLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await timer.WaitForNextTickAsync(cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(Kind == SpecialMenuKind.ShellNew ? 30 : 5), cancellationToken);
                 await StartRefreshAsync(markLoaded: false, showBusy: false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
