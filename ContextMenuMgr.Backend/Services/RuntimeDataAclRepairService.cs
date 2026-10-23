@@ -52,6 +52,17 @@ internal static class RuntimeDataAclRepairService
         }
 
         var pendingDirectories = new Stack<string>();
+        // Materialize both siblings before logger/DI initialization. Existing protected child
+        // ACLs are repaired by the same traversal below; new files inherit Users Modify.
+        foreach (var name in new[] { "Logs", "Locks" })
+        {
+            var directory = Path.Combine(rootDirectory, name);
+            try { Directory.CreateDirectory(directory); }
+            catch (Exception ex) when (IsRepairException(ex))
+            {
+                AddFailure(ref failedCount, failures, directory, ex);
+            }
+        }
         pendingDirectories.Push(rootDirectory);
 
         while (pendingDirectories.Count > 0)

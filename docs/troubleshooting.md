@@ -27,19 +27,29 @@ Frontend 在取得单实例 ownership 后开始会话；每卷头部记录启动
 
 写入前按 UTF-8 字节数检查上限。单条超大事件保留开头和结尾（含异常栈尾部），中间用 `LogEntryTruncated` 标明省略；不会生成无限大卷。升级遇到旧巨型活动日志时，只读取至多一卷最近尾部，写 `LegacyOversizedLog` 原大小/尾部保留标记并 flush，再移除旧文件；不永久保留巨型旧卷。此前更早内容按这项明确的大小保留策略淘汰。迁移失败保留原文件、不向巨型文件追加；以后重试。
 
-跨进程写入、归档和清理通过 `<active>.lock` 的独占文件 lease 串行；这些零字节协调文件不删除。数据句柄每条事件后关闭，避免阻塞维护。普通 append 不扫描目录。归档/删除被锁住或 ACL 拒绝时不突破大小/数量上限，不继续产生更多归档；失败后 30 秒再试，清空活动文件会立即解除等待。异步获取写锁/lease 各最多等 1 秒；同步 best-effort 各最多 250 ms，无后台日志队列或每条 `Task.Run`。两处磁盘都失败/等待耗尽时会丢弃该诊断记录，业务异常仍按原路径传播。
+v1.7.10 起，持久 lease 位于 `RuntimePaths.LocksDirectory`（`RootDirectory\Locks\<active>.lock`），活动日志与归档仍在 `RootDirectory\Logs`。例如 Installer 使用 `%ProgramData%\ContextMenuMgr\Locks\backend.log.lock`，Portable 使用 `<应用目录>\Data\Locks\backend.log.lock`。早期 writer 可自行创建两个目录，不依赖 DI 或提权；服务既有 ACL repair 会预创建并修复 Logs/Locks，均继承 Users Modify。
 
-早期服务启动、bootstrap、Frontend crash 和 Backend fallback 不依赖普通 Logger/DI。正常目的地不可用时独立尝试该进程的 `%TEMP%\ContextMenuMgr\Logs`，同样为 2 MiB/5 卷；LocalSystem 的 TEMP 可能位于 Windows 系统临时目录。双方均失败时不递归记录日志失败。TrayHost 磁盘写入失败采用 best-effort 丢弃，不干扰通知。
+升级不能假设旧 Frontend、Service、TrayHost 已全部退出。每次 append、recovery、rotation 和 clear 都按固定顺序取得 **Locks lease → 旧 `<active>.lock` lease**，整个操作结束后才释放。即使 Logs 已清理或旧进程暂时没有打开文件，后续新操作仍取得两个 lease，不以一次独占 open 判定旧进程已退出。旧路径因此可能在写入期间短暂出现在 Logs；旧进程仍可能留下它。新进程在完整受保护操作结束时，仅对七个已知 stream 的零字节普通旧 lock 设置删除，再关闭句柄；Windows 在句柄关闭前保持 delete-pending，旧版不能绕过。下次旧版重新创建路径后仍与新 writer 同步。崩溃残留在下次 recovery/write 重试，不移动或复制活跃同步原语。
+
+首次创建共享 writer 时会检查同目录七个已知旧 lock；忙碌/不可访问的流推迟处理，不妨碍其它流或启动。已迁移、半迁移与重复启动可重入；非空旧 lock、未知文件、目录和 reparse point 不删除。Locks 目标若有非空文件或目录冲突，不覆盖，当前流拒绝无锁写入。迁移/锁失败每个进程最多报告 8 条、每条最多 1024 字符的 `LogLockMaintenance` 到 Trace 和可用的独立 TEMP `backend-fallback.log`，TEMP 自身失败只保留 Trace，避免递归。没有日志时还应核查文件系统 ACL 与冲突路径，不能据此宣称迁移成功。
+
+数据句柄每条事件后关闭，避免阻塞维护。普通 append 不扫描目录。归档/删除被锁住或 ACL 拒绝时不突破大小/数量上限，不继续产生更多归档；失败后 30 秒再试，清空活动文件会立即解除等待。异步获取写锁/lease 各最多等 1 秒；同步 best-effort 各最多 250 ms，无后台日志队列或每条 `Task.Run`。迁移诊断只进行有界 best-effort 写入。两处磁盘都失败/等待耗尽时会丢弃该诊断记录，业务异常仍按原路径传播。
+
+早期服务启动、bootstrap、Frontend crash 和 Backend fallback 不依赖普通 Logger/DI。正常目的地不可用时独立尝试该进程的 `%TEMP%\ContextMenuMgr\Logs`，其 lease 使用同级 `%TEMP%\ContextMenuMgr\Locks`，不与正常根共享锁；同样为 2 MiB/5 卷。LocalSystem 的 TEMP 可能位于 Windows 系统临时目录。双方均失败时不递归记录日志失败。TrayHost 磁盘写入失败采用 best-effort 丢弃，不干扰通知。
 
 默认 Warning 不再强制记录成功的 Ping、快照、WPS 待审核等 routine query Start/End；Information 可恢复这些记录。mutation/进程维护操作的 Start/End、失败、超时、不确定结果保持关联 ID、命令、目标及耗时证据，即使配置 Error 也保留 request 失败。内部 Backend Warning/Error 独立按级别处理，不能被 query 分类吞掉。
 
 Package discovery 按 SID 和 metadata/enumeration/manifest 阶段聚合：首个条件立即 Warning；全部失败的 package/stage/异常/HRESULT/消息与数量参与签名，前三个样本用于定位。相同条件每 15 分钟输出 `PackageDiscoveryWarningSummary` 和 `SuppressedOccurrences`；变化、恢复或容量淘汰时汇总已抑制次数。最多保留 32 个 SID/阶段条件，每条件最多 8192 字符样本；部分 enumeration 失败不会宣称其它阶段已恢复。不全局忽略任何 HRESULT，也不改变 package 枚举或 registry 行为。
 
-“清除全部日志”在后台执行一次维护：逐流取得相同 lease，删除归档、截断活动文件，涵盖上述七种旧固定文件名、当前用户 emergency TEMP，以及机器 `SystemTemp`（默认 Windows `SystemTemp`）和旧机器 TMP/TEMP（默认 Windows `Temp`）内的应用日志子目录。未知 `.log`、状态库、设置、备份和 reparse-point 文件不处理；不搜索其它用户 profile 或自定义 service-process-only TEMP。锁住/保护或无法检查的目录/文件显示部分失败及具体路径；SYSTEM TEMP 的 ACL 可能拒绝普通前端访问，需管理员单独清理。已清理的文件不会被误报为全部成功；不停止服务，继续记录，Frontend 自动补回会话头。原 `.lock` 文件必须保留以避免竞争。
+“清除全部日志”在后台执行一次维护：逐流取得相同双 lease，删除精确归档名、截断活动文件，涵盖上述七种固定文件名、当前用户 emergency TEMP，以及机器 `SystemTemp`（默认 Windows `SystemTemp`）和旧机器 TMP/TEMP（默认 Windows `Temp`）内的应用日志子目录。没有活动日志/归档的流不创建 lease。未知 `.log`、状态库、设置、备份和 reparse-point 文件不处理；不搜索其它用户 profile 或自定义 service-process-only TEMP。锁住/保护或无法检查的目录/文件显示部分失败及具体路径；SYSTEM TEMP 的 ACL 可能拒绝普通前端访问，需管理员单独清理。已清理的文件不会被误报为全部成功；不停止服务，继续记录，Frontend 自动补回会话头。清理不删除 Locks 目录或持久 lease、不删除其它进程持有的旧 lock；仅在本次完整 lease 结束后按上述规则退休自己的旧路径。
+
+设置页“打开日志文件夹”仍创建并打开 `RuntimePaths.LogsDirectory`，不打开根或 Locks；“打开数据文件夹”仍打开原有 `DataDirectory` 根。Portable 从旧 ProgramData 迁移日志时，仅在源/目标两侧取得双 lease 后 copy-if-missing 七种活动日志和精确有效归档，不覆盖、不复制 lock、不递归遍历未知目录；旧日志原件保留。其它设置、备份和 Programs 的既有迁移不变。
+
+Windows 手工验收：分别在 Installer 和 Portable 包启动 Frontend、Service、TrayHost，确认两个同级目录及标准用户/LocalSystem 的实际写入；保留 v1.7.9 进程跨升级运行并触发轮转，确认两版本争用同一旧 lease、归档完整且不超预算；并发“清除全部日志”后继续触发日志，锁住一个归档确认部分失败；在 Logs 缺失时点击“打开日志文件夹”，确认只创建并打开 Logs，再核对“打开数据文件夹”仍是根。另测只读 Portable 根和 SYSTEM TEMP 不可访问时的实际 fallback、进程强制终止后恢复。单元测试和编译不能代替这些 SCM/Explorer/多账号验收。
 
 报错前请收集整个 Logs 文件夹中的活动和归档日志，而非只发送 `backend.log`。复制时若遇到轮转占用可重试；不需要停止服务。正常目录不可用时也收集对应进程 TEMP 中的日志。排查超时应切换 Information 后复现，以获得成功查询的完整关联时间线；涉及未确认 mutation 的证据默认仍保留。
 
-`RuntimePaths` 通过应用目录中的 `ContextMenuMgr.package.json` 明确识别包类型，缺失或无效时按 Installer 处理。Installer 根目录为 `%ProgramData%\ContextMenuMgr`；Portable 根目录为 `<应用目录>\Data`。`frontend-settings.json`、`context-menu-state.json`、`backend-protection-settings.json`、`DeletedBackups` 和 `Logs` 都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；排查历史安装时可以同时检查这些旧位置。
+`RuntimePaths` 通过应用目录中的 `ContextMenuMgr.package.json` 明确识别包类型，缺失或无效时按 Installer 处理。Installer 根目录为 `%ProgramData%\ContextMenuMgr`；Portable 根目录为 `<应用目录>\Data`。`frontend-settings.json`、`context-menu-state.json`、`backend-protection-settings.json`、`DeletedBackups`、`Logs` 和 `Locks` 都从该根目录派生。旧版本可能使用 `%LOCALAPPDATA%\ContextMenuMgr`、`%ProgramData%\ContextMenuMgr` 或 `%ProgramData%\ContextMenuMgr\Data`，当前代码保留 copy-only 迁移/兼容路径常量；排查历史安装时可以同时检查这些旧位置。
 
 `context-menu-state.json` 使用 `context-menu-state.json.bak` 保存一份最后已知正常状态。正常保存先写入同目录唯一 `.tmp-<guid>` 文件、flush/关闭并按生产格式重新验证，再替换 current；不要手工把临时文件当作 current。current JSON/结构损坏时，后端会将原始文件保存到 `Quarantine\corrupt-state-...`，验证 `.bak` 后自动恢复；没有有效 backup 时则从当前注册表重新采纳 baseline。恢复旧 backup 可能丢失非常新的本地状态更改，但不会直接修改注册表内容。
 

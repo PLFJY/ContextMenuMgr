@@ -26,6 +26,8 @@ public static class RuntimePaths
 
     public static string LogsDirectory => Path.Combine(RootDirectory, "Logs");
 
+    public static string LocksDirectory => Path.Combine(RootDirectory, "Locks");
+
     public static string BackendLogPath => Path.Combine(LogsDirectory, "backend.log");
 
     public static string FrontendDebugLogPath => Path.Combine(LogsDirectory, "frontend-debug.log");

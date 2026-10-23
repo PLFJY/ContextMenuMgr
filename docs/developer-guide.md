@@ -456,11 +456,19 @@ IPC 超时、不重试不确定写入、迟到权威状态、响应失败仍广�
 
 `Contracts/RollingLogFile` 是唯一 append/rotation/retention 实现；`RuntimeLogFiles` 定义七个 stream 的预算和维护 ownership，保留既有 Installer/Portable 根与活动文件名。Frontend debug/Backend 为 5 MiB + 10 归档；TrayHost/crash/service-startup/fallback/bootstrap 为 2 MiB + 5 归档。仅启动和 rotation 枚举本流归档，逐条按字节大小滚动，使用 GUID 防碰撞和跨进程文件 lease；日志失败不得阻止业务或服务启动。
 
+v1.7.10 将持久 lease 放到 `RuntimePaths.LocksDirectory = RootDirectory\Locks`，日志仍在 `LogsDirectory = RootDirectory\Logs`。TEMP emergency 使用自己的同级 Locks，不共享正常目的地的 lease。目录由共享 writer 在 DI 前 best-effort 创建；服务既有 `RuntimeDataAclRepairService` 预创建 Logs/Locks，再用既有 Users Modify 继承/修复遍历处理，不新增日志提权路径。
+
+兼容 #134 / v1.7.9 的 `<active>.lock`：每个新操作固定先取持久 Locks lease、再取旧路径 lease，直到所有文件操作结束。**即使旧 lock 不存在也不能跳过第二把锁**，因为旧进程可能在两次写入之间或后续启动时重新创建它。新旧共享旧路径；新新还共享持久路径，不会因迁移分裂互斥。旧 lease 使用 FileShare.Delete（仍拒绝其它读写），在完整操作结束后仅删除已知 stream 的空普通文件，保持句柄至 Windows delete-pending 结束；崩溃时句柄自动释放，残留下次重试。用户可能短暂看到旧 lock，旧进程或 ACL 拒绝也可能使它留下；不要为完全消除瞬时文件而绕过兼容锁。
+
+`RuntimeLogFiles.MigrateLegacyLocks` 在共享 writer 创建时检查七个旧路径，不复制 lock、不覆盖目的地；busy/部分失败推迟，重复启动安全。非空旧 lock 保留并继续参与同步；非空目的 lock、目录或 reparse point 冲突拒绝当前流写入。诊断为每进程至多八条有界 `LogLockMaintenance`，独立 TEMP fallback 不递归。Portable 的 `CopyLegacyLogsIfMissing` 只在两端按路径排序取双 lease 后复制缺少的已知活动日志/精确归档，保留源证据，不复制锁或遍历未知目录。
+
+兼容退休的维护决定：保留 #134/v1.7.9 双锁桥接；只有维护者明确停止支持旧 writer 与新 writer 共用同一根（包括仍运行进程、旧包再次启动及降级），并验证 Installer/Portable 的停机升级约束后才可删除。不能根据一次 open、一次进程枚举或已经没有旧 lock 判断可退休。
+
 Frontend 在单实例 ownership 成立后、DI 前启动 session，正常 OnExit 归档；fatal/kill 留存后由下次启动恢复。每卷都有相同启动时间/PID/session id。超大单条保留两端并标记截断；旧巨型活动文件保存最近有界尾部后退休，迁移失败不覆盖原件。Backend 保留 async API；既有非 await 调用用有界同步 best-effort，不累积 fire-and-forget Tasks。startup/crash/bootstrap/fallback 使用独立 writer，正常根失败后尝试有界 TEMP 日志，不递归调用 normal logger。
 
 `PipeOperationLogging` 的显式 allow-list 只决定 routine request 成功日志，不决定业务 mutation routing。snapshot/WPS 查询保留既有 baseline/reconciliation 行为；这些内部错误不能通过请求分类过滤。双方统一抑制 Warning 下成功查询，保留 mutation 和所有失败/timeout 关联证据。新增命令应审查语义；未知命令默认保留 operation evidence。`PackageDiscoveryWarningAggregator` 按用户/阶段有界保存 signature 与样本，15 分钟重复汇总，变化/恢复/淘汰汇总 suppressed count。
 
-维护 UI 用 `RuntimeLogFiles.ClearAsync` 同 lease 清归档/截断活动文件；后台任务仅用于一次维护，不用于每条日志。准确报告部分失败，不触碰未知文件/数据/备份、不删除 lease 文件、不停止 Backend/TrayHost。完整命名、失败/丢弃策略和日志收集见 [排错指南](./troubleshooting.md#日志轮转与收集134)。永久日志测试只保留 rolling/ownership/concurrency/recovery 与 bounded warning aggregation 的非平凡不变量；实际 SCM、WPF OnExit 和多账号 ACL 仍需 Windows 场景验证。
+维护 UI 用 `RuntimeLogFiles.ClearAsync` 同双 lease 清精确归档/截断活动文件；后台任务仅用于一次维护，不用于每条日志。不存在的流不创建 lease；保留 Locks 目录和持久 lease，兼容旧 lease 仅在完整受保护操作结束后退休。准确报告部分失败，不触碰未知文件/数据/备份、不停止 Backend/TrayHost。“打开日志文件夹”仍创建并打开 Logs，“打开数据文件夹”仍打开根，不暴露 Locks。完整命名、失败/丢弃策略和日志收集见 [排错指南](./troubleshooting.md#日志轮转与收集134)。永久日志测试保留 rolling/ownership/concurrency/recovery、真实子进程旧路径竞争、迁移与 ACL 失败安全及 bounded warning aggregation 的非平凡不变量；实际 SCM、WPF OnExit 和多账号 ACL 仍需 Windows 场景验证。
 
 ## OpenWith 来源检查与编辑完整性（#136）
 

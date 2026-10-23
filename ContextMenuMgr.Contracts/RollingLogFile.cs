@@ -246,43 +246,113 @@ public sealed class RollingLogFile(string path, int maximumBytes, int archiveCou
         return Path.GetFullPath(path);
     }
 
-    internal static FileStream? TryAcquireLease(string path)
+    internal static IDisposable? TryAcquireLease(string path, out Exception? failure)
     {
+        failure = null;
+        FileStream? current = null;
+        FileStream? legacy = null;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+            var locks = Path.Combine(Path.GetDirectoryName(directory)!, "Locks");
+            EnsureDirectory(directory);
+            EnsureDirectory(locks);
             EnsureRegularFile(path);
+            var lockPath = Path.Combine(locks, Path.GetFileName(path) + ".lock");
+            EnsureRegularFile(lockPath);
+            current = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+            if (current.Length != 0) throw new IOException("The lock destination contains unrelated data.");
+
+            // Always take both leases, even on a clean install: a sleeping old writer can
+            // recreate its path at any time. New -> legacy is the only acquisition order.
             EnsureRegularFile(path + ".lock");
-            return new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+            legacy = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.Delete);
+            var recognized = RuntimeLogFiles.IsOwnedStream(path);
+            return new LogLease(current, legacy, path + ".lock", recognized, legacy.Length == 0);
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            legacy?.Dispose();
+            current?.Dispose();
+            failure = ex;
+            return null;
+        }
     }
 
-    internal static async Task<FileStream> AcquireLeaseAsync(string path, CancellationToken cancellationToken)
+    internal static async Task<IDisposable> AcquireLeaseAsync(string path, CancellationToken cancellationToken)
     {
         var timer = Stopwatch.StartNew();
+        Exception? failure;
         do
         {
-            if (TryAcquireLease(path) is { } lease) return lease;
+            if (TryAcquireLease(path, out failure) is { } lease) return lease;
             await Task.Delay(10, cancellationToken).ConfigureAwait(false);
         } while (timer.ElapsedMilliseconds < 1000);
-        throw new IOException("Log stream is locked or inaccessible.");
+        var unavailable = new IOException("Log stream is locked or inaccessible.", failure);
+        RuntimeLogFiles.ReportLockFailure(path, unavailable);
+        throw unavailable;
     }
 
     internal static void EnsureRegularFile(string path)
     {
-        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            throw new IOException("Refusing to modify a log file that is a reparse point.");
+        try
+        {
+            if ((File.GetAttributes(path) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+                throw new IOException("Refusing to modify a log path that is a directory or reparse point.");
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
     }
 
-    private static FileStream? AcquireLease(string path)
+    internal static void EnsureDirectory(string path)
+    {
+        // Do not follow a redirected Logs/Locks directory (or runtime root) into user files.
+        foreach (var candidate in new[] { Path.GetDirectoryName(path), path })
+        {
+            if (candidate is not null && Directory.Exists(candidate)
+                && (File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Refusing to use a log directory that is a reparse point.");
+        }
+        Directory.CreateDirectory(path);
+    }
+
+    private sealed class LogLease(FileStream current, FileStream legacy, string legacyPath, bool recognized, bool empty) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            Exception? failure = null;
+            try
+            {
+                // This is retirement AFTER the protected operation, not an exclusive-open
+                // liveness probe. Windows keeps the file delete-pending until this handle
+                // closes. Every future new operation still takes the legacy lease, so old
+                // processes between writes remain synchronized when they recreate it.
+                if (recognized && empty && OperatingSystem.IsWindows()) File.Delete(legacyPath);
+                else if (recognized && !empty) failure = new IOException("Nonempty legacy lock preserved; ownership is uncertain.");
+            }
+            catch (Exception ex) { failure = ex; }
+            finally
+            {
+                try { legacy.Dispose(); }
+                finally { current.Dispose(); }
+            }
+            if (failure is not null) RuntimeLogFiles.ReportLockFailure(legacyPath, failure);
+        }
+    }
+
+    private static IDisposable? AcquireLease(string path)
     {
         var timer = Stopwatch.StartNew();
+        Exception? failure;
         do
         {
-            if (TryAcquireLease(path) is { } lease) return lease;
+            if (TryAcquireLease(path, out failure) is { } lease) return lease;
             Thread.Sleep(10);
         } while (timer.ElapsedMilliseconds < 250);
+        RuntimeLogFiles.ReportLockFailure(path, new IOException("Log stream is locked or inaccessible.", failure));
         return null;
     }
 }

@@ -60,7 +60,7 @@ public sealed class BackendRuntime : IDisposable
             aclRepairResult.Success ? RuntimeLogLevel.Information : RuntimeLogLevel.Warning,
             $"RuntimeDataAclRepairStartup: Success={aclRepairResult.Success}, Code={aclRepairResult.Code}, Detail={aclRepairResult.Detail}");
         logger.LogFireAndForget(
-            $"RuntimePackage: PackageKind={RuntimePaths.PackageKind}, RootDirectory={RuntimePaths.RootDirectory}, LogsDirectory={RuntimePaths.LogsDirectory}, DataDirectory={RuntimePaths.DataDirectory}");
+            $"RuntimePackage: PackageKind={RuntimePaths.PackageKind}, RootDirectory={RuntimePaths.RootDirectory}, LogsDirectory={RuntimePaths.LogsDirectory}, LocksDirectory={RuntimePaths.LocksDirectory}, DataDirectory={RuntimePaths.DataDirectory}");
 
         BackendEmergencyLogger.Log("CreateDefault: creating RuntimeHostIdentityProvider.");
         var hostIdentityProvider = new RuntimeHostIdentityProvider(logger);
@@ -188,7 +188,7 @@ public sealed class BackendRuntime : IDisposable
         if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
         {
             TryCopyDirectoryContentsIfMissing(RuntimePaths.LegacyProgramDataDeletedBackupsDirectory, RuntimePaths.DeletedBackupsDirectory);
-            TryCopyDirectoryContentsIfMissing(RuntimePaths.LegacyProgramDataLogsDirectory, RuntimePaths.LogsDirectory);
+            RuntimeLogFiles.CopyLegacyLogsIfMissing(RuntimePaths.LegacyProgramDataLogsDirectory, RuntimePaths.LogsDirectory);
             TryCopyDirectoryContentsIfMissing(RuntimePaths.LegacyProgramDataGeneratedProgramsDirectory, RuntimePaths.GeneratedProgramsDirectory);
         }
     }
