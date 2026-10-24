@@ -166,6 +166,9 @@ public sealed class ContextMenuRegistryCatalog
         {
             if (!string.Equals(itemId, original.Id, StringComparison.OrdinalIgnoreCase))
                 return CreateFailure("The requested item identity does not match its source.");
+            if (userContext is null) return CreateFailure("The authenticated user is unavailable.", original);
+            using var frontendHive = Registry.Users.OpenSubKey(userContext.Sid, writable: false);
+            if (frontendHive is null) return CreateFailure("The frontend user's registry hive is not loaded.", original);
 
             if (string.Equals(itemId, RecycleBinPinToHomeId, StringComparison.OrdinalIgnoreCase))
             {
@@ -193,6 +196,9 @@ public sealed class ContextMenuRegistryCatalog
                 || string.IsNullOrWhiteSpace(original.BackendRegistryPath))
                 return CreateFailure("The requested classic item has no physical source.");
 
+            if (original.BackendRegistryPath.StartsWith("HKEY_USERS\\", StringComparison.OrdinalIgnoreCase)
+                && (userContext is null || !original.BackendRegistryPath.StartsWith($"HKEY_USERS\\{userContext.Sid}\\", StringComparison.OrdinalIgnoreCase)))
+                return CreateFailure("The selected source does not belong to the authenticated user.", original);
             var candidates = await FindEntriesByIdAsync(itemId, cancellationToken, userContext);
             var sourcePrefix = GetSourceHivePrefix(original.BackendRegistryPath);
             var sourceCandidates = candidates.Where(entry =>
@@ -204,7 +210,10 @@ public sealed class ContextMenuRegistryCatalog
                     || string.Equals(entry.HandlerClsid, original.HandlerClsid, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
             if (sourceCandidates.Length == 0)
-                return new PipeResponse { Success = true, Message = "The original physical registry source no longer exists." };
+                return MenuDiscoveryCoverage.IsClassicComplete && userContext is not null && !original.IsDeleted
+                    ? new PipeResponse { Success = false, ErrorCode = PipeErrorCodes.MenuItemRemoved,
+                        RemovedItemIds = [itemId], Message = "The original physical registry source no longer exists." }
+                    : CreateFailure("The original source could not be verified.", original);
 
             var projection = await BuildSnapshotAsync(sourceCandidates,
                 state => string.Equals(state.Id, itemId, StringComparison.OrdinalIgnoreCase),
@@ -243,6 +252,7 @@ public sealed class ContextMenuRegistryCatalog
     {
         if (userContext is null)
         {
+            MenuDiscoveryCoverage.MarkIncomplete();
             return [];
         }
 
@@ -447,8 +457,10 @@ public sealed class ContextMenuRegistryCatalog
                        && Guid.TryParse(targetId, out var targetGuid)
                        && Guid.TryParse(entry.HandlerClsid, out var entryGuid) && entryGuid == targetGuid));
             if (item is null)
-                return CreateFailure("The selected Win11 declaration no longer exists for this user.")
-                    with { ClientOperationId = operationId };
+                return MenuDiscoveryCoverage.IsComplete
+                    ? new PipeResponse { Success = false, ErrorCode = PipeErrorCodes.MenuItemRemoved, RemovedItemIds = [targetId],
+                        Message = "The selected Win11 declaration has been removed.", ClientOperationId = operationId }
+                    : CreateFailure("The selected Win11 declaration could not be verified.") with { ClientOperationId = operationId };
             _logger.LogFireAndForget(RuntimeLogLevel.Warning,
                 $"Win11TogglePlan: OperationId={operationId}, RequestedItemId={targetId}, ItemId={item.Id}, Sid={userContext.Sid}, Enable={enable}, Clsids=[{item.HandlerClsid}], Impact={System.Text.Json.JsonSerializer.Serialize(item.Windows11ClsidImpact)}, ExplorerValidated=False.");
             var response = await ApplyDesiredStateCoreAsync(item.Id, enable, cancellationToken,
@@ -838,6 +850,7 @@ public sealed class ContextMenuRegistryCatalog
             && !string.IsNullOrWhiteSpace(fallbackItem.BackendRegistryPath))
         {
             var sourceState = await GetContextMenuItemStateAsync(itemId, fallbackItem, cancellationToken, userContext);
+            if (sourceState.ErrorCode == PipeErrorCodes.MenuItemRemoved) return sourceState;
             if (!sourceState.Success || sourceState.Item is null)
                 return CreateFailure("The selected physical registry source no longer exists; no mutation was attempted.",
                     fallbackItem, PipeErrorCodes.RegistryMutationVerificationFailed);
@@ -3133,6 +3146,7 @@ public sealed class ContextMenuRegistryCatalog
     private async Task<IReadOnlyList<ContextMenuEntry>> EnumerateActualEntriesAsync(CancellationToken cancellationToken, BackendUserContext? userContext = null, bool includeWindows11 = true)
     {
         var results = new List<ContextMenuEntry>();
+        if (userContext is null) MenuDiscoveryCoverage.MarkIncomplete();
         // Regular monitoring is scoped to the frontend/interactive user. A
         // service-side snapshot without that context sees only HKLM and cannot
         // establish or prune a user baseline.
@@ -4062,6 +4076,9 @@ public sealed class ContextMenuRegistryCatalog
             states.TryGetValue(parent.Id, out var state);
             var child = EnumerateShellSubMenuItems(parent, parentKey, state)
                 .FirstOrDefault(item => string.Equals(item.Id, childId, StringComparison.Ordinal));
+            if (child is null && MenuDiscoveryCoverage.IsClassicComplete && userContext is not null)
+                return new PipeResponse { Success = false, ErrorCode = PipeErrorCodes.MenuItemRemoved,
+                    RemovedItemIds = [childId], Message = "The selected submenu item has been removed." };
             if (child is null || child.IsSeparator || !child.CanToggle)
             {
                 return CreateFailure("The requested submenu item is not safely manageable.", parent);

@@ -1623,4 +1623,8 @@
   <data name="PortableStartupPolicyUncertain" xml:space="preserve">
     <value>无法可靠恢复启动策略。请先执行“安装或修复服务”，再修改这些选项。</value>
   </data>
+  <data name="MenuItemRemovedTitle" xml:space="preserve"><value>菜单项已移除</value></data>
+  <data name="MenuItemRemovedMessage" xml:space="preserve"><value>该菜单项已移除，列表已更新。</value></data>
+  <data name="MenuListCachedStatus" xml:space="preserve"><value>正在显示缓存结果，正在检查更新。</value></data>
+  <data name="MenuListIncompleteStatus" xml:space="preserve"><value>扫描不完整，已保留未能确认的菜单项。</value></data>
 </root>

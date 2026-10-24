@@ -37,7 +37,7 @@
             <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
                      Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}"
                      Background="Transparent" BorderThickness="0"
-                     ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}" ItemsSource="{Binding ItemsView}"
+                     ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}" behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding ItemsView}"
                      behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemTemplate>
@@ -98,8 +98,18 @@
                                         <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Padding="6,2" Appearance="Transparent"
                                                    Command="{Binding RetryCommand}" Content="{Binding RetryText}"
                                                    Visibility="{Binding CanRetry, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <TextBlock VerticalAlignment="Center" FontSize="12" Text="{Binding StatusText}" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock VerticalAlignment="Center" FontSize="12" Text="{Binding StatusText}" TextWrapping="Wrap">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsProtected}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </DockPanel>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">

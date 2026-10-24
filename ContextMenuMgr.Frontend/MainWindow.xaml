@@ -132,6 +132,7 @@
         </DataTemplate>
     </ui:FluentWindow.Resources>
 
+    <AdornerDecorator>
     <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -227,8 +228,17 @@
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
                     Appearance="Secondary"
                     Command="{Binding RefreshCommand}"
-                    Content="{Binding RefreshText}"
-                    Icon="{ui:SymbolIcon Symbol=ArrowClockwise24}" />
+                    AutomationProperties.Name="{Binding RefreshText}">
+                    <StackPanel Orientation="Horizontal">
+                        <Grid Width="16" Height="16" Margin="0,0,8,0">
+                            <ui:SymbolIcon Symbol="ArrowClockwise24" FontSize="16"
+                                Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                            <ui:ProgressRing Width="16" Height="16" IsIndeterminate="True"
+                                Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </Grid>
+                        <TextBlock Text="{Binding RefreshText}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ui:Button>
             </StackPanel>
 
             <StackPanel Grid.Column="4" Orientation="Horizontal">
@@ -262,61 +272,6 @@
                 Text="{Binding ServiceAttentionText}"
                 Visibility="{Binding ServiceAttentionText, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
         </Grid>
-
-        <Border
-            x:Name="RootInfoBar"
-            Grid.Row="2"
-            Margin="12,0,12,12"
-            Padding="16,10"
-            Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
-            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="4"
-            Visibility="Collapsed">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <ui:SymbolIcon
-                    Grid.Column="0"
-                    Margin="0,0,12,0"
-                    VerticalAlignment="Center"
-                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
-                    Symbol="Info24" />
-                <WrapPanel
-                    Grid.Column="1"
-                    VerticalAlignment="Center"
-                    Orientation="Horizontal">
-                    <TextBlock
-                        x:Name="RootInfoBarTitle"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold" />
-                    <TextBlock
-                        x:Name="RootInfoBarMessage"
-                        Margin="8,0,0,0"
-                        VerticalAlignment="Center" />
-                    <ui:HyperlinkButton
-                        x:Name="RootInfoBarLink"
-                        Margin="8,0,0,0"
-                        Padding="0"
-                        VerticalAlignment="Center"
-                        Icon="{ui:SymbolIcon Symbol=Open24}"
-                        Visibility="Collapsed" />
-                </WrapPanel>
-                <ui:Button
-                    x:Name="RootInfoBarClose"
-                    Grid.Column="2"
-                    Width="32"
-                    Height="32"
-                    Padding="0"
-                    HorizontalAlignment="Right"
-                    Appearance="Transparent"
-                    Icon="{ui:SymbolIcon Symbol=Dismiss24}" />
-            </Grid>
-        </Border>
 
         <Grid Grid.Row="3" Margin="5,0,5,5">
             <modernNavigation:ModernNavigationView
@@ -429,5 +384,10 @@
             </modernNavigation:ModernNavigationView>
 
         </Grid>
+        <ui:InfoBar x:Name="RootInfoBar" Grid.Row="2" Panel.ZIndex="100"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                    Margin="12,0,12,6" IsOpen="False" IsClosable="True"
+                    Severity="Informational" />
     </Grid>
+    </AdornerDecorator>
 </ui:FluentWindow>

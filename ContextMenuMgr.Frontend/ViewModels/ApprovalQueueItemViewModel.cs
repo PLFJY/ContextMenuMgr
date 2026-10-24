@@ -1,4 +1,5 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+﻿using System.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using ContextMenuMgr.Frontend.Services;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
@@ -6,7 +7,7 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 /// <summary>
 /// Represents the approval Queue Item View Model.
 /// </summary>
-public partial class ApprovalQueueItemViewModel : ObservableObject
+public partial class ApprovalQueueItemViewModel : ObservableObject, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -19,32 +20,49 @@ public partial class ApprovalQueueItemViewModel : ObservableObject
     {
         SourceItems = sourceItems;
         _localization = localization;
-        var categoryTags = sourceItems
-            .Select(static item => item.Category)
-            .Distinct()
-            .Select(category => ContextMenuCategoryText.GetLocalizedName(category, localization))
-            .Select(static category => new ApprovalTagChipViewModel(category, isWindows11Tag: false))
-            .ToList();
-
-        if (IsWindows11ContextMenu)
-        {
-            categoryTags.Insert(0, new ApprovalTagChipViewModel(localization.Translate("Windows11PendingApprovalTag"), isWindows11Tag: true));
-        }
-
-        CategoryTags = categoryTags;
+        CategoryTags = BuildCategoryTags();
+        foreach (var item in SourceItems) item.PropertyChanged += SourceChanged;
     }
+
+    private IReadOnlyList<ApprovalTagChipViewModel> BuildCategoryTags()
+    {
+        var tags = SourceItems.Select(item => item.Category).Distinct()
+            .Select(category => new ApprovalTagChipViewModel(ContextMenuCategoryText.GetLocalizedName(category, _localization), false)).ToList();
+        if (IsWindows11ContextMenu) tags.Insert(0, new ApprovalTagChipViewModel(_localization.Translate("Windows11PendingApprovalTag"), true));
+        return tags;
+    }
+    private void SourceChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        OnPropertyChanged(e.PropertyName);
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.Category) or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu)) RefreshLocalization();
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.IsPendingApproval) or nameof(ContextMenuItemViewModel.IsToggleBusy))
+            OnPropertyChanged(nameof(CanReviewApproval));
+    }
+    public void RefreshLocalization()
+    { CategoryTags = BuildCategoryTags(); OnPropertyChanged(nameof(CategoryTags)); }
+    public void Dispose() { foreach (var item in SourceItems) item.PropertyChanged -= SourceChanged; }
 
     /// <summary>
     /// Gets the source Items.
     /// </summary>
-    public IReadOnlyList<ContextMenuItemViewModel> SourceItems { get; }
+    public IReadOnlyList<ContextMenuItemViewModel> SourceItems { get; private set; }
+
+    public void UpdateSources(IReadOnlyList<ContextMenuItemViewModel> sourceItems)
+    {
+        if (SourceItems.SequenceEqual(sourceItems)) return;
+        foreach (var item in SourceItems) item.PropertyChanged -= SourceChanged;
+        SourceItems = sourceItems;
+        foreach (var item in SourceItems) item.PropertyChanged += SourceChanged;
+        CategoryTags = BuildCategoryTags();
+        OnPropertyChanged(string.Empty);
+    }
 
     public ContextMenuItemViewModel PrimaryItem => SourceItems[0];
 
     /// <summary>
     /// Gets the categories.
     /// </summary>
-    public IReadOnlyList<ApprovalTagChipViewModel> CategoryTags { get; }
+    public IReadOnlyList<ApprovalTagChipViewModel> CategoryTags { get; private set; }
 
     public string DisplayName => PrimaryItem.DisplayName;
 

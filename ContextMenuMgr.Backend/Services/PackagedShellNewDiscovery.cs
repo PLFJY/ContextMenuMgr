@@ -44,6 +44,7 @@ internal static class PackagedShellNewDiscovery
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
+            MenuDiscoveryCoverage.MarkPackagedIncomplete();
                     logger.LogFireAndForget(RuntimeLogLevel.Warning,
                         $"PackagedShellNewPackageSkipped: Sid={userSid}, Exception={ex.GetType().Name}: {ex.Message}");
                 }
@@ -57,6 +58,7 @@ internal static class PackagedShellNewDiscovery
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            MenuDiscoveryCoverage.MarkPackagedIncomplete();
             logger.LogFireAndForget(RuntimeLogLevel.Warning,
                 $"PackagedShellNewDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}: {ex.Message}");
         }

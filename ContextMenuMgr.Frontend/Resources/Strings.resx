@@ -1623,4 +1623,8 @@ Continue anyway? (Not recommended)</value>
   <data name="PortableStartupPolicyUncertain" xml:space="preserve">
     <value>The startup policy could not be restored reliably. Run Install or repair service before changing these options again.</value>
   </data>
+  <data name="MenuItemRemovedTitle" xml:space="preserve"><value>Menu item removed</value></data>
+  <data name="MenuItemRemovedMessage" xml:space="preserve"><value>This menu item has been removed. The list has been updated.</value></data>
+  <data name="MenuListCachedStatus" xml:space="preserve"><value>Showing saved results; checking for updates.</value></data>
+  <data name="MenuListIncompleteStatus" xml:space="preserve"><value>The scan is incomplete. Unverified items have been retained.</value></data>
 </root>

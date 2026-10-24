@@ -161,7 +161,7 @@
             VerticalScrollBarVisibility="Auto">
             <Grid>
                 <Grid Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <ItemsControl ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <ItemsControl behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.Resources>
                     <DataTemplate x:Key="WinXEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
                         <Border Margin="0,4,0,4" Style="{StaticResource ContextMenuItemCardStyle}">
@@ -421,7 +421,7 @@
                             <ItemsControl
                                 Margin="24,0,0,0"
                                 ItemTemplate="{StaticResource WinXEntryTemplate}"
-                                ItemsSource="{Binding Items}" />
+                                behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Items}" />
                         </Expander>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -429,7 +429,7 @@
 
                 <ItemsControl
                     behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-                    ItemsSource="{Binding ItemsView}"
+                    behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding ItemsView}"
                     Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type viewModels:SpecialMenuItemViewModel}">

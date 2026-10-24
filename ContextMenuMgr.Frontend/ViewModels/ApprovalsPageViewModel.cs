@@ -45,6 +45,11 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(ApprovalQueueItemViewModel.DisplayName), ListSortDirection.Ascending));
+        ((ListCollectionView)ItemsView).IsLiveSorting = true;
+        ((ListCollectionView)ItemsView).IsLiveFiltering = true;
+        foreach (var property in new[] { nameof(ApprovalQueueItemViewModel.DisplayName), nameof(ApprovalQueueItemViewModel.Subtitle),
+            nameof(ApprovalQueueItemViewModel.RegistryPath), nameof(ApprovalQueueItemViewModel.Notes), nameof(ApprovalQueueItemViewModel.CategoryTags) })
+            ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(property);
         RefreshLocalizedText();
         RebuildItems();
         ObserveFireAndForget(_workspace.RefreshWpsOfficeApprovalsAsync(), "RefreshWpsOfficeApprovalsAsync");
@@ -170,6 +175,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        foreach (var row in Items) row.RefreshLocalization();
         RefreshLocalizedText();
         OnPropertyChanged(nameof(AllowText));
         OnPropertyChanged(nameof(KeepDisabledText));
@@ -238,7 +244,6 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         }
 
         RebuildItems();
-        ItemsView.Refresh();
     }
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -251,25 +256,29 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
             or nameof(ContextMenuItemViewModel.Category))
         {
             RebuildItems();
-            ItemsView.Refresh();
         }
     }
 
     private void RebuildItems()
     {
+        var existing = Items.ToDictionary(item => CreateApprovalGroupKey(item.PrimaryItem), StringComparer.OrdinalIgnoreCase);
         var grouped = _workspace.Items
             .Concat(_workspace.WpsOfficeApprovalItems)
             .Where(static item => item.IsPendingApproval)
             .GroupBy(CreateApprovalGroupKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new ApprovalQueueItemViewModel(group.ToArray(), _localization))
+            .Select(group =>
+            {
+                if (!existing.TryGetValue(group.Key, out var row))
+                    return new ApprovalQueueItemViewModel(group.ToArray(), _localization);
+                row.UpdateSources(group.ToArray());
+                return row;
+            })
             .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        Items.Clear();
-        foreach (var item in grouped)
-        {
-            Items.Add(item);
-        }
+        var removed = Items.Except(grouped).ToArray();
+        IncrementalCollection.Apply(Items, grouped);
+        foreach (var row in removed) row.Dispose();
 
         ApplyFocusRequest();
     }
@@ -284,6 +293,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Dispose()
     {
+        foreach (var row in Items) row.Dispose();
         _localization.LanguageChanged -= OnLanguageChanged;
         _navigationState.ApprovalsRequested -= OnApprovalsRequested;
         _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;

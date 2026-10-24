@@ -1623,4 +1623,8 @@
   <data name="PortableStartupPolicyUncertain" xml:space="preserve">
     <value>無法可靠還原啟動原則。請先執行「安裝或修復服務」，再修改這些選項。</value>
   </data>
+  <data name="MenuItemRemovedTitle" xml:space="preserve"><value>功能表項目已移除</value></data>
+  <data name="MenuItemRemovedMessage" xml:space="preserve"><value>此功能表項目已移除，清單已更新。</value></data>
+  <data name="MenuListCachedStatus" xml:space="preserve"><value>正在顯示快取結果，正在檢查更新。</value></data>
+  <data name="MenuListIncompleteStatus" xml:space="preserve"><value>掃描不完整，已保留尚未確認的功能表項目。</value></data>
 </root>

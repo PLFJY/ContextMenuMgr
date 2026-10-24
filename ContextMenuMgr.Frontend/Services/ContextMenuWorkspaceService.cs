@@ -12,6 +12,7 @@ namespace ContextMenuMgr.Frontend.Services;
 /// </summary>
 public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDisposable
 {
+    private readonly IInfoBarService? _infoBarService;
     private readonly WorkspaceNotificationState _notificationState;
     private readonly IBackendClient _backendClient;
     private readonly IBackendServiceManager _backendServiceManager;
@@ -32,6 +33,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly CancellationTokenSource _shutdownCts = new();
     private CancellationTokenSource? _wpsOfficeApprovalRefreshCts;
     private Task? _wpsOfficeApprovalRefreshTask;
+    private readonly Dictionary<string, BackendNotification> _notificationQueries = new(StringComparer.OrdinalIgnoreCase);
+    private Task? _refreshTask;
+    private int _refreshGeneration;
+    private bool _hasSnapshot;
+    private bool _hasWpsSnapshot;
+    public bool HasSnapshot => _hasSnapshot;
+    [ObservableProperty] public partial bool IsScanning { get; private set; }
     private bool _notificationsInitialized;
     private bool _fullyInitialized;
     private bool _uiStateActive;
@@ -52,8 +60,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         LocalizationService localization,
         FrontendSettingsService settingsService,
         TrayHostProcessService trayHostProcessService,
-        PortablePackageTrustService portablePackageTrustService)
+        PortablePackageTrustService portablePackageTrustService,
+        IInfoBarService? infoBarService = null)
     {
+        _infoBarService = infoBarService;
         _backendClient = backendClient;
         _backendServiceManager = backendServiceManager;
         _itemActionsService = itemActionsService;
@@ -68,7 +78,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _trayHostProcessService = trayHostProcessService;
         _portablePackageTrustService = portablePackageTrustService;
         _backendClient.NotificationReceived += OnBackendNotificationReceived;
+        _backendClient.ItemsRemoved += OnItemsRemoved;
         ConnectionStatus = _localization.Translate("ConnectingStatus");
+    }
+
+    partial void OnIsBackendReadyChanged(bool value)
+    {
+        foreach (var item in Items.Concat(WpsOfficeApprovalItems)) item.IsBackendAvailable = value;
     }
 
     public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
@@ -128,6 +144,15 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 "ContextMenuWorkspaceService",
                 $"InitializeAsync started. SuppressBootstrapPrompt={suppressBootstrapPrompt}");
 
+            if (!_hasSnapshot)
+            {
+                var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest { Command = PipeCommand.GetSnapshot }, _shutdownCts.Token);
+                if (cached is not null)
+                {
+                    ApplySnapshot(cached, notify: false);
+                    ConnectionStatus = _localization.Translate("MenuListCachedStatus");
+                }
+            }
             if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
             {
                 await SyncBackendLogLevelAsync();
@@ -194,18 +219,28 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// <summary>
     /// Refreshes async.
     /// </summary>
-    public async Task RefreshAsync()
+    public Task RefreshAsync()
     {
+        if (_refreshTask is { IsCompleted: false }) return _refreshTask;
+        return _refreshTask = RefreshCoreAsync();
+    }
+
+    private async Task RefreshCoreAsync()
+    {
+        var generation = ++_refreshGeneration;
         _uiStateActive = true;
-        IsLoading = true;
+        IsScanning = true;
+        IsLoading = !_hasSnapshot;
         ClearMenuLoadFailure();
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var beforeScan = Items.ToDictionary(item => item.Id, item => item.Entry, StringComparer.OrdinalIgnoreCase);
             var snapshot = await _backendClient.GetSnapshotAsync(cts.Token);
+            if (generation != _refreshGeneration) return;
             // The frontend works from a backend-authored snapshot so every page
             // stays consistent after a single refresh pass.
-            ApplySnapshot(snapshot);
+            ApplySnapshot(snapshot, beforeScan: beforeScan);
             UpdateServiceAttention(ServiceAttentionState.None);
             ConnectionStatus = _localization.Translate("ConnectedStatus");
             // The normal menu snapshot is ready. WPS approvals are secondary data.
@@ -214,6 +249,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
         catch (Exception ex)
         {
+            if (generation != _refreshGeneration) return;
             if (BackendOperationHealthClassifier.FromPingResult(await CanReachBackendAsync())
                 == BackendOperationHealth.OperationFailed)
             {
@@ -236,7 +272,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
         finally
         {
-            IsLoading = false;
+            if (generation == _refreshGeneration) { IsScanning = false; IsLoading = false; }
         }
     }
 
@@ -327,6 +363,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             return false;
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            await FrontendMessageBox.ShowInfoAsync(
+                _localization.Translate("MenuItemRemovedMessage"),
+                _localization.Translate("MenuItemRemovedTitle"));
+            return false;
+        }
         catch (Exception ex)
         {
             FrontendDebugLog.Error(
@@ -368,6 +411,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             }
 
             return true;
+        }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return false;
         }
         catch (Exception ex)
         {
@@ -412,6 +459,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 await RefreshAsync();
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return;
+        }
         catch (Exception ex)
         {
             await HandleItemOperationFailureAsync(
@@ -433,6 +484,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             await _backendClient.PurgeDeletedItemAsync(item.Id, cts.Token);
             RemoveItem(item.Id);
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return;
+        }
         catch (Exception ex)
         {
             await HandleItemOperationFailureAsync(item, "PermanentDeleteFailedStatus", ex, "PurgeDeletedItemAsync");
@@ -442,6 +497,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     public async Task ResetStateDatabaseAsync(CancellationToken cancellationToken)
     {
         await _backendClient.ResetStateDatabaseAsync(cancellationToken);
+        _refreshGeneration++;
+        _refreshTask = null;
         await RefreshAsync();
     }
 
@@ -600,7 +657,14 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            if (!_hasWpsSnapshot)
+            {
+                var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
+                    Command = PipeCommand.GetWpsOfficePendingApprovals }, cts.Token);
+                if (cached is not null) await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => ApplyWpsOfficeApprovalSnapshot(cached, false));
+            }
             var snapshot = await _backendClient.GetWpsOfficePendingApprovalsAsync(cts.Token);
+            _hasWpsSnapshot = true;
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(
                 () => ApplyWpsOfficeApprovalSnapshot(snapshot));
             return true;
@@ -714,6 +778,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 return true;
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return false;
+        }
         catch (Exception ex)
         {
             FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, $"SetShellAttributeAsync failed for {item.Id}/{attribute}.");
@@ -749,6 +817,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 UpsertItem(updated);
                 return true;
             }
+        }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return false;
         }
         catch (Exception ex)
         {
@@ -788,6 +860,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 UpsertItem(updated);
                 return true;
             }
+        }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
+        {
+            return false;
         }
         catch (Exception ex)
         {
@@ -863,6 +939,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _wpsOfficeApprovalRefreshCts?.Dispose();
         _wpsOfficeApprovalRefreshLock.Dispose();
         _backendClient.NotificationReceived -= OnBackendNotificationReceived;
+        _backendClient.ItemsRemoved -= OnItemsRemoved;
         await _backendClient.DisposeAsync();
         _shutdownCts.Dispose();
     }
@@ -1106,6 +1183,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     {
         _uiStateActive = false;
         _fullyInitialized = false;
+        _hasSnapshot = false;
+        _refreshGeneration++;
+        _refreshTask = null;
         foreach (var item in Items.ToArray())
         {
             item.Dispose();
@@ -1142,16 +1222,20 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return false;
     }
 
-    private void ApplySnapshot(IReadOnlyList<ContextMenuEntry> snapshot)
+    private void ApplySnapshot(IReadOnlyList<ContextMenuEntry> snapshot, bool notify = true, IReadOnlyDictionary<string, ContextMenuEntry>? beforeScan = null)
     {
-        ClearResolvedDecisions(snapshot);
+        snapshot = MenuListData.Current(snapshot);
+        _hasSnapshot = true;
+        OnPropertyChanged(nameof(HasSnapshot));
+        if (notify) ClearResolvedDecisions(snapshot);
         var existing = Items.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in snapshot)
         {
             if (existing.Remove(entry.Id, out var item))
             {
-                item.Update(entry);
+                if (!item.IsToggleBusy && !item.IsAttributesBusy && (beforeScan is null || !beforeScan.TryGetValue(entry.Id, out var before) || ReferenceEquals(before, item.Entry)))
+                    item.Update(entry);
             }
             else
             {
@@ -1159,13 +1243,14 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             }
         }
 
-        foreach (var removed in existing.Values.ToList())
+        foreach (var removed in existing.Values.Where(item => MenuListData.AllowsRemoval(snapshot, item.Entry)).ToList())
         {
+            if (removed.IsToggleBusy || removed.IsAttributesBusy || beforeScan is not null && (!beforeScan.TryGetValue(removed.Id, out var before) || !ReferenceEquals(before, removed.Entry))) continue;
             removed.Dispose();
             Items.Remove(removed);
         }
 
-        _notificationState.UpdateRegular(snapshot);
+        if (notify) _notificationState.UpdateRegular(snapshot);
     }
 
     private void ClearResolvedDecisions(IReadOnlyList<ContextMenuEntry> snapshot)
@@ -1183,8 +1268,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
-    private void ApplyWpsOfficeApprovalSnapshot(IReadOnlyList<ContextMenuEntry> snapshot)
+    private void ApplyWpsOfficeApprovalSnapshot(IReadOnlyList<ContextMenuEntry> snapshot, bool notify = true)
     {
+        snapshot = MenuListData.Current(snapshot);
         lock (_decisionSync)
         {
             foreach (var id in _uncertainDecisions.Keys.Where(id => IsWpsOfficeApprovalItemId(id)
@@ -1209,17 +1295,18 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             }
         }
 
-        foreach (var removed in existing.Values.ToList())
+        foreach (var removed in existing.Values.Where(item => MenuListData.AllowsRemoval(snapshot, item.Entry)).ToList())
         {
             removed.Dispose();
             WpsOfficeApprovalItems.Remove(removed);
         }
 
-        _notificationState.UpdateWpsOffice(snapshot);
+        if (notify) _notificationState.UpdateWpsOffice(snapshot);
     }
 
     private void UpsertItem(ContextMenuEntry entry)
     {
+        if (!_uiStateActive) return;
         var existing = Items.FirstOrDefault(item => string.Equals(item.Id, entry.Id, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
@@ -1249,7 +1336,15 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private ContextMenuItemViewModel CreateItemViewModel(ContextMenuEntry entry)
     {
-        return new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync, SetCommandTextAsync, _deepAnalysisService, _settingsService, _shellSubMenuDialogService, _detailedEditMenuDialogService);
+        return new ContextMenuItemViewModel(entry, _localization, _iconPreviewService, _itemActionsService, SetEnabledAsync, SetShellAttributeAsync, SetDisplayTextAsync, AcknowledgeItemStateAsync, SetCommandTextAsync, _deepAnalysisService, _settingsService, _shellSubMenuDialogService, _detailedEditMenuDialogService) { IsBackendAvailable = IsBackendReady };
+    }
+
+    private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        void Apply() { foreach (var id in e.ItemIds) RemoveItem(id); }
+        if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply);
+        else Apply();
     }
 
     private void RemoveItem(string itemId)
@@ -1320,29 +1415,48 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private void OnBackendNotificationReceived(object? sender, BackendNotification notification)
     {
-        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        _ = dispatcher.BeginInvoke((Action)(() =>
         {
             if (notification.Kind is PipeNotificationKind.ServiceMessage or PipeNotificationKind.OpenWithChanged
                 && !string.IsNullOrWhiteSpace(notification.Message))
-            {
                 ServiceAttentionText = string.IsNullOrWhiteSpace(notification.MessageResourceKey)
-                    ? notification.Message
-                    : _localization.Translate(notification.MessageResourceKey);
-            }
+                    ? notification.Message : _localization.Translate(notification.MessageResourceKey);
+            if (notification.Item is not { } entry) return;
+            if (!_uiStateActive) { _notificationState.Observe(notification); return; }
+            if (!ShouldUpsertNotificationItem(notification, Items.Select(item => item.Id))) return;
+            var alreadyRunning = _notificationQueries.ContainsKey(entry.Id);
+            _notificationQueries[entry.Id] = notification;
+            if (!alreadyRunning) _ = ReconcileNotificationAsync(entry.Id);
+        }));
+    }
 
-            if (notification.Item is not null)
+    private async Task ReconcileNotificationAsync(string id)
+    {
+        try
+        {
+            while (_notificationQueries.TryGetValue(id, out var notification))
             {
-                _notificationState.Observe(notification);
-
-                if (_uiStateActive
-                    && ShouldUpsertNotificationItem(
-                        notification,
-                        Items.Select(static existing => existing.Id)))
+                var current = Items.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+                var original = current?.Entry;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token);
+                timeout.CancelAfter(BackendRequestBudgets.MutationOutcomeVerification);
+                try
                 {
-                    UpsertItem(notification.Item);
+                    var verified = await _backendClient.GetContextMenuItemStateAsync(id, original ?? notification.Item!, timeout.Token);
+                    if (_uiStateActive && verified is not null && (current is null || !current.IsToggleBusy && !current.IsAttributesBusy && ReferenceEquals(current.Entry, original)))
+                    {
+                        UpsertItem(verified);
+                        _notificationState.Observe(notification with { Item = verified });
+                    }
                 }
+                catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) { }
+                catch (Exception ex) { FrontendDebugLog.Warning(nameof(ContextMenuWorkspaceService), $"Notification verification deferred for {id}: {ex.Message}"); }
+                if (_notificationQueries.TryGetValue(id, out var latest) && ReferenceEquals(latest, notification)) break;
             }
-        });
+        }
+        finally { _notificationQueries.Remove(id); }
     }
 
     internal static bool ShouldUpsertNotificationItem(

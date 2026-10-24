@@ -86,7 +86,7 @@
                 Background="Transparent"
                 BorderThickness="0"
                 ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
-                ItemsSource="{Binding ItemsView}"
+                behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding ItemsView}"
                 ScrollViewer.CanContentScroll="True"
                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                 ScrollViewer.VerticalScrollBarVisibility="Auto">

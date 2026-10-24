@@ -34,14 +34,16 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         SourceItem = sourceItem;
         Query = query;
         _backendClient = backendClient;
+        _backendClient.ItemsRemoved += OnItemsRemoved;
         _workspace = workspace;
+        _workspace.PropertyChanged += OnBackendAvailabilityChanged;
         _localization = localization;
         _iconPreviewService = iconPreviewService;
         _actionsService = actionsService;
         _settingsService = settingsService;
         _backAsync = backAsync;
 
-        ItemsView = new ListCollectionView(Items);
+        ItemsView = new ListCollectionView(Items) { IsLiveSorting = true };
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.RegistryPath), ListSortDirection.Ascending));
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
 
@@ -88,7 +90,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         ? _localization.Translate("LoadingStatus")
         : _localization.Translate("FileTypeBatchNoItems");
 
-    public bool ShowPlaceholder => IsBusy || Items.Count == 0;
+    public bool ShowPlaceholder => Items.Count == 0;
 
     public bool CanDisableAll => !IsBusy && Items.Any(static item => item.IsEnabled && item.CanToggle);
 
@@ -120,8 +122,14 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            if (Items.Count == 0)
+            {
+                var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
+                    Command = PipeCommand.FindRelatedFileTypeMenuItems, FileTypeBatchQuery = Query }, cts.Token);
+                if (cached is not null && !_disposed) ApplySnapshot(cached);
+            }
             var entries = await _backendClient.FindRelatedFileTypeMenuItemsAsync(Query, cts.Token);
-            ApplySnapshot(entries);
+            if (!_disposed) ApplySnapshot(entries);
         }
         catch (Exception ex)
         {
@@ -265,14 +273,34 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         return success;
     }
 
+    private void OnBackendAvailabilityChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ContextMenuWorkspaceService.IsBackendReady))
+            foreach (var item in Items) item.IsBackendAvailable = _workspace.IsBackendReady;
+    }
+
+    private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        void Apply()
+        {
+            if (_disposed || e.Request.SpecialItem is not null) return;
+            foreach (var item in Items.Where(item => e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray())
+            { item.PropertyChanged -= OnItemPropertyChanged; Items.Remove(item); item.Dispose(); }
+            NotifyBulkCommands();
+        }
+        if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply); else Apply();
+    }
+
     private void ApplySnapshot(IReadOnlyList<ContextMenuEntry> entries)
     {
+        entries = MenuListData.Current(entries);
         var existing = Items.ToDictionary(static item => item.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
             if (existing.Remove(entry.Id, out var current))
             {
-                current.Update(entry);
+                if (!current.IsToggleBusy && !current.IsAttributesBusy) current.Update(entry);
                 continue;
             }
 
@@ -281,19 +309,18 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
                 _localization,
                 _iconPreviewService,
                 _actionsService,
-                SetEnabledAsync);
+                SetEnabledAsync) { IsBackendAvailable = _workspace.IsBackendReady };
             item.PropertyChanged += OnItemPropertyChanged;
             Items.Add(item);
         }
 
-        foreach (var stale in existing.Values)
+        foreach (var stale in existing.Values.Where(item => !item.IsToggleBusy && !item.IsAttributesBusy && MenuListData.AllowsRemoval(entries, item.Entry)))
         {
             stale.PropertyChanged -= OnItemPropertyChanged;
             stale.Dispose();
             Items.Remove(stale);
         }
 
-        ItemsView.Refresh();
         OnPropertyChanged(nameof(CountText));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(ShowPlaceholder));
@@ -356,6 +383,8 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         }
 
         _disposed = true;
+        _backendClient.ItemsRemoved -= OnItemsRemoved;
+        _workspace.PropertyChanged -= OnBackendAvailabilityChanged;
         _localization.LanguageChanged -= OnLanguageChanged;
         foreach (var item in Items)
         {

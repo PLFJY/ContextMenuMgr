@@ -194,6 +194,8 @@ Registry Write Protection 的设置值不是“用户最后一次点击的值”
 
 普通 classic `SetEnabled` 用 monitored roots 与持久 classic state 解析/验证，写前/写后 projection 不枚举 Win11 package 或 CommandStore。写前仍归一 active/disabled 双容器并更新已有 classic state，但不得建立局部首次 baseline。Win11 Id 继续分流 Win11 catalog，scene-only 项按 `FindEntriesByIdAsync` 的物理校验处理。结果查询保留原 HKLM/前端 HKU source，在持久 gate 内合并状态，不以另一 hive 替代缺失来源。
 
+原物理 classic 来源确认缺失时，状态查询返回 `MENU_ITEM_REMOVED` 和明确 Id；认证身份不匹配、访问拒绝、发现不完整及已有软删除恢复记录均不据此移除 UI。缓存项的文本/命令/属性/删除请求也先核实原来源，不能从前端缓存重新创建目标。协议字段与专用 SpecialMenu 查询见[IPC](process-and-privilege-flows.md#列表发现覆盖与已移除结果)。
+
 ## 回收站 Pin to Start 合成项
 
 `special:recyclebin:pintostart` 仅在有前端 SID、且机器 `HKLM\SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen` 默认值有合法 CLSID 时投影。它是继承 Shell Extension，不是 pintohome 的 AppliesTo filter。

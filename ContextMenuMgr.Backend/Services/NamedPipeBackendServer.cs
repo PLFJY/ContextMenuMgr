@@ -97,7 +97,7 @@ public sealed class NamedPipeBackendServer
                 await server.WaitForConnectionAsync(cancellationToken);
                 server.ReadMode = PipeTransmissionMode.Byte;
                 await _logger.LogAsync($"PipeConnectionAccepted: PipeName={PipeConstants.PipeName}, Timestamp={DateTimeOffset.UtcNow:O}.", cancellationToken);
-                _ = ObserveClientTaskAsync(server, cancellationToken);
+                _ = Task.Run(() => ObserveClientTaskAsync(server, cancellationToken), CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
@@ -218,7 +218,15 @@ public sealed class NamedPipeBackendServer
                 {
                     // Request handlers are allowed to fail independently; the pipe
                     // stays alive and the caller receives a structured error response.
-                    response = await HandleRequestAsync(envelope.Request, stream, cancellationToken);
+                    using var coverage = MenuDiscoveryCoverage.Begin();
+                    var absence = await VerifyRequestTargetAsync(envelope.Request, stream, cancellationToken);
+                    response = absence ?? await HandleRequestAsync(envelope.Request, stream, cancellationToken);
+                    if (envelope.Request.Command is PipeCommand.GetSnapshot or PipeCommand.GetSceneSnapshot
+                        or PipeCommand.GetSpecialMenuSnapshot or PipeCommand.GetWin11ContextMenuSnapshot
+                        or PipeCommand.GetWpsOfficePendingApprovals or PipeCommand.GetShellSubMenuItems
+                        or PipeCommand.FindRelatedFileTypeMenuItems or PipeCommand.ReviewOpenWithRegistration)
+                        response = response with { SnapshotIsComplete = response.Success && coverage.Complete,
+                            ClassicSnapshotIsComplete = response.Success && coverage.ClassicComplete };
                 }
                 catch (Exception ex)
                 {
@@ -265,7 +273,7 @@ public sealed class NamedPipeBackendServer
                 {
                     var notificationPublished = response.Item is not null
                         && envelope.Request.Command != PipeCommand.GetContextMenuItemState
-                        || response.SpecialItem is not null;
+                        || response.SpecialItem is not null && envelope.Request.Command != PipeCommand.GetSpecialMenuItemState;
                     await _logger.LogAsync(RuntimeLogLevel.Warning,
                         $"DirectResponseWriteFailed: CorrelationId={envelope.CorrelationId}, ClientOperationId={response.ClientOperationId}, Command={envelope.Request.Command}, ItemId={response.Item?.Id}, NotificationBroadcastBeforeResponseFailure={notificationPublished}, Message={deliveryFailure.Message}.", CancellationToken.None);
                     break;
@@ -313,7 +321,7 @@ public sealed class NamedPipeBackendServer
                 ClientOperationId = response.ClientOperationId,
                 Timestamp = DateTimeOffset.UtcNow
             });
-        if (response.Success && response.SpecialItem is not null)
+        if (response.Success && response.SpecialItem is not null && request.Command != PipeCommand.GetSpecialMenuItemState)
             await publish(new BackendNotification
             {
                 Kind = PipeNotificationKind.ItemStateChanged,
@@ -456,6 +464,9 @@ public sealed class NamedPipeBackendServer
                         await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
                         cancellationToken)
                 },
+            PipeCommand.GetSpecialMenuItemState when request.SpecialItem is not null
+                => await _specialMenuService.GetItemStateAsync(request.SpecialItem,
+                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken), cancellationToken),
             PipeCommand.SetSpecialMenuItemEnabled when request.SpecialItem is not null && request.Enable is not null
                 => await _specialMenuService.SetEnabledAsync(
                     request.SpecialItem,
@@ -814,6 +825,26 @@ public sealed class NamedPipeBackendServer
             : guidText.Trim('{', '}');
     }
 
+    private async Task<PipeResponse?> VerifyRequestTargetAsync(PipeRequest request, NamedPipeServerStream stream, CancellationToken token)
+    {
+        // Cached DTOs never authorize a write or create a replacement registration.
+        if (request.SpecialItem is { } special && request.Command is
+            (PipeCommand.SetSpecialMenuItemEnabled or PipeCommand.DeleteSpecialMenuItem or PipeCommand.UpdateSpecialMenuItem))
+        {
+            var state = await _specialMenuService.GetItemStateAsync(special,
+                await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, token), token);
+            if (!state.Success) return state;
+        }
+        if (request.Item is { IsDeleted: false, IsWindows11ContextMenu: false } original && request.Command is
+            (PipeCommand.SetShellAttribute or PipeCommand.SetDisplayText or PipeCommand.SetCommandText or PipeCommand.DeleteItem))
+        {
+            var state = await _catalog.GetContextMenuItemStateAsync(original.Id, original, token,
+                await ResolveFrontendUserContextAsync(stream, token, allowInteractiveFallback: false));
+            if (!state.Success) return state;
+        }
+        return null;
+    }
+
     private async Task<BackendUserContext?> ResolveSpecialMenuUserContextIfNeededAsync(
         PipeRequest request,
         NamedPipeServerStream stream,
@@ -889,12 +920,18 @@ public sealed class NamedPipeBackendServer
             userContext = resolver.TryResolveInteractiveUserFallback();
         if (userContext is null)
         {
+            MenuDiscoveryCoverage.MarkIncomplete();
             await _logger.LogAsync(
                 RuntimeLogLevel.Warning,
                 "Frontend user context could not be resolved for user-scoped request.",
                 cancellationToken);
         }
 
+        if (userContext is not null)
+        {
+            using var frontendHive = Microsoft.Win32.Registry.Users.OpenSubKey(userContext.Sid, writable: false);
+            if (frontendHive is null) MenuDiscoveryCoverage.MarkIncomplete();
+        }
         return userContext;
     }
 
@@ -925,6 +962,7 @@ public sealed class NamedPipeBackendServer
             userContext = resolver.TryResolveInteractiveUserFallback();
         if (userContext is null)
         {
+            MenuDiscoveryCoverage.MarkIncomplete();
             await _logger.LogAsync(RuntimeLogLevel.Warning, "Context-aware special menu request could not resolve frontend user context.", cancellationToken);
         }
 
@@ -1076,6 +1114,7 @@ public sealed class NamedPipeBackendServer
         var userContext = await ResolveFrontendUserSessionContextAsync(stream, cancellationToken);
         if (userContext is null)
         {
+            MenuDiscoveryCoverage.MarkIncomplete();
             await _logger.LogAsync(
                 RuntimeLogLevel.Warning,
                 "RestartExplorerRequest: Sid=<null>, SessionId=<null>, Result=Failed, Reason=MissingFrontendUserContext.",

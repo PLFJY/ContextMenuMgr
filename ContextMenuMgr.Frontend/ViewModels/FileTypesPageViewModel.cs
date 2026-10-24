@@ -261,6 +261,12 @@ public partial class FileTypesPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Title));
     }
 
+    public Task RefreshAsync() => IsBatchManagementActive && BatchManagement is not null
+        ? BatchManagement.RefreshAsync()
+        : (SelectedTabIndex switch {
+            1 => UwpShortcutTab, 2 => ExecutableTab, 3 => CustomExtensionTab,
+            4 => PerceivedTypeTab, 5 => DirectoryTypeTab, 6 => UnknownTypeTab, _ => ShortcutTab }).RefreshAsync();
+
     public async Task ApplyAnalysisResultAsync(FileTypeAnalysisResult result)
     {
         switch (result.SceneKind)

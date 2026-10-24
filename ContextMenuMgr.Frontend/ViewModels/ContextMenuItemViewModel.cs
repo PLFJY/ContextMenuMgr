@@ -170,7 +170,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool HasCommandText => !string.IsNullOrWhiteSpace(Entry.CommandText);
 
-    public bool CanEditCommandText => Entry.CanEditCommandText
+    public bool CanEditCommandText => IsBackendAvailable && Entry.CanEditCommandText
         && Entry.EntryKind == ContextMenuEntryKind.ShellVerb
         && !Entry.IsWindows11ContextMenu
         && IsPresentInRegistry
@@ -186,7 +186,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool HasOtherAttributesSection => Entry.EntryKind == ContextMenuEntryKind.ShellVerb && IsPresentInRegistry && !IsDeleted;
 
-    public bool CanEditShellAttributes => HasOtherAttributesSection && !IsAttributesBusy;
+    public bool CanEditShellAttributes => IsBackendAvailable && HasOtherAttributesSection && !IsAttributesBusy;
 
     public bool HasActionFlyout => !IsPinToStartSynthetic && (HasOtherAttributesSection
         || HasDetailsActions
@@ -199,7 +199,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool CanDelete => !IsPinToStartSynthetic && !IsDeleted;
 
-    public bool CanEditText => Entry.EntryKind == ContextMenuEntryKind.ShellVerb
+    public bool CanEditText => IsBackendAvailable && Entry.EntryKind == ContextMenuEntryKind.ShellVerb
         && IsPresentInRegistry
         && !IsDeleted
         && !string.IsNullOrWhiteSpace(Entry.EditableText)
@@ -443,9 +443,19 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public string PendingApprovalBadgeText => _localization.Translate("PendingApprovalBadge");
 
-    public bool CanReviewApproval => IsPendingApproval && IsPresentInRegistry && !IsDeleted;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggle))]
+    [NotifyPropertyChangedFor(nameof(CanPrimaryAction))]
+    [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    [NotifyPropertyChangedFor(nameof(CanReviewApproval))]
+    [NotifyPropertyChangedFor(nameof(CanEditText))]
+    [NotifyPropertyChangedFor(nameof(CanEditCommandText))]
+    [NotifyPropertyChangedFor(nameof(CanEditShellAttributes))]
+    public partial bool IsBackendAvailable { get; set; } = true;
 
-    public bool CanToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry && !IsToggleBusy && !IsToggleOutcomeUncertain;
+    public bool CanReviewApproval => IsBackendAvailable && IsPendingApproval && IsPresentInRegistry && !IsDeleted;
+
+    public bool CanToggle => IsBackendAvailable && Entry.CanToggle && !IsDeleted && IsPresentInRegistry && !IsToggleBusy && !IsToggleOutcomeUncertain;
 
     public bool ShowToggle => Entry.CanToggle && !IsDeleted && IsPresentInRegistry;
 
@@ -457,9 +467,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanManageSubMenuItems))]
     public partial bool IsSubMenuLoading { get; private set; }
 
-    public bool CanPrimaryAction => !IsPinToStartSynthetic && (IsDeleted || IsPresentInRegistry);
+    public bool CanPrimaryAction => IsBackendAvailable && !IsPinToStartSynthetic && (IsDeleted || IsPresentInRegistry);
 
-    public bool CanPermanentlyDelete => IsDeleted && HasBackup;
+    public bool CanPermanentlyDelete => IsBackendAvailable && IsDeleted && HasBackup;
 
     public string PrimaryActionLabel => IsDeleted
         ? _localization.Translate("UndoDelete")
@@ -579,7 +589,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (IsToggleBusy || IsToggleOutcomeUncertain)
+        if (!IsBackendAvailable || IsToggleBusy || IsToggleOutcomeUncertain)
         {
             RevertEnabled(oldValue);
             return;
@@ -615,6 +625,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Update(ContextMenuEntry entry)
     {
+        if (!IsToggleOutcomeUncertain && IsEnabled == entry.IsEnabled && MenuListData.Equivalent(Entry, entry)) return;
         _authoritativeVersion++;
         IsToggleOutcomeUncertain = false;
         Entry = entry;
@@ -781,17 +792,18 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var versionAtSubmission = _authoritativeVersion;
         try
         {
             var success = await _setShellAttributeAsync(this, attribute, newValue);
-            if (!success)
+            if (!success && _authoritativeVersion == versionAtSubmission)
             {
                 RevertShellAttribute(attribute, oldValue);
             }
         }
         catch
         {
-            RevertShellAttribute(attribute, oldValue);
+            if (_authoritativeVersion == versionAtSubmission) RevertShellAttribute(attribute, oldValue);
         }
         finally
         {

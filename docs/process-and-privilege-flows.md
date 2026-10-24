@@ -61,6 +61,14 @@ catalog `_persistentStateGate` 串行状态敏感工作，前端多连接不意�
 
 预算定义见 [BackendRequestBudgets](../ContextMenuMgr.Frontend/Services/BackendRequestBudgets.cs)。超时/取消表示停止等待，不证明后端没写；关闭取消可跳过后续查询。确认请求状态才成功，确认旧状态才回退，核对不可用则显示 Uncertain 并阻止再次写；fresh notification/refresh 解除。UI item version 防旧失败任务覆盖新权威结果，细节见[前端](frontend-wpf-ui.md#异步操作与结果)。不可盲重试不确定 mutation。
 
+## 列表发现覆盖与已移除结果
+
+快照响应增加可空 `SnapshotIsComplete` / `ClassicSnapshotIsComplete`；未知（含旧服务缺字段）不构成删除 diff 证据。请求内 `MenuDiscoveryCoverage` 区分经典/物理发现与包发现，共享 package 扫描缓存也保存覆盖结论，不能将缓存命中误报为完整扫描。前端呈现合并与后端 baseline 是不同责任。
+
+`PipeErrorCodes.MenuItemRemoved` (`MENU_ITEM_REMOVED`) 搭配明确的 `RemovedItemIds`，用于经认证原来源已经确认不存在、且不是可恢复软删除记录的请求。客户端 `BackendRequestException` 保留这些字段，不解析英文消息。普通 mutation 遇到该结果走非阻塞 InfoBar 和关联列表移除，不重试写入。只读通知核对不弹操作提示。
+
+`GetSpecialMenuItemState` 追加在 PipeCommand 末尾，使用现有 `SpecialItem` 输入返回当前 SpecialItem 或结构化缺失；保留各 kind 身份策略。SendTo/WinX 先验证用户范围和可访问根，再用 GetAttributes 区分缺失与访问失败；其它来源复用该职责的发现和完整性核查。普通 classic `GetContextMenuItemState` 保留原 HKLM/认证 HKU 与 handler 身份，原来源缺失不换另一 hive。已有缓存不能授权新建替代键。访问拒绝、profile/hive 缺失、发现不完整和代际冲突均不能转换成已移除。 发现结果缺少 Id 后还须核实该 kind 的允许物理根；注册结构改变但原 key 仍存在时保持失败/刷新处理。未能映射为认证物理来源的历史 HKCU 别名不作为缺失证明。只读单项核对不广播 ItemStateChanged，避免多客户端核对通知循环。
+
 ## 验证与维护
 
 检查相同 CorrelationId/ClientOperationId 的两端日志、物理路径/native view、请求完成和响应投递，`DirectResponseWriteFailed` 不是 mutation 必败。已有 `MutationOutcomeTests`、`FrontendControlClientTests` 及身份/SID fixture 保护并发/超时/认证边界；真实跨用户 Pipe、SCM、profile unload 和桌面激活仍须 VM 验收。

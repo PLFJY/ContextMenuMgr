@@ -37,7 +37,9 @@ internal sealed class PackagedContextMenuScanCache
                 _entries[userSid] = entry;
                 entry.Task = Task.Run(() =>
                 {
+                    using var coverage = MenuDiscoveryCoverage.Begin();
                     var result = _scan(userSid);
+                    entry.IsComplete = coverage.Complete;
                     entry.CompletedAtUtc = DateTimeOffset.UtcNow;
                     return result;
                 });
@@ -45,7 +47,9 @@ internal sealed class PackagedContextMenuScanCache
         }
 
         // A caller timing out must not cancel discovery used by another snapshot.
-        return await entry.Task.WaitAsync(cancellationToken);
+        var items = await entry.Task.WaitAsync(cancellationToken);
+        if (!entry.IsComplete) MenuDiscoveryCoverage.MarkPackagedIncomplete();
+        return items;
     }
 
     private sealed class CacheEntry
@@ -53,5 +57,6 @@ internal sealed class PackagedContextMenuScanCache
         public Task<IReadOnlyList<PackagedContextMenuDefinition>> Task { get; set; } = null!;
 
         public DateTimeOffset CompletedAtUtc { get; set; }
+        public bool IsComplete { get; set; }
     }
 }

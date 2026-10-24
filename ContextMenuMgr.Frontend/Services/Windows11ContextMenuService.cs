@@ -8,15 +8,22 @@ namespace ContextMenuMgr.Frontend.Services;
 /// <summary>
 /// Projects backend declarations and verifies registry state after user-scoped Win11 changes.
 /// </summary>
-public sealed class Windows11ContextMenuService
+public sealed class Windows11ContextMenuService : IDisposable
 {
     private readonly IBackendClient _backendClient;
     private readonly LocalizationService _localization;
+    private readonly object _refreshSync = new();
+    private readonly CancellationTokenSource _shutdown = new();
+    private Task? _refreshTask;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly HashSet<string> _pendingItems = new(StringComparer.OrdinalIgnoreCase);
     public bool IsOperationPending(string id) => _pendingItems.Contains(id);
 
     private readonly HashSet<string> _failedItems = new(StringComparer.OrdinalIgnoreCase);
+    public bool HasSnapshot { get; private set; }
+    public bool IsSnapshotComplete { get; private set; }
+    public bool CanMutate => _backendClient.IsConnected || _hasLiveSnapshot;
+    private bool _hasLiveSnapshot;
     public bool RequiresServiceUpdate { get; private set; }
     public bool HasOperationError(string id) => _failedItems.Contains(id);
 
@@ -39,6 +46,7 @@ public sealed class Windows11ContextMenuService
     {
         _backendClient = backendClient;
         _localization = localization;
+        _backendClient.ItemsRemoved += OnItemsRemoved;
     }
 
     /// <summary>
@@ -130,27 +138,52 @@ public sealed class Windows11ContextMenuService
     /// <summary>
     /// Executes refresh Async.
     /// </summary>
-    public async Task RefreshAsync(CancellationToken cancellationToken)
+    public Task RefreshAsync(CancellationToken cancellationToken)
     {
-        if (!IsSupported)
+        if (!IsSupported) return Task.CompletedTask;
+        lock (_refreshSync)
         {
-            return;
+            if (_refreshTask is not { IsCompleted: false }) _refreshTask = RefreshQueuedAsync();
+            return _refreshTask.WaitAsync(cancellationToken);
         }
+    }
 
-        await _operationGate.WaitAsync(cancellationToken);
-        try { await RefreshCoreAsync(cancellationToken); }
+    private async Task RefreshQueuedAsync()
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+        budget.CancelAfter(BackendRequestBudgets.Windows11Snapshot);
+        await _operationGate.WaitAsync(budget.Token);
+        try { await RefreshCoreAsync(budget.Token); }
         finally { _operationGate.Release(); }
     }
 
     private async Task RefreshCoreAsync(CancellationToken cancellationToken)
     {
+        await RestoreCacheAsync(cancellationToken);
         var entries = await _backendClient.GetWin11ContextMenuSnapshotAsync(cancellationToken)
             .WaitAsync(BackendRequestBudgets.Windows11Snapshot, cancellationToken);
-        CurrentItems = entries.Select(CreateDefinition).ToArray();
+        entries = MenuListData.Current(entries);
+        IsSnapshotComplete = MenuListData.AllowsRemoval(entries);
+        var fresh = entries.Select(CreateDefinition).ToArray();
+        CurrentItems = MenuListData.AllowsRemoval(entries) ? fresh
+            : fresh.Concat(CurrentItems.Where(old => !fresh.Any(item => item.Id.Equals(old.Id, StringComparison.OrdinalIgnoreCase)))).ToArray();
+        HasSnapshot = true;
+        _hasLiveSnapshot = true;
         _uncertainItems.Clear();
         _failedItems.Clear();
         OnItemsChanged();
         HasLoaded?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task RestoreCacheAsync(CancellationToken cancellationToken)
+    {
+        if (!IsSupported || HasSnapshot) return;
+        var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
+            Command = PipeCommand.GetWin11ContextMenuSnapshot }, cancellationToken);
+        if (cached is null || HasSnapshot) return;
+        CurrentItems = cached.Select(CreateDefinition).ToArray();
+        HasSnapshot = true;
+        OnItemsChanged();
     }
 
     /// <summary>
@@ -163,7 +196,7 @@ public sealed class Windows11ContextMenuService
             return;
         }
 
-        if (CurrentItems.Count == 0)
+        if (!_hasLiveSnapshot)
         {
             await RefreshAsync(cancellationToken);
         }
@@ -196,7 +229,26 @@ public sealed class Windows11ContextMenuService
         }
     }
 
+    public void Dispose()
+    {
+        _backendClient.ItemsRemoved -= OnItemsRemoved;
+        _shutdown.Cancel();
+        _shutdown.Dispose();
+    }
+
     #region Private methods
+
+    private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
+    {
+        if (e.Request.SpecialItem is not null) return;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        void Apply()
+        {
+            CurrentItems = CurrentItems.Where(item => !e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray();
+            OnItemsChanged();
+        }
+        if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply); else Apply();
+    }
 
     private void OnItemsChanged()
     {

@@ -39,6 +39,8 @@ ShellNew 开关会在同一物理来源的 `ShellNew` 与 `-ShellNew` sibling ke
 
 当 WPS 与 Microsoft Office 共存时，新建菜单页的“文档图标提供方”开关通过后端 Pipe 写入当前前端用户 `HKEY_USERS\<SID>\Software\Classes` 下的 Office ProgID `DefaultIcon` 覆盖。这是用户主动选择；成功写入后，后端会确认对应的 `special:wps-office-icon:document-icons` 合成检测项，不能把这次写入重新送入待审核。来自 WPS 或其他程序的关联修改和 ShellNew 注入仍保持原有检测规则。
 
+前端可先显示已验证设备/用户身份的历史列表；缓存条目及其中的 OrderLocked metadata 不设置当前发现有效性或锁状态。当前 ACL 仍由独立查询核实。传统物理项和 packaged 声明分别记录扫描覆盖：包失败保留旧只读声明，不阻断完整物理项的差量更新或缓存。缓存与过渡动画的共享行为见[前端](frontend-wpf-ui.md#列表缓存差量刷新与通知)。
+
 ## 排序与 ACL 条件事务
 
 新建菜单排序锁使用独立的 `GetShellNewOrderLock` 读取物理 ACL，不依赖昂贵的项目/包枚举或条目的 `OrderLocked` metadata。前端保留 Unknown / Locked / Unlocked，写入期间禁用重复切换和移动；超时或失败后用独立请求核对实际锁状态。无法核对时显示明确错误并保持 Unknown，不恢复旧 Toggle。刷新用状态版本阻止较旧的查询覆盖新的核对结果。

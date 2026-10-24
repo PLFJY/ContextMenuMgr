@@ -114,11 +114,11 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         "PackagedShellNewCreationSummary",
         Entry.Metadata.GetValueOrDefault("ShellNewFileName") ?? string.Empty);
 
-    public bool CanDelete => Entry.CanDelete && !IsBusy && !IsDeleted && !IsStateUncertain;
+    public bool CanDelete => IsBackendAvailable && Entry.CanDelete && !IsBusy && !IsDeleted && !IsStateUncertain;
 
-    public bool CanUndoDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
+    public bool CanUndoDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
 
-    public bool CanPermanentlyDelete => Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
+    public bool CanPermanentlyDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
 
     public bool CanEdit => Entry.CanEdit
         && Entry.Metadata.GetValueOrDefault("EntryType") != "DefaultDropEffect"
@@ -127,13 +127,21 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         && !IsStateUncertain
         && !IsDeleted;
 
-    public bool CanMove => Entry.CanMove && !IsBusy && !IsDeleted;
+    public bool CanMove => IsBackendAvailable && Entry.CanMove && !IsBusy && !IsDeleted;
 
     public bool CanMoveDown => CanMove && _canMoveDown;
 
     public bool CanMoveUp => CanMove && _canMoveUp;
 
-    public bool CanToggle => Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggle))]
+    [NotifyPropertyChangedFor(nameof(CanDelete))]
+    [NotifyPropertyChangedFor(nameof(CanUndoDelete))]
+    [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    [NotifyPropertyChangedFor(nameof(CanMove))]
+    public partial bool IsBackendAvailable { get; set; } = true;
+
+    public bool CanToggle => IsBackendAvailable && Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain
         && !(Entry.Kind == SpecialMenuKind.OpenWith && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") is "Unknown" or "Changed");
 
     public bool ShowDelete => (Entry.CanDelete || IsReadOnlyPackagedShellNew) && !IsDeleted;
@@ -220,6 +228,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public void Update(SpecialMenuEntry entry)
     {
+        if (!IsStateUncertain && IsEnabled == entry.IsEnabled && MenuListData.Equivalent(Entry, entry)) return;
         _stateVersion++;
         IsStateUncertain = false;
         Entry = entry;

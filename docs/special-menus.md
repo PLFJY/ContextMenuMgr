@@ -34,6 +34,8 @@ SpecialMenu 指当前代码中由 `SpecialMenuService` 管理、但不适合放�
 
 前端主要由 `SpecialMenuPageViewModel` 组装 `PipeRequest`，后端由 `NamedPipeBackendServer` 分发到 `SpecialMenuService`。
 
+SpecialMenu 列表使用独立前端呈现缓存和稳定 Id 差量更新，缓存规则与动画见[前端](frontend-wpf-ui.md#列表缓存差量刷新与通知)。`GetSpecialMenuItemState` 用于缓存项操作前的原来源核对与迟到通知核对；SendTo/WinX 区分用户根不可访问和单项缺失，不能用吞异常的 File.Exists 判定删除。其它 kind 的定向核对复用所属范围发现，不扩为全局 classic/Win11 扫描。软件删除、恢复与授权记录仍按原有专有契约处理。
+
 ## 专用责任文档
 
 ShellNew 的发现、排序、ACL、恢复和三态 UI 统一见 [ShellNew](shellnew.md)；Applications 注册、只读关联来源及显式持久保护统一见 [OpenWith](openwith.md)。Registry Write Protection 统一见[注册表模型](registry-model.md#registry-write-protection)。

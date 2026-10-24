@@ -9,7 +9,11 @@ public interface IBackendClient : IAsyncDisposable
 {
     event EventHandler<BackendNotification>? NotificationReceived;
 
+    event EventHandler<MenuItemsRemovedEventArgs>? ItemsRemoved;
+
     bool IsConnected { get; }
+
+    Task<MenuListSnapshot<T>?> ReadCachedListAsync<T>(PipeRequest request, CancellationToken cancellationToken);
 
     Task ConnectAsync(CancellationToken cancellationToken);
 
@@ -116,6 +120,8 @@ public interface IBackendClient : IAsyncDisposable
         string? scopeValue,
         Guid clientOperationId,
         CancellationToken cancellationToken);
+
+    Task<SpecialMenuEntry?> GetSpecialMenuItemStateAsync(SpecialMenuEntry item, CancellationToken cancellationToken);
 
     Task<bool> GetShellNewOrderLockAsync(CancellationToken cancellationToken);
 

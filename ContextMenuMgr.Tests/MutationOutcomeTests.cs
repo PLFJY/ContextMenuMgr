@@ -175,8 +175,10 @@ public sealed class MutationOutcomeTests
         Assert.Equal(256, cache.Count);
     }
 
-    [Fact]
-    public async Task LateAuthoritativeSuccess_IsNotOverwrittenByOlderFailedTask()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LateAuthoritativeSuccess_IsNotOverwrittenByOlderFailedTask(bool shellAttribute)
     {
         var settings = new FrontendSettingsService(null,
             Path.Combine(Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid() + ".json"));
@@ -196,21 +198,28 @@ public sealed class MutationOutcomeTests
             {
                 requestStarted.TrySetResult();
                 return finishRequest.Task;
+            }, (_, _, _) =>
+            {
+                requestStarted.TrySetResult();
+                return finishRequest.Task;
             });
         item.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(item.IsToggleBusy) && !item.IsToggleBusy)
+            if (e.PropertyName == (shellAttribute ? nameof(item.IsAttributesBusy) : nameof(item.IsToggleBusy))
+                && !(shellAttribute ? item.IsAttributesBusy : item.IsToggleBusy))
                 idle.TrySetResult();
         };
 
-        item.IsEnabled = false;
-        Assert.True(item.IsToggleBusy);
+        if (shellAttribute) item.OnlyWithShift = true;
+        else item.IsEnabled = false;
+        Assert.True(shellAttribute ? item.IsAttributesBusy : item.IsToggleBusy);
         await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        item.Update(original with { IsEnabled = false });
+        item.Update(shellAttribute ? original with { OnlyWithShift = true } : original with { IsEnabled = false });
         finishRequest.SetResult(false);
         await idle.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.False(item.IsEnabled);
-        Assert.False(item.IsToggleBusy);
+        if (shellAttribute) Assert.True(item.OnlyWithShift);
+        else Assert.False(item.IsEnabled);
+        Assert.False(item.IsToggleBusy || item.IsAttributesBusy);
     }
 
     [Fact]
@@ -284,6 +293,24 @@ public sealed class MutationOutcomeTests
         finish.SetResult(false);
         await idle.Task.WaitAsync(TimeSpan.FromSeconds(3));
         Assert.True(item.IsEnabled);
+    }
+
+    // Permanent: read-back must not generate another invalidation and a cross-client query loop.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TargetedStateQueries_DoNotPublishMutationNotifications(bool special)
+    {
+        var published = 0;
+        var delivered = false;
+        await NamedPipeBackendServer.PublishAndDeliverResponseAsync(
+            new PipeRequest { Command = special ? PipeCommand.GetSpecialMenuItemState : PipeCommand.GetContextMenuItemState },
+            new PipeResponse { Success = true,
+                Item = special ? null : new ContextMenuEntry { Id = "classic" },
+                SpecialItem = special ? new SpecialMenuEntry { Id = "special", Kind = SpecialMenuKind.SendTo } : null },
+            _ => { published++; return Task.CompletedTask; }, () => { delivered = true; return Task.CompletedTask; });
+        Assert.True(delivered);
+        Assert.Equal(0, published);
     }
 
     [Fact]
@@ -525,6 +552,9 @@ public sealed class MutationOutcomeTests
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
+            if (targetMethod?.Name is "add_ItemsRemoved" or "remove_ItemsRemoved") return null;
+            if (targetMethod?.Name == nameof(IBackendClient.ReadCachedListAsync))
+                return Task.FromResult<MenuListSnapshot<ContextMenuEntry>?>(null);
             if (targetMethod?.Name is nameof(IBackendClient.SetWin11BlockedItemAsync) or nameof(IBackendClient.RemoveWin11BlockedItemAsync))
             {
                 Mutations++;

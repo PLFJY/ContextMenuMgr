@@ -45,11 +45,21 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         themeService.Initialize(this);
         InitializeComponent();
         WindowChromeTitleBarFactory.Apply(this, 44);
-        infoBarService.SetInfoBarControl(RootInfoBar, RootInfoBarTitle, RootInfoBarMessage, RootInfoBarLink);
-        RootInfoBarClose.Click += (_, _) => infoBarService.CloseInfoBar();
+        infoBarService.SetInfoBarControl(RootInfoBar);
         RootNavigation.SetServiceProvider(serviceProvider);
         navigationService.SetNavigationControl(RootNavigation);
         DataContext = viewModel;
+        viewModel.RefreshCurrentPage = () => RootNavigation.CurrentContent?.DataContext switch
+        {
+            SpecialMenuPageViewModel special => special.RefreshAsync(),
+            Windows11ContextMenuPageViewModel windows11 => windows11.RefreshCommand.ExecuteAsync(null),
+            FileTypesPageViewModel fileTypes => fileTypes.RefreshAsync(),
+            OtherRulesPageViewModel rules => rules.RefreshAsync(),
+            SceneContextMenuTabViewModel scene => scene.RefreshAsync(),
+            FileTypeBatchManagementViewModel batch => batch.RefreshAsync(),
+            _ => null
+        };
+        Closed += (_, _) => viewModel.RefreshCurrentPage = null;
 
         ApplyWindowIcon();
 #if DEBUG

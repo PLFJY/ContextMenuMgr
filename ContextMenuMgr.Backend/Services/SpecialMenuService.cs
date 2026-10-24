@@ -81,6 +81,75 @@ public sealed class SpecialMenuService
         return items;
     }
 
+    public async Task<PipeResponse> GetItemStateAsync(SpecialMenuEntry original, BackendUserContext? userContext, CancellationToken token)
+    {
+        if (original.Kind is SpecialMenuKind.SendTo or SpecialMenuKind.WinX && !IsDynamicSendToDrive(original))
+        {
+            var context = RequireUserContext(userContext);
+            var path = DecodeId(original.Id);
+            var root = original.Kind == SpecialMenuKind.SendTo ? GetSendToPath(context) : GetWinXPath(context);
+            EnsurePathUnder(path, root);
+            // First open the authorized root: a disconnected profile/denied directory is not item removal.
+            _ = File.GetAttributes(root);
+            try { _ = File.GetAttributes(path); }
+            catch (FileNotFoundException) { return RemovedItem(original.Id); }
+            catch (DirectoryNotFoundException) { return RemovedItem(original.Id); }
+        }
+        using var coverage = MenuDiscoveryCoverage.Begin();
+        var items = await GetSnapshotAsync(original.Kind, userContext, token);
+        var item = items.FirstOrDefault(item => item.Id.Equals(original.Id, StringComparison.OrdinalIgnoreCase));
+        if (item is not null) return new PipeResponse { Success = true, SpecialItem = item };
+        if ((coverage.Complete || coverage.ClassicComplete && original.Metadata.GetValueOrDefault("ProviderType") != "PackagedShellNew")
+            && !string.Equals(original.Metadata.GetValueOrDefault("IsDeleted"), bool.TrueString, StringComparison.OrdinalIgnoreCase)
+            && IsPhysicalSourceMissing(original, userContext)) return RemovedItem(original.Id);
+        return Failure("The original special menu source could not be verified.", null);
+    }
+
+    private static bool IsPhysicalSourceMissing(SpecialMenuEntry item, BackendUserContext? context)
+    {
+        // A missing discovery row can also mean a changed/unsupported registration, not deletion.
+        // Only inspect a physical root owned by this kind; cached paths cannot select arbitrary hives.
+        if (item.Kind == SpecialMenuKind.GuidBlock)
+        {
+            if (!Guid.TryParse(item.KeyName, out _)) return false;
+            using var blocked = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked");
+            return blocked is null || !blocked.GetValueNames().Contains(item.KeyName, StringComparer.OrdinalIgnoreCase);
+        }
+        var path = item.RegistryPath;
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var userPrefix = context is null ? null : $@"HKEY_USERS\{context.Sid}\Software\Classes\";
+        const string machinePrefix = @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\";
+        if (item.Kind is SpecialMenuKind.ShellNew or SpecialMenuKind.OpenWith)
+        {
+            var prefix = path.StartsWith(machinePrefix, StringComparison.OrdinalIgnoreCase) ? machinePrefix
+                : userPrefix is not null && path.StartsWith(userPrefix, StringComparison.OrdinalIgnoreCase) ? userPrefix : null;
+            if (prefix is null) return false;
+            var relative = path[prefix.Length..];
+            if (item.Kind == SpecialMenuKind.OpenWith && !relative.StartsWith("Applications\\", StringComparison.OrdinalIgnoreCase)) return false;
+            if (item.Kind == SpecialMenuKind.ShellNew && !(relative.EndsWith("\\ShellNew", StringComparison.OrdinalIgnoreCase)
+                || relative.EndsWith("\\-ShellNew", StringComparison.OrdinalIgnoreCase))) return false;
+            using var root = RegistryKey.OpenBaseKey(prefix == machinePrefix ? RegistryHive.LocalMachine : RegistryHive.Users,
+                Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
+            using var selected = root.OpenSubKey(prefix == machinePrefix ? @"SOFTWARE\Classes\" + relative
+                : context!.Sid + @"\Software\Classes\" + relative);
+            return selected is null;
+        }
+        var allowed = item.Kind switch
+        {
+            SpecialMenuKind.CommandStore => path.StartsWith($@"HKEY_LOCAL_MACHINE\{CommandStorePath}\", StringComparison.OrdinalIgnoreCase),
+            SpecialMenuKind.DragDrop => path.StartsWith("HKEY_CLASSES_ROOT\\", StringComparison.OrdinalIgnoreCase)
+                && (path.Contains(@"\shellex\DragDropHandlers\", StringComparison.OrdinalIgnoreCase)
+                    || path.Contains(@"\shellex\-DragDropHandlers\", StringComparison.OrdinalIgnoreCase)),
+            _ => false
+        };
+        if (!allowed) return false;
+        using var source = OpenRegistryKey(path, writable: false);
+        return source is null;
+    }
+
+    private static PipeResponse RemovedItem(string id) => new()
+    { Success = false, ErrorCode = PipeErrorCodes.MenuItemRemoved, RemovedItemIds = [id], Message = "The selected menu item has been removed." };
+
     public async Task<PipeResponse> SetEnabledAsync(SpecialMenuEntry item, bool enabled, Guid? operationId, BackendUserContext? userContext, CancellationToken cancellationToken)
     {
         try

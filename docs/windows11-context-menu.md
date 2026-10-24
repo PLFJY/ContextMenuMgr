@@ -15,6 +15,8 @@
 
 声明保留 package full/family/display/publisher/install metadata、context types、Verb ID、server/class metadata；未声明 server path 则 FilePath 为空，不能用 package 目录伪造。manifest 标题不是 IExplorerCommand.GetTitle 的 Explorer 动态结果。
 
+包身份、安装路径与 manifest 是发现依据；`Package.DisplayName` / `PublisherDisplayName` 只是展示信息。服务读取这两个本地化字段失败时，分别回退到包名称与空发布者，继续读取 manifest，不跳过整个包、不标记发现不完整。日志 `PackagedContextMenuDisplayMetadataFallback` 汇总具体失败字段、HRESULT 和 `DiscoveryUnaffected=True`；包枚举、身份或 manifest 读取/解析失败仍记录 `PackagesSkipped` / `ManifestSkipped`，标记不完整并保留前端未能确认的旧条目，不能据此推断卸载。
+
 Packaged Id 为 `win11|{clsid}|{category}|{packageFamily}`；不同 family 同 CLSID/category 不覆盖，同 family 共存 full names 保存在引用元数据。RegistryPath 是逻辑 PackagedCom/Package/.../Class，BackendRegistryPath 是用户 Blocked 共享键，**不能按单菜单 key 删除**。普通 Delete/审核 Remove 拒绝；package 卸载由 Windows 管理。
 
 System 项为 `win11-system|{commandKey}`，真实 HKLM CommandStore 路径；必须有 MUIVerb/ExplorerCommandHandler/command 等命令元数据，不将任意 Windows.* 加入页面。显示名用 ShellMetadataResolver。
@@ -24,6 +26,8 @@ System 项为 `win11-system|{commandKey}`，真实 HKLM CommandStore 路径；�
 [PackagedContextMenuScanCache](../ContextMenuMgr.Backend/Services/PackagedContextMenuScanCache.cs) 按 SID 缓存 package 发现 30 秒，并发复用正在扫描；调用方取消不取消共享扫描。Blocked 不缓存，每次投影重开。常规快照重建 registry impact，手动 mutation 可复用最近 30 秒同 SID 声明/引用，缓存不保证刚安装/卸载立即可见。部分 package 错误汇总日志，不改变发现语义。
 
 已有 regular baseline 时 mutation 只构建 Win11 projection，不扫 classic；首次缺 baseline 仍完整采纳常规来源，不能建立局部 baseline。查询、手动/审批/隔离/纠偏与 state 保存共用 catalog 持久 gate；不由局部操作清理 classic 状态。状态分类统一见[状态与监控](state-and-monitoring.md)。
+
+Win11 页面恢复独立的前端设备/用户缓存，按应用 family 差量更新行和声明成员，不清空重建未变化行；缓存不替代 blocked 物理读回或持久恢复元数据。package 发现覆盖随三十秒缓存和 mutation discovery 一起保留。声明缺失且发现完整才可返回结构化已移除；局部 package 失败保持旧条目。列表刷新、迟到结果和动画见[前端](frontend-wpf-ui.md#列表缓存差量刷新与通知)。
 
 ## 应用操作与单 CLSID 操作
 

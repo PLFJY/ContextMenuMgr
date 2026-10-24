@@ -56,6 +56,7 @@ internal static class SetEnabledOperationResolver
         {
             throw;
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) { throw; }
         catch (Exception ex)
         {
             FrontendDebugLog.Warning("SetEnabledOperationResolver",

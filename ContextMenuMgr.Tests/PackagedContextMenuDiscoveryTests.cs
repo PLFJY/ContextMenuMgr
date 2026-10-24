@@ -1,6 +1,7 @@
 using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace ContextMenuMgr.Tests;
@@ -201,6 +202,7 @@ public sealed class PackagedContextMenuDiscoveryTests
     [Fact]
     public void Discover_MalformedPackageDoesNotAbortOtherPackages()
     {
+        using var coverage = MenuDiscoveryCoverage.Begin();
         var malformed = CreatePackage(fullName: "Broken.Package_1.0.0.0_x64__abc");
         var valid = CreatePackage(fullName: "Valid.Package_1.0.0.0_x64__abc");
 
@@ -213,7 +215,42 @@ public sealed class PackagedContextMenuDiscoveryTests
         var definition = Assert.Single(definitions);
         Assert.Equal(valid.FullName, definition.Package.FullName);
         Assert.False(definition.DiscoveryComplete);
+        Assert.False(coverage.Complete);
+        Assert.True(coverage.ClassicComplete);
         Assert.False(new Windows11ClsidImpactIndex(definitions).Get(definition.Clsid).AllowsAutomaticDisable);
+    }
+
+    // Permanent: unavailable service-side localized labels must not hide declarations
+    // or prevent deletion diff; unreadable manifests still make discovery incomplete.
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void UnavailableDisplayMetadata_PreservesDeclarationsAndCompleteCoverage(bool unavailableName, bool unavailablePublisher)
+    {
+        using var coverage = MenuDiscoveryCoverage.Begin();
+        var package = CreatePackage();
+        package = package with
+        {
+            DisplayName = PackagedContextMenuDiscovery.ReadOptionalDisplayMetadata(
+                () => unavailableName ? throw new COMException("Package resources unavailable", unchecked((int)0x80073B37)) : package.DisplayName,
+                package.Name, out var nameFailure),
+            PublisherDisplayName = PackagedContextMenuDiscovery.ReadOptionalDisplayMetadata(
+                () => unavailablePublisher ? throw new COMException("Package resources unavailable", unchecked((int)0x80073B37)) : package.PublisherDisplayName,
+                string.Empty, out var publisherFailure)
+        };
+
+        var definition = Assert.Single(PackagedContextMenuDiscovery.Discover([package], _ => PythonManifest));
+        Assert.Equal(PythonClsid, definition.Clsid, ignoreCase: true);
+        Assert.Equal("EditInIdle", Assert.Single(definition.Verbs).Id);
+        Assert.Equal(package.FamilyName, definition.Package.FamilyName);
+        Assert.Equal(unavailableName ? package.Name : "Contoso Package", definition.Package.DisplayName);
+        Assert.Equal(unavailablePublisher ? string.Empty : "Contoso Ltd.", definition.Package.PublisherDisplayName);
+        Assert.Equal(unavailableName, nameFailure is COMException);
+        Assert.Equal(unavailablePublisher, publisherFailure is COMException);
+        Assert.True(definition.DiscoveryComplete);
+        Assert.True(coverage.Complete);
+        Assert.True(coverage.ClassicComplete);
     }
 
     [Fact]

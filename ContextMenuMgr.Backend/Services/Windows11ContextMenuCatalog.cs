@@ -18,7 +18,7 @@ internal sealed class Windows11ContextMenuCatalog
 
     private readonly FileLogger? _logger;
     private readonly PackagedContextMenuScanCache _packageScanCache;
-    private readonly Dictionary<string, (DateTimeOffset CapturedAt, IReadOnlyList<ContextMenuEntry> Entries)> _mutationDiscovery = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (DateTimeOffset CapturedAt, IReadOnlyList<ContextMenuEntry> Entries, bool Complete)> _mutationDiscovery = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _discoveryLock = new();
 
     public Windows11ContextMenuCatalog(FileLogger? logger = null)
@@ -44,7 +44,10 @@ internal sealed class Windows11ContextMenuCatalog
         {
             if (_mutationDiscovery.TryGetValue(userContext.Sid, out var cached)
                 && DateTimeOffset.UtcNow - cached.CapturedAt < TimeSpan.FromSeconds(30))
+            {
                 recent = cached.Entries;
+                if (!cached.Complete) MenuDiscoveryCoverage.MarkPackagedIncomplete();
+            }
         }
         return recent is null
             ? await EnumerateEntriesAsync(cancellationToken, userContext)
@@ -113,7 +116,7 @@ internal sealed class Windows11ContextMenuCatalog
             .ThenBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         _logger?.LogFireAndForget($"Win11ContextMenuEnumerateSummary: IsSupported={IsSupported}, UserSid={userSid}, PackageCount={definitions.Select(static definition => definition.Package.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count()}, PackagedDefinitionCount={definitions.Count}, EntriesCount={result.Length}, SystemCommandCount={result.Count(static item => item.Windows11SourceKind == Windows11ContextMenuSourceKind.SystemCommandStore)}.");
-        lock (_discoveryLock) _mutationDiscovery[userSid] = (DateTimeOffset.UtcNow, result);
+        lock (_discoveryLock) _mutationDiscovery[userSid] = (DateTimeOffset.UtcNow, result, MenuDiscoveryCoverage.IsComplete);
         return result;
     }
 

@@ -23,12 +23,19 @@ public static class ContextMenuListPresentation
         {
             itemsView.SortDescriptions.Add(new SortDescription(propertyName, ListSortDirection.Ascending));
         }
+        itemsView.IsLiveSorting = true;
+        itemsView.IsLiveFiltering = true;
+        foreach (var property in new[] { nameof(ContextMenuItemViewModel.IsEnabled), nameof(ContextMenuItemViewModel.IsDeleted),
+            nameof(ContextMenuItemViewModel.DisplayName), nameof(ContextMenuItemViewModel.IsWindows11ContextMenu),
+            nameof(ContextMenuItemViewModel.KeyName), nameof(ContextMenuItemViewModel.RegistryPath), nameof(ContextMenuItemViewModel.Notes),
+            nameof(ContextMenuItemViewModel.UserNote), nameof(ContextMenuItemViewModel.Subtitle), nameof(ContextMenuItemViewModel.IsToggleBusy), nameof(ContextMenuItemViewModel.IsToggleOutcomeUncertain) })
+            itemsView.LiveFilteringProperties.Add(property);
     }
 
     /// <summary>
     /// Deleted entries deliberately remain visible while disabled non-deleted
     /// entries are hidden, so recovery remains available.
     /// </summary>
-    public static bool IsVisibleWithDisabledFilter(bool isEnabled, bool isDeleted, bool hideDisabledItems)
-        => !hideDisabledItems || isEnabled || isDeleted;
+    public static bool IsVisibleWithDisabledFilter(bool isEnabled, bool isDeleted, bool hideDisabledItems, bool isOperationPending = false)
+        => !hideDisabledItems || isEnabled || isDeleted || isOperationPending;
 }

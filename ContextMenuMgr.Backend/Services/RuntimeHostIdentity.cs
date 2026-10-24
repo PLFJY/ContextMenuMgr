@@ -1,3 +1,5 @@
+using ContextMenuMgr.Contracts;
+
 namespace ContextMenuMgr.Backend.Services;
 
 public sealed record RuntimeHostIdentity(
@@ -9,8 +11,8 @@ public sealed record RuntimeHostIdentity(
     DateTimeOffset CreatedAtUtc,
     string? FailureReason)
 {
-    public const int CurrentSchemaVersion = 1;
-    public const string CurrentKind = "WindowsMachineGuidAndUserSidHash";
+    public const int CurrentSchemaVersion = RuntimeIdentityFingerprint.SchemaVersion;
+    public const string CurrentKind = RuntimeIdentityFingerprint.Kind;
 
     public static RuntimeHostIdentity Untrusted(string reason) => new(
         IsTrusted: false,

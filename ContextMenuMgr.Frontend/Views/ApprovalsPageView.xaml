@@ -1,7 +1,7 @@
 <Page
     x:Class="ContextMenuMgr.Frontend.Views.ApprovalsPageView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:ContextMenuMgr.Frontend.Behaviors" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
@@ -43,7 +43,7 @@
             Background="Transparent"
             BorderThickness="0"
             ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
-            ItemsSource="{Binding ItemsView}"
+            behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding ItemsView}"
             ScrollViewer.CanContentScroll="True"
             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollBarVisibility="Auto"

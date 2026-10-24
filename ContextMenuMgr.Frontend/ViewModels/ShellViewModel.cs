@@ -38,8 +38,10 @@ public partial class ShellViewModel : ObservableObject, IDisposable
         GlobalSearchNavigationFilterService globalSearchFilterService,
         INavigationService navigationService,
         ExplorerRestartStateService explorerRestartState,
-        IBackendClient backendClient)
+        IBackendClient backendClient,
+        MenuListActivityService? listActivity = null)
     {
+        ListActivity = listActivity ?? new MenuListActivityService();
         _workspace = workspace;
         _localization = localization;
         _windows11Service = windows11Service;
@@ -196,14 +198,15 @@ public partial class ShellViewModel : ObservableObject, IDisposable
         _explorerRestartState.PropertyChanged -= OnExplorerRestartStatePropertyChanged;
     }
 
+    public MenuListActivityService ListActivity { get; }
+    public Func<Task?>? RefreshCurrentPage { get; set; }
+
     [RelayCommand]
     private async Task RefreshAsync()
     {
-        await _workspace.RefreshAsync();
-        if (_windows11Service.IsSupported)
-        {
-            await _windows11Service.RefreshAsync(CancellationToken.None);
-        }
+        var current = RefreshCurrentPage?.Invoke();
+        if (current is not null) await current;
+        else await _workspace.RefreshAsync();
     }
 
     [RelayCommand]

@@ -20,6 +20,14 @@ public sealed record PipeResponse
     /// </summary>
     public string? ErrorCode { get; init; }
 
+    /// <summary>Null means an older server did not report discovery coverage.</summary>
+    public bool? SnapshotIsComplete { get; init; }
+
+    public bool? ClassicSnapshotIsComplete { get; init; }
+
+    /// <summary>Only populated after authoritative physical absence verification.</summary>
+    public IReadOnlyList<string> RemovedItemIds { get; init; } = [];
+
     /// <summary>
     /// Gets or sets the items.
     /// </summary>

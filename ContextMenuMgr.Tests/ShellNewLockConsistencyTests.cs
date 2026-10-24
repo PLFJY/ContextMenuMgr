@@ -86,7 +86,9 @@ public sealed class ShellNewLockConsistencyTests
         {
             switch (method?.Name)
             {
-                case "add_NotificationReceived": case "remove_NotificationReceived": return null;
+                case "add_NotificationReceived": case "remove_NotificationReceived":
+                case "add_ItemsRemoved": case "remove_ItemsRemoved": return null;
+                case nameof(IBackendClient.ReadCachedListAsync): return Task.FromResult<MenuListSnapshot<SpecialMenuEntry>?>(null);
                 case nameof(IBackendClient.GetShellNewOrderLockAsync):
                     Queries++;
                     return QueryFails ? Task.FromException<bool>(new IOException("Service unavailable.")) : Task.FromResult(_locked);

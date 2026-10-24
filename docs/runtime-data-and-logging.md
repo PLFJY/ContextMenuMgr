@@ -14,6 +14,7 @@
 | `DeletedBackups`、`Quarantine` | 注册表删除恢复与损坏/foreign-host 隔离 |
 | `Programs` | 已启用增强菜单的持久脚本，不能当缓存随意清除 |
 | `portable-startup-transaction.marker` | 未完成 Portable 启动策略事务的删除 veto；提交/验证补偿后清除，异常残留只在显式修复核对后清除 |
+| `Cache/MenuLists` | 前端可丢弃的列表 DTO 缓存；不是状态库、授权或恢复备份 |
 | `Logs`、`Locks` | 日志与持久同步 lease，二者是根下同级目录 |
 
 后端在 logger/store 创建前 best-effort 修复根 ACL，预创建 Logs/Locks，给 Builtin Users Modify 并修复已有子项继承。前端保存设置遇到权限类失败时先走 `RepairRuntimeDataAcl` Pipe 并重试一次；Pipe 不可用才用 bootstrapper `repair-runtime-data-acl`。这是共享文件数据可写性修复，不是菜单注册表保护、ShellNew 解锁或隔离存储。不要把 ProgramData/Portable 文件当成防同机其他用户篡改的安全边界。
@@ -33,6 +34,16 @@
 Portable envelope 指纹不同会隔离旧 state 至 `Quarantine/foreign-host-...`，重新建立本地空 baseline；legacy dictionary 仅在当前 identity 可验证时迁移。删除备份按 `DeletedBackups/<host-prefix>` 分目录，非当前 host/旧根的备份隔离，恢复只接受当前 scoped 目录，不能导入另一用户/Windows 的 .reg。
 
 hostIdentity 元数据不存原始 MachineGuid/SID；state 的 OpenWith 授权却必然有 SID/HKU path，日志也可含用户路径。不能把“散列 hostIdentity”扩大为整个数据目录无身份信息。`frontend-settings.json` 语言/主题等偏好可移动，但 `ContextMenuItemNotes` 仍为 item/registry-bound 且未独立 host 隔离，属于现有限制。
+
+## 列表呈现缓存
+
+`MenuListCacheService` 以 `RuntimePaths.DataDirectory/Cache/MenuLists/<12 字符前缀>/<完整指纹>/<查询范围散列>.json` 隔离数据。Installer 和 Portable 均按设备与用户区分；Portable 的算法复用 Contracts `RuntimeIdentityFingerprint`，purpose、MachineGuid（优先 Registry64）、SID、SHA-256 字节格式以及 identity kind/version 与既有后端保持一致。后端仍由原 resolver 获取交互用户 fallback，并维持原可信结果缓存行为；前端明确传入当前进程用户 SID，不能借用服务首次缓存身份。
+
+schema-1 cache envelope 含完整 fingerprint、identity kind/version、scope、最后完整结果保存时间与 DTO。读取同时核对完整指纹和格式，不信任目录前缀；未知身份只运行内缓存，不读写磁盘。不加载、不迁移、不覆盖另一设备或用户目录。缓存元数据不保存原始 MachineGuid；DTO 本身仍可能含 SID/用户物理路径，根目录共享 ACL 也不构成安全边界。
+
+每查询范围/来源分区仅保留最后完整结果，包括成功的零项。单文件最多 32 MiB，每个当前身份目录最多 128 MiB，读取更新最近使用时间，超限按最久未使用淘汰当前身份的 JSON；不遍历或清除其它身份数据。读取拒绝 reparse-point 文件，损坏/不支持格式按缓存不可用处理；没有降级读取未来格式的兼容分支。
+
+写入经单进程 gate，同目录唯一临时文件、flush-to-disk、原子替换，失败保留原缓存。前端 mutation 的权威结果同步更新已加载范围，后台写盘可在退出时 Flush；不完整发现或在途 mutation 不发布中间结果为完整磁盘缓存。缓存失败仅记录诊断，不触发 UAC 或服务安装。Reset 清理当前身份列表缓存并增加代次，过期扫描/写入无法重新生成旧数据。清日志不清缓存。
 
 ## 日志入口
 

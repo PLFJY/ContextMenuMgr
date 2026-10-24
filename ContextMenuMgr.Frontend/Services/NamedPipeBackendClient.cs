@@ -14,6 +14,150 @@ public sealed class NamedPipeBackendClient : IBackendClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    private MenuListCacheService _listCache = new();
+    private MenuListActivityService _activity = new();
+    public event EventHandler<MenuItemsRemovedEventArgs>? ItemsRemoved;
+    public async Task<MenuListSnapshot<T>?> ReadCachedListAsync<T>(PipeRequest request, CancellationToken token)
+    {
+        var scope = ListScope(request);
+        var cached = await _listCache.ReadAsync<T>(scope, token).ConfigureAwait(false);
+        if (!HasPackagedPartition(request)) return cached;
+        var packaged = await _listCache.ReadAsync<T>(scope + "|Packaged", token).ConfigureAwait(false);
+        return cached is null && packaged is null ? null : CombineSnapshot(cached, packaged, true);
+    }
+
+    private static bool HasPackagedPartition(PipeRequest request) => request.Command == PipeCommand.GetSnapshot
+        || request.Command == PipeCommand.GetSpecialMenuSnapshot && request.SpecialKind == SpecialMenuKind.ShellNew;
+    private static bool IsPackaged<T>(T item) => item switch
+    {
+        ContextMenuEntry entry => entry.IsWindows11ContextMenu,
+        SpecialMenuEntry entry => entry.Metadata.GetValueOrDefault("ProviderType") == "PackagedShellNew",
+        _ => false
+    };
+    private static MenuListSnapshot<T> CombineSnapshot<T>(MenuListSnapshot<T>? classic,
+        MenuListSnapshot<T>? packaged, bool cached = false)
+        => new((classic ?? new MenuListSnapshot<T>([], false)).Concat(packaged ?? new MenuListSnapshot<T>([], false)).ToArray(),
+            classic?.IsComplete == true && packaged?.IsComplete == true, cached,
+            cached ? null : () => CombineSnapshot(classic?.CaptureCurrent(), packaged?.CaptureCurrent()),
+            item => IsPackaged(item) ? packaged?.IsComplete == true : classic?.IsComplete == true);
+
+    private async Task<MenuListSnapshot<T>> MergePartitionsAsync<T>(PipeRequest request, IReadOnlyList<T> items,
+        PipeResponse response, long version, int generation, CancellationToken token)
+    {
+        var scope = ListScope(request);
+        if (!HasPackagedPartition(request)) return await _listCache.MergeAsync(scope, items,
+            response.SnapshotIsComplete == true, version, token, generation).ConfigureAwait(false);
+        var classic = await _listCache.MergeAsync(scope, items.Where(item => !IsPackaged(item)).ToArray(),
+            response.ClassicSnapshotIsComplete == true, version, token, generation).ConfigureAwait(false);
+        var packaged = await _listCache.MergeAsync(scope + "|Packaged", items.Where(IsPackaged).ToArray(),
+            response.SnapshotIsComplete == true, version, token, generation).ConfigureAwait(false);
+        return CombineSnapshot(classic, packaged);
+    }
+
+    public NamedPipeBackendClient(MenuListCacheService cache, MenuListActivityService activity)
+        : this()
+    { _listCache = cache; _activity = activity; }
+
+    private static string ListScope(PipeRequest request) => MenuListCacheService.Scope(request.Command,
+        new { request.SceneKind, request.ScopeValue, request.SpecialKind, request.ParentItemId, request.FileTypeBatchQuery });
+
+    private static bool IsListQuery(PipeCommand command) => command is PipeCommand.GetSnapshot
+        or PipeCommand.GetSceneSnapshot or PipeCommand.GetSpecialMenuSnapshot or PipeCommand.GetWin11ContextMenuSnapshot
+        or PipeCommand.GetWpsOfficePendingApprovals or PipeCommand.GetShellSubMenuItems or PipeCommand.FindRelatedFileTypeMenuItems;
+
+    private Task<PipeResponse> SendRequestAsync(PipeRequest request, CancellationToken token)
+        => Task.Run(() => ExecuteRequestAsync(request, token), token);
+
+    private async Task<PipeResponse> ExecuteRequestAsync(PipeRequest request, CancellationToken token)
+    {
+        using var activity = IsListQuery(request.Command) ? _activity.Begin() : null;
+        if (request.Item is null && request.ItemId is { } itemId)
+            request = request with { Item = _listCache.FindItem<ContextMenuEntry>(itemId) };
+        var version = _listCache.Version;
+        var generation = _listCache.Generation;
+        var mutation = request.Command is PipeCommand.SetEnabled or PipeCommand.SetShellAttribute
+            or PipeCommand.SetDisplayText or PipeCommand.SetCommandText or PipeCommand.DeleteItem or PipeCommand.UndoDelete
+            or PipeCommand.PurgeDeletedItem or PipeCommand.ApplyDecision or PipeCommand.AcknowledgeItemState
+            or PipeCommand.SetSpecialMenuItemEnabled or PipeCommand.UpdateSpecialMenuItem or PipeCommand.DeleteSpecialMenuItem
+            or PipeCommand.UndoSpecialMenuItem or PipeCommand.PurgeSpecialMenuItem or PipeCommand.MoveSpecialMenuItem
+            or PipeCommand.SetShellSubMenuItemEnabled or PipeCommand.SetWin11ApplicationEnabled
+            or PipeCommand.SetWin11BlockedItem or PipeCommand.RemoveWin11BlockedItem or PipeCommand.ReviewOpenWithRegistration;
+        var id = request.SubMenuItemId ?? request.SpecialItem?.Id ?? request.ItemId ?? string.Empty;
+        if (mutation)
+        {
+            if (request.SubMenuItemId is not null) _listCache.BeginMutation<ShellSubMenuItem>(id);
+            else if (request.SpecialItem is not null) _listCache.BeginMutation<SpecialMenuEntry>(id);
+            else _listCache.BeginMutation<ContextMenuEntry>(id);
+        }
+        PipeResponse? result = null;
+        var removedResult = false;
+        var mutationResultApplied = false;
+        try
+        {
+            result = await SendRequestCoreAsync(request, token).ConfigureAwait(false);
+            if (mutation && generation != _listCache.Generation)
+                throw new OperationCanceledException("The menu state was reset while the operation was completing.");
+            if (request.Command == PipeCommand.ResetStateDatabase) await _listCache.InvalidateAsync().ConfigureAwait(false);
+            if (request.Command is PipeCommand.PurgeDeletedItem or PipeCommand.PurgeSpecialMenuItem
+                || request.Command == PipeCommand.DeleteSpecialMenuItem && request.SpecialItem?.Kind == SpecialMenuKind.WinX && result.SpecialItem is null)
+            {
+                if (request.SpecialItem is not null) _listCache.ApplyResult<SpecialMenuEntry>(id, null, removed: true, generation: generation);
+                else _listCache.ApplyResult<ContextMenuEntry>(id, null, removed: true, generation: generation);
+                mutationResultApplied = true;
+                ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, new[] { id }));
+            }
+            if (request.Command == PipeCommand.ReviewOpenWithRegistration && result.SnapshotIsComplete == true)
+            {
+                var selected = result.SpecialItems.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+                _listCache.ApplyResult(id, selected, removed: selected is null, generation: generation);
+                mutationResultApplied = true;
+                var scopeRequest = new PipeRequest { Command = PipeCommand.GetSpecialMenuSnapshot, SpecialKind = SpecialMenuKind.OpenWith };
+                result = result with { SpecialItems = await MergePartitionsAsync(scopeRequest, result.SpecialItems, result, version, generation, token).ConfigureAwait(false) };
+            }
+            if (IsListQuery(request.Command))
+            {
+                if (request.Command == PipeCommand.GetSpecialMenuSnapshot)
+                    result = result with { SpecialItems = await MergePartitionsAsync(request, result.SpecialItems, result, version, generation, token).ConfigureAwait(false) };
+                else if (request.Command == PipeCommand.GetShellSubMenuItems)
+                    result = result with { ShellSubMenuItems = await MergePartitionsAsync(request, result.ShellSubMenuItems, result, version, generation, token).ConfigureAwait(false) };
+                else result = result with { Items = await MergePartitionsAsync(request, result.Items, result, version, generation, token).ConfigureAwait(false) };
+            }
+            if (result.Item is { } item && !mutation && request.Command == PipeCommand.GetContextMenuItemState
+                && !_listCache.ApplyResult(item.Id, item, completesMutation: false, observedVersion: version, generation: generation))
+                throw new OperationCanceledException("A newer operation superseded this state query.");
+            if (result.SpecialItem is { } special && !mutation && request.Command == PipeCommand.GetSpecialMenuItemState
+                && !_listCache.ApplyResult(special.Id, special, completesMutation: false, observedVersion: version, generation: generation))
+                throw new OperationCanceledException("A newer operation superseded this special menu query.");
+            foreach (var entry in result.Items.Where(_ => mutation)) _listCache.ApplyResult(entry.Id, entry, completesMutation: false, generation: generation);
+            return result;
+        }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved && ex.RemovedItemIds.Count > 0)
+        {
+            removedResult = true;
+            var accepted = new List<string>();
+            foreach (var removed in ex.RemovedItemIds)
+            {
+                var applied = request.SubMenuItemId is not null
+                    ? _listCache.ApplyResult<ShellSubMenuItem>(removed, null, true, mutation, version, generation)
+                    : request.SpecialItem is not null
+                        ? _listCache.ApplyResult<SpecialMenuEntry>(removed, null, true, mutation, version, generation)
+                        : _listCache.ApplyResult<ContextMenuEntry>(removed, null, true, mutation, version, generation);
+                if (applied) accepted.Add(removed);
+            }
+            if (accepted.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, accepted, notifyUser: mutation));
+            throw;
+        }
+        finally
+        {
+            if (mutation && !removedResult && !mutationResultApplied)
+            {
+                if (request.SubMenuItemId is not null) _listCache.ApplyResult(id, result?.ShellSubMenuItem, generation: generation);
+                else if (request.SpecialItem is not null) _listCache.ApplyResult(id, result?.SpecialItem, generation: generation);
+                else _listCache.ApplyResult(id, result?.Item ?? result?.Items.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase)), generation: generation);
+            }
+        }
+    }
+
     private readonly object _notificationSync = new();
     private readonly RecentClientOperationCache _recentLocalOperations;
     private readonly string _pipeName;
@@ -525,6 +669,13 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task<SpecialMenuEntry?> GetSpecialMenuItemStateAsync(SpecialMenuEntry item, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.GetSpecialMenuItemState,
+            SpecialItem = item, SpecialKind = item.Kind }, cancellationToken);
+        return response.SpecialItem;
+    }
+
     public async Task<bool> GetShellNewOrderLockAsync(CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.GetShellNewOrderLock }, cancellationToken);
@@ -822,7 +973,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
             : DisposeNotificationLoopAsync(notificationLoopCts, notificationLoopTask);
     }
 
-    private async Task<PipeResponse> SendRequestAsync(PipeRequest request, CancellationToken cancellationToken)
+    private async Task<PipeResponse> SendRequestCoreAsync(PipeRequest request, CancellationToken cancellationToken)
     {
         if (_disposed)
         {
@@ -835,7 +986,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         try
         {
             using var stream = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            await stream.ConnectAsync(2000, cancellationToken);
+            await stream.ConnectAsync(2000, cancellationToken).ConfigureAwait(false);
             stream.ReadMode = PipeTransmissionMode.Byte;
 
             using var reader = new StreamReader(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
@@ -859,11 +1010,11 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 BuildOperationStartLog(correlationId, request));
 
             var payload = JsonSerializer.Serialize(envelope, JsonOptions);
-            await writer.WriteLineAsync(payload).WaitAsync(cancellationToken);
+            await writer.WriteLineAsync(payload).WaitAsync(cancellationToken).ConfigureAwait(false);
 
             while (true)
             {
-                var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
+                var line = await reader.ReadLineAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null)
                 {
                     throw new InvalidOperationException("The backend pipe closed before returning a response.");
@@ -904,7 +1055,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     throw new BackendRequestException(
                         responseEnvelope.Response.Message,
                         responseEnvelope.Response.ErrorCode,
-                        responseEnvelope.Response.RegistryProtectionEnabled);
+                        responseEnvelope.Response.RegistryProtectionEnabled,
+                        responseEnvelope.Response.RemovedItemIds);
                 }
 
                 stopwatch.Stop();

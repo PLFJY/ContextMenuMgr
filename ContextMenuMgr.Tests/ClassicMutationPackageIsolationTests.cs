@@ -58,7 +58,9 @@ public sealed class ClassicMutationPackageIsolationTests
                 {
                     BackendRegistryPath = $@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shell\{keyName}"
                 }, CancellationToken.None, context);
-            Assert.True(wrongSource.Success);
+            Assert.False(wrongSource.Success);
+            Assert.Equal(PipeErrorCodes.MenuItemRemoved, wrongSource.ErrorCode);
+            Assert.Equal(new[] { itemId }, wrongSource.RemovedItemIds);
             Assert.Null(wrongSource.Item); // Do not silently switch to the HKU copy.
 
             _ = await catalog.GetSnapshotAsync(CancellationToken.None, context);

@@ -20,6 +20,8 @@ public partial class App
         services.AddSingleton<INavigationService, NavigationService>();
 
         services.AddSingleton<RuntimeDataAclRepairClient>();
+        services.AddSingleton<MenuListCacheService>();
+        services.AddSingleton<MenuListActivityService>();
         services.AddSingleton<FrontendSettingsService>();
         services.AddSingleton<FrontendStartupService>();
         services.AddSingleton<PortablePackageTrustService>();
@@ -45,17 +47,22 @@ public partial class App
         services.AddSingleton<ContextMenuWorkspaceService>();
         services.AddSingleton<ExplorerRestartStateService>();
         services.AddSingleton<IInfoBarService, InfoBarService>();
+        services.AddSingleton<MenuListFeedbackService>();
         services.AddSingleton<UpdateCheckService>();
 
         services.AddSingleton<ShellViewModel>();
-        services.AddSingleton<MainWindow>(sp => new MainWindow(
+        services.AddSingleton<MainWindow>(sp =>
+        {
+            _ = sp.GetRequiredService<MenuListFeedbackService>();
+            return new MainWindow(
             sp.GetRequiredService<ShellViewModel>(),
             sp,
             sp.GetRequiredService<INavigationService>(),
             sp.GetRequiredService<IInfoBarService>(),
             sp.GetRequiredService<UpdateCheckService>(),
             sp.GetRequiredService<FrontendThemeService>(),
-            sp.GetRequiredService<MainWindowPlacementService>()));
+            sp.GetRequiredService<MainWindowPlacementService>());
+        });
 
         services.AddSingleton<FileContextMenuPageViewModel>();
         services.AddSingleton<AllObjectsContextMenuPageViewModel>();
@@ -101,6 +108,6 @@ public partial class App
         services.AddSingleton<ApprovalsPage>();
         services.AddSingleton<SettingsPage>();
 
-        return services.BuildServiceProvider();
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 }

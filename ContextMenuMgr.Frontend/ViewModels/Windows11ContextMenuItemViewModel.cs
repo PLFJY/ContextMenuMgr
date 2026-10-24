@@ -16,8 +16,8 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService? _settingsService;
     private readonly EventHandler _languageChangedHandler;
-    private readonly Windows11ContextMenuItemDefinition _primaryDefinition;
-    private readonly Task<ImageSource?> _logoTask;
+    private Windows11ContextMenuItemDefinition _primaryDefinition;
+    private Task<ImageSource?> _logoTask;
     private bool _suppressSync;
 
     public Windows11ContextMenuItemViewModel(
@@ -62,7 +62,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         _localization.LanguageChanged += _languageChangedHandler;
     }
 
-    public IReadOnlyList<Windows11ContextMenuItemDefinition> Definitions { get; }
+    public IReadOnlyList<Windows11ContextMenuItemDefinition> Definitions { get; private set; }
     public string Id => _primaryDefinition.Id;
     public string DisplayName => IsSystemCommand ? _primaryDefinition.DisplayName : _primaryDefinition.Package.DisplayName;
     public string PublisherName => _primaryDefinition.Package.PublisherDisplayName;
@@ -93,7 +93,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     public string RetryText => _localization.Translate("Refresh");
     public bool CanEditUserNote => _settingsService is not null;
     public bool HasUserNote => !string.IsNullOrWhiteSpace(UserNote);
-    public bool CanToggle => !IsBusy && !IsProtected && !IsStateUncertain;
+    public bool CanToggle => _service.CanMutate && !IsBusy && !IsProtected && !IsStateUncertain;
     public bool CanRetry => !IsBusy && (HasOperationError || IsStateUncertain);
     public string StatusText => _localization.Translate(IsStateUncertain ? "Windows11StateUncertain"
         : HasOperationError ? _service.RequiresServiceUpdate ? "Windows11ServiceUpdateRequired" : "Windows11ChangeFailed" : IsProtected ? "Windows11MenuUnavailable" : "");
@@ -136,6 +136,40 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     [NotifyPropertyChangedFor(nameof(HasStatus))]
     [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     public partial bool HasOperationError { get; set; }
+
+    public void UpdateDefinitions(IReadOnlyList<Windows11ContextMenuItemDefinition> definitions)
+    {
+        var previousEntries = Definitions.Select(item => item.Entry).ToArray();
+        var updatedEntries = definitions.Select(item => item.Entry).ToArray();
+        var changed = !previousEntries.SequenceEqual(updatedEntries) && !MenuListData.Equivalent(previousEntries, updatedEntries);
+        if (changed)
+        {
+            var oldLogo = _primaryDefinition.Package.LogoPath;
+            Definitions = definitions;
+            _primaryDefinition = definitions[0];
+            if (!string.Equals(oldLogo, _primaryDefinition.Package.LogoPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _logoTask = LoadLogoAsync(_primaryDefinition.Package);
+                _ = RefreshLogoAsync(_logoTask);
+            }
+            foreach (var name in new[] { nameof(DisplayName), nameof(PublisherName), nameof(PublisherText), nameof(PackageFamilyName),
+                nameof(PackageIdentityText), nameof(ComServerPath), nameof(FileLocationText), nameof(HasPublisher), nameof(HasFileLocation),
+                nameof(IsPartiallyEnabled), nameof(IsProtected), nameof(IsMachineBlocked), nameof(ContextTypesText),
+                nameof(ShowToggle), nameof(ShowMixedActions), nameof(ShowMixedBusy), nameof(CanToggle) }) OnPropertyChanged(name);
+        }
+        IsStateUncertain = _service.IsStateUncertain(Id);
+        HasOperationError = _service.HasOperationError(Id);
+        OnPropertyChanged(nameof(CanToggle));
+        // A pending click retains its own busy and optimistic presentation until it completes.
+        if (!IsBusy) RefreshState(Definitions.All(definition => definition.IsEnabled));
+    }
+
+    private async Task RefreshLogoAsync(Task<ImageSource?> task)
+    {
+        await task;
+        if (!ReferenceEquals(task, _logoTask)) return;
+        OnPropertyChanged(nameof(LogoSource)); OnPropertyChanged(nameof(HasLogo));
+    }
 
     public void RefreshState(bool isEnabled)
     {

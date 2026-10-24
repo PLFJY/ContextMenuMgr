@@ -32,6 +32,9 @@ internal static class PackagedContextMenuDiscovery
         var skippedPackageCount = 0;
         var skippedPackageSamples = new List<string>(3);
         var failureFingerprint = new byte[32];
+        var displayMetadataFailureCount = 0;
+        var displayMetadataSamples = new List<string>(3);
+        var displayMetadataFingerprint = new byte[32];
         string? enumerationFailure = null;
         try
         {
@@ -43,24 +46,42 @@ internal static class PackagedContextMenuDiscovery
                 var stage = "PackageIdentity";
                 try
                 {
-                    packageName = package.Id.FullName;
+                    var identity = package.Id;
+                    packageName = identity.FullName;
+                    var familyName = identity.FamilyName;
+                    var name = identity.Name;
                     stage = "InstalledLocation";
                     var installPath = package.InstalledLocation.Path;
                     stage = "ManifestPath";
                     var manifestPath = GetManifestPath(installPath);
                     if (string.IsNullOrWhiteSpace(packageName)
+                        || string.IsNullOrWhiteSpace(familyName)
+                        || string.IsNullOrWhiteSpace(name)
                         || string.IsNullOrWhiteSpace(manifestPath))
                     {
                         throw new InvalidDataException("Package identity or manifest is unavailable.");
                     }
 
-                    stage = "PackageMetadata";
+                    // Localized labels can fail in the service's resource context even
+                    // when the authenticated user's package and manifest are readable.
+                    // These labels are presentation only, never discovery evidence.
+                    var displayName = ReadOptionalDisplayMetadata(() => package.DisplayName, name, out var displayFailure);
+                    var publisher = ReadOptionalDisplayMetadata(() => package.PublisherDisplayName, string.Empty, out var publisherFailure);
+                    foreach (var (field, failure) in new[] { ("DisplayName", displayFailure), ("PublisherDisplayName", publisherFailure) })
+                    {
+                        if (failure is null) continue;
+                        displayMetadataFailureCount++;
+                        var detail = $"Package={packageName}, Stage={field}, Exception={failure.GetType().Name}, HResult=0x{failure.HResult:X8}";
+                        AddFailureFingerprint(displayMetadataFingerprint, detail + failure.Message);
+                        if (displayMetadataSamples.Count < 3) displayMetadataSamples.Add(detail);
+                    }
+
                     packages.Add(new PackagedContextMenuPackage(
                         packageName,
-                        package.Id.FamilyName,
-                        package.Id.Name,
-                        package.DisplayName,
-                        package.PublisherDisplayName,
+                        familyName,
+                        name,
+                        displayName,
+                        publisher,
                         installPath,
                         manifestPath));
                 }
@@ -70,6 +91,7 @@ internal static class PackagedContextMenuDiscovery
                 }
                 catch (Exception ex)
                 {
+                    MenuDiscoveryCoverage.MarkPackagedIncomplete();
                     skippedPackageCount++;
                     var failure = $"Package={packageName}, Stage={stage}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}";
                     AddFailureFingerprint(failureFingerprint, failure + ex.Message);
@@ -86,6 +108,7 @@ internal static class PackagedContextMenuDiscovery
         }
         catch (Exception ex)
         {
+            MenuDiscoveryCoverage.MarkPackagedIncomplete();
             enumerationFailure = $"PackagedContextMenuDiscoveryFailed: Sid={userSid}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}";
         }
 
@@ -93,6 +116,9 @@ internal static class PackagedContextMenuDiscovery
         if (skippedPackageCount > 0 || enumerationFailure is null)
             ReportWarning(userSid + "|metadata", skippedPackageCount == 0 ? null : $"{skippedPackageCount}:{Convert.ToHexString(failureFingerprint)}",
                 skippedPackageCount == 0 ? null : $"PackagedContextMenuPackagesSkipped: Sid={userSid}, Count={skippedPackageCount}, Signature={Convert.ToHexString(failureFingerprint)}, Samples=[{string.Join("; ", skippedPackageSamples)}].", logger);
+        if (displayMetadataFailureCount > 0 || enumerationFailure is null)
+            ReportWarning(userSid + "|displayMetadata", displayMetadataFailureCount == 0 ? null : $"{displayMetadataFailureCount}:{Convert.ToHexString(displayMetadataFingerprint)}",
+                displayMetadataFailureCount == 0 ? null : $"PackagedContextMenuDisplayMetadataFallback: Sid={userSid}, Count={displayMetadataFailureCount}, Samples=[{string.Join("; ", displayMetadataSamples)}], DiscoveryUnaffected=True.", logger);
 
         return Discover(
             packages,
@@ -105,6 +131,22 @@ internal static class PackagedContextMenuDiscovery
             {
                 DiscoveryComplete = definition.DiscoveryComplete && enumerationFailure is null && skippedPackageCount == 0
             }).ToArray();
+    }
+
+    internal static string ReadOptionalDisplayMetadata(Func<string> read, string fallback, out Exception? failure)
+    {
+        try
+        {
+            var value = read();
+            failure = null;
+            return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            failure = ex;
+            return fallback;
+        }
     }
 
     internal static IReadOnlyList<PackagedContextMenuDefinition> Discover(
@@ -134,6 +176,7 @@ internal static class PackagedContextMenuDiscovery
             }
             catch (Exception ex)
             {
+                MenuDiscoveryCoverage.MarkPackagedIncomplete();
                 skippedManifestCount++;
                 var failure = $"Package={package.FullName}, Stage=ManifestReadParse, ManifestPath={package.ManifestPath}, Exception={ex.GetType().Name}, HResult=0x{ex.HResult:X8}: {ex.Message}";
                 AddFailureFingerprint(failureFingerprint, failure);

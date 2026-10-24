@@ -163,6 +163,13 @@ public partial class OtherRulesPageViewModel : ObservableObject, IDisposable
         return EnsureTabLoadedAsync(SelectedTabIndex);
     }
 
+    public Task RefreshAsync() => SelectedTabIndex switch
+    {
+        2 => CustomRegistryPathTab.RefreshAsync(), 3 => DragDropTab.RefreshAsync(),
+        4 => CommandStoreTab.RefreshAsync(), 5 => GuidBlockTab.RefreshAsync(), 6 => IeMenuTab.RefreshAsync(),
+        0 => RefreshWorkspaceAndEnhanceStatesAsync(), _ => Task.CompletedTask
+    };
+
     private Task EnsureTabLoadedAsync(int tabIndex)
     {
         if (!_loadedBackendTabIndexes.Add(tabIndex))

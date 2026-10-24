@@ -21,6 +21,8 @@ workspace 区分 Pipe reachability 和单次加载错误。Ping 成功、GetSnap
 
 颜色/brush 使用 DynamicResource，如 `TextFillColorPrimaryBrush`、`CardBackgroundFillColorDefaultBrush`。根 Foreground 不保证覆盖 WPF-UI 模板、Popup 与状态触发器；检查 Appearance、BasedOn 和模板资源。标题栏 `ChromeTitleBarButton` 不跨用到普通按钮或 Popup。启用 badge 用 accent 与 TextOnAccentFillColorPrimaryBrush，禁用用中性背景与次要前景；badge 高度/垂直对齐一致，避免 WrapPanel 按其它按钮高度拉伸。
 
+Win11 菜单中受系统保护、暂不支持更改的条目，其状态说明使用 `SystemFillColorCautionBrush` 黄色警示文字，与普通次要说明区分，并随浅色/深色主题动态更新。
+
 Popup/Flyout/AutoSuggestBox 建议项脱离普通视觉树。DataTemplate 以 item VM 属性为主，不依赖 Window ancestor、ElementName=RootNavigation 或错误 TemplatedParent。选择处理放外层事件或 item 明确命令；`PressedForeground ... ContentPresenter` 等绑定报错先查 Style/Template。
 
 TitleBar 布局是 Icon、Title、GlobalSearchBox、HeaderActions、WindowButtons，避免 ColumnSpan 互相覆盖；可交互控件设 `WindowChrome.IsHitTestVisibleInChrome=True`。`MainWindowPlacementService` 保存 normal RestoreBounds/Maximized，不保存 Minimized；恢复校验 virtual screen，防断开显示器后窗口不可见。
@@ -64,7 +66,7 @@ File Types 批量管理是内部隐藏 UserControl，不新增导航 Page/TabIte
 
 刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
 
-Application Groups 保留 Frame 平滑滚动：后台对 UI 快照分组/搜索，约 120 ms 防抖，先呈现 40 组，再 Normal 优先级 DispatcherTimer 每 60 ms 追加 12 组，重建取消旧 timer；避免 Background yield 饥饿。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
+Application Groups 保留 Frame 平滑滚动：后台对 UI 捕获的只读输入分组，约 120 ms 防抖，先呈现 40 组，再 Normal 优先级 DispatcherTimer 每 60 ms 追加 12 组，差量更新保留已有组，后续分组取消旧 timer；避免 Background yield 饥饿。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
 
 ## 搜索、筛选与集合归属
 
@@ -77,6 +79,22 @@ AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，
 `GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。早期只显示目标子项的描述已不符合当前 `RebuildNavigationFilterGroup`。不以滚动定位或新扫描补救。
 
 workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。
+
+## 列表缓存、差量刷新与通知
+
+`MenuListCacheService` 是 DI 单例，只保存前端呈现 DTO；缓存身份、路径、容量和原子写见[运行时数据](runtime-data-and-logging.md#列表呈现缓存)。传统分类、应用分组和审批复用 workspace；Win11、SpecialMenu、按范围查询的 Scene/FileTypes、批量管理和子菜单各恢复自己的缓存。缓存恢复不触发 ItemDetected/托盘审核通知，不建立后端 baseline，也不恢复 Busy、Uncertain 或 ShellNew 锁状态。缓存开关须等 backend 就绪，实际请求仍由后端验证原物理来源。
+
+有效空缓存也是已有快照。首次无缓存才显示延迟加载占位；后续扫描保留列表及失败前的数据，顶部刷新图标以 ProgressRing 表示真实列表查询。顶部命令由当前导航内容路由：共享传统页/应用分组/审批刷新 workspace，Win11 刷新应用数据源，FileTypes/OtherRules 刷新当前 tab 或活动批量管理。重复的同范围扫描复用在途任务；选择另一个 Scene 范围使旧代次结果失效，不把两个范围合并。
+
+Pipe 结果保留整体和经典发现完整性，旧服务未提供字段时按未知处理。传统/Win11、ShellNew 物理项/包声明分区合并：包发现失败不能阻断已完整经典部分的缓存和删除 diff；不完整分区保留未返回项，不覆盖其最后完整磁盘快照。
+
+client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价对象。UI 使用当前缓存代次重新取得合并结果，再仅修改变化行；`IncrementalCollection` 保留分组、审批和 Win11 行实例，集合不发 Reset。普通属性变化由 live sorting/filtering 处理，明确更改搜索、语言或筛选时才重算视图。应用分组在 UI 线程捕获身份/搜索输入，后台只分组不可变输入，不访问 WPF ViewModel；分组 ViewModel 在 UI 线程创建。
+
+扫描版本、逐项 mutation 计数、权威结果及移除标记共用缓存协调锁。旧扫描不能覆盖新操作，已返回但尚未应用到 UI 的结果也会重新合并；只读核对不得结束在途写入。软件 reset 增加缓存代次，旧扫描和延迟写盘不能恢复 reset 前缓存。普通迟到通知先定向核对原来源，再更新已有 workspace 项；scene-only 项仍不进入全局池。OpenWith/WinX 保留专有通知刷新和事务门，不拆除 catalog/store 串行化。
+
+`MenuListTransitions` 仅动画已实现且在 viewport 内的容器：进入约 180 ms，退出以不可交互的 adorner 影像约 140 ms 淡出，保留行平滑移位。首屏批量呈现不逐项动画；遵从系统动画设置，虚拟化复用清理 transform，重现同 Id 取消旧退出影像，Unload 解除集合/LayoutUpdated 和动画回调。
+
+后端确认目标缺失才返回 `MENU_ITEM_REMOVED`，客户端广播 `ItemsRemoved`，各关联列表及缓存同步清除，退出动画只负责视觉。扫描发现条目消失时静默清理；用户操作命中已删除目标时通过 `MenuListFeedbackService` 显示 WPF-UI MessageBox。IPC 客户端不依赖 Localization/Settings，避免设置 ACL 修复依赖回环；启动构建 DI provider 时验证服务图。更新通知仍使用标题栏下方横幅式 WPF-UI InfoBar，并保留链接功能；详细错误只写日志。
 
 ## 异步操作与结果
 
@@ -94,7 +112,7 @@ SpecialMenu 首屏先呈现加载再请求；CommandStore 首次分批加入、�
 
 `ContextMenuItemActionsService` 在前端 Session 打开真实 BackendRegistryPath，只有缺物理路径才 HKCR fallback。Regedit LastKey 为完整 hive，不拼应用语言的计算机根名称；同 Session 已有 Regedit 则 -m 新窗口，不杀用户旧窗口。启动成功只证明请求，实际定位需看选中键。
 
-InfoBarService 承载简短非阻塞反馈；详细错误码/堆栈/路径写日志，不向普通用户暴露堆栈。只有需求/规则明确要求 Explorer restart 的设置，成功后通过单例 ExplorerRestartStateService.MarkRequired 联动顶部按钮，由用户执行并 Clear。Win11 应用开关不标 restart；全局经典菜单 tweak 有独立语义。重置软件设置须先完整禁用 Registry Write Protection，失败保留 authoritative toggle 并停止 reset。
+InfoBarService 的控件、位置与清理契约见上文；详细错误码/堆栈/路径写日志，不向普通用户暴露堆栈。只有需求/规则明确要求 Explorer restart 的设置，成功后通过单例 ExplorerRestartStateService.MarkRequired 联动顶部按钮，由用户执行并 Clear。Win11 应用开关不标 restart；全局经典菜单 tweak 有独立语义。重置软件设置须先完整禁用 Registry Write Protection，失败保留 authoritative toggle 并停止 reset。
 
 ViewModel Dispose/页面卸载取消刷新、debounce、加载回调与动画，解除 LanguageChanged/SettingsChanged/workspace/filter 等订阅；不能靠窗口关闭推断静态事件无泄漏。控制 Pipe/DI/单实例退出见[生命周期](runtime-lifecycle.md)。
 

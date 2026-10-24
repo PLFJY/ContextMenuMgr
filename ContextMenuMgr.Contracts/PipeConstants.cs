@@ -14,6 +14,7 @@ public static class PipeConstants
 
 public static class PipeErrorCodes
 {
+    public const string MenuItemRemoved = "MENU_ITEM_REMOVED";
     public const string RegistryWriteProtectionEnabled = "REGISTRY_WRITE_PROTECTION_ENABLED";
     public const string RegistryProtectionTransitionFailed = "REGISTRY_PROTECTION_TRANSITION_FAILED";
     public const string ProtectedRegistryMutationFailed = "PROTECTED_REGISTRY_MUTATION_FAILED";

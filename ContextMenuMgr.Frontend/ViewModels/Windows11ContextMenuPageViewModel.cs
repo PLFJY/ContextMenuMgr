@@ -43,6 +43,11 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         ItemsView = new ListCollectionView(Items);
         ItemsView.Filter = FilterItem;
         ItemsView.SortDescriptions.Add(new SortDescription(nameof(Windows11ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+        ((ListCollectionView)ItemsView).IsLiveSorting = true;
+        ((ListCollectionView)ItemsView).IsLiveFiltering = true;
+        foreach (var property in new[] { nameof(Windows11ContextMenuItemViewModel.DisplayName), nameof(Windows11ContextMenuItemViewModel.PublisherName),
+            nameof(Windows11ContextMenuItemViewModel.ContextTypesText), nameof(Windows11ContextMenuItemViewModel.UserNote) })
+            ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(property);
 
         _localization.LanguageChanged += OnLanguageChanged;
         _service.ItemsChanged += OnItemsChanged;
@@ -58,6 +63,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
             if (_service.CurrentItems.Count > 0)
             {
                 RebuildItems(_service.CurrentItems);
+            HasLoadError = !_service.IsSnapshotComplete;
             }
             else
             {
@@ -102,7 +108,8 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public string RefreshText => _localization.Translate("Refresh");
     public string ItemCountText => _localization.Format("Windows11ItemCount", ItemsView.Cast<object>().Count());
-    public string LoadErrorText => _localization.Translate("Windows11LoadFailed");
+    public string LoadErrorText => _localization.Translate(_service.HasSnapshot && !_service.IsSnapshotComplete
+        ? "MenuListIncompleteStatus" : "Windows11LoadFailed");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsListEmpty))]
@@ -112,7 +119,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
 
     public bool IsSupported => _service.IsSupported;
 
-    public bool IsListLoading => _loadingPresentation.IsVisible;
+    public bool IsListLoading => !_service.HasSnapshot && _loadingPresentation.IsVisible;
 
     public bool ShowListContent => !IsListLoading && !IsListEmpty;
 
@@ -138,6 +145,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
         {
             await _service.RefreshAsync(CancellationToken.None);
             RebuildItems(_service.CurrentItems);
+            HasLoadError = !_service.IsSnapshotComplete;
         }
         catch (Exception ex)
         {
@@ -223,9 +231,11 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     {
         try
         {
-            IsLoading = true;
+            await _service.RestoreCacheAsync(CancellationToken.None);
+            IsLoading = !_service.HasSnapshot;
             await _service.EnsureLoadedAsync(CancellationToken.None);
             RebuildItems(_service.CurrentItems);
+            HasLoadError = !_service.IsSnapshotComplete;
         }
         catch (Exception ex)
         {
@@ -259,6 +269,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
             }
 
             RebuildItems(_service.CurrentItems);
+            HasLoadError = !_service.IsSnapshotComplete;
         }
         catch (OperationCanceledException)
         {
@@ -275,23 +286,19 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     {
         var pendingApprovalKeys = GetPendingApprovalKeys();
 
-        foreach (var existing in Items)
+        var existing = Items.ToDictionary(item => CreateLogicalGroupKey(item.Definitions[0]), StringComparer.OrdinalIgnoreCase);
+        var target = new List<Windows11ContextMenuItemViewModel>();
+        foreach (var group in items.GroupBy(CreateLogicalGroupKey, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(group => group.First().Package.DisplayName, StringComparer.CurrentCultureIgnoreCase))
         {
-            existing.Dispose();
+            if (!existing.Remove(group.Key, out var row))
+                row = new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization, _settingsService);
+            else row.UpdateDefinitions(group.ToArray());
+            row.RefreshPendingApproval(group.Any(definition => pendingApprovalKeys.Contains(ApprovalKey(definition))));
+            target.Add(row);
         }
-
-        Items.Clear();
-        foreach (var group in items
-                     .GroupBy(CreateLogicalGroupKey, StringComparer.OrdinalIgnoreCase)
-                     .OrderBy(static group => group.First().Package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-                     .ThenBy(static group => group.First().DisplayName, StringComparer.CurrentCultureIgnoreCase))
-        {
-            var itemViewModel = new Windows11ContextMenuItemViewModel(group.ToArray(), _service, _localization, _settingsService);
-            itemViewModel.RefreshPendingApproval(group.Any(definition => pendingApprovalKeys.Contains(ApprovalKey(definition))));
-            Items.Add(itemViewModel);
-        }
-
-        ItemsView.Refresh();
+        IncrementalCollection.Apply(Items, target);
+        foreach (var removed in existing.Values) removed.Dispose();
         RefreshListPlaceholderState();
     }
 
@@ -398,6 +405,7 @@ public partial class Windows11ContextMenuPageViewModel : ObservableObject, IDisp
     private void RefreshListPlaceholderState()
     {
         OnPropertyChanged(nameof(ItemCountText));
+        OnPropertyChanged(nameof(LoadErrorText));
         OnPropertyChanged(nameof(IsListLoading));
         OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));

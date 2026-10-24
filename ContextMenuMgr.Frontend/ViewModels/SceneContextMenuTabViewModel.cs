@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Collections.Specialized;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -29,6 +28,8 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     private Task? _refreshTask;
     private int _refreshGeneration;
     private bool _hasLoaded;
+    private string? _refreshScope;
+    private string? _displayedScope;
     private bool _disposed;
     private bool _lastHideDisabledItems;
 
@@ -55,7 +56,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         Description = description;
         _sceneKind = sceneKind;
         _backendClient = backendClient;
+        _backendClient.ItemsRemoved += OnItemsRemoved;
         _workspace = workspace;
+        _workspace.PropertyChanged += OnBackendAvailabilityChanged;
         _localization = localization;
         _iconPreviewService = iconPreviewService;
         _actionsService = actionsService;
@@ -82,7 +85,6 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         _localization.LanguageChanged += OnLanguageChanged;
-        Items.CollectionChanged += OnItemsCollectionChanged;
 
         if (!string.IsNullOrWhiteSpace(_fixedScopeValue))
         {
@@ -319,11 +321,13 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     {
         lock (_refreshSync)
         {
-            if (_refreshTask is { IsCompleted: false })
+            var scope = ResolveScopeValue();
+            if (_refreshTask is { IsCompleted: false } && string.Equals(scope, _refreshScope, StringComparison.OrdinalIgnoreCase))
             {
                 return _refreshTask;
             }
 
+            _refreshScope = scope;
             var generation = ++_refreshGeneration;
             _refreshTask = RefreshCoreAsync(generation, markLoaded);
             return _refreshTask;
@@ -335,7 +339,8 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         var scopeValue = ResolveScopeValue();
         if (RequiresScopeValue() && string.IsNullOrWhiteSpace(scopeValue))
         {
-            ApplySnapshot([]);
+            ApplySnapshot(new MenuListSnapshot<ContextMenuEntry>([], true));
+            _displayedScope = scopeValue;
             EmptyText = _localization.Translate("SceneSelectionRequired");
             return;
         }
@@ -345,6 +350,15 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         {
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _disposeCts.Token);
+            var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
+                Command = PipeCommand.GetSceneSnapshot, SceneKind = _sceneKind, ScopeValue = scopeValue }, linkedCts.Token);
+            if (cached is not null && IsCurrentRefreshGeneration(generation))
+            {
+                if (!string.Equals(_displayedScope, scopeValue, StringComparison.OrdinalIgnoreCase))
+                    ApplySnapshot(new MenuListSnapshot<ContextMenuEntry>([], true));
+                _displayedScope = scopeValue;
+                ApplySnapshot(cached);
+            }
             var snapshot = await _backendClient.GetSceneSnapshotAsync(_sceneKind, scopeValue, linkedCts.Token);
             if (!IsCurrentRefreshGeneration(generation))
             {
@@ -354,6 +368,9 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
                 return;
             }
 
+            if (!string.Equals(_displayedScope, scopeValue, StringComparison.OrdinalIgnoreCase))
+                ApplySnapshot(new MenuListSnapshot<ContextMenuEntry>([], true));
+            _displayedScope = scopeValue;
             ApplySnapshot(snapshot);
             EmptyText = snapshot.Count == 0
                 ? _localization.Translate("SceneNoItems")
@@ -387,7 +404,6 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
             FrontendDebugLog.Warning(
                 "SceneContextMenuTabViewModel",
                 $"RefreshAsync failed. SceneKind={_sceneKind}, Generation={generation}, Message={ex.Message}");
-            ApplySnapshot([]);
             EmptyText = _localization.Format("OtherRulesTabLoadFailed", ex.Message);
         }
         finally
@@ -534,15 +550,35 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         await RefreshAsync();
     }
 
+    private void OnBackendAvailabilityChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ContextMenuWorkspaceService.IsBackendReady))
+            foreach (var item in Items) item.IsBackendAvailable = _workspace.IsBackendReady;
+    }
+
+    private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
+    {
+        if (e.Request.SpecialItem is not null) return;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        void Apply()
+        {
+            if (_disposed) return;
+            foreach (var item in Items.Where(item => e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray())
+            { Items.Remove(item); item.Dispose(); }
+        }
+        if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply); else Apply();
+    }
+
     private void ApplySnapshot(IReadOnlyList<ContextMenuEntry> snapshot)
     {
+        snapshot = MenuListData.Current(snapshot);
         var existing = Items.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in snapshot)
         {
             if (existing.Remove(entry.Id, out var current))
             {
-                current.Update(entry);
+                if (!current.IsToggleBusy && !current.IsAttributesBusy) current.Update(entry);
             }
             else
             {
@@ -554,16 +590,15 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
                     SetEnabledAsync,
                     SetShellAttributeAsync,
                     SetDisplayTextAsync,
-                    AcknowledgeItemStateAsync));
+                    AcknowledgeItemStateAsync) { IsBackendAvailable = _workspace.IsBackendReady });
             }
         }
 
-        foreach (var stale in existing.Values.ToList())
+        foreach (var stale in existing.Values.Where(item => !item.IsToggleBusy && !item.IsAttributesBusy && MenuListData.AllowsRemoval(snapshot, item.Entry)).ToList())
         {
+            stale.Dispose();
             Items.Remove(stale);
         }
-
-        ItemsView.Refresh();
     }
 
     private bool FilterItem(object obj)
@@ -576,7 +611,8 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         if (!ContextMenuListPresentation.IsVisibleWithDisabledFilter(
                 item.IsEnabled,
                 item.IsDeleted,
-                _settingsService.Current.HideDisabledItems))
+                _settingsService.Current.HideDisabledItems,
+                item.IsToggleBusy || item.IsToggleOutcomeUncertain))
         {
             return false;
         }
@@ -666,52 +702,6 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         }
     }
 
-    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (e.NewItems is not null)
-        {
-            foreach (ContextMenuItemViewModel item in e.NewItems)
-            {
-                item.PropertyChanged += OnItemPropertyChanged;
-            }
-        }
-
-        if (e.OldItems is not null)
-        {
-            foreach (ContextMenuItemViewModel item in e.OldItems)
-            {
-                item.PropertyChanged -= OnItemPropertyChanged;
-            }
-        }
-    }
-
-    private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(ContextMenuItemViewModel.IsEnabled)
-            or nameof(ContextMenuItemViewModel.IsToggleBusy))
-        {
-            if (_settingsService.Current.HideDisabledItems
-                && sender is ContextMenuItemViewModel { IsToggleBusy: false })
-            {
-                ItemsView.Refresh();
-            }
-
-            return;
-        }
-
-        if (e.PropertyName is nameof(ContextMenuItemViewModel.DisplayName)
-            or nameof(ContextMenuItemViewModel.KeyName)
-            or nameof(ContextMenuItemViewModel.RegistryPath)
-            or nameof(ContextMenuItemViewModel.Notes)
-            or nameof(ContextMenuItemViewModel.IsDeleted)
-            or nameof(ContextMenuItemViewModel.HasDetectedChange)
-            or nameof(ContextMenuItemViewModel.IsPendingApproval)
-            or nameof(ContextMenuItemViewModel.HasConsistencyIssue))
-        {
-            ItemsView.Refresh();
-        }
-    }
-
     /// <summary>
     /// Executes dispose.
     /// </summary>
@@ -723,14 +713,12 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         }
 
         _disposed = true;
+        _backendClient.ItemsRemoved -= OnItemsRemoved;
+        _workspace.PropertyChanged -= OnBackendAvailabilityChanged;
         _disposeCts.Cancel();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _localization.LanguageChanged -= OnLanguageChanged;
-        Items.CollectionChanged -= OnItemsCollectionChanged;
-        foreach (var item in Items)
-        {
-            item.PropertyChanged -= OnItemPropertyChanged;
-        }
+        foreach (var item in Items) item.Dispose();
     }
 
     private bool IsCurrentRefreshGeneration(int generation)

@@ -11,6 +11,23 @@ namespace ContextMenuMgr.Tests;
 [Collection("Registry catalog integration")]
 public sealed class OpenWithRegistrationTests
 {
+    // Permanent: a registration changing activation shape must not be misreported as physical removal.
+    [Fact]
+    public async Task CachedSourceVerification_DistinguishesChangedRegistrationFromPhysicalRemoval()
+    {
+        using var fixture = new Fixture();
+        fixture.Create();
+        var cached = await fixture.Read();
+        using (var verb = fixture.Open(@"\shell\open", writable: true)!)
+            verb.SetValue("DelegateExecute", Guid.NewGuid().ToString("B"));
+        var changed = await fixture.Service.GetItemStateAsync(cached, fixture.Context, default);
+        Assert.NotEqual(PipeErrorCodes.MenuItemRemoved, changed.ErrorCode);
+        fixture.Remove();
+        var missing = await fixture.Service.GetItemStateAsync(cached, fixture.Context, default);
+        Assert.Equal(PipeErrorCodes.MenuItemRemoved, missing.ErrorCode);
+        Assert.Equal(new[] { cached.Id }, missing.RemovedItemIds);
+    }
+
     // Permanent: observed visibility, whether third-party or previously program-owned,
     // must never become automatic authorization without the user's opt-in.
     [Theory]

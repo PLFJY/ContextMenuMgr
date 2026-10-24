@@ -29,6 +29,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private Task? _autoRefreshTask;
     private int _refreshGeneration;
     private bool _hasLoaded;
+    private bool _hasSnapshot;
     private bool _disposed;
     private bool _suppressShellNewLockSync;
     private int _shellNewStateVersion;
@@ -50,11 +51,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         _titleKey = titleKey;
         _descriptionKey = descriptionKey;
         _backendClient = backendClient;
+        _backendClient.ItemsRemoved += OnItemsRemoved;
         _iconPreviewService = iconPreviewService;
         _localization = localization;
         _explorerRestartState = explorerRestartState;
         _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         ItemsView = new ListCollectionView(Items);
+        ((ListCollectionView)ItemsView).IsLiveFiltering = true;
+        foreach (var property in new[] { nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
+            nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) }) ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(property);
         ItemsView.Filter = FilterItem;
         if (kind == SpecialMenuKind.OpenWith)
         {
@@ -278,7 +283,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     public string EmptyItemsText => _localization.Translate("EmptyItemsText");
 
-    public bool IsListLoading => _loadingPresentation.IsVisible;
+    public bool IsListLoading => !_hasSnapshot && _loadingPresentation.IsVisible;
 
     public bool ShowListContent => !IsListLoading && !IsListEmpty;
 
@@ -286,7 +291,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     {
         get
         {
-            if (IsListLoading || IsLoading)
+            if (IsListLoading || (!_hasSnapshot && IsLoading))
             {
                 return false;
             }
@@ -400,7 +405,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         var openWithGateHeld = false;
         if (showBusy)
         {
-            await SetLoadingAsync(true);
             await SetBusyAsync(true);
             await YieldToUiAsync();
         }
@@ -412,10 +416,20 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 await _openWithOperationGate.WaitAsync(_disposeCts.Token);
                 openWithGateHeld = true;
             }
-            if (Kind == SpecialMenuKind.ShellNew)
-                await VerifyShellNewLockStateAsync(shellNewVersion);
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _disposeCts.Token);
+            if (!_hasSnapshot)
+            {
+                var cached = await _backendClient.ReadCachedListAsync<SpecialMenuEntry>(new PipeRequest {
+                    Command = PipeCommand.GetSpecialMenuSnapshot, SpecialKind = Kind }, linkedCts.Token);
+                if (cached is not null && IsCurrentRefreshGeneration(generation))
+                {
+                    await ApplySnapshotAsync(cached, Kind == SpecialMenuKind.ShellNew ? shellNewVersion : null);
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => StatusText = _localization.Translate("MenuListCachedStatus"));
+                }
+            }
+            if (showBusy) await SetLoadingAsync(!_hasSnapshot);
+            if (Kind == SpecialMenuKind.ShellNew) await VerifyShellNewLockStateAsync(shellNewVersion);
             var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, linkedCts.Token);
             if (!IsCurrentRefreshGeneration(generation) || (Kind == SpecialMenuKind.ShellNew && shellNewVersion != _shellNewStateVersion))
             {
@@ -432,7 +446,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     _shellNewDiscoveryValid = true;
                     OnPropertyChanged(nameof(CanToggleShellNewOrderLock));
                 });
-            await ApplySnapshotAsync(snapshot, Kind == SpecialMenuKind.ShellNew ? shellNewVersion : null);
+            await ApplySnapshotAsync(snapshot, Kind == SpecialMenuKind.ShellNew ? shellNewVersion : null, preserveBusy: true);
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRefreshGeneration(generation) || (Kind == SpecialMenuKind.ShellNew && shellNewVersion != _shellNewStateVersion))
@@ -440,7 +454,9 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                     return;
                 }
 
-                if (Kind != SpecialMenuKind.ShellNew || IsShellNewOrderLocked.HasValue) StatusText = string.Empty;
+                if (Kind != SpecialMenuKind.ShellNew || IsShellNewOrderLocked.HasValue)
+                    StatusText = snapshot is MenuListSnapshot<SpecialMenuEntry> { IsComplete: false }
+                        ? _localization.Translate("MenuListIncompleteStatus") : string.Empty;
                 if (markLoaded)
                 {
                     _hasLoaded = true;
@@ -592,6 +608,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 await RefreshAsync();
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) {  }
         catch (Exception ex)
         {
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
@@ -640,6 +657,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 _explorerRestartState.MarkRequired();
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) {  }
         catch (Exception ex)
         {
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
@@ -692,6 +710,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 _explorerRestartState.MarkRequired();
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) {  }
         catch (Exception ex)
         {
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
@@ -748,6 +767,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 }
             }
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) {  }
         catch (Exception ex)
         {
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
@@ -787,6 +807,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             }
             await RefreshAsync();
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) { }
         catch (Exception ex)
         {
             await FrontendMessageBox.ShowErrorAsync(ex.Message, Title);
@@ -882,6 +903,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException(_localization.Translate("OpenWithOperationUncertain"));
             return true;
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) { return false; }
         catch (Exception ex)
         {
             if (Kind == SpecialMenuKind.OpenWith && openWithGateHeld)
@@ -920,6 +942,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             var snapshot = await _backendClient.GetSpecialMenuSnapshotAsync(Kind, timeout.Token);
             await ApplySnapshotAsync(snapshot);
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) {  }
         catch (Exception ex)
         {
             await ReconcileOpenWithFailureAsync(item);
@@ -1253,26 +1276,28 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         return null;
     }
 
-    private async Task ApplySnapshotAsync(IEnumerable<SpecialMenuEntry> snapshot, int? shellNewVersion = null)
+    private async Task ApplySnapshotAsync(IEnumerable<SpecialMenuEntry> snapshot, int? shellNewVersion = null, bool preserveBusy = false)
     {
-        var entries = snapshot.ToArray();
+        var entries = snapshot as IReadOnlyList<SpecialMenuEntry> ?? snapshot.ToArray();
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         if (!dispatcher.CheckAccess())
         {
             await dispatcher.InvokeAsync(() => shellNewVersion is int version && version != _shellNewStateVersion
-                ? Task.CompletedTask : ApplySnapshotCoreAsync(entries)).Task.Unwrap();
+                ? Task.CompletedTask : ApplySnapshotCoreAsync(entries, preserveBusy)).Task.Unwrap();
             return;
         }
 
         if (shellNewVersion is int version && version != _shellNewStateVersion) return;
-        await ApplySnapshotCoreAsync(entries);
+        await ApplySnapshotCoreAsync(entries, preserveBusy);
     }
 
-    private async Task ApplySnapshotCoreAsync(IReadOnlyList<SpecialMenuEntry> entries)
+    private async Task ApplySnapshotCoreAsync(IReadOnlyList<SpecialMenuEntry> entries, bool preserveBusy)
     {
+        entries = MenuListData.Current(entries);
+        _hasSnapshot = true;
         if (Kind == SpecialMenuKind.WinX)
         {
-            ApplyWinXSnapshotIncrementally(entries);
+            ApplyWinXSnapshotIncrementally(entries, preserveBusy);
             return;
         }
 
@@ -1283,16 +1308,12 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
         else
         {
-            ReconcileItemsIncrementally(entries);
+            ReconcileItemsIncrementally(entries, preserveBusy);
         }
 
-        UpdatePageStateFromSnapshot(entries);
+        if (entries is not MenuListSnapshot<SpecialMenuEntry> { IsFromCache: true }) UpdatePageStateFromSnapshot(entries);
+        foreach (var row in Items) row.IsBackendAvailable = entries is not MenuListSnapshot<SpecialMenuEntry> { IsFromCache: true } || _backendClient.IsConnected;
         UpdateShellNewMoveAvailability();
-        RebuildWinXGroups();
-        if (!string.IsNullOrWhiteSpace(SearchText))
-        {
-            ItemsView.Refresh();
-        }
 
         RefreshListPlaceholderState();
     }
@@ -1340,20 +1361,17 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         else await dispatcher.InvokeAsync(() => IsLoading = value);
     }
 
-    private void ApplyWinXSnapshotIncrementally(IReadOnlyList<SpecialMenuEntry> entries)
+    private void ApplyWinXSnapshotIncrementally(IReadOnlyList<SpecialMenuEntry> entries, bool preserveBusy)
     {
-        ReconcileItemsIncrementally(entries);
-        UpdatePageStateFromSnapshot(entries);
+        ReconcileItemsIncrementally(entries, preserveBusy);
+        foreach (var row in Items) row.IsBackendAvailable = entries is not MenuListSnapshot<SpecialMenuEntry> { IsFromCache: true } || _backendClient.IsConnected;
+        if (entries is not MenuListSnapshot<SpecialMenuEntry> { IsFromCache: true }) UpdatePageStateFromSnapshot(entries);
         ReconcileWinXGroupsIncrementally();
-        if (!string.IsNullOrWhiteSpace(SearchText))
-        {
-            ItemsView.Refresh();
-        }
 
         RefreshListPlaceholderState();
     }
 
-    private void ReconcileItemsIncrementally(IReadOnlyList<SpecialMenuEntry> entries)
+    private void ReconcileItemsIncrementally(IReadOnlyList<SpecialMenuEntry> entries, bool preserveBusy)
     {
         var existingById = new Dictionary<string, SpecialMenuItemViewModel>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in Items)
@@ -1366,7 +1384,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (var index = Items.Count - 1; index >= 0; index--)
         {
-            if (!newIds.Contains(Items[index].Id))
+            if ((!preserveBusy || !Items[index].IsBusy) && MenuListData.AllowsRemoval(entries, Items[index].Entry) && !newIds.Contains(Items[index].Id))
             {
                 Items.RemoveAt(index);
             }
@@ -1377,7 +1395,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
             var entry = entries[targetIndex];
             if (existingById.TryGetValue(entry.Id, out var item))
             {
-                item.Update(entry);
+                if (!preserveBusy || !item.IsBusy) item.Update(entry);
             }
             else
             {
@@ -1394,6 +1412,19 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 Items.Move(currentIndex, targetIndex);
             }
         }
+    }
+
+    private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
+    {
+        if (e.Request.SpecialItem?.Kind != Kind) return;
+        var dispatcher = System.Windows.Application.Current.Dispatcher;
+        _ = dispatcher.InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            foreach (var item in Items.Where(item => e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray()) Items.Remove(item);
+            if (Kind == SpecialMenuKind.WinX) ReconcileWinXGroupsIncrementally();
+            RefreshListPlaceholderState();
+        });
     }
 
     private void Upsert(SpecialMenuEntry entry)
@@ -1415,8 +1446,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
 
         UpdateShellNewMoveAvailability();
-        ItemsView.Refresh();
-        RebuildWinXGroups();
         RefreshListPlaceholderState();
     }
 
@@ -1460,8 +1489,23 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (notification.SpecialItem is { } specialItem) Upsert(specialItem);
+            if (notification.SpecialItem is { } specialItem)
+                ObserveFireAndForget(VerifyNotificationItemAsync(specialItem), "SpecialMenuNotificationVerification");
         });
+    }
+
+    private async Task VerifyNotificationItemAsync(SpecialMenuEntry entry)
+    {
+        var current = Items.FirstOrDefault(item => item.Id.Equals(entry.Id, StringComparison.OrdinalIgnoreCase));
+        var original = current?.Entry;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var verified = await _backendClient.GetSpecialMenuItemStateAsync(entry, timeout.Token);
+            if (!_disposed && verified is not null && (current is null || !current.IsBusy && ReferenceEquals(current.Entry, original))) Upsert(verified);
+        }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved) { }
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -1729,16 +1773,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void RebuildWinXGroups()
-    {
-        if (Kind != SpecialMenuKind.WinX)
-        {
-            return;
-        }
-
-        ReconcileWinXGroupsIncrementally();
-    }
-
     private void ReconcileWinXGroupsIncrementally()
     {
         foreach (var group in WinXGroups)
@@ -1999,6 +2033,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        _backendClient.ItemsRemoved -= OnItemsRemoved;
         _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
         _loadingPresentation.Dispose();
         _disposeCts.Cancel();

@@ -39,7 +39,7 @@
             </DockPanel>
         </Border>
         <Grid Grid.Row="3">
-            <ItemsControl ItemsSource="{Binding Groups}" Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <ItemsControl behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Groups}" Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border Margin="0,0,0,12" Padding="16" Style="{StaticResource CardBorderStyle}">
@@ -51,7 +51,7 @@
                                     <ui:TextBlock Margin="0,3,0,0" Opacity="0.65" Text="{Binding CountText}" />
                                 </StackPanel>
                             </DockPanel>
-                            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Items}">
+                            <ItemsControl Margin="0,8,0,0" behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Items}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Border Margin="0,0,0,8" Style="{StaticResource ContextMenuItemCardStyle}" Opacity="{Binding CardOpacity}" Tag="{Binding Id}">

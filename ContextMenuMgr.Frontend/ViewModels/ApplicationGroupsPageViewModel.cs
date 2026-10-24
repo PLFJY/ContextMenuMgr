@@ -77,7 +77,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     public bool IsEmpty => Groups.Count == 0 && !IsLoading && !IsListLoading;
 
-    public bool IsListLoading => _loadingPresentation.IsVisible;
+    public bool IsListLoading => !_workspace.HasSnapshot && _loadingPresentation.IsVisible;
 
     public bool ShowListContent => !IsListLoading && !IsEmpty;
 
@@ -155,34 +155,31 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         // grouped result off the UI thread so typing in the search box never
         // blocks input handling. Items are only read off-thread; UI updates
         // below always run on the UI thread.
-        var items = _workspace.Items.ToArray();
-        var searchText = SearchText;
-        var groups = await Task.Run(() => ComputeGroups(items, searchText), cts.Token);
-
-        if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts))
+        var candidates = _workspace.Items.Where(item => !item.IsWindows11ContextMenu && IsClassicCategory(item.Category))
+            .Select(item => (Item: item, Identity: GetGroupIdentity(item))).Select(candidate =>
+                (candidate.Item, candidate.Identity, Matches: MatchesItem(candidate.Identity, candidate.Item, SearchText))).ToArray();
+        var specs = await Task.Run(() => candidates.Where(candidate => candidate.Matches)
+            .GroupBy(candidate => candidate.Identity, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => (Identity: group.Key, Items: group.Select(candidate => candidate.Item).ToArray())).ToArray(), cts.Token);
+        if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts)) return;
+        var existing = Groups.ToDictionary(group => group.Identity, StringComparer.OrdinalIgnoreCase);
+        var groups = specs.Select(spec =>
         {
-            return;
-        }
-
-        // Non-full load: only render the first visible chunk synchronously so the
-        // frame stays responsive. The remaining groups are appended by a normal
-        // priority DispatcherTimer (not Background, which can be starved while the
-        // chunk is being rendered). The page keeps the frame-level smooth scrolling.
-        var visibleCount = Math.Min(InitialVisibleGroupCount, groups.Length);
-        Groups.Clear();
-        for (var index = 0; index < visibleCount; index++)
+            if (!existing.TryGetValue(spec.Identity, out var group))
+                group = new ApplicationGroupViewModel(spec.Identity, spec.Items, _workspace, _localization);
+            else group.UpdateItems(spec.Items);
+            return group;
+        }).ToArray();
+        if (Groups.Count == 0 && groups.Length > InitialVisibleGroupCount)
         {
-            Groups.Add(groups[index]);
+            IncrementalCollection.Apply(Groups, groups.Take(InitialVisibleGroupCount).ToArray());
+            StartAppendTimer(groups, InitialVisibleGroupCount, cts);
         }
-
+        else IncrementalCollection.Apply(Groups, groups);
         IsLoading = false;
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(ShowListContent));
-
-        if (groups.Length > visibleCount)
-        {
-            StartAppendTimer(groups, visibleCount, cts);
-        }
     }
 
     private void StartAppendTimer(ApplicationGroupViewModel[] groups, int offset, CancellationTokenSource cts)
@@ -237,12 +234,10 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
                     && string.Equals(GetGroupIdentity(item), NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
-            Groups.Clear();
-            Groups.Add(new ApplicationGroupViewModel(
-                NavigationFocusGroupIdentity,
-                groupItems,
-                _workspace,
-                _localization));
+            var group = Groups.FirstOrDefault(group => group.Identity.Equals(NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase))
+                ?? new ApplicationGroupViewModel(NavigationFocusGroupIdentity, groupItems, _workspace, _localization);
+            group.UpdateItems(groupItems);
+            IncrementalCollection.Apply(Groups, new[] { group });
             IsLoading = false;
             OnPropertyChanged(nameof(IsEmpty));
             OnPropertyChanged(nameof(ShowListContent));
@@ -256,25 +251,6 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
             + $"GroupIdentity={NavigationFocusGroupIdentity}.");
         ClearNavigationFilterState();
         ScheduleRebuildGroups();
-    }
-
-    private ApplicationGroupViewModel[] ComputeGroups(IReadOnlyList<ContextMenuItemViewModel> items, string searchText)
-    {
-        return items
-            .Where(static item => !item.IsWindows11ContextMenu && IsClassicCategory(item.Category))
-            .GroupBy(GetGroupIdentity, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new
-            {
-                Identity = group.Key,
-                // While typing, only matched sub-items are kept so the rendered
-                // card count stays small and typing never stalls on full-list
-                // layout. An empty query keeps the whole group, as before.
-                MatchedItems = group.Where(item => MatchesItem(group.Key, item, searchText)).ToArray()
-            })
-            .Where(static group => group.MatchedItems.Length > 0)
-            .OrderBy(static group => group.Identity, StringComparer.CurrentCultureIgnoreCase)
-            .Select(group => new ApplicationGroupViewModel(group.Identity, group.MatchedItems, _workspace, _localization))
-            .ToArray();
     }
 
     private string GetGroupIdentity(ContextMenuItemViewModel item) => _identityService.GetIdentity(item).Identity;
@@ -522,13 +498,20 @@ public partial class ApplicationGroupViewModel : ObservableObject
         LocalizationService localization)
     {
         Identity = identity;
-        Items = items;
+        Items = new ObservableCollection<ContextMenuItemViewModel>(items);
         _workspace = workspace;
         _localization = localization;
     }
 
     public string Identity { get; }
-    public IReadOnlyList<ContextMenuItemViewModel> Items { get; }
+    public ObservableCollection<ContextMenuItemViewModel> Items { get; }
+    public void UpdateItems(IReadOnlyList<ContextMenuItemViewModel> items)
+    {
+        if (Items.SequenceEqual(items)) return;
+        IncrementalCollection.Apply(Items, items);
+        OnPropertyChanged(nameof(CountText));
+        RefreshToggleActions();
+    }
     public string CountText => _localization.Format("ApplicationGroupCountFormat", Items.Count);
     public string DisableAllText => _localization.Translate(
         IsDisabling ? "ApplicationGroupDisabling"

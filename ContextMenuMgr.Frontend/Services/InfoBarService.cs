@@ -1,87 +1,46 @@
 using System.Windows;
 using Wpf.Ui.Controls;
-using WpfBorder = System.Windows.Controls.Border;
-using WpfTextBlock = System.Windows.Controls.TextBlock;
 
 namespace ContextMenuMgr.Frontend.Services;
 
-internal sealed class InfoBarService : IInfoBarService
+internal sealed class InfoBarService : IInfoBarService, IDisposable
 {
-    private WpfBorder? _host;
-    private WpfTextBlock? _titleBlock;
-    private WpfTextBlock? _messageBlock;
-    private HyperlinkButton? _linkButton;
+    private InfoBar? _host;
 
-    public void SetInfoBarControl(WpfBorder host, WpfTextBlock titleBlock, WpfTextBlock messageBlock, HyperlinkButton linkButton)
+    public void SetInfoBarControl(InfoBar host)
     {
         _host = host;
-        _titleBlock = titleBlock;
-        _messageBlock = messageBlock;
-        _linkButton = linkButton;
+        host.Unloaded += OnUnloaded;
     }
 
-    public void ShowInformationalInfoBar(string title, string message)
-    {
-        Show(title, message, linkText: null, linkUrl: null);
-    }
-
+    public void ShowInformationalInfoBar(string title, string message) => Show(title, message, null, null);
     public void ShowInformationalInfoBar(string title, string message, string linkText, string linkUrl)
-    {
-        Show(title, message, linkText, linkUrl);
-    }
+        => Show(title, message, linkText, linkUrl);
 
-    public void CloseInfoBar()
-    {
-        if (_host is null)
-        {
-            return;
-        }
-
-        void Close() => _host.Visibility = Visibility.Collapsed;
-
-        if (_host.Dispatcher.CheckAccess())
-        {
-            Close();
-            return;
-        }
-
-        _ = _host.Dispatcher.BeginInvoke((Action)Close);
-    }
+    public void CloseInfoBar() => Dispatch(() => { if (_host is not null) _host.IsOpen = false; });
 
     private void Show(string title, string message, string? linkText, string? linkUrl)
+        => Dispatch(() =>
+        {
+            if (_host is null) return;
+            _host.Title = title;
+            _host.Message = message;
+            _host.Severity = InfoBarSeverity.Informational;
+            _host.Content = string.IsNullOrWhiteSpace(linkUrl) ? null
+                : new HyperlinkButton { Content = linkText, NavigateUri = linkUrl, Padding = new Thickness(0) };
+            _host.IsOpen = true;
+        });
+
+    private void Dispatch(Action action)
     {
-        if (_host is null || _titleBlock is null || _messageBlock is null || _linkButton is null)
-        {
-            return;
-        }
-
-        void ShowCore()
-        {
-            _titleBlock.Text = title;
-            _messageBlock.Text = message;
-
-            if (string.IsNullOrWhiteSpace(linkText) || string.IsNullOrWhiteSpace(linkUrl))
-            {
-                _linkButton.Content = null;
-                _linkButton.NavigateUri = string.Empty;
-                _linkButton.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                _linkButton.Content = linkText;
-                _linkButton.NavigateUri = linkUrl;
-                _linkButton.Visibility = Visibility.Visible;
-            }
-
-            _host.Visibility = Visibility.Visible;
-        }
-
-        if (_host.Dispatcher.CheckAccess())
-        {
-            ShowCore();
-            return;
-        }
-
-        _ = _host.Dispatcher.BeginInvoke((Action)ShowCore);
+        if (_host is not { } host || host.Dispatcher.HasShutdownStarted) return;
+        if (host.Dispatcher.CheckAccess()) action();
+        else _ = host.Dispatcher.BeginInvoke(action);
+    }
+    private void OnUnloaded(object sender, RoutedEventArgs e) => Dispose();
+    public void Dispose()
+    {
+        if (_host is not null) _host.Unloaded -= OnUnloaded;
+        _host = null;
     }
 }
