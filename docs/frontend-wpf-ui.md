@@ -108,6 +108,8 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 `AsyncToggleSwitch` 在固定槽显示开/关或 ProgressRing，单项 Busy 同步置位，`ToggleBusyPresentation.WaitForFirstFrameAsync` 最多 100 ms/两个渲染事件后再写入；隐藏窗口有超时。写入期间禁重复操作，不因 Busy 折叠本来存在的按钮。普通开关仅 HideDisabled 开启时在完成后刷新过滤，避免全表 Reset 阻挡首帧。
 
+待审批的常规/Win11/WPS 分组在允许或拒绝提交期间保留原位的禁用按钮，并在旁边显示 ProgressRing；分组 Busy 覆盖全部逐项决策，防止重复提交。OpenWith 行沿用自身的 Busy 按钮与进度提示。
+
 classic SetEnabled 的 request→独立物理状态核对、20/10 秒预算和迟到广播见 [IPC](process-and-privilege-flows.md#请求迟到通知与不确定结果)。ProgressRing 覆盖核对阶段。权威 requested state 成功、旧 state 回退；无法确认保留当前乐观值并锁操作，直到 fresh update。item version 防旧失败覆盖新结果。Win11 核对应用全部目标，OpenWith 页串行门/IsStateUncertain 和 ShellNew 三态分别在各主文档定义，不重发写入猜结果。
 
 `DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` **必须先 Acknowledge 成功才本地隐藏**，失败保留提示。成功后同时设置本地 dismissed；结构冲突可能仍存在，`ApplyEntry` 保持相同 issue signature 的本地忽略，签名变化重新提示。旧文档“无论后端成功与否都忽略”与当前实现不符。

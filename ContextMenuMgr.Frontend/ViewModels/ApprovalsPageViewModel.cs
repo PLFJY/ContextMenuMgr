@@ -125,18 +125,8 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task AllowGroupAsync(ApprovalQueueItemViewModel? item)
-    {
-        if (item is null)
-        {
-            return;
-        }
-
-        foreach (var sourceItem in item.SourceItems.ToArray())
-        {
-            await _workspace.ApplyDecisionAsync(sourceItem, ContextMenuDecision.Allow);
-        }
-    }
+    private Task AllowGroupAsync(ApprovalQueueItemViewModel? item)
+        => ReviewGroupAsync(item, ContextMenuDecision.Allow);
 
     [RelayCommand]
     private Task DenyAsync(ContextMenuItemViewModel? item)
@@ -145,17 +135,27 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task DenyGroupAsync(ApprovalQueueItemViewModel? item)
+    private Task DenyGroupAsync(ApprovalQueueItemViewModel? item)
+        => ReviewGroupAsync(item, ContextMenuDecision.Deny);
+
+    private async Task ReviewGroupAsync(ApprovalQueueItemViewModel? item, ContextMenuDecision decision)
     {
-        if (item is null)
+        if (item is null || !item.CanReviewApproval)
         {
             return;
         }
 
-        foreach (var sourceItem in item.SourceItems.ToArray())
+        var sourceItems = item.SourceItems.ToArray();
+        item.IsDecisionBusy = true;
+        try
         {
-            await _workspace.ApplyDecisionAsync(sourceItem, ContextMenuDecision.Deny);
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
+            foreach (var sourceItem in sourceItems)
+            {
+                await _workspace.ApplyDecisionAsync(sourceItem, decision);
+            }
         }
+        finally { item.IsDecisionBusy = false; }
     }
 
     [RelayCommand]

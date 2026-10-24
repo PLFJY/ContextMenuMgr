@@ -205,6 +205,8 @@
                                     Content="{Binding DataContext.KeepDisabledText, RelativeSource={RelativeSource AncestorType=Page}}"
                                     Icon="{ui:SymbolIcon Symbol=Dismiss24}"
                                     IsEnabled="{Binding CanReviewApproval}" />
+                                <ui:ProgressRing Width="20" Height="20" Margin="10,0,0,0" IsIndeterminate="True"
+                                    Visibility="{Binding IsDecisionBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 <Grid Margin="10,0,0,0" Visibility="{Binding CanRemove, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <ui:Flyout IsOpen="{Binding IsApprovalRemoveFlyoutOpen, Mode=TwoWay}" Placement="Top">
                                         <StackPanel Width="280">

@@ -86,7 +86,11 @@ public partial class ApprovalQueueItemViewModel : ObservableObject, IApprovalQue
 
     public System.Windows.Media.ImageSource? IconSource => PrimaryItem.IconSource;
 
-    public bool CanReviewApproval => SourceItems.Any(static item => item.CanReviewApproval);
+    public bool CanReviewApproval => !IsDecisionBusy && SourceItems.Any(static item => item.CanReviewApproval);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanReviewApproval))]
+    public partial bool IsDecisionBusy { get; set; }
 
     public bool IsWindows11ContextMenu => SourceItems.Any(static item => item.Entry.IsWindows11ContextMenu);
 
