@@ -25,7 +25,6 @@ internal sealed class TrayHostRunner : IDisposable
     private CancellationTokenSource? _controlServerCts;
 
     private bool _isClosing;
-    private volatile bool _openWithNotification;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TrayHostRunner"/> class.
@@ -138,11 +137,6 @@ internal sealed class TrayHostRunner : IDisposable
 
     private void OpenApprovals()
     {
-        if (_openWithNotification)
-        {
-            _frontendActivationService.TryOpenOpenWith();
-            return;
-        }
         // Win32 balloon callbacks identify the icon, not an approval item. A
         // newer notification or a resolved approval must not supply a stale ID.
         _ = _logger.LogAsync("Opening approvals from tray notification.");
@@ -183,7 +177,10 @@ internal sealed class TrayHostRunner : IDisposable
     {
         if (notification.Kind == PipeNotificationKind.OpenWithChanged)
         {
-            _openWithNotification = true;
+            if (notification.OpenWithPendingCount is not > 0
+                || !string.Equals(notification.UserSid, System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value,
+                    StringComparison.OrdinalIgnoreCase)) return;
+            _ = _logger.LogAsync($"OpenWithApprovalNotificationReceived: PendingCount={notification.OpenWithPendingCount}, Path={notification.SpecialItem?.Metadata.GetValueOrDefault("AppRegistryPath")}.");
             _trayHost?.ShowNotification(_localization.Translate("Tray.OpenWithTitle"),
                 _localization.Translate("Tray.OpenWithMessage"));
             return;
@@ -198,8 +195,6 @@ internal sealed class TrayHostRunner : IDisposable
         {
             return;
         }
-
-        _openWithNotification = false;
 
         _ = _logger.LogAsync($"Approval notification received for item {notification.Item.Id} ({notification.Item.DisplayName}).");
 

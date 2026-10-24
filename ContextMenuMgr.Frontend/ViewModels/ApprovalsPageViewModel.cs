@@ -33,6 +33,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         _navigationState.ApprovalsRequested += OnApprovalsRequested;
         _workspace.Items.CollectionChanged += OnItemsCollectionChanged;
         _workspace.WpsOfficeApprovalItems.CollectionChanged += OnItemsCollectionChanged;
+        _workspace.OpenWithReviews.SnapshotChanged += OnOpenWithItemsChanged;
         foreach (var item in _workspace.Items)
         {
             item.PropertyChanged += OnItemPropertyChanged;
@@ -58,7 +59,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Gets the items.
     /// </summary>
-    public ObservableCollection<ApprovalQueueItemViewModel> Items { get; } = [];
+    public ObservableCollection<IApprovalQueueItem> Items { get; } = [];
 
     /// <summary>
     /// Gets the items View.
@@ -87,7 +88,23 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     /// Gets or sets the selected Item.
     /// </summary>
     [ObservableProperty]
-    public partial ApprovalQueueItemViewModel? SelectedItem { get; set; }
+    public partial IApprovalQueueItem? SelectedItem { get; set; }
+
+    public OpenWithReviewQueueService OpenWithReviews => _workspace.OpenWithReviews;
+
+    [RelayCommand]
+    private Task AcceptRegistrationAsync(OpenWithApprovalItemViewModel item)
+        => OpenWithReviews.DecideAsync(item, OpenWithReviewDecision.Accept, CancellationToken.None);
+
+    [RelayCommand]
+    private Task RejectRegistrationAsync(OpenWithApprovalItemViewModel item)
+        => OpenWithReviews.DecideAsync(item, OpenWithReviewDecision.Reject, CancellationToken.None);
+
+    [RelayCommand]
+    private void InspectRegistration(OpenWithApprovalItemViewModel item)
+    {
+        _navigationState.RequestOpenWith(item.Id);
+    }
 
     public string AllowText => _localization.Translate("Allow");
 
@@ -200,7 +217,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
     private bool FilterItem(object obj)
     {
-        if (obj is not ApprovalQueueItemViewModel item)
+        if (obj is not IApprovalQueueItem item)
         {
             return false;
         }
@@ -261,7 +278,7 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
 
     private void RebuildItems()
     {
-        var existing = Items.ToDictionary(item => CreateApprovalGroupKey(item.PrimaryItem), StringComparer.OrdinalIgnoreCase);
+        var existing = Items.OfType<ApprovalQueueItemViewModel>().ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
         var grouped = _workspace.Items
             .Concat(_workspace.WpsOfficeApprovalItems)
             .Where(static item => item.IsPendingApproval)
@@ -273,12 +290,13 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
                 row.UpdateSources(group.ToArray());
                 return row;
             })
+            .Cast<IApprovalQueueItem>().Concat(_workspace.OpenWithReviews.Items)
             .OrderBy(static item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var removed = Items.Except(grouped).ToArray();
         IncrementalCollection.Apply(Items, grouped);
-        foreach (var row in removed) row.Dispose();
+        foreach (var row in removed.OfType<ApprovalQueueItemViewModel>()) row.Dispose();
 
         ApplyFocusRequest();
     }
@@ -293,11 +311,12 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (var row in Items) row.Dispose();
+        foreach (var row in Items.OfType<ApprovalQueueItemViewModel>()) row.Dispose();
         _localization.LanguageChanged -= OnLanguageChanged;
         _navigationState.ApprovalsRequested -= OnApprovalsRequested;
         _workspace.Items.CollectionChanged -= OnItemsCollectionChanged;
         _workspace.WpsOfficeApprovalItems.CollectionChanged -= OnItemsCollectionChanged;
+        _workspace.OpenWithReviews.SnapshotChanged -= OnOpenWithItemsChanged;
         foreach (var item in _workspace.Items)
         {
             item.PropertyChanged -= OnItemPropertyChanged;
@@ -311,7 +330,14 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
     private void OnApprovalsRequested(object? sender, EventArgs e)
     {
         ObserveFireAndForget(_workspace.RefreshWpsOfficeApprovalsAsync(), "RefreshWpsOfficeApprovalsAsync");
+        ObserveFireAndForget(_workspace.OpenWithReviews.RefreshAsync(CancellationToken.None), "RefreshOpenWithReviewsAsync");
         ApplyFocusRequest();
+    }
+
+    private void OnOpenWithItemsChanged(object? sender, EventArgs e)
+    {
+        RebuildItems();
+        ItemsView.Refresh();
     }
 
     private void ApplyFocusRequest()
@@ -322,8 +348,9 @@ public partial class ApprovalsPageViewModel : ObservableObject, IDisposable
         }
 
         SelectedItem = Items.FirstOrDefault(
-            approval => approval.SourceItems.Any(
-                sourceItem => string.Equals(sourceItem.Id, _navigationState.FocusItemId, StringComparison.OrdinalIgnoreCase)));
+            approval => string.Equals(approval.Id, _navigationState.FocusItemId, StringComparison.OrdinalIgnoreCase)
+                || approval is ApprovalQueueItemViewModel classic && classic.SourceItems.Any(
+                    sourceItem => string.Equals(sourceItem.Id, _navigationState.FocusItemId, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static async void ObserveFireAndForget(Task task, string operationName)

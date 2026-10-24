@@ -15,6 +15,7 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 {
     private readonly IBackendClient _backendClient;
+    private readonly FrontendNavigationState? _navigationState;
     private readonly IconPreviewService _iconPreviewService;
     private readonly LocalizationService _localization;
     private readonly ExplorerRestartStateService _explorerRestartState;
@@ -45,9 +46,14 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         IBackendClient backendClient,
         IconPreviewService iconPreviewService,
         LocalizationService localization,
-        ExplorerRestartStateService explorerRestartState)
+        ExplorerRestartStateService explorerRestartState, FrontendNavigationState? navigationState = null)
     {
         Kind = kind;
+        _navigationState = navigationState;
+        if (kind == SpecialMenuKind.OpenWith && navigationState is not null)
+        {
+            navigationState.OpenWithRequested += OnOpenWithRequested;
+        }
         _titleKey = titleKey;
         _descriptionKey = descriptionKey;
         _backendClient = backendClient;
@@ -96,6 +102,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         _localization.LanguageChanged += OnLanguageChanged;
         Items.CollectionChanged += OnItemsCollectionChanged;
         WinXGroups.CollectionChanged += OnWinXGroupsCollectionChanged;
+        if (kind == SpecialMenuKind.OpenWith) SearchText = navigationState?.OpenWithFocusPath ?? string.Empty;
     }
 
     public SpecialMenuKind Kind { get; }
@@ -924,9 +931,13 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         => ReviewOpenWithAsync(item, !item.HasPersistentProtection);
 
     [RelayCommand]
-    private Task AcceptOpenWithAsync(SpecialMenuItemViewModel item) => ReviewOpenWithAsync(item, null);
+    private void OpenWithApprovals(SpecialMenuItemViewModel item)
+        => _navigationState?.RequestApprovals(item.Entry.Metadata.GetValueOrDefault("AppRegistryPath"));
 
-    private async Task ReviewOpenWithAsync(SpecialMenuItemViewModel item, bool? protect)
+    private void OnOpenWithRequested(object? sender, EventArgs e)
+        => SearchText = _navigationState?.OpenWithFocusPath ?? string.Empty;
+
+    private async Task ReviewOpenWithAsync(SpecialMenuItemViewModel item, bool protect)
     {
         if (Kind != SpecialMenuKind.OpenWith || !item.CanReviewOpenWith) return;
         item.IsBusy = true;
@@ -954,7 +965,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private string LocalizeOpenWithError(Exception ex) => ex.Message is
         "OpenWithExternalVisibility" or "OpenWithOperationUncertain" or "OpenWithUnsupportedRegistration"
         or "OpenWithIdentityUnavailable" or "OpenWithPersistenceUnavailable" or "OpenWithUserProtectionOnly"
-        or "OpenWithProtectionRequiresDisabled"
+        or "OpenWithProtectionRequiresDisabled" or "OpenWithStaleReview" or "OpenWithReviewRequired"
             ? _localization.Translate(ex.Message) : ex.Message;
 
     private async Task ReconcileOpenWithFailureAsync(SpecialMenuItemViewModel? item)
@@ -2033,6 +2044,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        if (_navigationState is not null) _navigationState.OpenWithRequested -= OnOpenWithRequested;
         _backendClient.ItemsRemoved -= OnItemsRemoved;
         _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
         _loadingPresentation.Dispose();
@@ -2152,8 +2164,9 @@ public sealed class WinXPageViewModel : SpecialMenuPageViewModel
 
 public sealed class OpenWithPageViewModel : SpecialMenuPageViewModel
 {
-    public OpenWithPageViewModel(IBackendClient backendClient, IconPreviewService iconPreviewService, LocalizationService localization, ExplorerRestartStateService explorerRestartState)
-        : base(SpecialMenuKind.OpenWith, "OpenWithPageTitle", "OpenWithPageDescription", backendClient, iconPreviewService, localization, explorerRestartState)
+    public OpenWithPageViewModel(IBackendClient backendClient, IconPreviewService iconPreviewService, LocalizationService localization,
+        ExplorerRestartStateService explorerRestartState, FrontendNavigationState navigationState)
+        : base(SpecialMenuKind.OpenWith, "OpenWithPageTitle", "OpenWithPageDescription", backendClient, iconPreviewService, localization, explorerRestartState, navigationState)
     {
     }
 }

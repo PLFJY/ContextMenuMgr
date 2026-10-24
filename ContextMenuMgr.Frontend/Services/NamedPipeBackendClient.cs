@@ -128,6 +128,12 @@ public sealed class NamedPipeBackendClient : IBackendClient
             if (result.SpecialItem is { } special && !mutation && request.Command == PipeCommand.GetSpecialMenuItemState
                 && !_listCache.ApplyResult(special.Id, special, completesMutation: false, observedVersion: version, generation: generation))
                 throw new OperationCanceledException("A newer operation superseded this special menu query.");
+            if (request.Command == PipeCommand.DecideOpenWithReview && result.SpecialItem is { } reviewed)
+            {
+                _listCache.ApplyResult(reviewed.Id, reviewed, completesMutation: false, observedVersion: version, generation: generation);
+                NotificationReceived?.Invoke(this, new BackendNotification { Kind = PipeNotificationKind.ItemStateChanged,
+                    SpecialKind = SpecialMenuKind.OpenWith, UserSid = result.OpenWithReviews?.UserSid, SpecialItem = reviewed });
+            }
             foreach (var entry in result.Items.Where(_ => mutation)) _listCache.ApplyResult(entry.Id, entry, completesMutation: false, generation: generation);
             return result;
         }
@@ -574,6 +580,18 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.SpecialItems;
     }
 
+    public async Task<OpenWithReviewSnapshot> GetOpenWithPendingReviewsAsync(CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.GetOpenWithPendingReviews }, cancellationToken);
+        return response.OpenWithReviews ?? throw new InvalidOperationException("Missing Open With review snapshot.");
+    }
+
+    public async Task<OpenWithReviewSnapshot> DecideOpenWithReviewAsync(OpenWithReviewRequest request, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest { Command = PipeCommand.DecideOpenWithReview,
+            OpenWithReview = request, ClientOperationId = Guid.NewGuid() }, cancellationToken);
+        return response.OpenWithReviews ?? throw new InvalidOperationException("Missing Open With review decision result.");
+    }
     public async Task<SpecialMenuEntry?> SetSpecialMenuItemEnabledAsync(
         SpecialMenuEntry item,
         bool enable,
@@ -1031,7 +1049,10 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     FrontendDebugLog.Info(
                         "NamedPipeBackendClient",
                         $"Notification received on request channel: {responseEnvelope.Notification.Kind}, ItemId={responseEnvelope.Notification.Item?.Id}");
-                    if (responseEnvelope.Notification.ClientOperationId != request.ClientOperationId)
+                    if (responseEnvelope.Notification.ClientOperationId != request.ClientOperationId
+                        && (responseEnvelope.Notification.SpecialKind != SpecialMenuKind.OpenWith
+                            || string.Equals(responseEnvelope.Notification.UserSid,
+                                System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)))
                     {
                         NotificationReceived?.Invoke(this, responseEnvelope.Notification);
                     }
@@ -1235,6 +1256,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
 
     internal bool TryForwardSubscriptionNotification(BackendNotification notification)
     {
+        if (notification.SpecialKind == SpecialMenuKind.OpenWith && !string.Equals(notification.UserSid,
+            System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)) return false;
         if (_recentLocalOperations.Contains(notification.ClientOperationId))
         {
             return false;

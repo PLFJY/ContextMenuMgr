@@ -6,6 +6,9 @@
 public sealed record BackendNotification
 {
     public string? UserSid { get; init; }
+
+    // Null is a diagnostic or ordinary invalidation, never evidence of a pending review.
+    public int? OpenWithPendingCount { get; init; }
     /// <summary>
     /// Gets or sets the kind.
     /// </summary>

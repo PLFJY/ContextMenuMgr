@@ -129,6 +129,47 @@ internal static class OpenWithRegistration
         => Hash(JsonSerializer.Serialize(new[] { ShellVerbVisibility.CaptureValue(key, VisibilityValue),
             ShellVerbVisibility.CaptureValue(key, OwnershipMarker) }));
 
+    internal static string RegistrationStamp(RegistryKey key, string path, bool includeVisibility = true)
+        => RegistrationStamp(key, path, includeVisibility, null);
+
+    private static string RegistrationStamp(RegistryKey key, string path, bool includeVisibility,
+        RegistryTransaction? transaction)
+    {
+        var material = new StringBuilder(path.ToUpperInvariant());
+        var nodes = 0;
+        var values = 0;
+        Read(key, path, 0);
+        return Hash(material.ToString());
+
+        void Read(RegistryKey current, string currentPath, int depth)
+        {
+            if (++nodes > 512 || depth > 16) throw new InvalidOperationException("OpenWithRegistrationTooLarge");
+            material.Append('\n').Append(currentPath.ToUpperInvariant());
+            if (includeVisibility)
+            {
+                var error = RegQueryInfoKey(current.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                    IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, out var written);
+                if (error != 0) throw new Win32Exception(error);
+                material.Append(':').Append(written);
+            }
+            foreach (var name in current.GetValueNames().Order(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!includeVisibility && depth == 0 && (name.Equals(VisibilityValue, StringComparison.OrdinalIgnoreCase)
+                    || name.Equals(OwnershipMarker, StringComparison.OrdinalIgnoreCase))) continue;
+                if (++values > 4096) throw new InvalidOperationException("OpenWithRegistrationTooLarge");
+                material.Append(JsonSerializer.Serialize(ShellVerbVisibility.CaptureValue(current, name)));
+                if (material.Length > 1024 * 1024) throw new InvalidOperationException("OpenWithRegistrationTooLarge");
+            }
+            foreach (var name in current.GetSubKeyNames().Order(StringComparer.OrdinalIgnoreCase))
+            {
+                var childPath = currentPath + "\\" + name;
+                using var child = transaction is null ? current.OpenSubKey(name) : transaction.Open(childPath);
+                if (child is null) throw new InvalidOperationException("OpenWithStaleReview");
+                Read(child, childPath, depth + 1);
+            }
+        }
+    }
+
     internal static bool CanManage(RegistryKey app, string? verbName, RegistryKey? command, string? target)
         => CanManage(app, verbName, command, target, null, null);
 
@@ -191,8 +232,13 @@ internal static class OpenWithRegistration
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
+    [DllImport("advapi32.dll", EntryPoint = "RegQueryInfoKeyW")]
+    private static extern int RegQueryInfoKey(SafeRegistryHandle key, IntPtr keyClass, IntPtr classLength,
+        IntPtr reserved, IntPtr subKeyCount, IntPtr maxSubKeyName, IntPtr maxClass, IntPtr valueCount,
+        IntPtr maxValueName, IntPtr maxValueLength, IntPtr securityLength, out long lastWriteTime);
+
     internal static void SetEnabled(string path, bool enabled, string? expectedStamp, string commandSubPath, string? expectedCommand,
-        string? expectedEditStamp = null)
+        string? expectedEditStamp = null, string? expectedRegistrationStamp = null)
     {
         using var transaction = new RegistryTransaction();
         using var key = transaction.Open(path, writable: true)
@@ -203,6 +249,8 @@ internal static class OpenWithRegistration
             throw new InvalidOperationException("The Open With visibility value changed. Refresh before retrying.");
         if (expectedEditStamp is not null && EditStamp(key, path, transaction) != expectedEditStamp)
             throw new InvalidOperationException("The Open With registration changed. Refresh before retrying.");
+        if (expectedRegistrationStamp is not null && RegistrationStamp(key, path, true, transaction) != expectedRegistrationStamp)
+            throw new InvalidOperationException("OpenWithStaleReview");
         using var selectedCommand = transaction.Open(path + "\\" + commandSubPath);
         if (selectedCommand is null || !string.Equals(selectedCommand.GetValue(null, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string, expectedCommand, StringComparison.Ordinal))
             throw new InvalidOperationException("The Open With command changed. Refresh before retrying.");

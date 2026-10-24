@@ -454,6 +454,15 @@ public sealed class NamedPipeBackendServer
                 => await monitoring.ReviewAsync(request.SpecialItem, request.OpenWithProtection,
                     await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
                         ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
+            PipeCommand.GetOpenWithPendingReviews when _specialMenuService.OpenWithMonitoring is { } reviewQuery
+                => new PipeResponse { Success = true, OpenWithReviews = await reviewQuery.GetPendingReviewsAsync(
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken) },
+            PipeCommand.DecideOpenWithReview when request.OpenWithReview is not null
+                && _specialMenuService.OpenWithMonitoring is { } decisions
+                => await decisions.DecideReviewAsync(request.OpenWithReview,
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
             PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
                 => new PipeResponse
                 {
@@ -978,7 +987,9 @@ public sealed class NamedPipeBackendServer
         };
 
         var subscribers = _clients.Values.Where(connection => connection.IsNotificationSubscriber
-            && (notification.UserSid is null || notification.UserSid.Equals(connection.UserContext?.Sid, StringComparison.OrdinalIgnoreCase))).ToList();
+            && (notification.SpecialKind == SpecialMenuKind.OpenWith
+                ? notification.UserSid is not null && notification.UserSid.Equals(connection.UserContext?.Sid, StringComparison.OrdinalIgnoreCase)
+                : notification.UserSid is null || notification.UserSid.Equals(connection.UserContext?.Sid, StringComparison.OrdinalIgnoreCase))).ToList();
         var removedDeadSubscribers = 0;
         await _logger.LogAsync(
             $"BroadcastNotificationStart: Kind={notification.Kind}, ClientOperationId={notification.ClientOperationId}, SubscriberCount={subscribers.Count}, Timestamp={DateTimeOffset.UtcNow:O}.",

@@ -56,6 +56,7 @@ public partial class ShellViewModel : ObservableObject, IDisposable
         _workspace.PropertyChanged += OnWorkspacePropertyChanged;
         _workspace.Items.CollectionChanged += OnWorkspaceItemsCollectionChanged;
         _workspace.WpsOfficeApprovalItems.CollectionChanged += OnWorkspaceItemsCollectionChanged;
+        _workspace.OpenWithReviews.Items.CollectionChanged += OnOpenWithReviewsChanged;
         foreach (var item in _workspace.Items)
         {
             item.PropertyChanged += OnWorkspaceItemPropertyChanged;
@@ -186,6 +187,7 @@ public partial class ShellViewModel : ObservableObject, IDisposable
         _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
         _workspace.Items.CollectionChanged -= OnWorkspaceItemsCollectionChanged;
         _workspace.WpsOfficeApprovalItems.CollectionChanged -= OnWorkspaceItemsCollectionChanged;
+        _workspace.OpenWithReviews.Items.CollectionChanged -= OnOpenWithReviewsChanged;
         foreach (var item in _workspace.Items)
         {
             item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
@@ -390,7 +392,8 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     private void UpdateApprovalBadge()
     {
         var count = _workspace.Items.Count(static item => item.IsPendingApproval)
-                    + _workspace.WpsOfficeApprovalItems.Count(static item => item.IsPendingApproval);
+                    + _workspace.WpsOfficeApprovalItems.Count(static item => item.IsPendingApproval)
+                    + _workspace.OpenWithReviews.Items.Count;
         _approvalsBadge.Value = count > 0 ? count.ToString() : string.Empty;
         _approvalsBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -415,6 +418,8 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
         UpdateApprovalBadge();
     }
+
+    private void OnOpenWithReviewsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateApprovalBadge();
 
     private void OnWorkspaceItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

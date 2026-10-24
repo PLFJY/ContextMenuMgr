@@ -1,5 +1,10 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.IO.Pipes;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using ContextMenuMgr.Frontend.Services;
 using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
@@ -11,6 +16,536 @@ namespace ContextMenuMgr.Tests;
 [Collection("Registry catalog integration")]
 public sealed class OpenWithRegistrationTests
 {
+    // Permanent: reset between reservation and mutation must cancel isolation, never create a fresh baseline or write.
+    [Fact]
+    public async Task IsolationReservation_ResetBeforeMutationCannotWriteOrRecreateBaseline()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        fixture.CreateLiteral();
+        var observed = await fixture.Read();
+        await fixture.Store!.WithOpenWithAsync(state =>
+        {
+            state.Users[fixture.Context.Sid].PendingIsolations[fixture.Path] = "New";
+            return true;
+        }, true, default);
+        await fixture.Store.ResetAsync(default);
+        var isolate = typeof(OpenWithMonitoringService).GetMethod("SetVisibilityCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => (Task<SpecialMenuEntry>)isolate.Invoke(fixture.Monitoring,
+            [observed, false, false, fixture.Context, CancellationToken.None, null, "New"])!);
+        using (var key = fixture.Open()!) Assert.Null(key.GetValue("NoOpenWith"));
+        Assert.False(File.Exists(fixture.StatePath));
+        Assert.False((await fixture.Pending()).BaselineEstablished);
+    }
+
+    // Permanent: a failed or unsupported isolation is attention, never a successful approval target.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IsolationFailure_NeverPublishesAnActionableReviewOrAllowsBypass(bool unsupported)
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        fixture.CreateLiteral();
+        IDisposable? denied = null;
+        try
+        {
+            if (unsupported)
+            {
+                using var verb = fixture.Open(@"\shell\open", true)!;
+                verb.SetValue("DelegateExecute", "{00000000-0000-0000-0000-000000000000}");
+            }
+            else denied = fixture.Deny("", RegistryRights.SetValue);
+            var notifications = new List<BackendNotification>();
+            fixture.Monitoring!.Changed += (_, notification) => notifications.Add(notification);
+            await fixture.Poll(40);
+            await fixture.Poll(55);
+            var attention = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(OpenWithReviewStatus.IsolationFailed, attention.Status);
+            Assert.False(attention.CanAccept);
+            Assert.False(attention.CanReject);
+            Assert.False(attention.IsQuarantined);
+            Assert.True(attention.IsEnabled);
+            Assert.Empty(notifications); // no successful-isolation approval notification
+            using (var key = fixture.Open()!) Assert.Null(key.GetValue("NoOpenWith"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(attention, OpenWithReviewDecision.Accept));
+            fixture.RestartMonitoring();
+            var restored = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(OpenWithReviewStatus.IsolationFailed, restored.Status);
+            Assert.False(restored.CanAccept);
+            var toggle = await fixture.Service.SetEnabledAsync(await fixture.Read(), true, null, fixture.Context, default);
+            Assert.False(toggle.Success);
+            Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
+        }
+        finally { denied?.Dispose(); }
+    }
+
+    // Permanent: slow/blocked classic discovery must not prevent Applications settling and notification.
+    [Fact]
+    public async Task Monitoring_ClassicCatalogContentionCannotDelayOpenWithDetectionAndShutdown()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.Poll(-40);
+        await fixture.Poll(-5);
+        var logger = new FileLogger(System.IO.Path.ChangeExtension(fixture.StatePath, "monitor.log"));
+        var directory = System.IO.Path.GetDirectoryName(fixture.StatePath)!;
+        var catalog = new ContextMenuRegistryCatalog(logger, fixture.Store!,
+            new RegistryBackupService(System.IO.Path.Combine(directory, "backups"), logger),
+            new BackendProtectionSettingsStore(System.IO.Path.Combine(directory, "protection.json"), logger));
+        var gate = (SemaphoreSlim)typeof(ContextMenuRegistryCatalog)
+            .GetField("_persistentStateGate", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(catalog)!;
+        await gate.WaitAsync();
+        var monitor = new ContextMenuRegistryMonitor(catalog, logger, () => fixture.Context, TimeSpan.FromSeconds(1))
+        { OpenWithMonitoring = fixture.Monitoring };
+        using var stop = new CancellationTokenSource();
+        var detected = new TaskCompletionSource<BackendNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Monitoring!.Changed += (_, notification) =>
+        {
+            if (notification.SpecialItem?.Metadata.GetValueOrDefault("AppRegistryPath") == fixture.Path)
+                detected.TrySetResult(notification);
+        };
+        try
+        {
+            fixture.CreateLiteral();
+            using (var key = fixture.Open(writable: true)!) key.SetValue("NoOpenWith", "");
+            monitor.Start(stop.Token);
+            var signal = await detected.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.False(monitor.BaselineEstablished.IsCompleted); // the real classic gate is still held
+            Assert.Equal(fixture.Context.Sid, signal.UserSid);
+            Assert.True(signal.OpenWithPendingCount > 0);
+            var pending = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(OpenWithReviewStatus.New, pending.Status);
+            fixture.RestartMonitoring();
+            Assert.Equal(pending.Generation, Assert.Single((await fixture.Pending()).Reviews).Generation);
+        }
+        finally
+        {
+            // Cancellation must drain both loops even while classic discovery is still blocked.
+            stop.Cancel();
+            try { await monitor.StopAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+            finally { gate.Release(); }
+        }
+    }
+
+    // Permanent: actual authenticated pipe dispatch, typed client payload and durable Accept.
+    [Fact]
+    public async Task PendingReviews_AuthenticatedPipeQueryAndDecisionPersistExactPhysicalTarget()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var review = await fixture.CreatePending(initiallyDisabled: true);
+        var logger = new FileLogger(System.IO.Path.ChangeExtension(fixture.StatePath, "pipe.log"));
+        var backend = new NamedPipeBackendServer(null!, fixture.Service, null!, null!, null!, null!, null!, logger);
+        var handle = typeof(NamedPipeBackendServer).GetMethod("ObserveClientTaskAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var pipeName = "ContextMenuMgr.Tests.OpenWith." + Guid.NewGuid().ToString("N");
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        async Task Serve()
+        {
+            using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut,
+                NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            await pipe.WaitForConnectionAsync(budget.Token);
+            await (Task)handle.Invoke(backend, [pipe, budget.Token])!;
+        }
+        await using var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        var serving = Serve();
+        var stateBefore = await File.ReadAllBytesAsync(fixture.StatePath);
+        var queried = await client.GetOpenWithPendingReviewsAsync(budget.Token);
+        await serving;
+        Assert.Equal(fixture.Context.Sid, queried.UserSid);
+        Assert.Equal(review.Generation, Assert.Single(queried.Reviews).Generation);
+        Assert.Equal(stateBefore, await File.ReadAllBytesAsync(fixture.StatePath));
+        serving = Serve();
+        var accepted = await client.DecideOpenWithReviewAsync(new(review.RegistryPath, review.Generation, OpenWithReviewDecision.Accept), budget.Token);
+        await serving;
+        Assert.Empty(accepted.Reviews);
+        fixture.RestartMonitoring();
+        Assert.Empty((await fixture.Pending()).Reviews);
+        using (var key = fixture.Open()!) Assert.Equal("", key.GetValue("NoOpenWith"));
+        serving = Serve();
+        await Assert.ThrowsAsync<BackendRequestException>(() => client.DecideOpenWithReviewAsync(
+            new(review.RegistryPath, review.Generation, OpenWithReviewDecision.Accept), budget.Token));
+        await serving;
+
+        // Authenticate a real subscriber, then prove absent/foreign SID signals cannot reach it.
+        serving = Serve();
+        using (var subscriber = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await subscriber.ConnectAsync(budget.Token);
+            using var reader = new StreamReader(subscriber, new UTF8Encoding(false), leaveOpen: true);
+            using var writer = new StreamWriter(subscriber, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeEnvelope { MessageType = PipeMessageType.Request,
+                Request = new PipeRequest { Command = PipeCommand.SubscribeNotifications } }, json));
+            Assert.True(JsonSerializer.Deserialize<PipeEnvelope>((await reader.ReadLineAsync(budget.Token))!, json)!.Response!.Success);
+            var broadcast = typeof(NamedPipeBackendServer).GetMethod("BroadcastNotificationAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var signal = new BackendNotification { Kind = PipeNotificationKind.OpenWithChanged,
+                SpecialKind = SpecialMenuKind.OpenWith, SpecialItem = review.Registration, OpenWithPendingCount = 2 };
+            var notification = reader.ReadLineAsync(budget.Token);
+            foreach (var sid in new string?[] { null, "S-1-5-21-1-2-3-1001", fixture.Context.Sid })
+                await (Task)broadcast.Invoke(backend, [signal with { UserSid = sid }, budget.Token])!;
+            var delivered = JsonSerializer.Deserialize<PipeEnvelope>((await notification)!, json)!.Notification!;
+            Assert.Equal(fixture.Context.Sid, delivered.UserSid);
+            Assert.Equal(2, delivered.OpenWithPendingCount); // one representative is not a complete pending list
+        }
+        await serving;
+    }
+
+    [Fact]
+    public async Task PendingAccept_PreservesExternalDisabledVisibilityAndDoesNotAuthorizeProtection()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.CreatePending(initiallyDisabled: true);
+        using (var key = fixture.Open(writable: true)!) key.SetValue("NoOpenWith", new byte[] { 3, 7 }, RegistryValueKind.Binary);
+        await fixture.Poll(60);
+        await fixture.Poll(75);
+        var pending = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.False(pending.Registration.IsEnabled);
+        var result = await fixture.Decide(pending, OpenWithReviewDecision.Accept);
+        Assert.False(result.SpecialItem!.IsEnabled);
+        Assert.Empty(result.OpenWithReviews!.Reviews);
+        using (var key = fixture.Open()!)
+        {
+            Assert.Equal(new byte[] { 3, 7 }, Assert.IsType<byte[]>(key.GetValue("NoOpenWith")));
+            Assert.Null(key.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
+        }
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
+        fixture.RestartMonitoring();
+        Assert.Empty((await fixture.Pending()).Reviews);
+    }
+
+    // Permanent: the pending query is a read-only view of durable, settled, per-path reviews.
+    [Fact]
+    public async Task PendingReviews_AdoptBaselineSettlePersistAndResetWithoutVisibilityChanges()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        fixture.CreateLiteral();
+        var beforeBaseline = await fixture.Pending();
+        Assert.False(beforeBaseline.BaselineEstablished);
+        Assert.Empty(beforeBaseline.Reviews);
+        Assert.False(File.Exists(fixture.StatePath)); // Query must not establish a baseline.
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        var afterBaseline = await fixture.Pending();
+        Assert.True(afterBaseline.BaselineEstablished);
+        Assert.Empty(afterBaseline.Reviews);
+        using (var command = fixture.Open(@"\shell\open\command", true)!)
+            command.SetValue(null, $"\"{fixture.ExecutablePath}\" /changed \"%1\"");
+        await fixture.Poll(40);
+        Assert.Empty((await fixture.Pending()).Reviews);
+        await fixture.Poll(55);
+        var review = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.Equal(OpenWithReviewStatus.Changed, review.Status);
+        Assert.Equal(fixture.Path, review.RegistryPath);
+        Assert.Equal(fixture.Context.Sid, review.UserSid);
+        var beforeQuery = await File.ReadAllBytesAsync(fixture.StatePath);
+        fixture.RestartMonitoring();
+        Assert.Equal(review.Generation, Assert.Single((await fixture.Pending()).Reviews).Generation);
+        Assert.Equal(beforeQuery, await File.ReadAllBytesAsync(fixture.StatePath));
+        var accepted = await fixture.Decide(review, OpenWithReviewDecision.Accept);
+        Assert.Empty(accepted.OpenWithReviews!.Reviews);
+        Assert.True(accepted.SpecialItem!.IsEnabled);
+        using (var key = fixture.Open()!)
+        {
+            Assert.Null(key.GetValue("NoOpenWith"));
+            Assert.Null(key.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
+        }
+        await fixture.Store!.ResetAsync(default);
+        fixture.RestartMonitoring();
+        await fixture.Poll(60);
+        await fixture.Poll(95);
+        Assert.Empty((await fixture.Pending()).Reviews);
+    }
+
+    [Fact]
+    public async Task PendingReject_VerifiesPhysicalOwnershipAndPersistence_WithoutAuthorizingProtection()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var pending = await fixture.CreatePending();
+        Assert.True(pending.IsQuarantined);
+        Assert.False(pending.IsEnabled);
+        var result = await fixture.Decide(pending, OpenWithReviewDecision.Reject);
+        Assert.True(result.Success);
+        Assert.False(result.SpecialItem!.IsEnabled);
+        Assert.Equal("Owned", result.SpecialItem.Metadata["VisibilityOwnership"]);
+        Assert.Empty(result.OpenWithReviews!.Reviews);
+        using (var key = fixture.Open()!)
+        {
+            Assert.Equal(RegistryValueKind.String, key.GetValueKind("NoOpenWith"));
+            Assert.Equal("", key.GetValue("NoOpenWith"));
+            Assert.StartsWith("ContextMenuMgrPlus.OpenWith.v1:", Assert.IsType<string>(key.GetValue("ContextMenuMgrPlus.OpenWithVisibility")));
+        }
+        fixture.RestartMonitoring();
+        Assert.Empty((await fixture.Pending()).Reviews);
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(pending, OpenWithReviewDecision.Reject));
+    }
+
+    [Theory]
+    [InlineData(OpenWithReviewDecision.Accept)]
+    [InlineData(OpenWithReviewDecision.Reject)]
+    public async Task PendingDecision_RejectsStaleCommandTargetAndGeneration(OpenWithReviewDecision decision)
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var pending = await fixture.CreatePending(initiallyDisabled: true);
+        using (var command = fixture.Open(@"\shell\open\command", true)!)
+            command.SetValue(null, "\"C:\\changed-target.exe\" /changed \"%1\"");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(pending, decision));
+        Assert.Equal(OpenWithReviewStatus.Uncertain, Assert.Single((await fixture.Pending()).Reviews).Status);
+        using (var key = fixture.Open()!) Assert.Equal("", key.GetValue("NoOpenWith"));
+        await fixture.Poll(60);
+        await fixture.Poll(75);
+        var changed = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.Equal(OpenWithReviewStatus.Changed, changed.Status);
+        Assert.NotEqual(pending.Generation, changed.Generation);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(pending, decision));
+        Assert.Single((await fixture.Pending()).Reviews);
+    }
+
+    [Fact]
+    public async Task PendingReviews_IncompleteDiscoveryAndFailedDecisionCommitRetainReview()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var pending = await fixture.CreatePending(initiallyDisabled: true);
+        using (fixture.Deny("", RegistryRights.QueryValues))
+        {
+            await fixture.Poll(60);
+            await fixture.Poll(95);
+            var inaccessible = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(OpenWithReviewStatus.Uncertain, inaccessible.Status);
+            Assert.False(inaccessible.CanAccept);
+            Assert.False(inaccessible.CanReject);
+            Assert.Null(inaccessible.IsEnabled);
+        }
+        Assert.Single((await fixture.Pending()).Reviews);
+        using (fixture.Deny("", RegistryRights.SetValue))
+        {
+            // ACL edits may advance registry last-write time. Review the newly settled physical generation.
+            await fixture.Poll(135);
+            await fixture.Poll(170);
+            pending = Assert.Single((await fixture.Pending()).Reviews);
+            using (File.Open(fixture.StatePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                await Assert.ThrowsAnyAsync<IOException>(() => fixture.Decide(pending, OpenWithReviewDecision.Reject));
+        }
+        Assert.Single((await fixture.Pending()).Reviews);
+        using (var key = fixture.Open()!) Assert.Equal("", key.GetValue("NoOpenWith"));
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Users[fixture.Context.Sid].VisibilityIntents, false, default));
+    }
+
+    [Fact]
+    public async Task PendingIsolation_CannotBeBypassedByToggleOrProtection()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var pending = await fixture.CreatePending();
+        Assert.True(pending.IsQuarantined);
+        Assert.False(pending.IsEnabled);
+        var enabled = await fixture.Service.SetEnabledAsync(await fixture.Read(), true, null, fixture.Context, default);
+        Assert.False(enabled.Success);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await fixture.Monitoring!.ReviewAsync(
+            await fixture.Read(), true, fixture.Context, default));
+        Assert.Single((await fixture.Pending()).Reviews);
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
+        fixture.RestartMonitoring();
+        pending = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.True(pending.IsQuarantined);
+        var allowed = await fixture.Decide(pending, OpenWithReviewDecision.Accept);
+        Assert.True(allowed.SpecialItem!.IsEnabled);
+        Assert.Empty(allowed.OpenWithReviews!.Reviews);
+        using var actual = fixture.Open()!;
+        Assert.Null(actual.GetValue("NoOpenWith"));
+        Assert.Null(actual.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
+    }
+
+    [Fact]
+    public async Task PendingReject_PreservesThirdPartyVisibilityWithoutAdoptingOwnership()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.CreatePending(initiallyDisabled: true);
+        using (var key = fixture.Open(writable: true)!) key.SetValue("NoOpenWith", new byte[] { 3, 7 }, RegistryValueKind.Binary);
+        await fixture.Poll(60);
+        await fixture.Poll(75);
+        var review = Assert.Single((await fixture.Pending()).Reviews);
+        await fixture.Decide(review, OpenWithReviewDecision.Reject);
+        using (var key = fixture.Open()!)
+        {
+            Assert.Equal(new byte[] { 3, 7 }, Assert.IsType<byte[]>(key.GetValue("NoOpenWith")));
+            Assert.Null(key.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
+        }
+        Assert.Empty((await fixture.Pending()).Reviews);
+    }
+
+    [Fact]
+    public async Task PendingReadOnlyRegistration_CanAcknowledgeButCannotReject()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.CreatePending(initiallyDisabled: true);
+        using (var verb = fixture.Open(@"\shell\open", true)!) verb.SetValue("DelegateExecute", "{00000000-0000-0000-0000-000000000000}");
+        await fixture.Poll(80);
+        await fixture.Poll(95);
+        var readOnly = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.True(readOnly.CanAccept);
+        Assert.False(readOnly.CanReject);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(readOnly, OpenWithReviewDecision.Reject));
+        await fixture.Decide(readOnly, OpenWithReviewDecision.Accept);
+        Assert.Empty((await fixture.Pending()).Reviews);
+        using var actual = fixture.Open()!;
+        Assert.Equal("", actual.GetValue("NoOpenWith"));
+        Assert.Null(actual.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
+        using var actualVerb = actual.OpenSubKey(@"shell\open");
+        Assert.Equal("{00000000-0000-0000-0000-000000000000}", actualVerb!.GetValue("DelegateExecute"));
+    }
+
+    [Fact]
+    public async Task PendingReviews_MissingAndReregisteredGenerationsCannotReuseAnOldDecision()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var original = await fixture.CreatePending(initiallyDisabled: true);
+        fixture.Remove();
+        await fixture.Poll(60);
+        await fixture.Poll(75);
+        Assert.Empty((await fixture.Pending()).Reviews);
+        fixture.RestartMonitoring();
+        fixture.CreateLiteral();
+        using (var key = fixture.Open(writable: true)!) key.SetValue("NoOpenWith", "");
+        await fixture.Poll(80);
+        await fixture.Poll(115);
+        var returned = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.Equal(OpenWithReviewStatus.ReRegistered, returned.Status);
+        Assert.Equal(original.RegistryPath, returned.RegistryPath);
+        Assert.NotEqual(original.Generation, returned.Generation);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(original, OpenWithReviewDecision.Accept));
+        await fixture.Decide(returned, OpenWithReviewDecision.Accept);
+    }
+
+    // Permanent: both quarantine and release recover a committed registry write without repeating it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IsolationOrRelease_PhysicalCommitAndFailedPersistenceRemainUncertainUntilReadBack(bool release)
+    {
+        using var fixture = new Fixture(monitoring: true);
+        SpecialMenuEntry before;
+        if (release) before = (await fixture.CreatePending()).Registration;
+        else
+        {
+            await fixture.Poll(0);
+            await fixture.Poll(35);
+            fixture.CreateLiteral();
+            before = await fixture.Read();
+        }
+        await fixture.Store!.WithOpenWithAsync(state =>
+        {
+            var baseline = state.Users[fixture.Context.Sid];
+            baseline.Registrations[fixture.Path] = "interrupted operation";
+            baseline.Generations[fixture.Path] = before.Metadata["RegistrationStamp"];
+            if (!release) baseline.PendingIsolations[fixture.Path] = "New";
+            baseline.VisibilityIntents[fixture.Path] = new()
+            {
+                BeforeGeneration = before.Metadata["RegistrationStamp"], ContentGeneration = before.Metadata["ContentStamp"],
+                CommandIdentity = before.Metadata["CommandIdentity"], Enabled = release, ResolveReview = release,
+                IsolationReviewStatus = release ? null : "New"
+            };
+            return true;
+        }, true, default);
+        var actual = SpecialMenuService.SetOpenWithEnabled(before, release, fixture.Context);
+        Assert.Equal(release, actual.IsEnabled);
+        using (File.Open(fixture.StatePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await fixture.Poll(60);
+            await fixture.Poll(75);
+            Assert.Single(await fixture.Store.WithOpenWithAsync(s => s.Users[fixture.Context.Sid].VisibilityIntents, false, default));
+            fixture.RestartMonitoring();
+            var uncertain = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(OpenWithReviewStatus.Uncertain, uncertain.Status);
+            Assert.False(uncertain.CanAccept);
+            Assert.False(uncertain.CanReject);
+        }
+        await fixture.Poll(80);
+        await fixture.Poll(115);
+        var snapshot = await fixture.Pending();
+        if (release) Assert.Empty(snapshot.Reviews);
+        else
+        {
+            var pending = Assert.Single(snapshot.Reviews);
+            Assert.Equal(OpenWithReviewStatus.New, pending.Status);
+            Assert.True(pending.IsQuarantined);
+            Assert.False(pending.IsEnabled);
+        }
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Users[fixture.Context.Sid].VisibilityIntents, false, default));
+        Assert.Equal(actual.Metadata["RegistrationStamp"], (await fixture.Read()).Metadata["RegistrationStamp"]);
+    }
+
+    [MachineRegistrationFact]
+    public async Task PendingReviews_UserAndMachineRegistrationsWithSameNameStaySeparate()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,
+            Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
+        var machineSubPath = @"SOFTWARE\Classes\Applications\" + fixture.Path[(fixture.Path.LastIndexOf('\\') + 1)..];
+        var machinePath = @"HKEY_LOCAL_MACHINE\" + machineSubPath;
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        try
+        {
+            fixture.CreateLiteral();
+            using (var app = fixture.Open(writable: true)!) app.SetValue("FriendlyAppName", "Identical review display name");
+            using (var app = machine.CreateSubKey(machineSubPath)!)
+            {
+                app.SetValue("FriendlyAppName", "Identical review display name");
+                using var command = app.CreateSubKey(@"shell\open\command");
+                command.SetValue(null, $"\"{fixture.ExecutablePath}\" \"%1\"");
+            }
+            var signals = new List<BackendNotification>();
+            fixture.Monitoring!.Changed += (_, signal) => signals.Add(signal);
+            await fixture.Poll(40);
+            await fixture.Poll(55);
+            var reviews = (await fixture.Pending()).Reviews;
+            Assert.Equal(2, reviews.Count);
+            Assert.All(reviews, r => Assert.Equal(OpenWithReviewStatus.New, r.Status));
+            Assert.All(reviews, r => Assert.True(r.IsQuarantined));
+            Assert.Equal(2, Assert.Single(signals).OpenWithPendingCount);
+            Assert.NotEqual(reviews[0].Generation, reviews[1].Generation);
+            string machineGeneration;
+            using (var observed = machine.OpenSubKey(machineSubPath)!) machineGeneration = OpenWithRegistration.RegistrationStamp(observed, machinePath);
+            await fixture.Decide(Assert.Single(reviews, r => r.RegistryPath == fixture.Path), OpenWithReviewDecision.Reject);
+            using (var untouched = machine.OpenSubKey(machineSubPath)!)
+                Assert.Equal(machineGeneration, OpenWithRegistration.RegistrationStamp(untouched, machinePath));
+            var machineReview = Assert.Single((await fixture.Pending()).Reviews);
+            Assert.Equal(machinePath, machineReview.RegistryPath);
+            Assert.True(machineReview.CanReject); // Manual capability does not authorize a machine protection rule.
+            await fixture.Decide(machineReview, OpenWithReviewDecision.Accept);
+            using (var released = machine.OpenSubKey(machineSubPath)!) Assert.Null(released.GetValue("NoOpenWith"));
+            using (var rejected = fixture.Open()!) Assert.NotNull(rejected.GetValue("NoOpenWith"));
+            Assert.Empty((await fixture.Pending()).Reviews);
+            Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
+        }
+        finally { machine.DeleteSubKeyTree(machineSubPath, throwOnMissingSubKey: false); }
+    }
+
+    [Fact]
+    public async Task PendingQueryAndDecision_RequireCallerHiveAndCannotCrossUserScope()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        var pending = await fixture.CreatePending(initiallyDisabled: true);
+        var wrongUser = fixture.Context with { Sid = "S-1-5-21-1-2-3-1001" };
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Monitoring!.GetPendingReviewsAsync(wrongUser, default));
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Monitoring!.DecideReviewAsync(
+            new(fixture.Path, pending.Generation, OpenWithReviewDecision.Accept), wrongUser, default));
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Monitoring!.DecideReviewAsync(
+            new(@"HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Classes\Applications\same.exe", pending.Generation,
+                OpenWithReviewDecision.Reject), fixture.Context, default));
+        Assert.Equal(pending.Generation, Assert.Single((await fixture.Pending()).Reviews).Generation);
+    }
+
+    private sealed class MachineRegistrationFactAttribute : FactAttribute
+    {
+        public MachineRegistrationFactAttribute()
+        {
+            if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
+                Skip = "Requires an elevated disposable Windows testhost for a unique HKLM Applications registration; never elevates automatically.";
+        }
+    }
+
     // Permanent: a registration changing activation shape must not be misreported as physical removal.
     [Fact]
     public async Task CachedSourceVerification_DistinguishesChangedRegistrationFromPhysicalRemoval()
@@ -68,7 +603,7 @@ public sealed class OpenWithRegistrationTests
         Assert.Empty(signals); // incomplete/unstable installer generation
         await fixture.Poll(55);
         Assert.Equal("New", (await fixture.Read()).Metadata["MonitoringStatus"]);
-        Assert.True((await fixture.Read()).IsEnabled);
+        Assert.False((await fixture.Read()).IsEnabled);
         await fixture.Poll(70);
         Assert.Single(signals);
         Assert.Equal(fixture.Context.Sid, signals[0].UserSid);
@@ -82,8 +617,8 @@ public sealed class OpenWithRegistrationTests
         fixture.CreateLiteral();
         await fixture.Poll(110);
         await fixture.Poll(145);
-        Assert.Equal("New", (await fixture.Read()).Metadata["MonitoringStatus"]);
-        Assert.True((await fixture.Read()).IsEnabled);
+        Assert.Equal("ReRegistered", (await fixture.Read()).Metadata["MonitoringStatus"]);
+        Assert.False((await fixture.Read()).IsEnabled);
     }
 
     // Permanent: durable protection survives key recreation/restart; backup collision safety;
@@ -679,6 +1214,20 @@ public sealed class OpenWithRegistrationTests
             Service.OpenWithMonitoring = Monitoring;
         }
         public Task Poll(int seconds) => Monitoring!.PollAsync(Context, _started.AddSeconds(seconds), default);
+        public Task<OpenWithReviewSnapshot> Pending() => Monitoring!.GetPendingReviewsAsync(Context, default);
+        public Task<PipeResponse> Decide(OpenWithPendingReview review, OpenWithReviewDecision decision)
+            => Monitoring!.DecideReviewAsync(new(review.RegistryPath, review.Generation, decision), Context, default);
+        public async Task<OpenWithPendingReview> CreatePending(bool initiallyDisabled = false)
+        {
+            await Poll(0);
+            await Poll(35);
+            CreateLiteral();
+            if (initiallyDisabled)
+                using (var key = Open(writable: true)!) key.SetValue("NoOpenWith", "", RegistryValueKind.String);
+            await Poll(40);
+            await Poll(55);
+            return Assert.Single((await Pending()).Reviews);
+        }
         public void CreateLiteral()
         {
             Create();

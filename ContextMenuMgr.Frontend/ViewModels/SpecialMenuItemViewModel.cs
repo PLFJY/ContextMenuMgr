@@ -77,16 +77,19 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public bool HasPersistentProtection => Entry.Metadata.GetValueOrDefault("PersistentProtection") == "True";
     public bool ShowProtection => HasPersistentProtection || Entry.Kind == SpecialMenuKind.OpenWith
         && Entry.CanEdit && !IsEnabled && !IsDeleted && Entry.Metadata.GetValueOrDefault("RegistryScope") == "User"
-        && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") == "Owned";
-    public bool CanReviewOpenWith => !IsBusy && !IsStateUncertain;
+        && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") == "Owned" && !ShowOpenWithReview;
+    private bool HasUnverifiedOpenWithOutcome => Entry.Kind == SpecialMenuKind.OpenWith
+        && Entry.Metadata.GetValueOrDefault("MonitoringStatus") == "Uncertain";
+    public bool CanReviewOpenWith => IsBackendAvailable && !IsBusy && !IsStateUncertain
+        && (!HasUnverifiedOpenWithOutcome || HasPersistentProtection);
     public string ProtectionText => _localization.Translate(HasPersistentProtection ? "OpenWithProtectionOff" : "OpenWithProtectionOn");
     public string ProtectionToolTip => _localization.Translate("OpenWithProtectionNotice");
     public string MonitoringText => (HasPersistentProtection ? _localization.Translate("OpenWithProtectionActive") + " · " : string.Empty)
         + (Entry.Metadata.GetValueOrDefault("MonitoringStatus") is { Length: > 0 } status
             ? _localization.Translate("OpenWithMonitor" + status) : string.Empty);
     public bool HasMonitoringText => !string.IsNullOrWhiteSpace(MonitoringText);
-    public bool ShowOpenWithReview => Entry.Metadata.GetValueOrDefault("MonitoringStatus") is "New" or "Changed" or "ReRegistered" or "Reapplied";
-    public string AcceptOpenWithText => _localization.Translate("OpenWithAcceptCurrent");
+    public bool ShowOpenWithReview => Entry.Metadata.GetValueOrDefault("MonitoringStatus") is "New" or "Changed" or "ReRegistered" or "Conflict" or "Uncertain" or "IsolationFailed";
+    public string OpenWithApprovalsText => _localization.Translate("PendingApprovalTitle");
     public bool HasRegistrationNotice => Entry.Kind == SpecialMenuKind.OpenWith && Entry.Id != "openwith:use-store";
     public string RegistrationNotice => _localization.Translate("OpenWithScope" + Entry.Metadata.GetValueOrDefault("RegistryScope"))
         + (IsReadOnlyOpenWith ? string.Empty : Entry.Metadata.GetValueOrDefault("VisibilityOwnership") switch
@@ -114,17 +117,18 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         "PackagedShellNewCreationSummary",
         Entry.Metadata.GetValueOrDefault("ShellNewFileName") ?? string.Empty);
 
-    public bool CanDelete => IsBackendAvailable && Entry.CanDelete && !IsBusy && !IsDeleted && !IsStateUncertain;
+    public bool CanDelete => IsBackendAvailable && Entry.CanDelete && !IsBusy && !IsDeleted && !IsStateUncertain && !HasUnverifiedOpenWithOutcome;
 
-    public bool CanUndoDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
+    public bool CanUndoDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain && !HasUnverifiedOpenWithOutcome;
 
-    public bool CanPermanentlyDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain;
+    public bool CanPermanentlyDelete => IsBackendAvailable && Entry.Kind != SpecialMenuKind.WinX && Entry.CanDelete && !IsBusy && IsDeleted && !IsStateUncertain && !HasUnverifiedOpenWithOutcome;
 
     public bool CanEdit => Entry.CanEdit
         && Entry.Metadata.GetValueOrDefault("EntryType") != "DefaultDropEffect"
         && Entry.Metadata.GetValueOrDefault("CanEditDetails") != "false"
         && !IsBusy
         && !IsStateUncertain
+        && !HasUnverifiedOpenWithOutcome
         && !IsDeleted;
 
     public bool CanMove => IsBackendAvailable && Entry.CanMove && !IsBusy && !IsDeleted;
@@ -139,9 +143,11 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanUndoDelete))]
     [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
     [NotifyPropertyChangedFor(nameof(CanMove))]
+    [NotifyPropertyChangedFor(nameof(CanReviewOpenWith))]
     public partial bool IsBackendAvailable { get; set; } = true;
 
-    public bool CanToggle => IsBackendAvailable && Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain
+    public bool CanToggle => IsBackendAvailable && Entry.CanEdit && ShowToggle && !IsBusy && !IsDeleted && !IsStateUncertain && !HasUnverifiedOpenWithOutcome
+        && !(Entry.Kind == SpecialMenuKind.OpenWith && !IsEnabled && ShowOpenWithReview)
         && !(Entry.Kind == SpecialMenuKind.OpenWith && Entry.Metadata.GetValueOrDefault("VisibilityOwnership") is "Unknown" or "Changed");
 
     public bool ShowDelete => (Entry.CanDelete || IsReadOnlyPackagedShellNew) && !IsDeleted;
@@ -308,7 +314,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(MonitoringText));
         OnPropertyChanged(nameof(HasMonitoringText));
         OnPropertyChanged(nameof(ShowOpenWithReview));
-        OnPropertyChanged(nameof(AcceptOpenWithText));
+        OnPropertyChanged(nameof(OpenWithApprovalsText));
     }
 
     partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(CanReviewOpenWith));

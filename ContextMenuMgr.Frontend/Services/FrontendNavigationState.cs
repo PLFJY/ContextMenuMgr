@@ -14,6 +14,14 @@ public partial class FrontendNavigationState : ObservableObject
     public partial string? FocusItemId { get; set; }
 
     public event EventHandler? ApprovalsRequested;
+    public event EventHandler? OpenWithRequested;
+    public string? OpenWithFocusPath { get; private set; }
+
+    public void RequestOpenWith(string path)
+    {
+        OpenWithFocusPath = path;
+        OpenWithRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     /// Executes request Approvals.

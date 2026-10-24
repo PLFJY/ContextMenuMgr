@@ -24,6 +24,9 @@
                     Margin="0,6,0,0"
                     Opacity="0.72"
                     Text="{Binding Description}" />
+                <ui:TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
+                    Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                    Text="{Binding OpenWithReviews.StatusText}" />
                 <StackPanel Margin="0,12,0,0">
                     <ui:TextBlock
                         Margin="0,0,0,6"
@@ -48,7 +51,49 @@
             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollBarVisibility="Auto"
             SelectedItem="{Binding SelectedItem, Mode=TwoWay}">
-            <ListBox.ItemTemplate>
+            <ListBox.Resources>
+                <DataTemplate DataType="{x:Type viewModels:OpenWithApprovalItemViewModel}">
+                    <Border Margin="0,0,0,10" Padding="12" CornerRadius="8" BorderThickness="1"
+                        Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}">
+                        <StackPanel>
+                            <ui:TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                            <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding CategoryTags}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="8,2" CornerRadius="4" HorizontalAlignment="Left"
+                                            Background="{DynamicResource AccentFillColorSecondaryBrush}">
+                                            <ui:TextBlock FontSize="11" Text="{Binding Text}"
+                                                Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ui:TextBlock Margin="0,6,0,0" FontFamily="Consolas" FontSize="11" Opacity="0.72"
+                                Text="{Binding RegistryPath}" TextWrapping="Wrap" />
+                            <ui:TextBlock Margin="0,6,0,0" Text="{Binding Subtitle}" TextWrapping="Wrap" />
+                            <ui:TextBlock Margin="0,6,0,0" Text="{Binding Notes}" TextWrapping="Wrap" />
+                            <ui:TextBlock Margin="0,6,0,0" Opacity="0.78" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                            <WrapPanel Margin="0,12,0,0">
+                                <ui:Button Margin="0,0,8,4" Padding="12,5" Content="{Binding AcceptText}"
+                                    Icon="{ui:SymbolIcon Symbol=Checkmark24}"
+                                    Command="{Binding DataContext.AcceptRegistrationCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                    CommandParameter="{Binding}" IsEnabled="{Binding CanAccept}"
+                                    Visibility="{Binding Review.CanAccept, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button Margin="0,0,8,4" Padding="12,5" Content="{Binding RejectText}"
+                                    Icon="{ui:SymbolIcon Symbol=Dismiss24}" Appearance="Secondary"
+                                    Command="{Binding DataContext.RejectRegistrationCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                    CommandParameter="{Binding}" IsEnabled="{Binding CanReject}"
+                                    Visibility="{Binding Review.CanReject, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button Margin="0,0,8,4" Padding="12,5" Content="{Binding InspectText}"
+                                    Command="{Binding DataContext.InspectRegistrationCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                    CommandParameter="{Binding}" />
+                                <ui:ProgressRing Width="20" Height="20" IsIndeterminate="True"
+                                    Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
                 <DataTemplate DataType="{x:Type viewModels:ApprovalQueueItemViewModel}">
                     <Border
                         Margin="0,0,0,10"
@@ -196,7 +241,7 @@
                         </StackPanel>
                     </Border>
                 </DataTemplate>
-            </ListBox.ItemTemplate>
+            </ListBox.Resources>
         </ListBox>
     </Grid>
 </Page>

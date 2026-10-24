@@ -169,6 +169,7 @@ public static class MenuListTransitions
             Windows11ContextMenuItemViewModel row => row.IsSystemCommand ? row.Id : row.PackageFamilyName,
             ApplicationGroupViewModel row => row.Identity,
             ApprovalQueueItemViewModel row => ContextMenuApprovalIdentity.CreateLogicalItemKey(row.PrimaryItem.Entry),
+            OpenWithApprovalItemViewModel row => row.Id,
             ShellSubMenuItemViewModel row => row.Item.Id,
             _ => null
         };

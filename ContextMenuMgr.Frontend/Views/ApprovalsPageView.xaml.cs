@@ -13,5 +13,10 @@ public partial class ApprovalsPageView : Page
     public ApprovalsPageView()
     {
         InitializeComponent();
+        Loaded += async (_, _) =>
+        {
+            if (DataContext is ViewModels.ApprovalsPageViewModel viewModel)
+                await viewModel.OpenWithReviews.RefreshAsync(CancellationToken.None);
+        };
     }
 }

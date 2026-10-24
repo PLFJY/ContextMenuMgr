@@ -78,6 +78,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         _trayHostProcessService = trayHostProcessService;
         _portablePackageTrustService = portablePackageTrustService;
         _backendClient.NotificationReceived += OnBackendNotificationReceived;
+        OpenWithReviews = new OpenWithReviewQueueService(backendClient, localization, _shutdownCts.Token);
         _backendClient.ItemsRemoved += OnItemsRemoved;
         ConnectionStatus = _localization.Translate("ConnectingStatus");
     }
@@ -95,6 +96,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
     public ObservableCollection<ContextMenuItemViewModel> WpsOfficeApprovalItems { get; } = [];
+
+    public OpenWithReviewQueueService OpenWithReviews { get; }
 
     /// <summary>
     /// Gets the notifications.
@@ -246,6 +249,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             // The normal menu snapshot is ready. WPS approvals are secondary data.
             IsLoading = false;
             await RefreshWpsOfficeApprovalsAsync();
+            await OpenWithReviews.RefreshAsync(_shutdownCts.Token);
         }
         catch (Exception ex)
         {
@@ -497,6 +501,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     public async Task ResetStateDatabaseAsync(CancellationToken cancellationToken)
     {
         await _backendClient.ResetStateDatabaseAsync(cancellationToken);
+        await OpenWithReviews.RefreshAsync(cancellationToken);
         _refreshGeneration++;
         _refreshTask = null;
         await RefreshAsync();
@@ -967,6 +972,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             {
                 await Task.Delay(retryDelay, cancellationToken);
                 var success = await RefreshWpsOfficeApprovalsAsync();
+                success = await OpenWithReviews.RefreshAsync(cancellationToken) && success;
                 retryDelay = success
                     ? TimeSpan.FromSeconds(15)
                     : TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
@@ -1419,7 +1425,12 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         if (dispatcher is null || dispatcher.HasShutdownStarted) return;
         _ = dispatcher.BeginInvoke((Action)(() =>
         {
+            if (notification.SpecialKind == SpecialMenuKind.OpenWith)
+            {
+                if (!OpenWithReviews.Invalidate(notification, _shutdownCts.Token)) return;
+            }
             if (notification.Kind is PipeNotificationKind.ServiceMessage or PipeNotificationKind.OpenWithChanged
+                && notification.MessageResourceKey != "OpenWithMonitoringChanged"
                 && !string.IsNullOrWhiteSpace(notification.Message))
                 ServiceAttentionText = string.IsNullOrWhiteSpace(notification.MessageResourceKey)
                     ? notification.Message : _localization.Translate(notification.MessageResourceKey);

@@ -95,7 +95,7 @@ TrayHost 是每用户进程，因为托盘图标、通知和通知点击激活�
 
 `NativeTrayHost` 使用 `PostMessage(WM_APP + 1)` 将通知、图标显隐和本地化更新派发到隐藏窗口所属线程，与 `TaskbarCreated` 和托盘回调串行处理。只保留最新的一条尚未成功提交的通知；`Shell_NotifyIcon(NIM_MODIFY)` 返回 true 后立即清除投递缓存，此结果只表示 Shell 接受提交，不代表用户已经看到通知。图标注册或通知提交失败时，使用同线程 Win32 timer 每秒重试，最多额外五次；预算耗尽或 timer 创建失败时丢弃未提交通知并停止重试。已有恢复期间的 `TaskbarCreated` 不重置预算；后续新通知或新的图标恢复事件可再次尝试。图标重建不会重新缓存已提交通知。
 
-投递缓存与通知点击上下文独立：仅成功提交设置点击上下文，Explorer 重启不清除此上下文，也不再次投递通知。仅 `NIN_BALLOONUSERCLICK` 路由通知激活，常规审核通知打开 Approvals，OpenWith attention 由 TrayHostRunner 路由 OpenWith；普通鼠标/键盘托盘选择打开主窗口，不消费通知点击上下文。Win32 回调只标识图标，无法可靠区分连续通知对应的审核项，因此通知点击使用现有 frontend control pipe 打开普通 Approvals 页面，不再传递最近接收的 item id。审核已处理时仍可安全打开当前审核列表，无需新增后端协议。
+投递缓存与通知点击上下文独立：仅成功提交设置点击上下文，Explorer 重启不清除此上下文，也不再次投递通知。仅 `NIN_BALLOONUSERCLICK` 路由通知激活，常规审核和 OpenWith 未解决审核均由 TrayHostRunner 打开中央 Approvals；普通鼠标/键盘托盘选择打开主窗口，不消费通知点击上下文。Win32 回调只标识图标，无法可靠区分连续通知对应的审核项，因此通知点击使用现有 frontend control pipe 打开普通 Approvals 页面，不再传递最近接收的 item id，也不根据最新通知类型猜测目标页。审核已处理时仍可安全打开当前审核列表；OpenWith 的 SID 过滤、诊断与待审核计数语义见 [OpenWith](openwith.md#监控审核与显式持久保护)。
 
 `StartWithWindows` 是用户意图，不等于系统已健康实现该意图。启用操作按以下顺序收敛：验证服务注册与 executable path，设置并回读 startup mode，配置并验证 recovery，必要时启动并等待 SCM `Running`，最后等待 backend pipe 的真实 `Ping`；只有全部成功才写用户 policy。`Running` 但 pipe 不响应不能报告成功。普通关闭前端窗口时，仅 `KeepBackgroundAfterClose` 决定当前运行的 Backend Service 和 TrayHost 是否继续运行；即使 `StartWithWindows=true`，关闭保留后台选项也会请求两者退出。`StartWithWindows` 仍决定下次登录时的启动行为。
 

@@ -527,8 +527,8 @@
                                             Text="{Binding MonitoringText}"
                                             Visibility="{Binding HasMonitoringText, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <WrapPanel Margin="0,6,0,0">
-                                            <ui:Button Margin="0,0,6,0" Content="{Binding AcceptOpenWithText}"
-                                                Command="{Binding DataContext.AcceptOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            <ui:Button Margin="0,0,6,0" Content="{Binding OpenWithApprovalsText}"
+                                                Command="{Binding DataContext.OpenWithApprovalsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
                                                 Visibility="{Binding ShowOpenWithReview, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             <ui:Button Content="{Binding ProtectionText}" ToolTip="{Binding ProtectionToolTip}"

@@ -77,5 +77,5 @@
     <value>后端服务不可用。</value>
   </data>
   <data name="Tray.OpenWithTitle" xml:space="preserve"><value>打开方式审核</value></data>
-  <data name="Tray.OpenWithMessage" xml:space="preserve"><value>打开方式注册已改变或保护需要处理，请打开打开方式页面审核。</value></data>
+  <data name="Tray.OpenWithMessage" xml:space="preserve"><value>打开方式注册需要审核，请前往待审批检查。</value></data>
 </root>

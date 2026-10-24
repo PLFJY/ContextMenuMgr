@@ -64,5 +64,7 @@ public enum PipeCommand
     GetShellNewOrderLock,
     SetWin11ApplicationEnabled,
     RequestPortableExit,
-    GetSpecialMenuItemState
+    GetSpecialMenuItemState,
+    GetOpenWithPendingReviews,
+    DecideOpenWithReview
 }

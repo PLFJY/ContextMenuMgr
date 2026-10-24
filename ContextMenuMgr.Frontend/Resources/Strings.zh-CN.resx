@@ -1571,16 +1571,15 @@
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可见性数据或归属标记与已验证写入不符，已保留。</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多个物理注册，未确定最终生效的处理程序</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>受系统保护</value></data>
-  <data name="OpenWithAcceptCurrent" xml:space="preserve"><value>接受当前状态</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>无法验证程序身份。需为现有本地文件的绝对路径，不能使用环境变量或符号链接，文件不能超过 128 MiB。</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>注册已改变，请核查来源与命令。</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>保护需要审核：身份、可见性归属或纠正次数存在冲突，已停止自动写入。可停止保护以接受注册，或核查后禁用并重新授权。</value></data>
-  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>打开方式注册发生变化，请在打开方式页面审核。</value></data>
+  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>打开方式注册已变化，请前往待审批处理。</value></data>
   <data name="OpenWithMonitorMissing" xml:space="preserve"><value>受保护注册不存在。规则仍保留，可在此停止保护。</value></data>
-  <data name="OpenWithMonitorNew" xml:space="preserve"><value>新注册待审核：使用开关禁用，或接受当前状态。</value></data>
+  <data name="OpenWithMonitorNew" xml:space="preserve"><value>新注册待审核，请前往待审批处理。</value></data>
   <data name="OpenWithMonitorReapplied" xml:space="preserve"><value>已重新禁用并验证被重新注册或启用的应用；未执行删除。</value></data>
-  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>应用已重新注册，原删除备份仍保留。</value></data>
-  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>纠正结果尚未确认，正在等待物理状态回读；已暂停自动重试。</value></data>
+  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>应用注册再次出现；已有的删除备份仍保留。</value></data>
+  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>物理结果需要核实。在权威核对成功前暂停审核操作和自动重试。</value></data>
   <data name="OpenWithPersistenceUnavailable" xml:space="preserve"><value>保护未保存：无法验证此便携版的主机身份。</value></data>
   <data name="OpenWithProtectionActive" xml:space="preserve"><value>已启用持续保护</value></data>
   <data name="OpenWithProtectionNotice" xml:space="preserve"><value>仅保护此用户注册。注册表路径、命令、程序路径及 SHA-256 必须一致；程序文件或路径改变时需重新审核。每次授权最多自动纠正三次，HKLM 仅手动管理。其他关联来源仍可能显示此应用。</value></data>
@@ -1627,4 +1626,28 @@
   <data name="MenuItemRemovedMessage" xml:space="preserve"><value>该菜单项已移除，列表已更新。</value></data>
   <data name="MenuListCachedStatus" xml:space="preserve"><value>正在显示缓存结果，正在检查更新。</value></data>
   <data name="MenuListIncompleteStatus" xml:space="preserve"><value>扫描不完整，已保留未能确认的菜单项。</value></data>
+  <data name="OpenWithAcceptRegistration" xml:space="preserve"><value>确认已有禁用</value></data>
+  <data name="OpenWithRejectRegistration" xml:space="preserve"><value>拒绝注册</value></data>
+  <data name="OpenWithInspectRegistration" xml:space="preserve"><value>在打开方式中检查</value></data>
+  <data name="OpenWithReviewNotice" xml:space="preserve"><value>该注册已隔离。通过仅解除本次审核产生且归属已核实的 NoOpenWith；拒绝则保持禁用。其他关联来源仍可能显示此应用，持久保护需另行授权。</value></data>
+  <data name="OpenWithReviewRefreshFailed" xml:space="preserve"><value>无法刷新打开方式审核。已保留原有条目，请刷新后再处理。</value></data>
+  <data name="OpenWithReviewDecisionChecked" xml:space="preserve"><value>响应中断，已重新核对当前审核状态。</value></data>
+  <data name="OpenWithReviewDecisionFailed" xml:space="preserve"><value>未确认审核完成。核对后的条目仍待处理，请检查后再决定。</value></data>
+  <data name="OpenWithStaleReview" xml:space="preserve"><value>注册内容或审核代际已改变，请刷新并检查当前注册后再决定。</value></data>
+  <data name="OpenWithVisibilityUnverified" xml:space="preserve"><value>可见性尚未核实</value></data>
+  <data name="DebugOpenWithTitle" xml:space="preserve"><value>模拟打开方式注册</value></data>
+  <data name="DebugOpenWithHelp" xml:space="preserve"><value>请保持后端运行。创建前先核实监控基线；创建后最多等待两分钟，查询真实待审批状态，期间暂停清理。不安装或执行软件。</value></data>
+  <data name="DebugOpenWithCreate" xml:space="preserve"><value>模拟新软件注册</value></data>
+  <data name="DebugOpenWithCleanup" xml:space="preserve"><value>清理测试注册</value></data>
+  <data name="DebugOpenWithCreated" xml:space="preserve"><value>注册已创建并回读验证，正在等待进入待审批，请保留注册：</value></data>
+  <data name="DebugOpenWithCleaned" xml:space="preserve"><value>已移除并核实 {0} 个测试注册，监控稳定后会同步队列。</value></data>
+  <data name="DebugOpenWithFailed" xml:space="preserve"><value>操作失败或未能核实。请检查注册表和前端日志，可能仍有未完成的测试注册。</value></data>
+  <data name="DebugOpenWithBaselineWaiting" xml:space="preserve"><value>尚未确认后端监控基线。请保持后端运行，稍后重试；更新程序后请重启后端以加载最新构建。</value></data>
+  <data name="DebugOpenWithPendingConfirmed" xml:space="preserve"><value>已确认进入待审批。托盘气泡是否显示仍由 Windows 决定：</value></data>
+  <data name="DebugOpenWithPendingUnverified" xml:space="preserve"><value>注册表项已创建，但尚未确认进入待审批。请先保留注册并检查后端日志，再决定是否继续创建。</value></data>
+  <data name="OpenWithAllowRegistration" xml:space="preserve"><value>通过并放行</value></data>
+  <data name="OpenWithReviewPreserveDisabled" xml:space="preserve"><value>该注册原已禁用。确认时保留可见性数据，拒绝则保持禁用；审批不会删除原有或第三方禁用值。</value></data>
+  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>尚未完成隔离或隔离失败，禁止放行。请检查注册和后端日志；已确认失败的操作退避重试，不确定写入只进行核对。</value></data>
+  <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>持久保护仍有独立授权。请先检查并停止该保护，再放行此隔离注册。</value></data>
+  <data name="OpenWithReviewRequired" xml:space="preserve"><value>该注册正在等待审核，请先到待审批处理，再启用或授权持久保护。</value></data>
 </root>

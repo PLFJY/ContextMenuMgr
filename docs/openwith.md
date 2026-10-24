@@ -74,15 +74,32 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 ## 监控、审核与显式持久保护
 
-[OpenWithMonitoringService](../ContextMenuMgr.Backend/Services/OpenWithMonitoringService.cs) 由既有 `ContextMenuRegistryMonitor` 五秒循环驱动，不另起后台轮询任务，也不做扩展名来源扫描。每轮重新打开 native HKU/HKLM Applications，无长期 Registry handle/RegNotify watcher；每 root 最多 4096 名，发现预算 15 秒协作取消，单次同步 Windows API 无法抢占。
+[OpenWithMonitoringService](../ContextMenuMgr.Backend/Services/OpenWithMonitoringService.cs) 由 `ContextMenuRegistryMonitor` 管理独立的 Applications 轮询任务，默认每轮结束后等五秒；不等待常规/Win11 全量扫描及其 catalog gate，也不做扩展名来源扫描。两个任务共用停止令牌，Stop/Completion 等待两者退出。每轮重新打开 native HKU/HKLM Applications，无长期 Registry handle/RegNotify watcher；每 root 最多 4096 名，发现预算 15 秒协作取消，单次同步 Windows API 无法抢占。
 
-认证 Pipe 上下文和每 30 秒枚举一次的 WTS active/connected/disconnected token 提供用户。执行前独立验证 SID、loaded hive 和 Classes root；同 SID 多 Session 共用一个 baseline，不同 SID 独立。HKLM/HKU 同名项始终是不同物理来源。通知 `OpenWithChanged` 带 UserSid，只向相同认证 SID 的订阅者发送；普通 OpenWith mutation 广播也按 SID 过滤。通知 DTO 只触发 fresh snapshot，不作为状态直接覆盖 UI。TrayHost 用既有 Win32 通知和 `FrontendControlCommand.OpenWith` / `--open-openwith` 打开本页，隐藏图标时仍工作。
+认证 Pipe 上下文和每 30 秒枚举一次的 WTS active/connected/disconnected token 提供用户。执行前独立验证 SID、loaded hive 和 Classes root；同 SID 多 Session 共用一个 baseline，不同 SID 独立。HKLM/HKU 同名项始终是不同物理来源。通知 `OpenWithChanged` 带 UserSid，只向相同认证 SID 的订阅者发送；普通 OpenWith mutation 广播也按 SID 过滤。通知 DTO 只触发 fresh snapshot，不作为状态直接覆盖 UI。TrayHost 只为持久未解决审核数量大于零的监控通知显示既有 Win32 气泡，Information 级别的 OpenWithApprovalNotificationReceived 记录收到的审核信号，不能作为 Windows 实际显示证明；激活统一通过 `OpenApprovals` 打开中央待审批并重新查询。气泡回调只有图标身份，不能从代表性的 SpecialItem 或最近一次全局状态推断历史点击目标；单条、聚合和重叠气泡均采用安全的通用待审批入口。监控不可用诊断不构造待审批，也不产生审核气泡；隐藏图标时仍可接收通知。兼容决定：保留已发布 `FrontendControlCommand.OpenWith` / `--open-openwith` 的显式页面激活，但 TrayHost 不再使用它转接审核。
 
 ### 稳定与审核
 
 新监控或 session reset 等待 30 秒，且初始发现须 10 秒不变；单项和确认缺失也须稳定 10 秒。访问拒绝/不完整发现暂停采纳，记录失败并退避 30 秒；同一错误持续期间避免重复 attention。首次没有该 SID OpenWith baseline 时静默采纳当前项（可为零），与 regular/WPS markers 无关。已有 baseline 会在启动稳定后发现离线新增；完全在两次轮询之间出现又消失的变化不可见。
 
-新物理注册（包括不支持结构）仅写入持久 review，不自动禁用、不套用经典 Added/quarantine。每 SID/轮聚合一次通知。页面展示来源、作用域及 Accept current state / Keep this registration disabled / Stop persistent protection。`ReviewOpenWithRegistration` 的 `SpecialItem` 带显示代际：`OpenWithProtection=null` 采纳，true 授权，false 移除规则；保存成功后再显示成功并读权威快照。普通页面加载不建立监控 baseline。
+**基础流程：发现新增、改变或重注册 → 核实隔离成功 → 送审；通过后仅解除本次隔离，拒绝则保持禁用。** 首次/重置基线仍静默采纳；第三方已有禁用值保留，无法隔离的项仅显示需处理状态，不能放行。OpenWith 使用独立 NoOpenWith/journal，不套用经典 Added/quarantine。每 SID/轮聚合一次通知。中央待审批是注册审核入口，普通 OpenWith 页保留状态、定位待审批按钮和独立持久保护管理，不再提供竞争性的接受操作。
+
+| 持久状态 | 中央队列语义 |
+| --- | --- |
+| New / Changed / ReRegistered | 已核实禁用，可按当前代际通过或拒绝。确认稳定缺失后保留独立缺失身份，重现归为 ReRegistered；未观察到缺失的同内容重写按 Changed。 |
+| Conflict | 显式 attention，须到 OpenWith 检查并停止或重新授权保护，不展示普通接受/拒绝。 |
+| Uncertain | 显示待核实，暂停审核 mutation；查询失败、物理代际尚未稳定或 visibility journal 未完成时同样禁止决策。 |
+| IsolationFailed | 尚未成功隔离，禁止审核放行；已核实失败每路径退避 30 秒，不确定写入只回读。 |
+| Reapplied | 已核实保护结果，仅信息，不计入未解决队列。 |
+| Missing | 已确认缺失后不制造活动应用审批，规则仍在普通 OpenWith 页管理。尚无法确认的缺失保留 Uncertain。 |
+
+`GetOpenWithPendingReviews` 使用认证 SID、loaded hive/native view，只读取持久 review、未完成 journal 与保护 attention 的准确物理路径，不扫描全部 Applications、不建立 baseline、不写注册表或生成 review。最多 8192 个身份，后端 15 秒协作预算；单项读取不完整保留 Uncertain，可见性返回 null 并显示尚未核实，不使用占位布尔值猜测启用状态；状态库/身份/数量错误使整次查询失败，前端保留原列表。结果为独立强类型 OpenWithReviewSnapshot，包含用户、物理路径、SpecialMenuEntry 原始信息、status、capability/限制及 protection，并以 BaselineEstablished 明确表示该认证 SID 的持久基线是否存在；此只读标志不建立基线。HKU/HKLM 同名项分别决策。
+
+`DecideOpenWithReview` 提交路径、审核 generation 和 Accept/Reject。generation 结合持久审核版本、SID/物理路径及完整注册 fingerprint；fingerprint 包含原始值/类型、子键及 last-write time，最多 512 个节点、深度 16、4096 个值、1 MiB 序列化指纹材料，超限 fail closed。不支持激活结构也有物理指纹。只接受与最新稳定观测和 fresh read 完全一致的 generation；解除本次隔离时还在原有 TxR 内再次核对，内容或同内容重建使旧决策失效。
+
+Accept 经原 TxR/read-back 解除归属仍匹配的本次隔离，提交成功才移出队列；原已禁用的项仅确认并保留原值。Reject 回读已禁用后持久解除审核，保持 NoOpenWith，不删除注册或自动授权保护。IsolationFailed/Conflict/Uncertain 仅提供检查；原有保护授权须先显式停止才能放行。
+
+兼容决定：保留已发布 `ReviewOpenWithRegistration` nullable 协议：true/false 仅管理保护，null 将原 DTO 的准确代际转到同一 Accept 实现；缺少有效代际或已无未解决审核时拒绝并要求刷新。普通页面加载及上述查询均不建立 baseline。
 
 ### 授权身份与限制
 
@@ -97,17 +114,21 @@ exe 必须是存在的固定本地盘文件，至多 128 MiB，不含环境变�
 3. 持有 exe identity 句柄，使用既有 `OpenWithRegistration.SetEnabled` TxR 写入；fresh read-back 后保存 Reapplied/时间及 review。已有 NoOpenWith 不覆盖、不认领。
 4. 失败、取消或结果保存失败保留 durable Uncertain。下一轮只确认已禁用，或进入 Conflict/review，不盲重试该次未知写入。
 
-每次授权至多三次纠正，累计持久退避 30/120/270 秒；再被恢复为开启则 Conflict，等待新授权，避免持续与安装器/管理员争写。显式普通 Enable **先持久撤销规则**再注册表启用，撤销保存失败则拒绝启用；Stop protection 只撤销意图，不改物理可见性。原项缺失仍保留 rule-only 卡片或已有 deleted backup，供用户移除授权。
+每次授权至多三次纠正，累计持久退避 30/120/270 秒；再被恢复为开启则 Conflict，等待新授权，避免持续与安装器/管理员争写。隔离、审批放行与普通开关共用 visibility journal：先在 monitor/store gates 内验证身份与代际并持久预留，再执行原 TxR 和 fresh read-back，最后提交 baseline/review/规则结果。Enable 在预留期间暂停该路径自动保护，只有物理及保存核实后才撤销规则；失败保留既有授权。普通禁用不确认注册审核；待审核项禁止绕过中央审批启用或新增保护授权。Stop protection 只撤销授权，不改物理可见性。原项缺失仍保留 rule-only 卡片或已有 deleted backup，供用户移除授权。
 
-监控不 rename/purge，不增加 `.deleted` 后缀，也不覆盖备份或重注册原项。重新注册与备份分别送审；匹配显式规则时可验证禁用，不称“已自动删除”。Applications suppression 仍不能控制其它关联来源或默认应用。
+Registry 和 JSON 不共享事务。写后提交失败保留 durable journal，队列和普通页面显示 Uncertain 并阻止重复开关。后续 monitor 只读核对：完整原 generation 未变则解除 journal，保留 review/规则；目标可见性、归属和非可见性内容都核实一致才提交结果。其余情况继续待核实，不盲写、不清除。
+
+监控不 rename/purge，不增加 `.deleted` 后缀，也不覆盖备份或重注册原项。重新注册单独送审，备份仍在原页面管理；匹配显式规则时可验证禁用，不称“已自动删除”。Applications suppression 仍不能控制其它关联来源或默认应用。
 
 ### 持久格式与 reset
 
-独立 schema-3 `openWith` section 保存 users/baseline/reviews/rules，不造伪 classic state。原子写、备份、损坏恢复、host quarantine 与跨 section merge 见[状态与监控](state-and-monitoring.md)。schema 2/raw 升级不制造规则，旧 schema-2 reader 拒绝新格式。reset 一起删除授权、review、baseline 和 backup，下轮重新静默采纳，但不启用注册、不删 NoOpenWith。hostIdentity 字段只保存散列；**授权 section 本身保存 SID 和物理 HKU 路径**，不能声称整个文件不含 SID。
+独立 schema-3 `openWith` section 保存 users/baseline/reviews/rules，以及 generations/reviewVersions/visibilityIntents/missingRegistrations/pendingIsolations/quarantines，不造伪 classic state。原子写、备份、损坏恢复、host quarantine 与跨 section merge 见[状态与监控](state-and-monitoring.md)。旧 schema-3 缺新增字段时使用空集合，保留原 reviews/rules；monitor 对未保存完整指纹的历史未变 baseline 补录观测，不制造升级送审洪泛。schema 2/raw 升级不制造规则，旧 schema-2 reader 拒绝新格式。reset 一起删除授权、review、baseline 和 backup，下轮重新静默采纳，但不启用注册、不删 NoOpenWith。hostIdentity 字段只保存散列；**授权 section 本身保存 SID 和物理 HKU 路径**，不能声称整个文件不含 SID。
 
 ### 监控验收
 
-在 Windows 10/11 真实服务上验证首次/重置不送审洪泛、HKU/HKLM 新项仅审核、授权后相同 binary/commands 重建可纠正、重启后继续授权；改 binary/command/path/外部 visibility 应保留并 Conflict。移除 owned visibility 三次后再次重建应停止；普通 Enable 撤销规则。删除后重注册不得覆盖 backup，原项缺失仍可停保护。验证 RDP/快速切换、hive unload/reload、SID 通知、隐藏托盘激活、真实安装器时序。registry fixture 测试不能替代 Explorer 候选列表、HKLM 提升服务或默认应用启动验收。
+Debug 构建主窗口按 F12，在调试工具的“模拟打开方式注册”中创建唯一 `ContextMenuMgrPlus.DebugOpenWith.<GUID>.exe`。工具在前端当前账号已加载的 native `HKU\<SID>\Software\Classes\Applications` 直接模拟外部安装器写入，command 指向系统 notepad.exe，但不执行程序；不是正常管理链路 A 的替代入口。创建前通过只读审核查询验证 BaselineEstablished，未确认则拒绝创建并提示稍后重试，避免测试项被首次基线直接采纳。写后分别显示“注册已创建”和“已确认进入待审批”，最多等待两分钟定向查询真实持久队列；等待期间停用重复创建和清理，关闭窗口取消等待但保留已创建注册。超时/后端不可用明确提示送审尚未确认，不能当作未写注册表而盲重试。工具不直接生成 review、气泡或徽标；失败细节写前端日志。重新打开调试窗口仍可按“清理测试注册”删除名称符合精确 GUID 格式且 `ContextMenuMgrPlus.DebugOpenWithOwner` 与 GUID 匹配的本用户活动项，逐项回读缺失；其它注册、`.deleted` 备份和已授权规则均保留。已删除备份/缺失规则仍通过普通 OpenWith 管理。整个窗口沿用非 Debug 编译排除，不影响 Beta/Release。
+
+在 Windows 10/11 真实服务上验证首次/重置不送审洪泛、HKU/HKLM 新项先隔离再审核、授权后相同 binary/commands 重建可纠正、重启后继续授权；改 binary/command/path/外部 visibility 应保留并 Conflict。移除 owned visibility 三次后再次重建应停止；普通 Enable 撤销规则。删除后重注册不得覆盖 backup，原项缺失仍可停保护。在一次监控已稳定的唯一测试注册上分别验证气泡投递、徽标、中央队列、通过仅解除本次隔离、拒绝保留 NoOpenWith/归属值、状态文件与重启、UI 同步；换 command/target 或重建同内容时旧请求须拒绝。锁住测试状态文件模拟提交失败，不能从响应/气泡判断已完成。验证 RDP/快速切换、hive unload/reload、SID 通知、隐藏托盘激活、真实安装器时序。registry fixture 测试不能替代 Explorer 候选列表、HKLM 提升服务或默认应用启动验收。
 
 ## 源码与维护
 

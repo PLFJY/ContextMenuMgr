@@ -562,7 +562,14 @@ public sealed class ContextMenuStateStore
             {
                 if (monitoring.Users is null || monitoring.Rules is null
                     || monitoring.Users.Any(p => string.IsNullOrWhiteSpace(p.Key) || p.Value is null
-                        || p.Value.Registrations is null || p.Value.Reviews is null)
+                        || p.Value.Registrations is null || p.Value.Reviews is null || p.Value.Generations is null
+                        || p.Value.ReviewVersions is null || p.Value.VisibilityIntents is null || p.Value.MissingRegistrations is null
+                        || p.Value.PendingIsolations is null || p.Value.Quarantines is null
+                        || p.Value.PendingIsolations.Any(i => i.Value is not ("New" or "Changed" or "ReRegistered"))
+                        || p.Value.VisibilityIntents.Any(i => i.Value is null || string.IsNullOrEmpty(i.Value.BeforeGeneration)
+                            || string.IsNullOrEmpty(i.Value.CommandIdentity) || string.IsNullOrEmpty(i.Value.ContentGeneration)
+                            || i.Value.IsolationReviewStatus is not (null or "New" or "Changed" or "ReRegistered")
+                            || i.Value.IsolationReviewStatus is not null && (i.Value.Enabled || i.Value.ResolveReview)))
                     || monitoring.Rules.Any(p => p.Value is null || string.IsNullOrWhiteSpace(p.Value.Sid)
                         || string.IsNullOrWhiteSpace(p.Value.Path) || p.Value.Attempts < 0))
                     throw new InvalidDataException("Invalid Open With monitoring state.");
@@ -572,6 +579,12 @@ public sealed class ContextMenuStateStore
                 {
                     user.Registrations = new(user.Registrations, StringComparer.OrdinalIgnoreCase);
                     user.Reviews = new(user.Reviews, StringComparer.OrdinalIgnoreCase);
+                    user.Generations = new(user.Generations, StringComparer.OrdinalIgnoreCase);
+                    user.ReviewVersions = new(user.ReviewVersions, StringComparer.OrdinalIgnoreCase);
+                    user.VisibilityIntents = new(user.VisibilityIntents, StringComparer.OrdinalIgnoreCase);
+                    user.MissingRegistrations = new(user.MissingRegistrations, StringComparer.OrdinalIgnoreCase);
+                    user.PendingIsolations = new(user.PendingIsolations, StringComparer.OrdinalIgnoreCase);
+                    user.Quarantines = new(user.Quarantines, StringComparer.OrdinalIgnoreCase);
                 }
             }
             return new ParsedState(states, envelope);

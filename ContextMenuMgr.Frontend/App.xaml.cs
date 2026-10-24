@@ -60,6 +60,8 @@ public partial class App : Application
             if (RuntimePaths.PackageKind == RuntimePackageKind.Portable) settingsService.EnsureInitialSettingsPersisted();
             _localization = _serviceProvider.GetRequiredService<LocalizationService>();
             _navigationState = _serviceProvider.GetRequiredService<FrontendNavigationState>();
+            _navigationState.OpenWithRequested += OnOpenWithRequested;
+            _navigationState.ApprovalsRequested += OnApprovalsRequested;
             _trayHostProcessService = _serviceProvider.GetRequiredService<TrayHostProcessService>();
 
             FrontendDebugLog.Configure(settingsService.Current.LogLevel);
@@ -86,6 +88,9 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
+    private void OnOpenWithRequested(object? sender, EventArgs e) => _mainWindow?.NavigateTo(typeof(OpenWithPage));
+    private void OnApprovalsRequested(object? sender, EventArgs e) => _mainWindow?.NavigateTo(typeof(ApprovalsPage));
+
     protected override void OnExit(ExitEventArgs e)
     {
         _isShuttingDown = true;
@@ -108,6 +113,11 @@ public partial class App : Application
             _shellViewModel = null;
             _mainWindow = null;
             _localization = null;
+            if (_navigationState is not null)
+            {
+                _navigationState.OpenWithRequested -= OnOpenWithRequested;
+                _navigationState.ApprovalsRequested -= OnApprovalsRequested;
+            }
             _navigationState = null;
             _trayHostProcessService = null;
             _frontendSettingsService = null;

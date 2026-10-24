@@ -23,7 +23,7 @@ B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-l
 | --- | --- |
 | GetSnapshot、Win11 专用 query/mutation，通用 SetEnabled/ApplyDecision 的 Win11 请求 | 认证 Pipe 用户，不 fallback 到另一登录用户；Win11 blocked mutation 不需要 SessionId |
 | ShellNew | 认证 SID；merged HKCR 另验证 WTS token SID/SessionId、profile/hive loaded；无用户/部分发现拒绝，不回服务 HKCR |
-| OpenWith snapshot/mutation/inspection/review | 仅认证 SID、loaded hive/native view；HKLM 项也不允许缺用户，不需要 SessionId |
+| OpenWith snapshot/mutation/inspection/review、GetOpenWithPendingReviews/DecideOpenWithReview | 仅认证 SID、loaded hive/native view；HKLM 项也不允许缺用户，不需要 SessionId |
 | 部分 classic/其它用户请求 | resolver 仍有交互用户 fallback，必须逐 handler 检查，不宣称全局已禁用 fallback |
 | Restart Explorer | Pipe session context，匹配用户的 session fallback；只处理该桌面 |
 | 后台常规 monitor | 每轮交互用户 fallback；缺上下文保留 baseline，不隔离/纠偏/清理；OpenWith 另维护多 SID |
@@ -41,6 +41,10 @@ ShellNew 的 `FrontendUserClassesRoot` 在同步退出即恢复的服务 scope �
 `RequestPortableExit` 是追加的窄生命周期命令，不改变普通 `RequestShutdown`。只接受该 Portable 目录 Frontend EXE 的活进程，Pipe SID、进程 token SID 与实际 Session 必须一致；PID、路径、SID、包类型不取自 DTO，也没有用户/Session fallback。持有客户端进程句柄防 PID 复用，运行期固定的前端文件身份防换名替换；TrayHost 和任意认证本地客户端不能申请自动删除。产品还保守检查其它登录 Session、Frontend/TrayHost 和所有活动 Pipe 消费者；只有调用 Frontend 自己的连接或原生已确认断开的连接可共存，未知消费者拒绝退出。检查与新连接 admission 共用 gate，接受退出后不再接收新业务连接，避免验证与删除之间引入新消费者。实际 DeleteService 在已退出 Pipe impersonation 的 LocalSystem 进程执行，并再次核对线程身份。只允许自身固定 ServiceName，完整顺序和 SCM/policy 核对见[生命周期](runtime-lifecycle.md#portable-自动移除-scm-注册)。此窄链路 A 例外不提供任意服务卸载 API，也不扩大 Pipe ACL 或替代链路 B 的显式维护命令。
 
 [PipeCommand](../ContextMenuMgr.Contracts/PipeCommand.cs) 以枚举数值传输，当前使用默认 System.Text.Json，没有通用协议版本协商。新增命令追加，不能插入/重排既有值。新增字段考虑缺失/null/旧客户端语义；未知或缺必需字段由服务失败响应，不允许拆成有部分成功风险的兼容写循环。`PipeResponse.Success/Message/ErrorCode` 与 `Item/Items/SpecialItem` 是不同证据，成功需要子系统实际读回/保存；不能把空 payload 当权威状态。
+
+GetOpenWithPendingReviews 与 DecideOpenWithReview 追加于既有枚举末尾，旧值不重排。前者只读持久审核路径并返回强类型 OpenWithReviewSnapshot（含认证 SID 的 BaselineEstablished，只反映持久基线是否存在），后者仅接收物理 Applications 路径、generation 和 Accept/Reject，不接受客户端指定 SID；两者都严格取 Pipe 认证 SID 并验证 loaded hive，HKLM 项也不豁免。请求代际不符或不支持时拒绝，成功后提供权威队列和所选 SpecialItem（IsQuarantined 区分本次隔离与原有禁用，通过仅解除前者，拒绝保持禁用）；业务与 TxR/journal 约束见 [OpenWith](openwith.md#稳定与审核)。
+
+OpenWith 监控消息带可空 OpenWithPendingCount；只有明确大于零才属于待审核气泡，diagnostic/null 及 purely informational 结果不作为审批。计数不是前端 badge 数据源，代表 SpecialItem 不是完整列表；广播、前端及 TrayHost 都按认证当前 SID 过滤，缺 SID 的 OpenWith 广播拒绝。
 
 Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
 

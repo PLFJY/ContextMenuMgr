@@ -88,4 +88,6 @@ public sealed record PipeResponse
 
     public OpenWithAssociationInspection? OpenWithInspection { get; init; }
 
+    public OpenWithReviewSnapshot? OpenWithReviews { get; init; }
+
 }

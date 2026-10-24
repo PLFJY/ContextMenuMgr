@@ -7,7 +7,7 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 /// <summary>
 /// Represents the approval Queue Item View Model.
 /// </summary>
-public partial class ApprovalQueueItemViewModel : ObservableObject, IDisposable
+public partial class ApprovalQueueItemViewModel : ObservableObject, IApprovalQueueItem, IDisposable
 {
     private readonly LocalizationService _localization;
 
@@ -58,6 +58,8 @@ public partial class ApprovalQueueItemViewModel : ObservableObject, IDisposable
     }
 
     public ContextMenuItemViewModel PrimaryItem => SourceItems[0];
+
+    public string Id => ContextMenuMgr.Contracts.ContextMenuApprovalIdentity.CreateLogicalItemKey(PrimaryItem.Entry);
 
     /// <summary>
     /// Gets the categories.

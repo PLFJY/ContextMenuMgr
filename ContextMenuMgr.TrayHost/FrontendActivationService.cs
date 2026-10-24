@@ -28,9 +28,6 @@ internal sealed class FrontendActivationService
             new FrontendControlRequest { Command = FrontendControlCommand.ShowMainWindow },
             "--show-main");
 
-    public bool TryOpenOpenWith() => TryOpenFrontend(
-        new FrontendControlRequest { Command = FrontendControlCommand.OpenWith }, "--open-openwith");
-
     /// <summary>
     /// Attempts to open Approvals.
     /// </summary>

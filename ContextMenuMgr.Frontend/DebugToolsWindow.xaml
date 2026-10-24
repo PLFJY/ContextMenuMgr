@@ -7,7 +7,7 @@
     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Width="460"
-    Height="340"
+    Height="620"
     MinWidth="420"
     MinHeight="300"
     ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
@@ -85,6 +85,21 @@
                             Appearance="Secondary"
                             Click="OnForceUpdatePromptClick"
                             Icon="{ui:SymbolIcon Symbol=Alert24}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="0,14,0,0" Style="{StaticResource CardBorderStyle}">
+                    <StackPanel>
+                        <TextBlock x:Name="OpenWithDebugTitleText" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock x:Name="OpenWithDebugHelpText" Margin="0,6,0,12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <WrapPanel>
+                            <ui:Button x:Name="CreateOpenWithDebugButton" Margin="0,0,8,6" Padding="14,7"
+                                       Click="OnCreateOpenWithDebugClick" />
+                            <ui:Button x:Name="CleanupOpenWithDebugButton" Margin="0,0,0,6" Padding="14,7"
+                                       Click="OnCleanupOpenWithDebugClick" />
+                        </WrapPanel>
+                        <TextBox x:Name="OpenWithDebugStatusText" Margin="0,6,0,0" IsReadOnly="True"
+                                 TextWrapping="Wrap" BorderThickness="0" Background="Transparent" />
                     </StackPanel>
                 </Border>
                 <Border Margin="0,14,0,0" Style="{StaticResource CardBorderStyle}">

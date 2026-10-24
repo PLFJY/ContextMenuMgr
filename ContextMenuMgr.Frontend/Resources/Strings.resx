@@ -1571,16 +1571,15 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>Visibility data or ownership marker differs from the verified writer; it is preserved.</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>Multiple physical registrations; effective handler not determined</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>System protected</value></data>
-  <data name="OpenWithAcceptCurrent" xml:space="preserve"><value>Accept current state</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>Cannot verify the executable identity. Use a literal local path to an existing file without symbolic links. Files over 128 MiB are not eligible.</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>Registration changed — review its source and command.</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>Protection needs review. Identity, visibility ownership or correction limit conflicts; no automatic write. Stop protection to accept the registration, or disable and authorize it again after inspection.</value></data>
-  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>Open With registrations changed. Review the Open With page.</value></data>
+  <data name="OpenWithMonitoringChanged" xml:space="preserve"><value>Open With registrations changed. Review Pending Approvals.</value></data>
   <data name="OpenWithMonitorMissing" xml:space="preserve"><value>Protected registration missing. The saved rule remains; stop protection here if no longer wanted.</value></data>
-  <data name="OpenWithMonitorNew" xml:space="preserve"><value>New registration — review; use the switch to disable or accept to keep.</value></data>
+  <data name="OpenWithMonitorNew" xml:space="preserve"><value>New registration — review in Pending Approvals.</value></data>
   <data name="OpenWithMonitorReapplied" xml:space="preserve"><value>Re-registered or re-enabled application disabled and verified; not deleted.</value></data>
-  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>Application re-registered; the deleted backup is preserved.</value></data>
-  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>Correction outcome uncertain. Waiting for physical read-back; automatic retries are suspended.</value></data>
+  <data name="OpenWithMonitorReRegistered" xml:space="preserve"><value>Application registration appeared again; any deleted backup is preserved.</value></data>
+  <data name="OpenWithMonitorUncertain" xml:space="preserve"><value>The physical result needs verification. Decisions and automatic retries are suspended until authoritative reconciliation succeeds.</value></data>
   <data name="OpenWithPersistenceUnavailable" xml:space="preserve"><value>Protection was not saved: this portable host identity could not be verified.</value></data>
   <data name="OpenWithProtectionActive" xml:space="preserve"><value>Persistent protection enabled</value></data>
   <data name="OpenWithProtectionNotice" xml:space="preserve"><value>Opt in for this user registration only. Exact registry path, commands, executable path and SHA-256 must still match. Changed binaries or paths require review. At most three corrections per authorization; HKLM requires manual action. Other association sources can still offer this app.</value></data>
@@ -1627,4 +1626,28 @@ Continue anyway? (Not recommended)</value>
   <data name="MenuItemRemovedMessage" xml:space="preserve"><value>This menu item has been removed. The list has been updated.</value></data>
   <data name="MenuListCachedStatus" xml:space="preserve"><value>Showing saved results; checking for updates.</value></data>
   <data name="MenuListIncompleteStatus" xml:space="preserve"><value>The scan is incomplete. Unverified items have been retained.</value></data>
+  <data name="OpenWithAcceptRegistration" xml:space="preserve"><value>Acknowledge disabled registration</value></data>
+  <data name="OpenWithRejectRegistration" xml:space="preserve"><value>Reject registration</value></data>
+  <data name="OpenWithInspectRegistration" xml:space="preserve"><value>Inspect in Open With</value></data>
+  <data name="OpenWithReviewNotice" xml:space="preserve"><value>This registration is isolated. Allow releases only the verified NoOpenWith isolation created for this review; Reject keeps it disabled. Other association sources may still offer the app. Persistent protection requires separate authorization.</value></data>
+  <data name="OpenWithReviewRefreshFailed" xml:space="preserve"><value>Open With reviews could not be refreshed. Previously known entries are retained; refresh before deciding.</value></data>
+  <data name="OpenWithReviewDecisionChecked" xml:space="preserve"><value>The response was interrupted. Current review state has been verified.</value></data>
+  <data name="OpenWithReviewDecisionFailed" xml:space="preserve"><value>The decision was not confirmed. The refreshed entry remains pending; inspect it before deciding again.</value></data>
+  <data name="OpenWithStaleReview" xml:space="preserve"><value>The registration or review generation changed. Refresh and inspect the current registration before deciding.</value></data>
+  <data name="OpenWithVisibilityUnverified" xml:space="preserve"><value>Visibility unverified</value></data>
+  <data name="DebugOpenWithTitle" xml:space="preserve"><value>Simulate Open With registration</value></data>
+  <data name="DebugOpenWithHelp" xml:space="preserve"><value>Keep the backend running. The tool checks that its baseline exists before creating a registration, then waits up to two minutes for the authoritative pending queue. Cleanup is available after this check. No software is installed or executed.</value></data>
+  <data name="DebugOpenWithCreate" xml:space="preserve"><value>Register a test application</value></data>
+  <data name="DebugOpenWithCleanup" xml:space="preserve"><value>Clean up test registrations</value></data>
+  <data name="DebugOpenWithCreated" xml:space="preserve"><value>Registration created and verified. Waiting for authoritative Pending Approvals; keep it registered:</value></data>
+  <data name="DebugOpenWithCleaned" xml:space="preserve"><value>Removed and verified {0} test registration(s). The monitor will reconcile the queue after settling.</value></data>
+  <data name="DebugOpenWithFailed" xml:space="preserve"><value>Operation failed or could not be verified. Inspect the key and frontend log; an incomplete test registration may remain.</value></data>
+  <data name="DebugOpenWithBaselineWaiting" xml:space="preserve"><value>The backend baseline is not confirmed yet. Keep the backend running and try again shortly. After updating the program, restart the backend to load the current build.</value></data>
+  <data name="DebugOpenWithPendingConfirmed" xml:space="preserve"><value>Confirmed in Pending Approvals. Windows controls whether the tray balloon is displayed:</value></data>
+  <data name="DebugOpenWithPendingUnverified" xml:space="preserve"><value>The registry entry was created, but its pending review is not confirmed. Keep it registered and inspect the backend log before creating another entry.</value></data>
+  <data name="OpenWithAllowRegistration" xml:space="preserve"><value>Allow registration</value></data>
+  <data name="OpenWithReviewPreserveDisabled" xml:space="preserve"><value>This registration was already disabled. Acknowledgement preserves its visibility values; Reject keeps it disabled. Existing or third-party values are never removed by approval.</value></data>
+  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>Isolation is incomplete or failed. The registration cannot be allowed. Inspect the registration and backend log; verified failures retry after backoff, uncertain writes are only reconciled.</value></data>
+  <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>Persistent protection remains authorized. Inspect and stop that protection before allowing this isolated registration.</value></data>
+  <data name="OpenWithReviewRequired" xml:space="preserve"><value>This registration is awaiting review. Allow it in Pending Approvals before enabling it or authorizing persistent protection.</value></data>
 </root>

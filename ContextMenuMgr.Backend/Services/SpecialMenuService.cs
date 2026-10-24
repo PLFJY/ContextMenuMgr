@@ -2480,6 +2480,8 @@ public sealed class SpecialMenuService
                         ["VerbRegistryPath"] = verbPath ?? string.Empty,
                         ["VerbName"] = verbName ?? string.Empty,
                         ["ReadOnlyReason"] = manageable ? string.Empty : "OpenWithUnsupportedRegistration",
+                        ["RegistrationStamp"] = OpenWithRegistration.RegistrationStamp(appKey, deletedAppPath),
+                        ["ContentStamp"] = OpenWithRegistration.RegistrationStamp(appKey, deletedAppPath, includeVisibility: false),
                         ["EditStamp"] = manageable ? OpenWithRegistration.EditStamp(appKey, deletedAppPath) : string.Empty,
                         ["CommandIdentity"] = manageable ? OpenWithRegistration.CommandIdentity(appKey, appPath) : string.Empty,
                         ["VisibilityOwnership"] = OpenWithRegistration.VisibilityOwnership(appKey, appPath, manageable),
@@ -2671,7 +2673,8 @@ public sealed class SpecialMenuService
             VerifyOpenWithRequest(item, appPath);
             var commandPath = item.RegistryPath ?? DecodeId(item.Id);
             OpenWithRegistration.SetEnabled(appPath, enabled, item.Metadata.GetValueOrDefault("VisibilityStamp"),
-                commandPath[(appPath.Length + 1)..], item.CommandText, item.Metadata.GetValueOrDefault("EditStamp"));
+                commandPath[(appPath.Length + 1)..], item.CommandText, item.Metadata.GetValueOrDefault("EditStamp"),
+                item.Metadata.GetValueOrDefault("RegistrationStamp"));
             var updated = ReadOpenWithRegistration(appPath, context);
             if (updated.IsEnabled != enabled)
                 throw new InvalidOperationException("Open With visibility read-back did not match the requested state.");

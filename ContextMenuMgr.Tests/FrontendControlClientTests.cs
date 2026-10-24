@@ -12,6 +12,27 @@ public sealed class FrontendControlClientTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // Permanent: aggregate notification activation stays unfocused; an explicit physical target survives IPC.
+    [Theory]
+    [InlineData(null)]
+    [InlineData(@"HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Classes\Applications\review.exe")]
+    public async Task ApprovalActivation_DeliversCentralDestinationAndExactOptionalFocus(string? path)
+    {
+        var pipeName = CreatePipeName();
+        FrontendControlRequest? received = null;
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var server = ServeOneRequestAsync(pipeName, null, Task.CompletedTask, budget.Token,
+            inspectRequest: request => received = request);
+        Assert.True(await FrontendControlClient.TrySendAsync(new FrontendControlRequest
+        {
+            Command = FrontendControlCommand.OpenApprovals,
+            FocusItemId = path
+        }, pipeName, TimeSpan.FromSeconds(2), budget.Token));
+        await server;
+        Assert.Equal(FrontendControlCommand.OpenApprovals, received!.Command);
+        Assert.Equal(path, received.FocusItemId);
+    }
+
     [Fact]
     public async Task SynchronousCallerWithNonPumpingSynchronizationContext_DoesNotDeadlock()
     {
@@ -166,7 +187,8 @@ public sealed class FrontendControlClientTests
         TaskCompletionSource? requestReceived,
         Task responseGate,
         CancellationToken cancellationToken,
-        Action? onRequestReceived = null)
+        Action? onRequestReceived = null,
+        Action<FrontendControlRequest>? inspectRequest = null)
     {
         await using var server = new NamedPipeServerStream(
             pipeName,
@@ -190,7 +212,9 @@ public sealed class FrontendControlClientTests
         };
 
         var line = await reader.ReadLineAsync(cancellationToken);
-        Assert.NotNull(JsonSerializer.Deserialize<FrontendControlRequest>(line!, JsonOptions));
+        var request = JsonSerializer.Deserialize<FrontendControlRequest>(line!, JsonOptions);
+        Assert.NotNull(request);
+        inspectRequest?.Invoke(request);
         onRequestReceived?.Invoke();
         requestReceived?.TrySetResult();
         await responseGate.WaitAsync(cancellationToken);

@@ -5,12 +5,12 @@
 ## 入口与保存格式
 
 - [ContextMenuRegistryCatalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs)：`RunPersistentStateOperationAsync` 串行快照、审核、删除/恢复与 reconciliation 的 Load → Merge → Save。
-- [ContextMenuRegistryMonitor](../ContextMenuMgr.Backend/Services/ContextMenuRegistryMonitor.cs)：五秒轮询、稳定内存 baseline、session 重建与 OpenWith 调度。
+- [ContextMenuRegistryMonitor](../ContextMenuMgr.Backend/Services/ContextMenuRegistryMonitor.cs)：常规轮询、稳定内存 baseline、session 重建；另独立调度 OpenWith Applications 轮询，完整扫描耗时不能阻塞其稳定观测。
 - [ContextMenuStateStore](../ContextMenuMgr.Backend/Services/ContextMenuStateStore.cs)：store gate、schema parser、原子替换、隔离与恢复。
 - [PersistedContextMenuState](../ContextMenuMgr.Backend/Services/PersistedContextMenuState.cs)：desired/observed、pending、删除备份、visibility provenance、子菜单引用、Win11 恢复日志。
 - [ContextMenuChangeClassifier](../ContextMenuMgr.Backend/Services/ContextMenuChangeClassifier.cs)：身份及外部变化比较；恢复元数据不参与 Added/Modified 判断。
 
-当前 envelope 为 `schemaVersion=3`，包含 `hostIdentity`、`states` 和独立 `openWith`。仍读取 schema 2 与 legacy raw dictionary，不由迁移凭空生成授权规则；未来 schema 拒绝读取，不能当损坏清空。普通 Save 在 store gate 中重新读取并保留最新 OpenWith section；OpenWith callback 同 gate 读取/合并最新常规 states 后保存。catalog gate 与 store gate 各有职责，不能以单次 Load/Save 自身有锁推断整段 read/merge/write 安全。
+当前 envelope 为 `schemaVersion=3`，包含 `hostIdentity`、`states` 和独立 `openWith`。OpenWith 的 per-SID reviews/generations/reviewVersions、可见性操作 journal 与缺失身份均属于该独立 section；中央待审批读取它们，不向 states 添加伪经典项，也不由通知反向生成审核。旧 schema-3 缺新增集合时保留已发布 reviews/rules，空集合兼容加载；读回失败不清空审核。仍读取 schema 2 与 legacy raw dictionary，不由迁移凭空生成授权规则；未来 schema 拒绝读取，不能当损坏清空。普通 Save 在 store gate 中重新读取并保留最新 OpenWith section；OpenWith callback 同 gate 读取/合并最新常规 states 后保存。catalog gate 与 store gate 各有职责，不能以单次 Load/Save 自身有锁推断整段 read/merge/write 安全。
 
 ShellVerb provenance、Win11 `Windows11BlockBackups`、Pin to Start provenance、删除备份和禁用的 SubCommands 引用属于恢复/归属信息；不能作为外部变化身份。各自兼容条件由对应子系统说明。
 
@@ -128,7 +128,9 @@ generic consistency 只保留无法自动归一化的真实注册表结构冲突
 
 `BackendRuntime.HandleNewItemDetectedAsync` 接收 monitor 同次扫描的用户上下文，再调用 `QuarantineNewItemAsync`；隔离失败不采纳为已稳定新项。审核 `ApplyDecision` 在 gate 内取得一次完整快照并复用：Allow 启用并清 pending，Deny 保持禁用并清 pending，Remove 走删除路径；Win11 不提供删除 package 的伪操作。
 
-`ContextMenuApprovalIdentity` 将同一逻辑项聚合，Win11 按 CLSID 控制域去重，不等于 category-specific Id。UI 通知基线由 `WorkspaceNotificationState` 分开保存常规/WPS 去重，不能反向建立持久 baseline。WPS 前端审核刷新启动先等五秒，成功后间隔十五秒，失败指数退避到六十秒，主快照加载与该循环分开。WPS 检测范围与处置见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
+`ContextMenuApprovalIdentity` 将同一逻辑项聚合，Win11 按 CLSID 控制域去重，不等于 category-specific Id。OpenWith 注册审核使用独立 GetOpenWithPendingReviews/DecideOpenWithReview，先核实隔离再送审，通过仅解除本次隔离，拒绝保持禁用；写入和持久结果均须核实。普通 OpenWith 开关保留 review，写入/保存失败不得提前删除 Reviews 或撤销保护；不确定操作只核对、不盲重写。详细状态分类、兼容与保护规则见 [OpenWith](openwith.md#稳定与审核)。
+
+UI 通知基线由 `WorkspaceNotificationState` 分开保存常规/WPS 去重，不能反向建立持久 baseline。WPS 前端审核刷新启动先等五秒，成功后间隔十五秒，失败指数退避到六十秒，主快照加载与该循环分开。该循环同时同步有界 OpenWith 持久审核查询，通知、页面进入、主刷新及 reset 也请求同步，不在 UI 新建高频 Applications 全扫描。查询失败保留既有队列及徽标数量。WPS 检测范围与处置见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
 
 重置通过 `ResetStateDatabase`，持有 catalog/store gates 删除 current、backup、临时 generation 和当前 host 的删除备份；OpenWith rules/reviews/baseline 同时撤销。随后完整快照采纳当前物理状态，重置不会自动启用旧禁用项。Registry Write Protection 的设置文件和 ACL 独立，不能只删保护设置来假装解锁。
 

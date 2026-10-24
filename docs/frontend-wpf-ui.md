@@ -78,6 +78,12 @@ AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，
 
 `GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。早期只显示目标子项的描述已不符合当前 `RebuildNavigationFilterGroup`。不以滚动定位或新扫描补救。
 
+待审批由 ApprovalsPageViewModel 合并常规/Win11/WPS 的既有分组行与独立 OpenWithApprovalItemViewModel，以 IApprovalQueueItem 只共享呈现属性和稳定身份；不同物理修改语义不共享。OpenWith 使用独立 DataTemplate，显示 New/Changed/ReRegistered、作用域、原物理路径、command、当前可见性与限制；搜索包含这些字段及 OpenWith 分类标签。已隔离项显示“通过并放行”，原已禁用项仅确认保留原值；IsolationFailed/Conflict/Uncertain 提供检查入口。
+
+OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞刷新且保留期间收到的 invalidation；按物理路径复用行，保留选择/动画，失败刷新保留条目并暂停决策。按钮先 Busy、防重复提交，不乐观移除。45 秒决策等待失败后另用 10 秒权威查询核对；核对失败锁定 Uncertain，后续成功查询才恢复安全状态。旧响应、通知 payload/计数不直接改队列；相同 SID 的通知只触发当前查询。Shell 徽标在既有常规/WPS 数量上加未解决 OpenWith 行，排除 Reapplied/Missing。
+
+中央检查按钮导航普通 OpenWith 并按精确物理路径筛选；普通页的审核导航将该物理路径交给 FrontendNavigationState，中央刷新后选择对应行。普通 OpenWith 注册变更不重复显示顶部横幅，监控不可用等诊断仍保留。Win32 气泡只有图标身份，统一走无单项目标的待审批激活，不能依据旧代表 DTO 猜焦点。气泡、SID 与持久规则详见 [OpenWith](openwith.md#监控审核与显式持久保护)。
+
 workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。
 
 ## 列表缓存、差量刷新与通知
@@ -106,7 +112,7 @@ classic SetEnabled 的 request→独立物理状态核对、20/10 秒预算和�
 
 `DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` **必须先 Acknowledge 成功才本地隐藏**，失败保留提示。成功后同时设置本地 dismissed；结构冲突可能仍存在，`ApplyEntry` 保持相同 issue signature 的本地忽略，签名变化重新提示。旧文档“无论后端成功与否都忽略”与当前实现不符。
 
-SpecialMenu 首屏先呈现加载再请求；CommandStore 首次分批加入、图标异步，后续差量更新且不做定时全量刷新。其它 SpecialMenu 的定时刷新见各责任文档。新 Loading/Empty 不能引入全局模拟服务；DebugToolsWindow/强制更新入口仅 Debug 编译。
+SpecialMenu 首屏先呈现加载再请求；CommandStore 首次分批加入、图标异步，后续差量更新且不做定时全量刷新。其它 SpecialMenu 的定时刷新见各责任文档。新 Loading/Empty 不能引入全局模拟服务；DebugToolsWindow/强制更新入口仅 Debug 编译。F12 调试窗口还提供当前用户 OpenWith 测试注册的创建与按归属清理；创建前验证后端持久基线，创建后有界查询并显示真实送审结果，等待期间禁止提前清理，操作范围和基线等待见 [OpenWith 验收](openwith.md#监控验收)。
 
 ## 本地动作、错误与清理
 

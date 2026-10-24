@@ -11,6 +11,174 @@ namespace ContextMenuMgr.Tests;
 
 public sealed class MutationOutcomeTests
 {
+    // Permanent: authoritative queue refresh/decision ordering, uncertain outcomes and SID filtering.
+    [Fact]
+    public async Task OpenWithQueue_RefreshRacesTimeoutsAndLateSignalsCannotLoseOrResurrectReviews()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext(dispatcher));
+            dispatcher.BeginInvoke(async () =>
+            {
+                var directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+                    var client = DispatchProxy.Create<IBackendClient, ReviewBackend>();
+                    var backend = (ReviewBackend)client;
+                    var settings = new FrontendSettingsService(null, Path.Combine(directory, "settings.json"));
+                    var localization = new LocalizationService(settings);
+                    var icons = new IconPreviewService();
+                    await using var workspace = new ContextMenuWorkspaceService(client, null!, null!, null!, null!, null!,
+                        icons, localization, settings, null!, null!);
+                    var queue = workspace.OpenWithReviews;
+                    using var regular = new ContextMenuItemViewModel(new ContextMenuEntry { Id = "classic|review",
+                        DisplayName = "Regular", IsPendingApproval = true }, localization, icons, null!);
+                    using var wps = new ContextMenuItemViewModel(new ContextMenuEntry { Id = "special:wps-office-association:test",
+                        DisplayName = "WPS", IsPendingApproval = true }, localization, icons, null!);
+                    workspace.Items.Add(regular);
+                    workspace.WpsOfficeApprovalItems.Add(wps);
+                    using var win11 = new Windows11ContextMenuService(client, localization);
+                    using var search = new ContextMenuGlobalSearchService(workspace, win11, localization, icons, settings);
+                    using var shell = new ShellViewModel(workspace, localization, win11, search,
+                        new GlobalSearchNavigationFilterService(), null!, new ExplorerRestartStateService(), client);
+                    OpenWithPendingReview Review(string name, OpenWithReviewStatus status, string version = "observed")
+                    {
+                        var path = $@"HKEY_USERS\{sid}\Software\Classes\Applications\{name}.exe";
+                        return new(sid, path, version, status, new SpecialMenuEntry { Id = path,
+                            DisplayName = name, Kind = SpecialMenuKind.OpenWith, IsEnabled = false, CommandText = "test.exe %1" },
+                            status == OpenWithReviewStatus.New, status == OpenWithReviewStatus.New, null, false, false, status == OpenWithReviewStatus.New);
+                    }
+                    var pending = Review("new", OpenWithReviewStatus.New);
+                    var conflict = Review("attention", OpenWithReviewStatus.Conflict);
+                    var navigation = new FrontendNavigationState();
+                    navigation.RequestApprovals(pending.RegistryPath);
+                    using var page = new ApprovalsPageViewModel(workspace, localization, navigation);
+                    backend.Snapshot = new(sid, [pending, conflict, Review("information", OpenWithReviewStatus.Reapplied), Review("missing", OpenWithReviewStatus.Missing)]);
+                    Assert.True(await queue.RefreshAsync(default));
+                    Assert.Equal(2, queue.Items.Count);
+                    var row = Assert.Single(queue.Items, i => i.Id == pending.RegistryPath);
+                    Assert.Equal(4, page.Items.Count);
+                    Assert.Equal("4", shell.ApprovalsBadge.Value);
+                    Assert.Same(row, page.SelectedItem);
+                    page.SearchText = pending.RegistryPath;
+                    Assert.Same(row, Assert.Single(page.ItemsView.Cast<IApprovalQueueItem>()));
+                    page.SearchText = "test.exe";
+                    Assert.Equal(2, page.ItemsView.Cast<IApprovalQueueItem>().Count());
+                    page.SearchText = string.Empty;
+                    Assert.True(row.CanReject);
+                    backend.QueryFails = true;
+                    Assert.False(await queue.RefreshAsync(default));
+                    Assert.Same(row, Assert.Single(queue.Items, i => i.Id == pending.RegistryPath));
+                    Assert.False(row.CanReject);
+                    Assert.Equal(2, queue.Items.Count);
+                    Assert.Equal("4", shell.ApprovalsBadge.Value);
+                    backend.QueryFails = false;
+                    await queue.RefreshAsync(default);
+                    backend.Decision = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var decision = queue.DecideAsync(row, OpenWithReviewDecision.Reject, default);
+                    Assert.True(row.IsBusy);
+                    await queue.DecideAsync(row, OpenWithReviewDecision.Reject, default);
+                    Assert.Equal(1, backend.Decisions);
+                    var queuedRefresh = queue.RefreshAsync(default);
+                    backend.Snapshot = new(sid, [conflict]);
+                    backend.Decision.SetResult(backend.Snapshot);
+                    await decision;
+                    await queuedRefresh;
+                    Assert.Single(queue.Items);
+                    Assert.Equal("3", shell.ApprovalsBadge.Value);
+                    Assert.Equal(3, page.Items.Count);
+                    Assert.True(regular.IsPendingApproval);
+                    Assert.True(wps.IsPendingApproval);
+                    var queries = backend.Queries;
+                    Assert.False(queue.Invalidate(new BackendNotification { SpecialKind = SpecialMenuKind.OpenWith,
+                        UserSid = "S-1-5-21-1-2-3-1001", SpecialItem = pending.Registration }, default));
+                    Assert.Equal(queries, backend.Queries);
+                    Assert.True(queue.Invalidate(new BackendNotification { Kind = PipeNotificationKind.OpenWithChanged,
+                        SpecialKind = SpecialMenuKind.OpenWith, UserSid = sid, SpecialItem = pending.Registration,
+                        OpenWithPendingCount = 99, Timestamp = DateTimeOffset.UtcNow.AddMinutes(-10) }, default));
+                    await queue.RefreshAsync(default);
+                    Assert.Single(queue.Items); // payload, count and timestamp cannot resurrect resolved state
+                    backend.Snapshot = new(sid, [pending with { Generation = "second generation" }, conflict]);
+                    await queue.RefreshAsync(default);
+                    row = Assert.Single(queue.Items, i => i.Id == pending.RegistryPath);
+                    backend.Decision = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    backend.Decision.SetException(new TimeoutException("Response lost after submission."));
+                    backend.QueryFails = true;
+                    await queue.DecideAsync(row, OpenWithReviewDecision.Accept, default);
+                    Assert.True(row.IsStateUncertain);
+                    Assert.False(row.CanAccept);
+                    Assert.Equal(2, queue.Items.Count);
+                    await queue.DecideAsync(row, OpenWithReviewDecision.Accept, default);
+                    Assert.Equal(2, backend.Decisions);
+                    backend.QueryFails = false;
+                    await queue.RefreshAsync(default);
+                    Assert.False(row.IsStateUncertain);
+                    Assert.True(row.CanAccept);
+                    backend.Query = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var olderRead = queue.RefreshAsync(default);
+                    var waitingDecision = queue.DecideAsync(row, OpenWithReviewDecision.Accept, default);
+                    backend.Query.SetResult(new(sid, [pending with { Generation = "third generation" }, conflict]));
+                    await olderRead;
+                    await waitingDecision;
+                    Assert.Equal(2, backend.Decisions); // stale click queued behind refresh never writes
+                    Assert.Same(row, Assert.Single(queue.Items, i => i.Id == pending.RegistryPath));
+                    backend.Query = null;
+                    var isolationFailure = Review("isolation failed", OpenWithReviewStatus.IsolationFailed);
+                    backend.Snapshot = new(sid, [pending, conflict, isolationFailure]);
+                    await queue.RefreshAsync(default);
+                    var failedIsolation = Assert.Single(queue.Items, i => i.Id == isolationFailure.RegistryPath);
+                    Assert.False(failedIsolation.CanAccept);
+                    Assert.False(failedIsolation.CanReject);
+                    Assert.Equal("5", shell.ApprovalsBadge.Value);
+                    backend.Snapshot = new("S-1-5-21-1-2-3-1001", []);
+                    Assert.False(await queue.RefreshAsync(default));
+                    Assert.Equal(3, queue.Items.Count); // cross-user response cannot clear this user's queue
+                    completion.SetResult();
+                }
+                catch (Exception ex) { completion.SetException(ex); }
+                finally
+                {
+                    if (Directory.Exists(directory)) Directory.Delete(directory, true);
+                    dispatcher.BeginInvokeShutdown(System.Windows.Threading.DispatcherPriority.Normal);
+                }
+            });
+            System.Windows.Threading.Dispatcher.Run();
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(thread.Join(TimeSpan.FromSeconds(2)));
+    }
+
+    public class ReviewBackend : DispatchProxy
+    {
+        public OpenWithReviewSnapshot Snapshot { get; set; } = null!;
+        public bool QueryFails { get; set; }
+        public int Queries { get; private set; }
+        public int Decisions { get; private set; }
+        public TaskCompletionSource<OpenWithReviewSnapshot>? Query { get; set; }
+        public TaskCompletionSource<OpenWithReviewSnapshot>? Decision { get; set; }
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method?.Name.StartsWith("add_", StringComparison.Ordinal) == true
+                || method?.Name.StartsWith("remove_", StringComparison.Ordinal) == true) return null;
+            if (method?.Name == nameof(IBackendClient.DisposeAsync)) return ValueTask.CompletedTask;
+            if (method?.Name == nameof(IBackendClient.ReadCachedListAsync))
+                return Task.FromException<MenuListSnapshot<ContextMenuEntry>?>(new IOException("Secondary source unavailable."));
+            if (method?.Name == nameof(IBackendClient.GetOpenWithPendingReviewsAsync))
+            {
+                Queries++;
+                return QueryFails ? Task.FromException<OpenWithReviewSnapshot>(new IOException("Read failed."))
+                    : Query?.Task ?? Task.FromResult(Snapshot);
+            }
+            if (method?.Name == nameof(IBackendClient.DecideOpenWithReviewAsync)) { Decisions++; return Decision!.Task; }
+            throw new NotSupportedException(method?.Name);
+        }
+    }
+
     [Fact]
     public void ContextMenuRequestWithoutOperationId_GetsOneAndRegistersItBeforeSend()
     {

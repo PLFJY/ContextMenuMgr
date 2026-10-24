@@ -76,7 +76,12 @@ public sealed class ContextMenuRegistryMonitor
         if (_monitorTask is not null) return;
         _monitorCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var monitorToken = _monitorCts.Token;
-        _monitorTask = Task.Run(() => MonitorLoopAsync(monitorToken), monitorToken);
+        var classic = Task.Run(() => MonitorLoopAsync(monitorToken), monitorToken);
+        // Applications settling must keep its cadence while a classic/package scan waits on catalog work.
+        var openWith = OpenWithMonitoring is { } monitoring
+            ? Task.Run(() => MonitorOpenWithAsync(monitoring, monitorToken), monitorToken)
+            : Task.CompletedTask;
+        _monitorTask = Task.WhenAll(classic, openWith);
     }
 
     internal async Task StopAsync()
@@ -86,6 +91,26 @@ public sealed class ContextMenuRegistryMonitor
         try { await Completion; }
         catch (OperationCanceledException) { }
         finally { monitorCts?.Dispose(); }
+    }
+
+    private async Task MonitorOpenWithAsync(OpenWithMonitoringService monitoring, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                // Authenticated pipe contexts and the monitor's WTS discovery own OpenWith identities.
+                await monitoring.PollAsync(null, DateTimeOffset.UtcNow, cancellationToken);
+                await Task.Delay(_pollInterval, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                await _logger.LogAsync(RuntimeLogLevel.Warning, $"OpenWith monitor cycle failed: {ex.Message}", cancellationToken);
+                try { await Task.Delay(_pollInterval, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            }
+        }
     }
 
     private async Task MonitorLoopAsync(CancellationToken cancellationToken)
@@ -100,8 +125,6 @@ public sealed class ContextMenuRegistryMonitor
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (OpenWithMonitoring is { } openWith)
-                    await openWith.PollAsync(_resolveUserContext(), DateTimeOffset.UtcNow, cancellationToken);
                 initialScan = await ReadSnapshotAsync(cancellationToken);
                 break;
             }
@@ -133,9 +156,6 @@ public sealed class ContextMenuRegistryMonitor
             {
                 await _logger.LogAsync($"RegistryMonitorDebounceWait: DelayMs={_pollInterval.TotalMilliseconds}.", cancellationToken);
                 await Task.Delay(_pollInterval, cancellationToken);
-
-                if (OpenWithMonitoring is { } openWith)
-                    await openWith.PollAsync(_resolveUserContext(), DateTimeOffset.UtcNow, cancellationToken);
 
                 if (!_interactiveBaselineResetRequested)
                 {
