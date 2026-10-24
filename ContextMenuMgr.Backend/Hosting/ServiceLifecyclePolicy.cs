@@ -17,6 +17,7 @@ internal enum BackendServiceStopReason
 internal sealed class BackendStopRequestedEventArgs(BackendServiceStopReason reason) : EventArgs
 {
     public BackendServiceStopReason Reason { get; } = reason;
+    public PortableExitCaller? PortableCaller { get; init; }
 }
 
 internal sealed class BackendServiceTerminationState
@@ -127,6 +128,7 @@ internal sealed record ServiceConfigurationSnapshot(
     string ConfiguredStartType,
     bool DelayedAutoStart,
     bool FailureActionsPresent,
+    bool FailureActionsMatch,
     bool FailureActionsOnNonCrashFailures,
     string CurrentStatus,
     string SystemDrive,
@@ -140,7 +142,7 @@ internal sealed record ServiceConfigurationSnapshot(
         _ => false
     };
 
-    public bool FailureRecoveryConfigured => FailureActionsPresent && FailureActionsOnNonCrashFailures;
+    public bool FailureRecoveryConfigured => FailureActionsPresent && FailureActionsMatch && FailureActionsOnNonCrashFailures;
 }
 
 internal sealed record ServiceRuntimeConvergenceResult(bool Success, string Code, string Detail);
@@ -150,7 +152,7 @@ internal sealed record ServiceAutostartTransitionResult(
     string Code,
     string Detail,
     bool PolicyCommitted,
-    int ScExitCode,
+    int Win32Error,
     string ActualStartupMode,
     string ServiceStatus);
 
@@ -205,15 +207,15 @@ internal static class ServiceAutostartTransition
                 "Missing");
         }
 
-        var scResult = configureStartupMode();
-        if (!scResult.Success)
+        var configurationResult = configureStartupMode();
+        if (!configurationResult.Success)
         {
             return new ServiceAutostartTransitionResult(
                 false,
                 "SERVICE_STARTUP_CONFIG_FAILED",
-                scResult.Detail,
+                configurationResult.Detail,
                 false,
-                scResult.ExitCode,
+                configurationResult.ExitCode,
                 "Unverified",
                 readConfiguration().CurrentStatus);
         }
@@ -226,7 +228,7 @@ internal static class ServiceAutostartTransition
                 "SERVICE_STARTUP_CONFIG_MISMATCH",
                 $"RequestedStartupMode={requestedStartupMode}, ActualStartupMode={configuration.ConfiguredStartType}.",
                 false,
-                scResult.ExitCode,
+                configurationResult.ExitCode,
                 configuration.ConfiguredStartType,
                 configuration.CurrentStatus);
         }
@@ -268,7 +270,7 @@ internal static class ServiceAutostartTransition
                     runtimeResult.Code,
                     runtimeResult.Detail,
                     false,
-                    scResult.ExitCode,
+                    configurationResult.ExitCode,
                     configuration.ConfiguredStartType,
                     configuration.CurrentStatus);
             }
@@ -286,7 +288,7 @@ internal static class ServiceAutostartTransition
                 "AUTOSTART_POLICY_WRITE_FAILED",
                 ex.Message,
                 false,
-                scResult.ExitCode,
+                configurationResult.ExitCode,
                 configuration.ConfiguredStartType,
                 configuration.CurrentStatus);
         }
@@ -297,7 +299,7 @@ internal static class ServiceAutostartTransition
             enabled ? "STARTUP_AUTO" : "STARTUP_MANUAL",
             enabled ? configuration.ConfiguredStartType : "Manual",
             true,
-            scResult.ExitCode,
+            configurationResult.ExitCode,
             configuration.ConfiguredStartType,
             configuration.CurrentStatus);
     }

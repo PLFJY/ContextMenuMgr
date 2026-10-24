@@ -57,6 +57,7 @@ public partial class App : Application
             _serviceProvider = BuildServiceProvider();
             var settingsService = _serviceProvider.GetRequiredService<FrontendSettingsService>();
             _frontendSettingsService = settingsService;
+            if (RuntimePaths.PackageKind == RuntimePackageKind.Portable) settingsService.EnsureInitialSettingsPersisted();
             _localization = _serviceProvider.GetRequiredService<LocalizationService>();
             _navigationState = _serviceProvider.GetRequiredService<FrontendNavigationState>();
             _trayHostProcessService = _serviceProvider.GetRequiredService<TrayHostProcessService>();
@@ -68,11 +69,14 @@ public partial class App : Application
             _controlServer = new FrontendControlServer(HandleFrontendControlRequestAsync);
             _controlServer.Start(_controlServerCts.Token);
 
-            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            // Closed, rather than Closing, establishes that the close was not
+            // cancelled. Keep IPC alive while the bounded lifecycle work runs.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             ShowMainWindow(initialRequest, forceActivate: true);
         }
         catch (Exception ex)
         {
+            _isShuttingDown = true;
             FrontendDebugLog.Error("App", ex, "Fatal error while bootstrapping frontend.");
             HandleFatalException("Startup", ex);
             Shutdown(-1);
@@ -369,8 +373,10 @@ public partial class App : Application
         Shutdown();
     }
 
-    private void OnMainWindowClosed(object? sender, EventArgs e)
+    private async void OnMainWindowClosed(object? sender, EventArgs e)
     {
+        var normalClose = !_isShuttingDown && _ownsSingleInstanceMutex;
+        _isShuttingDown = true;
         if (_mainWindow is not null)
         {
             _mainWindow.Closed -= OnMainWindowClosed;
@@ -379,65 +385,57 @@ public partial class App : Application
 
         _mainWindow = null;
         _shellViewModel = null;
+        if (!normalClose) return;
+        try
+        {
+            var actions = FrontendCloseLifecyclePolicy.Evaluate(_frontendSettingsService?.Current.KeepBackgroundAfterClose ?? true);
+            await ShutdownBackgroundRuntimeOnCloseAsync(actions);
+        }
+        catch (Exception ex) { FrontendDebugLog.Error("App", ex, "Normal exit lifecycle failed."); }
+        finally { Shutdown(); }
     }
 
     private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_isShuttingDown || _frontendSettingsService is null)
-        {
-            return;
-        }
-
-        var settings = _frontendSettingsService.Current;
-        var actions = FrontendCloseLifecyclePolicy.Evaluate(settings.KeepBackgroundAfterClose);
-        FrontendDebugLog.Operation(
-            "App",
-            $"Main window closing. KeepBackgroundAfterClose={settings.KeepBackgroundAfterClose}, StartWithWindows={settings.AutoStartOnLogin}, "
-            + $"RequestBackendShutdown={actions.RequestBackendShutdown}, RequestTrayHostExit={actions.RequestTrayHostExit}.");
-
-        if (actions.RequestBackendShutdown || actions.RequestTrayHostExit)
-        {
-            TryShutdownBackgroundRuntimeOnClose(actions);
-        }
+        if (!_isShuttingDown && _frontendSettingsService?.IsLifecycleTransitionInProgress == true)
+            e.Cancel = true;
     }
 
-    private void TryShutdownBackgroundRuntimeOnClose(FrontendCloseActions actions)
+    private async Task ShutdownBackgroundRuntimeOnCloseAsync(FrontendCloseActions actions)
     {
-        try
+        var portable = RuntimePaths.PackageKind == RuntimePackageKind.Portable;
+        async Task ExitTrayAsync()
         {
-            var shutdownTask = Task.Run(async () =>
+            if (!actions.RequestTrayHostExit || _trayHostProcessService is null) return;
+            try
             {
-                if (actions.RequestBackendShutdown
-                    && _serviceProvider?.GetService<IBackendClient>() is { } backendClient)
-                {
-                    try
-                    {
-                        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
-                        await backendClient.RequestShutdownAsync(cts.Token);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (actions.RequestTrayHostExit && _trayHostProcessService is not null)
-                {
-                    try
-                    {
-                        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
-                        await _trayHostProcessService.RequestExitAsync(cts.Token);
-                    }
-                    catch
-                    {
-                    }
-                }
-            });
-
-            shutdownTask.Wait(TimeSpan.FromSeconds(2));
+                using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
+                if (portable) await _trayHostProcessService.RequestExitAndWaitAsync(cts.Token);
+                else await _trayHostProcessService.RequestExitAsync(cts.Token);
+            }
+            catch (Exception ex) { FrontendDebugLog.Warning("App", $"TrayHost exit not verified: {ex.Message}"); }
         }
-        catch
+        async Task ExitBackendAsync()
         {
+            if (!actions.RequestBackendShutdown || _serviceProvider?.GetService<IBackendClient>() is not { } backendClient) return;
+            try
+            {
+                using var cts = new CancellationTokenSource(portable ? TimeSpan.FromSeconds(3) : TimeSpan.FromMilliseconds(800));
+                if (portable)
+                    await backendClient.RequestPortableExitAsync(cts.Token);
+                else
+                    await backendClient.RequestShutdownAsync(cts.Token);
+            }
+            catch (Exception ex) { FrontendDebugLog.Warning("App", $"Backend exit not acknowledged: {ex.Message}"); }
         }
+        if (portable) { await ExitTrayAsync(); await ExitBackendAsync(); }
+        else { await ExitBackendAsync(); await ExitTrayAsync(); }
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        base.OnSessionEnding(e);
+        if (!e.Cancel) _isShuttingDown = true;
     }
 
     private void RegisterGlobalExceptionHandlers()
@@ -449,6 +447,7 @@ public partial class App : Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        _isShuttingDown = true;
         HandleFatalException("DispatcherUnhandledException", e.Exception);
         e.Handled = true;
         Shutdown(-1);
@@ -456,6 +455,7 @@ public partial class App : Application
 
     private void OnCurrentDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
     {
+        _isShuttingDown = true;
         if (e.ExceptionObject is Exception exception)
         {
             HandleFatalException("AppDomainUnhandledException", exception);

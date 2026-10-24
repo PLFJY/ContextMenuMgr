@@ -369,7 +369,7 @@ public sealed class BackendServiceManager : IBackendServiceManager
     /// <summary>
     /// Sets service Auto Start Enabled Async.
     /// </summary>
-    public async Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken)
+    public async Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken, bool? removePortableServiceOnExit = null)
     {
         var stopwatch = Stopwatch.StartNew();
         FrontendDebugLog.Info("BackendServiceManager", $"SetServiceAutoStartEnabledAsync started. Enabled={enabled}, CurrentSid={GetCurrentUserSid() ?? "<null>"}");
@@ -388,6 +388,8 @@ public sealed class BackendServiceManager : IBackendServiceManager
             FrontendDebugLog.Info("BackendServiceManager", $"Resolved backend executable path: {backendExePath}");
             FrontendDebugLog.Info("BackendServiceManager", $"Startup mode result file path: {resultFilePath}");
             var bootstrapArguments = AppendUserSidArgument($"--service-bootstrap set-startup-mode --enabled {(enabled ? "1" : "0")} --result-file \"{resultFilePath}\"");
+            if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
+                bootstrapArguments += $" --portable-remove-on-exit {(removePortableServiceOnExit == true ? "1" : "0")}";
             FrontendDebugLog.Info("BackendServiceManager", $"Startup mode bootstrap arguments: {bootstrapArguments}, HasUserSid={bootstrapArguments.Contains("--user-sid", StringComparison.OrdinalIgnoreCase)}");
             using var process = Process.Start(CreateElevatedBackendStartInfo(
                 backendExePath,

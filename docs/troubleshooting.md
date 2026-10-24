@@ -21,9 +21,17 @@
 
 服务维护检查 `--result-file`、退出码/BootstrapResult、UAC 取消、--user-sid、SERVICE_PENDING_DELETE；关闭 Services MMC/任务管理器服务页等持有句柄后再试，必要时重启。强力修复删除服务注册不等于清理用户菜单/数据。
 
+安装性能以 bootstrap 开始、逐项 ScmOperation、SCM Running、真实 Pipe Ping 与前端快照完成分段计时。当前代码直接调用 SCM，不再启动 sc.exe；若日志仍显示 RunSc，应先确认实际运行的构建和 executable 路径。原生调用快不代表服务启动或菜单扫描已完成，不能用只读查询的毫秒数宣称完整安装性能。操作失败查看 Win32Error 与具体 API 阶段，不通过跳过权限/回读/恢复策略核验来降低耗时。
+
 Portable 运行文件 Zone.Identifier 可导致 bootstrap 启动/结果缺失。前端只检查当前 runtime 文件，需用户确认才 Unblock，不扫描目录外用户文档。可在下载 zip 属性解除阻止后重解压；检查 PortableMotwScan/Detected/Unblock/ServiceBootstrapBlockedByMotw。不得把所有 UAC 失败归因到 MOTW。
 
+Portable 退出后服务仍存在时，检查 `service-startup.log` 的 PortableServiceCleanup Trigger/Stage/Win32Error/Result，并对照原 SCM PathName、PID、StartMode、用户 StartWithWindows/旧 Run 值、后台保留和 cleanup 设置。MarkedForDeletion/AlreadyMarkedForDeletion 不等于 SCM absent；先等旧进程退出并关闭 Services MMC/任务管理器服务页等句柄，再从 SCM 查询。前端快速重开最多有界观察后提示重试，不强制改写另一个副本的服务注册。
+
+若是 RetainedByPolicy、StartupOwnershipUncertain、ActivationInProgress、调用用户 hive/其它 Session/消费者无法确认、缺失或非法设置，保留注册是有意的 fail-closed 结果；正常停止仍应检查 StopReason 和资源释放日志。认证的独占前端退出不因无关离线用户 hive 未加载而拒绝清理；系统关机仍要求核验全部用户的保留 policy，hive 已卸载时不能承诺该次自动移除。消费者拒绝日志包含 CallerPID/CallerSession、UserSessions、ConsumerPIDs，用于区分托盘尚未退出、其它副本和其它登录用户。安装完成边缘的生命周期锁最多等待一秒，持续竞争仍拒绝。残留 portable-startup-transaction.marker 会持续否决自动删除，两个设置开关锁定；显式修复核对后保守关闭自动移除再解除 veto。PORTABLE_STARTUP_ROLLBACK_FAILED 要收集同一次 bootstrap.log 的 SCM 配置/用户 policy/JSON 提交与补偿各阶段；未确认前不反复切换猜结果，使用显式服务修复并再次核对。Installer 没有自动移除分支。完整契约与真机验收见[生命周期](runtime-lifecycle.md#portable-自动移除-scm-注册)。
+
 ## 请求超时与真实结果
+
+若启动中先出现 Operation Timeout、随后扫描成功，对照设置页请求与 bootstrap Ping 的时间：构造阶段不应发出 SetTrayIconPolicy/日志同步，也不应在服务尚未就绪时读取 GetAutoStartEnabled。检查 Workspace.IsBackendReady 与设置页初始回填/就绪订阅，不能单纯延长所有 Pipe 超时或吞掉真正的操作失败。初始探测 Ping 不可达可进入正常安装流程，不等于菜单扫描请求已经失败。
 
 classic 看 FrontendRequestStarted、SetEnabledTimeout、OutcomeVerificationStarted/VerifiedApplied/VerifiedNotApplied/Uncertain；backend 对照操作和 DirectResponseWriteFailed。广播在直响应前，迟到成功应能到达停止等待的客户端。超时不是没写，查询原来源失败不是可安全重试。
 

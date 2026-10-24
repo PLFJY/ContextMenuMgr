@@ -98,6 +98,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     public partial bool IsServiceBootstrapInProgress { get; private set; }
 
     [ObservableProperty]
+    public partial bool IsBackendReady { get; private set; }
+
+    [ObservableProperty]
     public partial string MenuLoadFailureText { get; private set; } = string.Empty;
 
     public bool HasMenuLoadFailure => !string.IsNullOrWhiteSpace(MenuLoadFailureText);
@@ -625,6 +628,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         var result = await _backendServiceManager.InstallOrRepairServiceAsync(CancellationToken.None);
         if (result.Success)
         {
+            IsBackendReady = true; // Bootstrap success includes verified pipe Ping.
             _trayHostEnsured = false;
             UpdateServiceAttention(ServiceAttentionState.None);
             await EnsureTrayHostAsync();
@@ -666,9 +670,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// <summary>
     /// Sets service Auto Start Enabled Async.
     /// </summary>
-    public Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled)
+    public Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, bool? removePortableServiceOnExit = null)
     {
-        return _backendServiceManager.SetServiceAutoStartEnabledAsync(enabled, CancellationToken.None);
+        return _backendServiceManager.SetServiceAutoStartEnabledAsync(enabled, CancellationToken.None, removePortableServiceOnExit);
     }
 
     public Task RepairRuntimeDataAclAsync(CancellationToken cancellationToken)
@@ -905,7 +909,26 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private async Task<bool> EnsureBackendReadyAsync(bool suppressBootstrapPrompt)
     {
-        if (await CanReachBackendAsync())
+        var probeBackend = true;
+        if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
+        {
+            var backend = Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.Service.exe");
+            var state = await PortableServiceStartup.WaitForSettledAsync(
+                () => PortableServiceStartup.Observe(backend), TimeSpan.FromSeconds(4), _shutdownCts.Token);
+            if (state is PortableServiceRegistrationState.PendingDeletion or PortableServiceRegistrationState.Foreign or PortableServiceRegistrationState.Uncertain)
+            {
+                UpdateServiceAttention(ServiceAttentionState.Unavailable);
+                ConnectionStatus = _localization.Translate(state == PortableServiceRegistrationState.PendingDeletion
+                    ? "PortableServicePendingDeletion" : "PortableServiceOwnershipUncertain");
+                MenuLoadFailureText = ConnectionStatus;
+                return false;
+            }
+            // A service proven absent/stopped cannot answer its pipe. Avoid
+            // paying the two-second connection timeout on every portable launch.
+            probeBackend = state != PortableServiceRegistrationState.Absent
+                && _backendServiceManager.GetServiceStatus() != System.ServiceProcess.ServiceControllerStatus.Stopped;
+        }
+        if (probeBackend && await CanReachBackendAsync())
         {
             ClearMenuLoadFailure();
             UpdateServiceAttention(ServiceAttentionState.None);
@@ -1045,10 +1068,12 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             await _backendClient.PingAsync(cts.Token);
+            IsBackendReady = true;
             return true;
         }
         catch
         {
+            IsBackendReady = false;
             return false;
         }
     }
@@ -1254,6 +1279,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private void UpdateServiceAttention(ServiceAttentionState state)
     {
+        if (state != ServiceAttentionState.None) IsBackendReady = false;
         _serviceAttentionState = state;
         ServiceAttentionText = GetServiceAttentionText(state);
     }

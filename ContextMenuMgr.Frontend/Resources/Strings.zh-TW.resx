@@ -1608,4 +1608,19 @@
   <data name="Windows11Publisher" xml:space="preserve"><value>發行者：{0}</value></data>
   <data name="Windows11PackageIdentity" xml:space="preserve"><value>應用程式識別碼：{0}</value></data>
   <data name="Windows11FileLocation" xml:space="preserve"><value>檔案位置：{0}</value></data>
+  <data name="Settings.RemovePortableServiceOnExit" xml:space="preserve">
+    <value>結束軟體時自動解除安裝背景服務</value>
+  </data>
+  <data name="Settings.RemovePortableServiceOnExit.Description" xml:space="preserve">
+    <value>結束背景執行後移除服務註冊。下次啟動可能需要再次進行 UAC 授權。此選項與隨 Windows 啟動互斥，請先關閉已啟用的選項，再開啟另一項。</value>
+  </data>
+  <data name="PortableServicePendingDeletion" xml:space="preserve">
+    <value>上次執行的服務仍在等待刪除。請關閉「服務」管理員或其他服務工具後重試；若持續等待，請重新啟動 Windows。</value>
+  </data>
+  <data name="PortableServiceOwnershipUncertain" xml:space="preserve">
+    <value>背景服務屬於其他安裝或無法確認歸屬。請結束對應副本並明確解除安裝其服務後，再啟動此可攜版。</value>
+  </data>
+  <data name="PortableStartupPolicyUncertain" xml:space="preserve">
+    <value>無法可靠還原啟動原則。請先執行「安裝或修復服務」，再修改這些選項。</value>
+  </data>
 </root>

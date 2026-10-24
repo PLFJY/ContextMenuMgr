@@ -57,6 +57,50 @@ public sealed class FrontendSettingsService
 
     public string? LastSaveError { get; private set; }
 
+    public bool IsLifecycleTransitionInProgress { get; set; }
+
+    public void EnsureInitialSettingsPersisted()
+    {
+        if (!File.Exists(_settingsPath)) Save();
+    }
+
+    public bool TryUpdateLifecycleSettings(bool autoStart, bool removeOnExit)
+    {
+        var previousAutoStart = Current.AutoStartOnLogin;
+        var previousRemoval = Current.RemovePortableServiceOnExit;
+        Current.AutoStartOnLogin = autoStart;
+        Current.RemovePortableServiceOnExit = RuntimePaths.PackageKind == RuntimePackageKind.Portable
+            ? removeOnExit && !autoStart : previousRemoval;
+        try
+        {
+            Save(updateLifecycle: true);
+            if (LastSaveError is null)
+            {
+                using var stream = File.OpenRead(_settingsPath);
+                var actual = PortableServiceExitPolicy.Read(stream);
+                if (actual.AutoStart == Current.AutoStartOnLogin && actual.RemoveOnExit == Current.RemovePortableServiceOnExit)
+                    return true;
+                LastSaveError = "Lifecycle settings read-back mismatch.";
+            }
+        }
+        catch (Exception ex)
+        {
+            LastSaveError = ex.Message;
+        }
+        Current.AutoStartOnLogin = previousAutoStart;
+        Current.RemovePortableServiceOnExit = previousRemoval;
+        return false;
+    }
+
+    public void ReloadLifecycleSettings()
+    {
+        using var stream = File.OpenRead(_settingsPath);
+        var policy = PortableServiceExitPolicy.Read(stream);
+        Current.AutoStartOnLogin = policy.AutoStart;
+        Current.RemovePortableServiceOnExit = policy.RemoveOnExit;
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public string GetContextMenuItemNote(string itemId)
     {
         if (string.IsNullOrWhiteSpace(itemId))
@@ -274,13 +318,19 @@ public sealed class FrontendSettingsService
     {
         try
         {
-            if (!File.Exists(_settingsPath))
-            {
-                return new FrontendSettings();
-            }
+            try { _ = File.GetAttributes(_settingsPath); }
+            catch (FileNotFoundException) { return new FrontendSettings(); }
+            catch (DirectoryNotFoundException) { return new FrontendSettings(); }
 
             var json = File.ReadAllText(_settingsPath);
-            var settings = JsonSerializer.Deserialize<FrontendSettings>(json, JsonOptions) ?? new FrontendSettings();
+            var settings = JsonSerializer.Deserialize<FrontendSettings>(json, JsonOptions)
+                ?? throw new JsonException("Expected settings object.");
+            try
+            {
+                using var stream = File.OpenRead(_settingsPath);
+                _ = PortableServiceExitPolicy.Read(stream);
+            }
+            catch { settings.RemovePortableServiceOnExit = false; }
             // TODO: ContextMenuItemNotes are registry item-bound runtime data.
             // Keep pure preferences portable, but move notes to host-bound state
             // or clear them on portable foreign-host detection in a follow-up.
@@ -291,17 +341,19 @@ public sealed class FrontendSettingsService
         }
         catch
         {
-            return new FrontendSettings();
+            // An unrelated preference/placement save must not transform a bad
+            // policy into permission to delete the machine-wide registration.
+            return new FrontendSettings { RemovePortableServiceOnExit = false };
         }
     }
 
-    private void Save()
+    private void Save(bool updateLifecycle = false)
     {
         try
         {
             lock (_syncRoot)
             {
-                SaveCore();
+                SaveCore(updateLifecycle);
             }
 
             LastSaveError = null;
@@ -320,7 +372,7 @@ public sealed class FrontendSettingsService
             {
                 lock (_syncRoot)
                 {
-                    SaveCore();
+                    SaveCore(updateLifecycle);
                 }
 
                 LastSaveError = null;
@@ -346,7 +398,7 @@ public sealed class FrontendSettingsService
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void SaveCore()
+    private void SaveCore(bool updateLifecycle)
     {
         var directory = Path.GetDirectoryName(_settingsPath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -355,7 +407,8 @@ public sealed class FrontendSettingsService
         }
 
         var json = JsonSerializer.Serialize(Current, JsonOptions);
-        File.WriteAllText(_settingsPath, json);
+        FrontendSettingsFile.Write(_settingsPath, json,
+            preserveLifecycle: !updateLifecycle && IsLifecycleTransitionInProgress && RuntimePaths.PackageKind == RuntimePackageKind.Portable);
     }
 
     private RuntimeDataAclRepairClientResult RepairRuntimeDataAclForSynchronousSave()
@@ -403,23 +456,14 @@ public sealed class FrontendSettingsService
     /// </summary>
     public void ResetToDefaults()
     {
+        var previous = Current;
         Current = new FrontendSettings();
-
-        lock (_syncRoot)
+        try
         {
-            try
-            {
-                if (File.Exists(_settingsPath))
-                {
-                    File.Delete(_settingsPath);
-                }
-            }
-            catch
-            {
-            }
+            Save(updateLifecycle: true);
+            if (LastSaveError is not null) throw new IOException(LastSaveError);
         }
-
-        SettingsChanged?.Invoke(this, EventArgs.Empty);
+        catch { Current = previous; throw; }
     }
 
     private void TryMigrateLegacySettings()

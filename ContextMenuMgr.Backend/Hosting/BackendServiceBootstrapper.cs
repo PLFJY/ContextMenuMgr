@@ -9,6 +9,7 @@ using System.Text.Json;
 using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
+using static ContextMenuMgr.Backend.Hosting.ServiceScmNative;
 
 namespace ContextMenuMgr.Backend.Hosting;
 
@@ -34,7 +35,6 @@ internal static class BackendServiceBootstrapper
     private static readonly string StopReasonMarkerPath = Path.Combine(
         DataDirectory,
         ServiceMetadata.StopReasonMarkerFileName);
-    private const int RecoveryResetPeriodSeconds = 24 * 60 * 60;
     private const string RecoveryActions = "restart/5000/restart/15000/restart/60000";
 
     /// <summary>
@@ -83,6 +83,9 @@ internal static class BackendServiceBootstrapper
 
         try
         {
+            using var lifecycle = RuntimePaths.PackageKind == RuntimePackageKind.Portable
+                && command is not "repair-runtime-data-acl"
+                ? ServiceLifecycleLease.Acquire(TimeSpan.FromSeconds(5)) : null;
             var userSidArgument = TryGetUserSidArgument(args);
             AddDetail($"UserSidArgument: Present={!string.IsNullOrWhiteSpace(userSidArgument.Sid)}, Valid={userSidArgument.IsValid}, Sid={userSidArgument.Sid ?? "<null>"}, Detail={userSidArgument.Detail ?? "<null>"}.");
             if (!userSidArgument.IsValid)
@@ -96,7 +99,8 @@ internal static class BackendServiceBootstrapper
                 "uninstall" => UninstallService(AddDetail),
                 "force-remove-service" => ForceRemoveService(AddDetail),
                 "stop" => StopService(AddDetail),
-                "set-startup-mode" => SetServiceStartupMode(TryParseEnabledArgument(args), userSidArgument.Sid, AddDetail),
+                "set-startup-mode" => SetServiceStartupMode(TryParseEnabledArgument(args), userSidArgument.Sid, AddDetail,
+                    TryGetArgumentValue(args, "--portable-remove-on-exit")),
                 "repair-runtime-data-acl" => RepairRuntimeDataAcl(AddDetail),
                 _ => (false, "UNKNOWN_BOOTSTRAP_COMMAND", command)
             };
@@ -123,6 +127,14 @@ internal static class BackendServiceBootstrapper
         }
 
         var binaryPath = $"\"{serviceExePath}\" --service";
+        if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
+        {
+            var observed = PortableServiceStartup.WaitForSettledAsync(
+                () => PortableServiceStartup.Observe(serviceExePath), TimeSpan.FromSeconds(5), CancellationToken.None).GetAwaiter().GetResult();
+            if (observed is PortableServiceRegistrationState.PendingDeletion or PortableServiceRegistrationState.Foreign or PortableServiceRegistrationState.Uncertain)
+                return (false, observed == PortableServiceRegistrationState.PendingDeletion ? "SERVICE_PENDING_DELETE" : "SERVICE_IMAGE_PATH_MISMATCH",
+                    "Portable service is pending deletion or ownership is uncertain. Close Services MMC and retry after the previous runtime exits; do not repair another installation.");
+        }
         var isAutostartEnabled = requestedAutostartEnabled ?? IsAutostartEnabledForUser(userSid, log);
         var startupMode = GetRequestedStartupMode(isAutostartEnabled, serviceExePath);
         var createStartupMode = isAutostartEnabled ? "auto" : "demand";
@@ -160,15 +172,7 @@ internal static class BackendServiceBootstrapper
 
         if (!ServiceExistsInScm(ServiceMetadata.ServiceName))
         {
-            var createResult = TryRunSc(log,
-                "create",
-                ServiceMetadata.ServiceName,
-                "binPath=",
-                binaryPath,
-                "start=",
-                createStartupMode,
-                "DisplayName=",
-                ServiceMetadata.DisplayName);
+            var createResult = RunScm(log, "CreateService", () => CreateOwnService(binaryPath, createStartupMode));
             if (!createResult.Success)
             {
                 if (createResult.ExitCode == ErrorServiceExists)
@@ -181,29 +185,17 @@ internal static class BackendServiceBootstrapper
 
                     if (!ServiceExistsInScm(ServiceMetadata.ServiceName))
                     {
-                        createResult = TryRunSc(log,
-                            "create",
-                            ServiceMetadata.ServiceName,
-                            "binPath=",
-                            binaryPath,
-                            "start=",
-                            createStartupMode,
-                            "DisplayName=",
-                            ServiceMetadata.DisplayName);
+                        createResult = RunScm(log, "CreateService", () => CreateOwnService(binaryPath, createStartupMode));
                     }
                     else
                     {
-                        var configExistingResult = TryRunSc(log,
-                            "config",
-                            ServiceMetadata.ServiceName,
-                            "binPath=",
-                            binaryPath);
+                        var configExistingResult = RunScm(log, "ImagePath", () => ConfigureOwnImagePath(binaryPath));
                         if (!configExistingResult.Success)
                         {
                             return (false, "SERVICE_CONFIG_FAILED", configExistingResult.Detail);
                         }
 
-                        createResult = new ScResult(true, 0, string.Empty, string.Empty, "Existing healthy service will be configured.");
+                        createResult = new ServiceCommandResult(true, 0, "Existing healthy service will be configured.");
                     }
                 }
                 else if (createResult.ExitCode == ErrorServiceMarkedForDelete)
@@ -222,11 +214,7 @@ internal static class BackendServiceBootstrapper
         }
         else
         {
-            var configResult = TryRunSc(log,
-                "config",
-                ServiceMetadata.ServiceName,
-                "binPath=",
-                binaryPath);
+            var configResult = RunScm(log, "ImagePath", () => ConfigureOwnImagePath(binaryPath));
             if (!configResult.Success)
             {
                 return (false, "SERVICE_CONFIG_FAILED", configResult.Detail);
@@ -248,7 +236,7 @@ internal static class BackendServiceBootstrapper
                 $"Configured service executable does not match this backend. Expected={serviceExePath}, Actual={registeredConfiguration.ServiceExePath ?? "<missing>"}.");
         }
 
-        var descriptionResult = TryRunSc(log, "description", ServiceMetadata.ServiceName, "Context Menu Manager Plus elevated backend service");
+        var descriptionResult = RunScm(log, "Description", () => ConfigureOwnDescription("Context Menu Manager Plus elevated backend service"));
         if (!descriptionResult.Success)
         {
             return (false, "SERVICE_DESCRIPTION_CONFIG_FAILED", descriptionResult.Detail);
@@ -262,8 +250,7 @@ internal static class BackendServiceBootstrapper
                 requestedStartupMode: startupMode,
                 configureStartupMode: () =>
                 {
-                    var result = TryRunSc(log, "config", ServiceMetadata.ServiceName, "start=", startupMode);
-                    return new ServiceCommandResult(result.Success, result.ExitCode, result.Detail);
+                    return RunScm(log, "StartupMode", () => ConfigureOwnStartupMode(startupMode));
                 },
                 readConfiguration: () => ReadServiceConfiguration(ServiceMetadata.ServiceName),
                 configureRecovery: () =>
@@ -274,7 +261,7 @@ internal static class BackendServiceBootstrapper
                 convergeRuntime: () => ConvergeServiceRuntime(serviceExePath, log),
                 commitPolicy: () => SetAutostartPolicyForUser(userSid, isAutostartEnabled, log));
 
-            log($"ServiceStartupModeResult: RequestedStartupMode={startupMode}, ActualStartupMode={transition.ActualStartupMode}, ScExitCode={transition.ScExitCode}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
+            log($"ServiceStartupModeResult: RequestedStartupMode={startupMode}, ActualStartupMode={transition.ActualStartupMode}, Win32Error={transition.Win32Error}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
             if (!transition.Success)
             {
                 TryDeleteKeepFrontendMarker();
@@ -308,6 +295,20 @@ internal static class BackendServiceBootstrapper
             }
         }
 
+        if (RuntimePaths.PackageKind == RuntimePackageKind.Portable && !persistRequestedPolicyOnSuccess
+            && PortableServiceExitPolicy.HasUnsettledStartupTransaction(RuntimePaths.DataDirectory))
+        {
+            if (string.IsNullOrWhiteSpace(userSid)) return (false, "USER_SID_REQUIRED", "Explicit user context is required to recover a Portable startup transaction.");
+            using var paths = new PortableRuntimeIdentity();
+            paths.PinDirectory(RuntimePaths.DataDirectory);
+            // A verified explicit repair adopts the effective autostart policy
+            // and retains the registration until the user opts into cleanup again.
+            FrontendSettingsFile.UpdateLifecycle(RuntimePaths.SettingsPath, isAutostartEnabled, removeOnExit: false);
+            File.Delete(Path.Combine(RuntimePaths.DataDirectory, ServiceMetadata.PortableStartupTransactionMarkerFileName));
+            if (PortableServiceExitPolicy.HasUnsettledStartupTransaction(RuntimePaths.DataDirectory))
+                return (false, "PORTABLE_STARTUP_ROLLBACK_FAILED", "Transaction marker removal could not be verified after repair.");
+            log("PortableStartupTransactionRecovered: cleanup disabled after verified service repair.");
+        }
         TryDeleteKeepFrontendMarker();
         LogServiceLifecycleDiagnostics(log, userSid, isAutostartEnabled, startupMode);
         return (true, "OK", "Running");
@@ -424,7 +425,95 @@ internal static class BackendServiceBootstrapper
         }
     }
 
-    private static (bool Success, string Code, string Detail) SetServiceStartupMode(bool enabled, string? userSid, Action<string> log)
+    private static (bool Success, string Code, string Detail) SetServiceStartupMode(
+        bool enabled, string? userSid, Action<string> log, string? removeOnExit)
+    {
+        if (RuntimePaths.PackageKind != RuntimePackageKind.Portable)
+            return SetServiceStartupModeCore(enabled, userSid, log);
+        if (string.IsNullOrWhiteSpace(userSid) || removeOnExit is not (null or "0" or "1"))
+            return (false, "INVALID_PORTABLE_STARTUP_POLICY", "An explicit user SID and boolean cleanup policy are required.");
+
+        using var paths = new PortableRuntimeIdentity();
+        paths.PinDirectory(RuntimePaths.RootDirectory);
+        using var settings = File.OpenRead(RuntimePaths.SettingsPath);
+        var previousPolicy = PortableServiceExitPolicy.Read(settings);
+        settings.Dispose();
+        var desiredRemoval = !enabled && (removeOnExit is null ? previousPolicy.RemoveOnExit : removeOnExit == "1");
+        var previousConfiguration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+        if (previousConfiguration.Exists && !string.Equals(previousConfiguration.ImagePath?.Trim(),
+                $"\"{Environment.ProcessPath}\" --service", StringComparison.OrdinalIgnoreCase))
+            return (false, "SERVICE_IMAGE_PATH_MISMATCH", "Another installation owns the service registration.");
+        if (previousConfiguration.Exists && previousConfiguration.StartValue is not (2 or 3 or 4))
+            return (false, "SERVICE_STARTUP_CONFIG_MISMATCH", "Previous startup mode is uncertain.");
+
+        using var userRoot = Registry.Users.OpenSubKey(userSid, writable: true)
+            ?? throw new IOException("Authenticated user's hive is not loaded.");
+        using var policy = userRoot.CreateSubKey(FrontendPolicyKeyPath, writable: true);
+        using var run = userRoot.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        var oldValue = policy.GetValue(FrontendPolicyValueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        var oldKind = oldValue is null ? RegistryValueKind.DWord : policy.GetValueKind(FrontendPolicyValueName);
+        var oldRun = run?.GetValue("ContextMenuManagerPlus.TrayHost", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        var oldRunKind = oldRun is null ? RegistryValueKind.String : run!.GetValueKind("ContextMenuManagerPlus.TrayHost");
+        var result = PortableStartupTransaction.Execute(
+            RuntimePaths.DataDirectory,
+            () =>
+            {
+                var transition = SetServiceStartupModeCore(enabled, userSid, log);
+                return new(transition.Success, transition.Code, transition.Detail);
+            },
+            () => FrontendSettingsFile.UpdateLifecycle(RuntimePaths.SettingsPath, enabled, desiredRemoval, expected: previousPolicy),
+            () =>
+            {
+                // Roll back in the same elevated process; never ask for a second
+                // UAC authorization to compensate for a failed transaction.
+                var current = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+                if (current.Exists)
+                {
+                    if (!PathsReferToSameFile(current.ServiceExePath, Environment.ProcessPath))
+                        throw new IOException("Service ownership changed; rollback refused.");
+                    var oldMode = previousConfiguration.StartValue switch
+                    {
+                        2 when previousConfiguration.DelayedAutoStart => "delayed-auto",
+                        2 => "auto", 4 => "disabled", _ => "demand"
+                    };
+                    var alreadyRestored = current.StartValue == (previousConfiguration.StartValue ?? 3)
+                        && (current.StartValue != 2 || current.DelayedAutoStart == previousConfiguration.DelayedAutoStart);
+                    if (!alreadyRestored)
+                    {
+                        if (!current.MatchesRequestedStartupMode(GetRequestedStartupMode(enabled, Environment.ProcessPath!)))
+                            throw new IOException("External SCM startup change preserved; rollback is uncertain.");
+                        var restored = RunScm(log, "StartupModeRollback", () => ConfigureOwnStartupMode(oldMode));
+                        var observed = ReadServiceConfiguration(ServiceMetadata.ServiceName);
+                        if (!restored.Success || observed.StartValue != (previousConfiguration.StartValue ?? 3)
+                            || observed.StartValue == 2 && observed.DelayedAutoStart != previousConfiguration.DelayedAutoStart)
+                            throw new IOException("SCM startup rollback could not be verified.");
+                    }
+                }
+                var actual = policy.GetValue(FrontendPolicyValueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                if (!Equals(actual, oldValue) && !Equals(actual, enabled ? 1 : 0))
+                    throw new IOException("External user policy change preserved; rollback is uncertain.");
+                if (oldValue is null) policy.DeleteValue(FrontendPolicyValueName, false);
+                else policy.SetValue(FrontendPolicyValueName, oldValue, oldKind);
+                if (oldRun is not null && run?.GetValue("ContextMenuManagerPlus.TrayHost") is null)
+                    run?.SetValue("ContextMenuManagerPlus.TrayHost", oldRun, oldRunKind);
+                if (!Equals(policy.GetValue(FrontendPolicyValueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames), oldValue)
+                    || oldValue is not null && policy.GetValueKind(FrontendPolicyValueName) != oldKind
+                    || !Equals(run?.GetValue("ContextMenuManagerPlus.TrayHost", null, RegistryValueOptions.DoNotExpandEnvironmentNames), oldRun)
+                    || oldRun is not null && run!.GetValueKind("ContextMenuManagerPlus.TrayHost") != oldRunKind)
+                    throw new IOException("User policy rollback read-back failed.");
+                using var stream = File.OpenRead(RuntimePaths.SettingsPath);
+                var actualSettings = PortableServiceExitPolicy.Read(stream);
+                stream.Dispose();
+                if (actualSettings.AutoStart == enabled && actualSettings.RemoveOnExit == desiredRemoval)
+                    FrontendSettingsFile.UpdateLifecycle(RuntimePaths.SettingsPath, previousPolicy.AutoStart, previousPolicy.RemoveOnExit, expected: actualSettings);
+                else if (actualSettings.AutoStart != previousPolicy.AutoStart || actualSettings.RemoveOnExit != previousPolicy.RemoveOnExit)
+                    throw new IOException("External lifecycle settings change preserved; rollback is uncertain.");
+            });
+        log($"PortableStartupTransaction: Success={result.Success}, Code={result.Code}, Detail={result.Detail}.");
+        return (result.Success, result.Code, result.Detail);
+    }
+
+    private static (bool Success, string Code, string Detail) SetServiceStartupModeCore(bool enabled, string? userSid, Action<string> log)
     {
         log($"SetServiceStartupMode: Enabled={enabled}, UserSid={userSid ?? "<null>"}.");
 
@@ -450,15 +539,14 @@ internal static class BackendServiceBootstrapper
             requestedStartupMode: "demand",
             configureStartupMode: () =>
             {
-                var result = TryRunSc(log, "config", ServiceMetadata.ServiceName, "start=", "demand");
-                return new ServiceCommandResult(result.Success, result.ExitCode, result.Detail);
+                return RunScm(log, "StartupMode", () => ConfigureOwnStartupMode("demand"));
             },
             readConfiguration: () => ReadServiceConfiguration(ServiceMetadata.ServiceName),
             configureRecovery: static () => new ServiceCommandResult(true, 0, "Not required while disabling autostart."),
             convergeRuntime: static () => new ServiceRuntimeConvergenceResult(true, "OK", "Not required while disabling autostart."),
             commitPolicy: () => SetAutostartPolicyForUser(userSid, enabled: false, log));
 
-        log($"ServiceStartupModeResult: RequestedStartupMode=demand, ActualStartupMode={transition.ActualStartupMode}, ScExitCode={transition.ScExitCode}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
+        log($"ServiceStartupModeResult: RequestedStartupMode=demand, ActualStartupMode={transition.ActualStartupMode}, Win32Error={transition.Win32Error}, ServiceStatus={transition.ServiceStatus}, PolicyCommitted={transition.PolicyCommitted}, Success={transition.Success}, Code={transition.Code}.");
         return (transition.Success, transition.Code, transition.Detail);
     }
 
@@ -492,8 +580,8 @@ internal static class BackendServiceBootstrapper
         if (existsInScm && !string.Equals(statusText, nameof(ServiceControllerStatus.Stopped), StringComparison.OrdinalIgnoreCase))
         {
             TryWriteStopReasonMarker(MapRemovalStopReason(reason), log);
-            var disableFailureFlag = TryRunSc(log, "failureflag", serviceName, "0");
-            log($"RemovalRecoverySuppression: ServiceName={serviceName}, Success={disableFailureFlag.Success}, ScExitCode={disableFailureFlag.ExitCode}. Normal SCM stop remains non-recoverable even if this best-effort guard fails.");
+            var disableFailureFlag = RunScm(log, "RemovalRecoverySuppression", () => DisableRecoveryDuringRemoval(serviceName));
+            log($"RemovalRecoverySuppression: ServiceName={serviceName}, Success={disableFailureFlag.Success}, Win32Error={disableFailureFlag.ExitCode}. Normal SCM stop remains non-recoverable even if this best-effort guard fails.");
             if (keepFrontendAlive)
             {
                 TryEnsureKeepFrontendMarker(log);
@@ -633,36 +721,17 @@ internal static class BackendServiceBootstrapper
                && !string.Equals(systemDrive, serviceDrive, StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static IReadOnlyList<string[]> BuildRecoveryScCommands(string serviceName)
-        =>
-        [
-            [
-                "failure",
-                serviceName,
-                "reset=",
-                RecoveryResetPeriodSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                "actions=",
-                RecoveryActions
-            ],
-            ["failureflag", serviceName, "1"]
-        ];
-
     private static (bool Success, string Code, string Detail) ConfigureAndVerifyStartupMode(
         string requestedStartupMode,
         Action<string> log)
     {
-        var scResult = TryRunSc(
-            log,
-            "config",
-            ServiceMetadata.ServiceName,
-            "start=",
-            requestedStartupMode);
+        var configurationResult = RunScm(log, "StartupMode", () => ConfigureOwnStartupMode(requestedStartupMode));
         var configuration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
-        log($"ServiceStartupModeResult: RequestedStartupMode={requestedStartupMode}, ActualStartupMode={configuration.ConfiguredStartType}, DelayedAutoStart={configuration.DelayedAutoStart}, ScExitCode={scResult.ExitCode}, ServiceStatus={configuration.CurrentStatus}.");
+        log($"ServiceStartupModeResult: RequestedStartupMode={requestedStartupMode}, ActualStartupMode={configuration.ConfiguredStartType}, DelayedAutoStart={configuration.DelayedAutoStart}, Win32Error={configurationResult.ExitCode}, ServiceStatus={configuration.CurrentStatus}.");
 
-        if (!scResult.Success)
+        if (!configurationResult.Success)
         {
-            return (false, "SERVICE_STARTUP_CONFIG_FAILED", scResult.Detail);
+            return (false, "SERVICE_STARTUP_CONFIG_FAILED", configurationResult.Detail);
         }
 
         if (!configuration.MatchesRequestedStartupMode(requestedStartupMode))
@@ -678,29 +747,11 @@ internal static class BackendServiceBootstrapper
 
     private static (bool Success, string Code, string Detail) ConfigureAndVerifyServiceRecovery(Action<string> log)
     {
-        foreach (var arguments in BuildRecoveryScCommands(ServiceMetadata.ServiceName))
-        {
-            var result = TryRunSc(log, arguments);
-            if (!result.Success)
-            {
-                log($"ServiceRecoveryConfiguration: FailureRecoveryConfigured=False, FailedCommand={arguments[0]}, ScExitCode={result.ExitCode}, Detail={result.Detail}.");
-                return (false, "SERVICE_RECOVERY_CONFIG_FAILED", result.Detail);
-            }
-        }
-
-        var queryFailure = TryRunSc(log, "qfailure", ServiceMetadata.ServiceName);
-        var queryFailureFlag = TryRunSc(log, "qfailureflag", ServiceMetadata.ServiceName);
-        if (!queryFailure.Success || !queryFailureFlag.Success)
-        {
-            var failed = !queryFailure.Success ? queryFailure : queryFailureFlag;
-            return (false, "SERVICE_RECOVERY_VERIFY_FAILED", failed.Detail);
-        }
-
-        var configuration = ReadServiceConfiguration(ServiceMetadata.ServiceName);
-        log($"ServiceRecoveryConfiguration: FailureRecoveryConfigured={configuration.FailureRecoveryConfigured}, FailureActionsPresent={configuration.FailureActionsPresent}, FailureActionsOnNonCrashFailures={configuration.FailureActionsOnNonCrashFailures}, ResetSeconds={RecoveryResetPeriodSeconds}, Actions={RecoveryActions}.");
-        return configuration.FailureRecoveryConfigured
-            ? (true, "OK", RecoveryActions)
-            : (false, "SERVICE_RECOVERY_CONFIG_MISMATCH", "SCM recovery settings could not be verified after configuration.");
+        // The native operation performs exact actions/reset/flag read-back on
+        // the same service handle. No diagnostic child process is required.
+        var result = RunScm(log, "Recovery", ConfigureOwnRecovery);
+        log($"ServiceRecoveryConfiguration: FailureRecoveryConfigured={result.Success}, Win32Error={result.ExitCode}, ResetSeconds={ServiceRecoveryConfiguration.RequiredResetSeconds}, Actions={RecoveryActions}, Detail={result.Detail}.");
+        return result.Success ? (true, "OK", RecoveryActions) : (false, "SERVICE_RECOVERY_CONFIG_FAILED", result.Detail);
     }
 
     private static ServiceRuntimeConvergenceResult ConvergeServiceRuntime(
@@ -776,8 +827,9 @@ internal static class BackendServiceBootstrapper
 
     internal static ServiceConfigurationSnapshot ReadServiceConfiguration(string serviceName)
     {
-        using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{serviceName}");
-        if (key is null)
+        ScmServiceConfiguration native;
+        try { native = ServiceScmNative.ReadConfiguration(serviceName); }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorServiceDoesNotExist)
         {
             return new ServiceConfigurationSnapshot(
                 false,
@@ -789,17 +841,16 @@ internal static class BackendServiceBootstrapper
                 false,
                 false,
                 false,
+                false,
                 "Missing",
                 GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? "<unknown>",
                 "<unknown>");
         }
 
-        var imagePath = key.GetValue("ImagePath") as string;
+        var imagePath = native.ImagePath;
         var serviceExePath = string.IsNullOrWhiteSpace(imagePath) ? null : TryParseExecutablePath(imagePath);
-        int? startValue = key.GetValue("Start") is int start ? start : null;
-        var delayedAutoStart = key.GetValue("DelayedAutostart") is int delayed && delayed != 0;
-        var failureActionsPresent = key.GetValue("FailureActions") is byte[] failureActions && failureActions.Length > 0;
-        var failureActionsOnNonCrashFailures = key.GetValue("FailureActionsOnNonCrashFailures") is int failureFlag && failureFlag != 0;
+        int? startValue = checked((int)native.StartType);
+        var delayedAutoStart = native.DelayedAutoStart;
         var configuredStartType = startValue switch
         {
             0 => "Boot",
@@ -819,9 +870,11 @@ internal static class BackendServiceBootstrapper
             startValue,
             configuredStartType,
             delayedAutoStart,
-            failureActionsPresent,
-            failureActionsOnNonCrashFailures,
-            GetServiceStatusText(serviceName),
+            native.Recovery.Actions.Count > 0,
+            native.Recovery.HasExpectedActions,
+            native.Recovery.OnNonCrashFailures,
+            Enum.IsDefined(typeof(ServiceControllerStatus), (int)native.State)
+                ? ((ServiceControllerStatus)native.State).ToString() : "Unknown",
             GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) ?? "<unknown>",
             GetPathRoot(serviceExePath) ?? "<unknown>");
     }
@@ -929,6 +982,15 @@ internal static class BackendServiceBootstrapper
                     $@"Unable to open frontend autostart policy key HKEY_USERS\{userSid}\{FrontendPolicyKeyPath}.");
 
             key.SetValue(FrontendPolicyValueName, enabled ? 1 : 0, RegistryValueKind.DWord);
+            if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
+            {
+                using var run = userRoot.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                run?.DeleteValue("ContextMenuManagerPlus.TrayHost", false);
+                key.Flush();
+                if (key.GetValue(FrontendPolicyValueName) is not int actual || actual != (enabled ? 1 : 0)
+                    || run?.GetValue("ContextMenuManagerPlus.TrayHost") is not null)
+                    throw new IOException("User startup policy read-back failed.");
+            }
             log($@"SetAutostartPolicyForUser: Path=HKEY_USERS\{userSid}\{FrontendPolicyKeyPath}, ValueName={FrontendPolicyValueName}, ValueKind={RegistryValueKind.DWord}, ValueData={(enabled ? 1 : 0)}, Result=Success.");
         }
         catch (Exception ex)
@@ -997,49 +1059,17 @@ internal static class BackendServiceBootstrapper
         }
     }
 
-    private static ScResult TryRunSc(Action<string> log, params string[] arguments)
+    private static ServiceCommandResult RunScm(Action<string> log, string operation, Func<string> execute)
     {
         var stopwatch = Stopwatch.StartNew();
-        var startInfo = new ProcessStartInfo
+        ServiceCommandResult result;
+        try { result = new(true, 0, execute()); }
+        catch (Exception ex)
         {
-            FileName = "sc.exe",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
+            result = new(false, ex is Win32Exception native ? native.NativeErrorCode : -1, ex.Message);
         }
-
-        using var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            return new ScResult(false, -1, string.Empty, string.Empty, "Failed to start sc.exe.");
-        }
-
-        process.WaitForExit();
-        stopwatch.Stop();
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        log($"RunSc: Arguments={string.Join(" ", arguments)}, ExitCode={process.ExitCode}, ElapsedMs={stopwatch.ElapsedMilliseconds}, Stdout={(process.ExitCode == 0 ? "<suppressed-success>" : stdout)}, Stderr={(process.ExitCode == 0 ? "<suppressed-success>" : stderr)}.");
-        if (process.ExitCode == 0)
-        {
-            return new ScResult(true, process.ExitCode, stdout, stderr, "OK");
-        }
-
-        var detail = stderr;
-        if (string.IsNullOrWhiteSpace(detail))
-        {
-            detail = stdout;
-        }
-
-        var trimmedDetail = string.IsNullOrWhiteSpace(detail)
-            ? $"sc.exe exited with code {process.ExitCode}."
-            : detail.Trim();
-        return new ScResult(false, process.ExitCode, stdout, stderr, trimmedDetail);
+        log($"ScmOperation: Operation={operation}, Success={result.Success}, Win32Error={result.ExitCode}, ElapsedMs={stopwatch.Elapsed.TotalMilliseconds:F2}, Detail={result.Detail}.");
+        return result;
     }
 
     private static DeleteServiceResult TryDeleteServiceRegistration(string serviceName)
@@ -1153,18 +1183,6 @@ internal static class BackendServiceBootstrapper
         return firstSpace > 0 ? trimmed[..firstSpace] : trimmed;
     }
 
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern IntPtr OpenSCManager(string? machineName, string? databaseName, int desiredAccess);
-
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern IntPtr OpenService(IntPtr serviceControlManager, string serviceName, int desiredAccess);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool DeleteService(IntPtr service);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool CloseServiceHandle(IntPtr handle);
-
     private static void WriteResult(string resultFilePath, bool success, string code, string detail)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(resultFilePath) ?? Path.GetTempPath());
@@ -1197,13 +1215,14 @@ internal static class BackendServiceBootstrapper
     {
         try
         {
-            log($"TryPingBackendPipe: Attempt={attempt}, ConnectTimeoutMs={timeout.TotalMilliseconds}, Result=Start.");
+            log($"TryPingBackendPipe: Attempt={attempt}, RequestTimeoutMs={timeout.TotalMilliseconds}, Result=Start.");
+            using var timeoutCts = new CancellationTokenSource(timeout);
             using var pipe = new NamedPipeClientStream(
                 ".",
                 PipeConstants.PipeName,
                 PipeDirection.InOut,
-                PipeOptions.None);
-            pipe.Connect((int)timeout.TotalMilliseconds);
+                PipeOptions.Asynchronous);
+            pipe.ConnectAsync(timeoutCts.Token).GetAwaiter().GetResult();
 
             using var reader = new StreamReader(
                 pipe,
@@ -1228,8 +1247,8 @@ internal static class BackendServiceBootstrapper
                 }
             }, JsonOptions);
 
-            writer.WriteLine(payload);
-            var line = reader.ReadLine();
+            writer.WriteLineAsync(payload.AsMemory(), timeoutCts.Token).GetAwaiter().GetResult();
+            var line = reader.ReadLineAsync(timeoutCts.Token).AsTask().GetAwaiter().GetResult();
             if (string.IsNullOrWhiteSpace(line))
             {
                 log($"TryPingBackendPipe: Attempt={attempt}, Result=FailureEmptyResponse.");
@@ -1326,22 +1345,7 @@ internal static class BackendServiceBootstrapper
         int ErrorCode,
         string Detail);
 
-    private sealed record ScResult(bool Success, int ExitCode, string Stdout, string Stderr, string Detail);
-
     private sealed record OpenServiceResult(bool Success, SafeScHandle? Handle, int ErrorCode, string Detail);
-
-    private sealed class SafeScHandle : SafeHandle
-    {
-        public SafeScHandle(IntPtr handle)
-            : base(IntPtr.Zero, ownsHandle: true)
-        {
-            SetHandle(handle);
-        }
-
-        public override bool IsInvalid => handle == IntPtr.Zero;
-
-        protected override bool ReleaseHandle() => CloseServiceHandle(handle);
-    }
 
     private static void TryEnsureTrayHostViaPipe(Action<string> log)
     {

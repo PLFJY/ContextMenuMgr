@@ -1608,4 +1608,19 @@ Continue anyway? (Not recommended)</value>
   <data name="Windows11Publisher" xml:space="preserve"><value>Publisher: {0}</value></data>
   <data name="Windows11PackageIdentity" xml:space="preserve"><value>App identity: {0}</value></data>
   <data name="Windows11FileLocation" xml:space="preserve"><value>File location: {0}</value></data>
+  <data name="Settings.RemovePortableServiceOnExit" xml:space="preserve">
+    <value>Automatically uninstall backend service on exit</value>
+  </data>
+  <data name="Settings.RemovePortableServiceOnExit.Description" xml:space="preserve">
+    <value>Removes the service registration after exiting the background runtime. A later launch may require UAC authorization again. Turn this off before enabling Start with Windows; turn Start with Windows off before enabling this option.</value>
+  </data>
+  <data name="PortableServicePendingDeletion" xml:space="preserve">
+    <value>The previous service is still being deleted. Close Services MMC or other service tools, then retry. Restart Windows if it remains pending.</value>
+  </data>
+  <data name="PortableServiceOwnershipUncertain" xml:space="preserve">
+    <value>The backend service belongs to another installation or its ownership cannot be verified. Exit that copy and remove its service explicitly before starting this Portable copy.</value>
+  </data>
+  <data name="PortableStartupPolicyUncertain" xml:space="preserve">
+    <value>The startup policy could not be restored reliably. Run Install or repair service before changing these options again.</value>
+  </data>
 </root>

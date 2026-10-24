@@ -43,6 +43,8 @@ public sealed class FrontendSettings
     /// </summary>
     public bool KeepBackgroundAfterClose { get; set; }
 
+    public bool RemovePortableServiceOnExit { get; set; } = true;
+
     /// <summary>
     /// Gets or sets the lock New Context Menu Items.
     /// </summary>

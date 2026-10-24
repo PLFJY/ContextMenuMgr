@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Text;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
@@ -83,6 +85,20 @@ public sealed class TrayHostProcessService
     public async Task<bool> RequestExitAsync(CancellationToken cancellationToken)
         => await SendCommandAsync(TrayHostControlCommand.Exit, cancellationToken);
 
+    public async Task RequestExitAndWaitAsync(CancellationToken cancellationToken)
+    {
+        var processes = Process.GetProcessesByName("ContextMenuManagerPlus.TrayHost");
+        try
+        {
+            await SendCommandAsync(new TrayHostControlRequest { Command = TrayHostControlCommand.Exit }, cancellationToken,
+                verifyCurrentRuntime: true);
+            foreach (var process in processes)
+                if (!process.HasExited && process.SessionId == Process.GetCurrentProcess().SessionId)
+                    await process.WaitForExitAsync(cancellationToken);
+        }
+        finally { foreach (var process in processes) process.Dispose(); }
+    }
+
     /// <summary>
     /// Executes request Reload Localization Async.
     /// </summary>
@@ -110,7 +126,8 @@ public sealed class TrayHostProcessService
     private static async Task<bool> SendCommandAsync(TrayHostControlCommand command, CancellationToken cancellationToken)
         => await SendCommandAsync(new TrayHostControlRequest { Command = command }, cancellationToken);
 
-    private static async Task<bool> SendCommandAsync(TrayHostControlRequest request, CancellationToken cancellationToken)
+    private static async Task<bool> SendCommandAsync(TrayHostControlRequest request, CancellationToken cancellationToken,
+        bool verifyCurrentRuntime = false)
     {
         var startedAt = DateTimeOffset.UtcNow;
         FrontendDebugLog.Operation(
@@ -121,6 +138,15 @@ public sealed class TrayHostProcessService
         {
             using var stream = new NamedPipeClientStream(".", PipeConstants.TrayHostControlPipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await stream.ConnectAsync(500, cancellationToken);
+            if (verifyCurrentRuntime)
+            {
+                if (!GetNamedPipeServerProcessId(stream.SafePipeHandle, out var pid)) return false;
+                using var server = Process.GetProcessById(checked((int)pid));
+                if (server.SessionId != Process.GetCurrentProcess().SessionId
+                    || !string.Equals(server.MainModule?.FileName,
+                        Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.TrayHost.exe"), StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
 
             using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
@@ -151,4 +177,6 @@ public sealed class TrayHostProcessService
             return false;
         }
     }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint pid);
 }

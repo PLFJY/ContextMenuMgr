@@ -38,6 +38,8 @@ ShellNew 的 `FrontendUserClassesRoot` 在同步退出即恢复的服务 scope �
 
 服务 Pipe ACL 给 LocalSystem/Administrators FullControl，Authenticated Users ReadWrite/CreateNewInstance。它不是仅本产品二进制可访问的能力令牌；请求中的路径/SID/DTO 仍是不可信输入，handler 必须验证物理身份和权限边界。`RuleUserSid` 等字段存在不代表客户端可以冒充任意用户。OpenWith 通知另按认证 SID 过滤，不把这项保护推导成所有通知均按用户隔离。
 
+`RequestPortableExit` 是追加的窄生命周期命令，不改变普通 `RequestShutdown`。只接受该 Portable 目录 Frontend EXE 的活进程，Pipe SID、进程 token SID 与实际 Session 必须一致；PID、路径、SID、包类型不取自 DTO，也没有用户/Session fallback。持有客户端进程句柄防 PID 复用，运行期固定的前端文件身份防换名替换；TrayHost 和任意认证本地客户端不能申请自动删除。产品还保守检查其它登录 Session、Frontend/TrayHost 和所有活动 Pipe 消费者；只有调用 Frontend 自己的连接或原生已确认断开的连接可共存，未知消费者拒绝退出。检查与新连接 admission 共用 gate，接受退出后不再接收新业务连接，避免验证与删除之间引入新消费者。实际 DeleteService 在已退出 Pipe impersonation 的 LocalSystem 进程执行，并再次核对线程身份。只允许自身固定 ServiceName，完整顺序和 SCM/policy 核对见[生命周期](runtime-lifecycle.md#portable-自动移除-scm-注册)。此窄链路 A 例外不提供任意服务卸载 API，也不扩大 Pipe ACL 或替代链路 B 的显式维护命令。
+
 [PipeCommand](../ContextMenuMgr.Contracts/PipeCommand.cs) 以枚举数值传输，当前使用默认 System.Text.Json，没有通用协议版本协商。新增命令追加，不能插入/重排既有值。新增字段考虑缺失/null/旧客户端语义；未知或缺必需字段由服务失败响应，不允许拆成有部分成功风险的兼容写循环。`PipeResponse.Success/Message/ErrorCode` 与 `Item/Items/SpecialItem` 是不同证据，成功需要子系统实际读回/保存；不能把空 payload 当权威状态。
 
 Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。

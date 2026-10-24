@@ -8,14 +8,17 @@
 
 | 文件/目录 | 责任 |
 | --- | --- |
-| `frontend-settings.json` | FrontendSettingsService 的 UI 偏好及本地备注 |
+| `frontend-settings.json` | FrontendSettingsService 的 UI 偏好、本地备注及 Portable 生命周期偏好；不另建后端设置副本 |
 | `context-menu-state.json`、`.bak`、`.tmp-*` | 状态、恢复/归属、OpenWith section；不由前端直接删除 |
 | `backend-protection-settings.json` | Registry Write Protection 提交设置，与 ACL 一起收敛 |
 | `DeletedBackups`、`Quarantine` | 注册表删除恢复与损坏/foreign-host 隔离 |
 | `Programs` | 已启用增强菜单的持久脚本，不能当缓存随意清除 |
+| `portable-startup-transaction.marker` | 未完成 Portable 启动策略事务的删除 veto；提交/验证补偿后清除，异常残留只在显式修复核对后清除 |
 | `Logs`、`Locks` | 日志与持久同步 lease，二者是根下同级目录 |
 
 后端在 logger/store 创建前 best-effort 修复根 ACL，预创建 Logs/Locks，给 Builtin Users Modify 并修复已有子项继承。前端保存设置遇到权限类失败时先走 `RepairRuntimeDataAcl` Pipe 并重试一次；Pipe 不可用才用 bootstrapper `repair-runtime-data-acl`。这是共享文件数据可写性修复，不是菜单注册表保护、ShellNew 解锁或隔离存储。不要把 ProgramData/Portable 文件当成防同机其他用户篡改的安全边界。
+
+`FrontendSettingsFile` 统一设置写入：同目录唯一临时文件、flush-to-disk、原子替换；按规范化路径的具名 mutex 串行短文件事务。提升的 Portable startup-mode 操作只更新两个生命周期字段，保留其它偏好，使用条件式核对防止覆盖外部策略；前端在这段事务期间保存其它偏好时保留磁盘中的生命周期值。初次 Portable 启动持久化默认设置，reset 原子保存默认而不靠删除文件表示策略。后端关机读策略遇到缺失/不可读/损坏不得从默认推导删除权限；前端加载损坏/不可读策略时也将自动移除保守置 false，避免窗口位置等无关保存把损坏文件转成删除授权；具体默认值和 unloaded-hive 保守限制见[生命周期](runtime-lifecycle.md#portable-自动移除-scm-注册)。共享可写数据仍不是授权边界，SCM 删除还要独立验证身份、实际配置与用户策略。
 
 ## Installer 与 Portable 迁移
 

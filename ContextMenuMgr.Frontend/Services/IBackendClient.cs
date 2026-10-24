@@ -19,6 +19,8 @@ public interface IBackendClient : IAsyncDisposable
 
     Task RequestShutdownAsync(CancellationToken cancellationToken);
 
+    Task RequestPortableExitAsync(CancellationToken cancellationToken);
+
     Task<IReadOnlyList<ContextMenuEntry>> GetSnapshotAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ContextMenuEntry>> GetSceneSnapshotAsync(

@@ -27,6 +27,16 @@ TitleBar 布局是 Icon、Title、GlobalSearchBox、HeaderActions、WindowButton
 
 `LocalizationService` 支持 System/zh-CN/en-US/zh-TW，更新 culture 和 CurrentLanguage。长期用户文本同步 `Strings.resx`、`Strings.zh-CN.resx`、`Strings.zh-TW.resx`，托盘资源也独立维护，切语言通知 TrayHost reload。回收站 Pin to Start 等系统名称使用 `TranslateSystem` 的用户 Windows UI 语言，不能用服务语言替代。
 
+## Portable 生命周期设置
+
+SettingsPage 的 `RemovePortableServiceOnExit` 仅在 RuntimePackageManifest 判定 Portable 时显示，三语资源包含退出后台后移除注册、下次可能再次 UAC 的提示。默认 true，旧 JSON 缺字段继承 true，显式 false 保留；KeepBackgroundAfterClose 和 AutoStartOnLogin 仍默认 false。Installer 隐藏并忽略自动移除，即使用户手改 JSON。
+
+AutoStart 与自动移除通过各自命令的 `CanExecute` 互斥：一项开启时另一项不能操作，必须先手动关闭当前项；关闭当前项的命令始终允许，不会替用户关闭另一项。开关用 OneWay 显示已提交状态，操作失败强制刷新绑定以回退控件；不再由属性回调启动异步设置任务。`IsLifecycleSettingsEnabled` 在初次读取、命令执行和 reset 期间统一防重入；AutoStart 命令执行期间显示进度。自动移除只是本地持久偏好，既有 autostart 必须先通过原 verified startup-mode disable 操作关闭，之后才允许开启移除；不会为单独修改 cleanup 弹 UAC。失败恢复旧 UI/设置快照；补偿不确定或存在事务 marker 时禁用两个开关，明确提示先显式安装/修复服务；不能把后端查询失败当作 false 覆盖用户意图。事务期间取消普通窗口关闭，避免前端消失而提升操作继续。KeepBackgroundAfterClose 保持独立，详细事务/失败补偿与安全限制只见[生命周期](runtime-lifecycle.md#portable-启动策略事务)。
+
+设置页构造时回填语言、主题、日志级别、托盘和保护偏好不触发保存/远程副作用。Workspace 以真实 Ping 设置 `IsBackendReady`，设置页订阅其变化，在就绪后单飞读取远程设置；安装/UAC 尚未完成时打开设置页不会提前调用 GetAutoStartEnabled 或 SetTrayIconPolicy。读取失败保持生命周期开关禁用并保留持久意图，不能因 finally 执行而将未知状态开放为可操作。后端不可用期间语言和日志级别仍可本地修改，运行时同步由后续就绪流程完成；页面 Dispose 移除就绪订阅。
+
+App 以实际 Closed 触发 await 退出请求，取消 Closing 不停服；IPC 释放在退出请求之后。后台或服务控制关闭、系统会话结束、致命异常没有普通前端自动卸载意图。WPF Toggle、取消关闭、UAC 取消/失败回填、快速连续点击和真实单实例激活仍需 Windows 人工验收；策略/事务单测不证明模板或 SCM 已验证。
+
 ## 导航与页面组合
 
 本地 [ModernNavigationView](../ContextMenuMgr.Frontend/Controls/Modern/Navigation/ModernNavigationView.xaml.cs) 实现 WPF-UI INavigationView；仍用 INavigationService、NavigationViewItem/TargetPageType，递归保留 MenuItems/Source、Binding、Visibility、InfoBadge、图标与展开。不另造平行导航集合。

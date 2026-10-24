@@ -14,4 +14,6 @@ public static class ServiceMetadata
     public const string KeepFrontendOnStopMarkerFileName = "keep-frontend-on-service-stop.marker";
 
     public const string StopReasonMarkerFileName = "service-stop-reason.marker";
+
+    public const string PortableStartupTransactionMarkerFileName = "portable-startup-transaction.marker";
 }

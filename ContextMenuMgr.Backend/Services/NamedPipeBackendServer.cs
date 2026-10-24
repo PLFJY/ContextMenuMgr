@@ -7,6 +7,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
+using ContextMenuMgr.Backend.Hosting;
 
 namespace ContextMenuMgr.Backend.Services;
 
@@ -27,10 +28,12 @@ public sealed class NamedPipeBackendServer
     private readonly ExplorerRestartService _explorerRestartService;
     private readonly FileLogger _logger;
     private readonly ConcurrentDictionary<Guid, PipeClientConnection> _clients = new();
+    private readonly Lock _clientLifecycleGate = new();
+    private bool _portableExitAccepted;
     private CancellationTokenSource? _acceptLoopCts;
     private Task? _acceptLoopTask;
 
-    public event EventHandler? BackendShutdownRequested;
+    internal event EventHandler<BackendStopRequestedEventArgs>? BackendShutdownRequested;
     public event EventHandler? EnsureTrayHostRequested;
 
     /// <summary>
@@ -163,7 +166,11 @@ public sealed class NamedPipeBackendServer
     private async Task HandleClientAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
     {
         var connection = new PipeClientConnection(stream);
-        _clients[connection.Id] = connection;
+        lock (_clientLifecycleGate)
+        {
+            if (_portableExitAccepted) { connection.Dispose(); return; }
+            _clients[connection.Id] = connection;
+        }
         await _logger.LogAsync($"PipeClientConnected: ConnectionId={connection.Id}, Timestamp={DateTimeOffset.UtcNow:O}.", cancellationToken);
 
         try
@@ -348,6 +355,7 @@ public sealed class NamedPipeBackendServer
                 Message = "Notification subscription established."
             },
             PipeCommand.RequestShutdown => HandleShutdownRequest(),
+            PipeCommand.RequestPortableExit => HandlePortableExitRequest(stream),
             PipeCommand.SetLogLevel when request.LogLevel is not null
                 => HandleSetLogLevelRequest(request.LogLevel.Value),
             PipeCommand.GetSnapshot => new PipeResponse
@@ -974,12 +982,41 @@ public sealed class NamedPipeBackendServer
 
     private PipeResponse HandleShutdownRequest()
     {
-        BackendShutdownRequested?.Invoke(this, EventArgs.Empty);
+        BackendShutdownRequested?.Invoke(this, new(BackendServiceStopReason.FrontendRequest));
         return new PipeResponse
         {
             Success = true,
             Message = "Backend shutdown requested."
         };
+    }
+
+    private PipeResponse HandlePortableExitRequest(NamedPipeServerStream stream)
+    {
+        try
+        {
+            // A just-completed install may still be releasing its lifecycle
+            // lease when the frontend closes. Bound this wait inside the
+            // frontend's three-second request budget; never retry a mutation.
+            using var lifecycle = ServiceLifecycleLease.Acquire(TimeSpan.FromSeconds(1));
+            using var caller = PortableExitCaller.Authenticate(stream,
+                new BackendUserContextResolver(_logger).TryResolveFromPipeClient(stream));
+            PortableServiceCleanup.VerifyFrontendCanStop(caller);
+            lock (_clientLifecycleGate)
+            {
+                foreach (var client in _clients.Values)
+                    if (!caller.OwnsConnectionOrClosed(client.Stream))
+                        throw new IOException("Another or unresolvable pipe consumer still uses the service.");
+                _portableExitAccepted = true;
+                try { BackendShutdownRequested?.Invoke(this, new(BackendServiceStopReason.FrontendRequest) { PortableCaller = caller }); }
+                catch { _portableExitAccepted = false; throw; }
+            }
+            return new PipeResponse { Success = true, Message = "Portable exit accepted; consult service lifecycle log for deletion outcome." };
+        }
+        catch (Exception ex)
+        {
+            BackendEmergencyLogger.Log(ex, "PortableExitRejected: runtime retained.");
+            return new PipeResponse { Success = false, ErrorCode = "PORTABLE_EXIT_REFUSED", Message = ex.Message };
+        }
     }
 
     private PipeResponse HandleEnsureTrayHostRequest()
@@ -1126,6 +1163,8 @@ public sealed class NamedPipeBackendServer
         /// Gets the id.
         /// </summary>
         public Guid Id { get; }
+
+        public NamedPipeServerStream Stream => _stream;
 
         /// <summary>
         /// Gets the reader.

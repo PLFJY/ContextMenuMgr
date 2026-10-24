@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.ServiceProcess;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -241,7 +242,22 @@ public partial class MainViewModel : ObservableObject
     private async Task<bool> EnsureBackendReadyAsync()
     {
         FrontendDebugLog.Info("MainViewModel", "EnsureBackendReadyAsync started.");
-        if (await CanReachBackendAsync())
+        var probeBackend = true;
+        if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
+        {
+            var backend = Path.Combine(AppContext.BaseDirectory, "ContextMenuManagerPlus.Service.exe");
+            var state = await PortableServiceStartup.WaitForSettledAsync(
+                () => PortableServiceStartup.Observe(backend), TimeSpan.FromSeconds(4), CancellationToken.None);
+            if (state is PortableServiceRegistrationState.PendingDeletion or PortableServiceRegistrationState.Foreign or PortableServiceRegistrationState.Uncertain)
+            {
+                ConnectionStatus = _localization.Translate(state == PortableServiceRegistrationState.PendingDeletion
+                    ? "PortableServicePendingDeletion" : "PortableServiceOwnershipUncertain");
+                return false;
+            }
+            probeBackend = state != PortableServiceRegistrationState.Absent
+                && _backendServiceManager.GetServiceStatus() != ServiceControllerStatus.Stopped;
+        }
+        if (probeBackend && await CanReachBackendAsync())
         {
             FrontendDebugLog.Info("MainViewModel", "Backend reachable without bootstrap.");
             return true;

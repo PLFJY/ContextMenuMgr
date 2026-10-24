@@ -61,6 +61,7 @@
 
         <Border
             Margin="0,0,10,10"
+            MaxWidth="480"
             Background="{DynamicResource ControlFillColorSecondaryBrush}"
             Style="{StaticResource CardBorderStyle}">
             <StackPanel>
@@ -71,15 +72,22 @@
                 <ui:ToggleSwitch
                     Margin="0,12,0,0"
                     Content="{Binding AutoStartOnLoginLabel}"
-                    IsChecked="{Binding AutoStartOnLogin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    Command="{Binding ToggleAutoStartOnLoginCommand}"
+                    IsChecked="{Binding AutoStartOnLogin, Mode=OneWay}" />
                 <ui:TextBlock
                     Margin="0,8,0,0"
                     Opacity="0.72"
                     Text="{Binding AutoStartOnLoginDescription}"
                     TextWrapping="Wrap" />
+                <ProgressBar
+                    Height="4"
+                    Margin="0,8,0,0"
+                    IsIndeterminate="True"
+                    Visibility="{Binding ToggleAutoStartOnLoginCommand.IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 <ui:ToggleSwitch
                     Margin="0,16,0,0"
                     Content="{Binding ShowTrayIconLabel}"
+                    IsEnabled="{Binding IsLifecycleSettingsEnabled}"
                     IsChecked="{Binding ShowTrayIcon, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 <ui:TextBlock
                     Margin="0,8,0,0"
@@ -95,6 +103,18 @@
                     Opacity="0.72"
                     Text="{Binding KeepBackgroundAfterCloseDescription}"
                     TextWrapping="Wrap" />
+                <StackPanel Visibility="{Binding IsPortablePackage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ui:ToggleSwitch
+                        Margin="0,16,0,0"
+                        Content="{Binding RemovePortableServiceOnExitLabel}"
+                        Command="{Binding ToggleRemovePortableServiceOnExitCommand}"
+                        IsChecked="{Binding RemovePortableServiceOnExit, Mode=OneWay}" />
+                    <ui:TextBlock
+                        Margin="0,8,0,0"
+                        Opacity="0.72"
+                        Text="{Binding RemovePortableServiceOnExitDescription}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
@@ -316,6 +336,7 @@
                         Margin="0,0,12,12"
                         Padding="16,8"
                         Command="{Binding ResetSettingsCommand}"
+                        IsEnabled="{Binding IsLifecycleSettingsEnabled}"
                         Content="{Binding ResetSettingsText}"
                         Icon="{ui:SymbolIcon Symbol=Settings24}" />
                     <ui:Button

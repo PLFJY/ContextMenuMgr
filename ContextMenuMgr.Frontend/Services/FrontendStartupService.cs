@@ -42,14 +42,7 @@ public sealed class FrontendStartupService
     /// </summary>
     public async Task<bool> IsAutoStartEnabledAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            return await _backendClient.GetAutoStartEnabledAsync(cancellationToken);
-        }
-        catch
-        {
-            return false;
-        }
+        return await _backendClient.GetAutoStartEnabledAsync(cancellationToken);
     }
 
     /// <summary>

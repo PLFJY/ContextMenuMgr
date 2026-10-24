@@ -91,6 +91,11 @@ public sealed class NamedPipeBackendClient : IBackendClient
             cancellationToken);
     }
 
+    public async Task RequestPortableExitAsync(CancellationToken cancellationToken)
+    {
+        await SendRequestAsync(new PipeRequest { Command = PipeCommand.RequestPortableExit }, cancellationToken);
+    }
+
     /// <summary>
     /// Gets snapshot Async.
     /// </summary>

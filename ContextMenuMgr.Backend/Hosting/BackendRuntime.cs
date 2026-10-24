@@ -28,6 +28,8 @@ public sealed class BackendRuntime : IDisposable
 
     internal event EventHandler<BackendStopRequestedEventArgs>? StopRequested;
 
+    internal bool PrepareForStop() => _frontendAutostartLauncher.PrepareForStop();
+
     private BackendRuntime(
         FileLogger logger,
         ContextMenuRegistryMonitor monitor,
@@ -630,10 +632,10 @@ public sealed class BackendRuntime : IDisposable
         }
     }
 
-    private void OnBackendShutdownRequested(object? sender, EventArgs e)
+    private void OnBackendShutdownRequested(object? sender, BackendStopRequestedEventArgs e)
     {
         _shutdownFrontendOnStop = true;
-        StopRequested?.Invoke(this, new BackendStopRequestedEventArgs(BackendServiceStopReason.FrontendRequest));
+        StopRequested?.Invoke(this, e);
     }
 
     private void OnEnsureTrayHostRequested(object? sender, EventArgs e)

@@ -19,7 +19,7 @@ public interface IBackendServiceManager
 
     Task<BackendServiceBootstrapResult> ForceRemoveServiceAsync(CancellationToken cancellationToken);
 
-    Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken);
+    Task<BackendServiceBootstrapResult> SetServiceAutoStartEnabledAsync(bool enabled, CancellationToken cancellationToken, bool? removePortableServiceOnExit = null);
 
     Task<BackendServiceBootstrapResult> RepairRuntimeDataAclAsync(CancellationToken cancellationToken);
 }

@@ -1,5 +1,11 @@
+using System.Text;
+using System.Text.Json;
+using System.Reflection;
+using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Backend.Hosting;
 using ContextMenuMgr.Frontend.Services;
+using ContextMenuMgr.Frontend.ViewModels;
+using Microsoft.Win32;
 using Xunit;
 
 namespace ContextMenuMgr.Tests;
@@ -24,7 +30,7 @@ public sealed class ServiceLifecycleTests
     }
 
     [Fact]
-    public void FailedScConfigDoesNotReportSuccessOrCommitPolicy()
+    public void FailedStartupConfigurationDoesNotReportSuccessOrCommitPolicy()
     {
         var policyCommits = 0;
 
@@ -37,7 +43,7 @@ public sealed class ServiceLifecycleTests
         Assert.False(result.Success);
         Assert.False(result.PolicyCommitted);
         Assert.Equal("SERVICE_STARTUP_CONFIG_FAILED", result.Code);
-        Assert.Equal(5, result.ScExitCode);
+        Assert.Equal(5, result.Win32Error);
         Assert.Equal(0, policyCommits);
     }
 
@@ -217,18 +223,31 @@ public sealed class ServiceLifecycleTests
         Assert.False(committed);
     }
 
-    [Fact]
-    public void RecoveryCommandsAreConservativeAndIdempotent()
+    [Theory]
+    [InlineData(86400, 1, 5000, 3, true, true)]
+    [InlineData(0, 1, 5000, 3, true, false)]
+    [InlineData(86400, 1, 6000, 3, true, false)]
+    [InlineData(86400, 2, 5000, 3, true, false)]
+    [InlineData(86400, 1, 5000, 2, true, false)]
+    [InlineData(86400, 1, 5000, 3, false, false)]
+    public void RecoveryReadBackMustMatchActionsResetAndFlagBeforeAutostartCommit(
+        uint reset, uint firstType, uint firstDelay, int count, bool flag, bool expected)
     {
-        var first = BackendServiceBootstrapper.BuildRecoveryScCommands("ContextMenuManagerPlusService");
-        var second = BackendServiceBootstrapper.BuildRecoveryScCommands("ContextMenuManagerPlusService");
-
-        Assert.Equal(2, first.Count);
-        Assert.Equal(first.Select(static value => string.Join('|', value)), second.Select(static value => string.Join('|', value)));
-        Assert.Equal(
-            "failure|ContextMenuManagerPlusService|reset=|86400|actions=|restart/5000/restart/15000/restart/60000",
-            string.Join('|', first[0]));
-        Assert.Equal("failureflag|ContextMenuManagerPlusService|1", string.Join('|', first[1]));
+        var actions = new ServiceRecoveryAction[] { new(firstType, firstDelay), new(1, 15000), new(1, 60000) }.Take(count).ToArray();
+        var observed = new ServiceRecoveryConfiguration(reset, actions, flag);
+        var snapshot = CreateConfiguration(2, false, recoveryConfigured: true) with
+        {
+            FailureActionsPresent = actions.Length > 0,
+            FailureActionsMatch = observed.HasExpectedActions,
+            FailureActionsOnNonCrashFailures = observed.OnNonCrashFailures
+        };
+        var committed = false;
+        var result = ServiceAutostartTransition.Execute(true, true, "auto",
+            () => new(true, 0, "OK"), () => snapshot, () => new(true, 0, "API accepted configuration"),
+            () => new(true, "OK", "Running/Ping"), () => committed = true);
+        Assert.Equal(expected, observed.IsConfigured);
+        Assert.Equal(expected, result.Success);
+        Assert.Equal(expected, committed);
     }
 
     [Fact]
@@ -298,6 +317,406 @@ public sealed class ServiceLifecycleTests
         Assert.Equal(expectedTrayExit, actions.RequestTrayHostExit);
     }
 
+    // Permanent lifecycle invariants. These tests never register, delete or stop
+    // an SCM service and are not Windows shutdown integration tests.
+    [Fact]
+    public async Task OpeningSettingsBeforeBackendReadinessNeverSendsPreferenceWritesOrPrematureQueries()
+    {
+        using var files = new LifecycleFiles();
+        var path = Path.Combine(files.Directory, "frontend-settings.json");
+        const string saved = "{\"showTrayIcon\":true,\"lockNewContextMenuItems\":true,\"autoStartOnLogin\":true}";
+        File.WriteAllText(path, saved);
+        var settings = new FrontendSettingsService(null, path);
+        var localization = new LocalizationService(settings);
+        var backend = DispatchProxy.Create<IBackendClient, StartupRequestRecorder>();
+        var manager = DispatchProxy.Create<IBackendServiceManager, StartupRequestRecorder>();
+        var trust = new PortablePackageTrustService();
+        // Unused UI actions and TrayHost transport are deliberately absent:
+        // this fixture must not reach the real control pipe or SCM.
+        await using var workspace = new ContextMenuWorkspaceService(backend, manager,
+            null!, null!, null!, null!, null!, localization, settings, null!, trust);
+        using var page = new SettingsPageViewModel(settings, new FrontendStartupService(backend),
+            null!, workspace, localization, new FrontendThemeService(settings), null!,
+            new ExplorerRestartStateService(), trust);
+
+        Assert.False(workspace.IsBackendReady);
+        Assert.Empty(((StartupRequestRecorder)(object)backend).Requests);
+        Assert.Equal(saved, File.ReadAllText(path));
+        Assert.True(settings.Current.AutoStartOnLogin); // Unknown must not become false.
+    }
+
+    public class StartupRequestRecorder : DispatchProxy
+    {
+        public List<string> Requests { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            var method = targetMethod!;
+            if (method.Name.StartsWith("add_", StringComparison.Ordinal)
+                || method.Name.StartsWith("remove_", StringComparison.Ordinal)) return null;
+            if (method.Name == nameof(IAsyncDisposable.DisposeAsync)) return ValueTask.CompletedTask;
+            Requests.Add(method.Name);
+            if (method.ReturnType == typeof(Task)) return Task.CompletedTask;
+            if (method.ReturnType == typeof(Task<bool>)) return Task.FromResult(false);
+            if (method.ReturnType == typeof(bool)) return false;
+            if (method.ReturnType == typeof(System.ServiceProcess.ServiceControllerStatus?)) return null;
+            throw new InvalidOperationException($"Unexpected startup request: {method.Name}");
+        }
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("{}", true)]
+    [InlineData("{\"keepBackgroundAfterClose\":false}", true)]
+    [InlineData("{\"removePortableServiceOnExit\":false}", false)]
+    public void PortableSettingsMigrationPreservesExitPolicyThroughSaveAndReset(string? json, bool removal)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Lifecycle-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "frontend-settings.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            if (json is not null) File.WriteAllText(path, json);
+            var settings = new FrontendSettingsService(null, path);
+            if (json is null) settings.EnsureInitialSettingsPersisted();
+            Assert.Equal(removal, settings.Current.RemovePortableServiceOnExit);
+            Assert.False(settings.Current.KeepBackgroundAfterClose);
+            Assert.False(settings.Current.AutoStartOnLogin);
+            settings.UpdateShowTrayIcon(false);
+            Assert.Equal(removal, new FrontendSettingsService(null, path).Current.RemovePortableServiceOnExit);
+            using (var stream = File.OpenRead(path)) Assert.Equal(removal, PortableServiceExitPolicy.Read(stream).RemoveOnExit);
+            settings.ResetToDefaults();
+            using var defaults = File.OpenRead(path);
+            var policy = PortableServiceExitPolicy.Read(defaults);
+            Assert.True(policy.RemoveOnExit);
+            Assert.False(policy.AutoStart);
+            Assert.False(policy.KeepBackground);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(true, false, true, false, false)]
+    [InlineData(true, false, true, true, true)]
+    [InlineData(true, true, false, true, false)]
+    [InlineData(false, false, false, true, false)]
+    public void ExitAndShutdownPoliciesKeepRetentionAndAutostartSeparate(
+        bool remove, bool autostart, bool background, bool shutdown, bool expected)
+    {
+        var policy = new PortableServiceExitPolicy(remove, autostart, background);
+        Assert.Equal(expected, policy.AllowsRemoval(RuntimePackageKind.Portable, shutdown));
+        Assert.False(policy.AllowsRemoval(RuntimePackageKind.Installer, shutdown));
+        var actions = FrontendCloseLifecyclePolicy.Evaluate(background);
+        Assert.Equal(!background, actions.RequestBackendShutdown);
+        Assert.Equal(!background, actions.RequestTrayHostExit);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{")]
+    [InlineData("{\"removePortableServiceOnExit\":null}")]
+    [InlineData("{\"autoStartOnLogin\":\"false\"}")]
+    [InlineData("{\"removePortableServiceOnExit\":true,\"RemovePortableServiceOnExit\":false}")]
+    public void MalformedOrAmbiguousPolicyDoesNotGrantDeletion(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        Assert.ThrowsAny<JsonException>(() => PortableServiceExitPolicy.Read(stream));
+    }
+
+    [Fact]
+    public void MissingOrInaccessibleSettingsNeverCreateAnEnabledLifecyclePolicy()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Lifecycle-" + Guid.NewGuid().ToString("N") + ".json");
+        Assert.Throws<FileNotFoundException>(() => FrontendSettingsFile.UpdateLifecycle(path, false, true));
+        Assert.False(File.Exists(path));
+        try
+        {
+            File.WriteAllText(path, "{\"removePortableServiceOnExit\":false}");
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Assert.Throws<IOException>(() => FrontendSettingsFile.UpdateLifecycle(path, false, true));
+            using var stream = File.OpenRead(path);
+            Assert.False(PortableServiceExitPolicy.Read(stream).RemoveOnExit);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ExclusiveFrontendIgnoresOfflineProfilesButRequiredOrLoadedAutostartPoliciesStillVetoRemoval()
+    {
+        // Offline unrelated profiles are not current consumers. The caller's
+        // hive and every profile during Windows shutdown remain required.
+        PortableServiceCleanup.VerifyUserPolicy(null, requireLoaded: false);
+        Assert.Throws<IOException>(() => PortableServiceCleanup.VerifyUserPolicy(null, requireLoaded: true));
+
+        var keyPath = @"Software\ContextMenuMgr-LifecycleTests\" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using var hive = Registry.CurrentUser.CreateSubKey(keyPath);
+            PortableServiceCleanup.VerifyUserPolicy(hive, requireLoaded: true);
+            using var policy = hive.CreateSubKey(@"Software\ContextMenuMgr\Frontend");
+            policy.SetValue("StartWithWindows", 0, RegistryValueKind.DWord);
+            PortableServiceCleanup.VerifyUserPolicy(hive, requireLoaded: true);
+            foreach (var value in new object[] { 1, "0", 0L })
+            {
+                policy.SetValue("StartWithWindows", value);
+                // A loaded user's enabled or malformed policy cannot be
+                // ignored even if that user's hive is not required.
+                Assert.Throws<IOException>(() => PortableServiceCleanup.VerifyUserPolicy(hive, requireLoaded: false));
+            }
+            policy.SetValue("StartWithWindows", 0, RegistryValueKind.DWord);
+            using var run = hive.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            run.SetValue("ContextMenuManagerPlus.TrayHost", "retained startup command");
+            Assert.Throws<IOException>(() => PortableServiceCleanup.VerifyUserPolicy(hive, requireLoaded: false));
+        }
+        finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false); }
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void AtomicLifecycleCommitPreservesUnrelatedSettingsAndEnforcesExclusion(bool autostart, bool expectedRemoval)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Lifecycle-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            FrontendSettingsFile.Write(path, "{\"theme\":2,\"keepBackgroundAfterClose\":true}");
+            FrontendSettingsFile.UpdateLifecycle(path, autostart, removeOnExit: true);
+            using var stream = File.OpenRead(path);
+            var policy = PortableServiceExitPolicy.Read(stream);
+            Assert.Equal(autostart, policy.AutoStart);
+            Assert.Equal(expectedRemoval, policy.RemoveOnExit);
+            Assert.True(policy.KeepBackground);
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.Equal(2, document.RootElement.GetProperty("theme").GetInt32());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("SCM", false)]
+    [InlineData("UserPolicy", false)]
+    [InlineData("Settings", true)]
+    public void FailedPortableStartupTransactionRollsBackBeforeReturning(string stage, bool transitionSuccess)
+    {
+        using var files = new LifecycleFiles();
+        var calls = new List<string>();
+        var result = PortableStartupTransaction.Execute(
+            files.Directory,
+            () => { calls.Add("transition"); return new(transitionSuccess, stage, "failure"); },
+            () => { calls.Add("settings"); throw new IOException("settings unavailable"); },
+            () => calls.Add("rollback"));
+        Assert.False(result.Success);
+        Assert.False(PortableServiceExitPolicy.HasUnsettledStartupTransaction(files.Directory));
+        Assert.Equal(transitionSuccess ? new[] { "transition", "settings", "rollback" } : new[] { "transition", "rollback" }, calls);
+    }
+
+    [Fact]
+    public void PortableStartupRollbackFailureIsExplicitAndCannotReportSuccess()
+    {
+        using var files = new LifecycleFiles();
+        var result = PortableStartupTransaction.Execute(
+            files.Directory,
+            () => new(false, "SCM", "failure"), () => throw new Exception("must not commit"),
+            () => throw new IOException("SCM rollback unavailable"));
+        Assert.False(result.Success);
+        Assert.Equal("PORTABLE_STARTUP_ROLLBACK_FAILED", result.Code);
+        Assert.True(PortableServiceExitPolicy.HasUnsettledStartupTransaction(files.Directory));
+        result = PortableStartupTransaction.Execute(files.Directory,
+            () => throw new Exception("must not retry uncertain SCM write"), () => { }, () => { });
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public void CommittedStartupPolicySurvivesConcurrentPreferenceSaveAndClearsVeto()
+    {
+        using var files = new LifecycleFiles();
+        var path = Path.Combine(files.Directory, "frontend-settings.json");
+        FrontendSettingsFile.Write(path, "{\"theme\":1}");
+        var result = PortableStartupTransaction.Execute(files.Directory,
+            () => new(true, "STARTUP_AUTO", "verified"),
+            () => FrontendSettingsFile.UpdateLifecycle(path, autoStart: true, removeOnExit: false),
+            () => throw new Exception("successful commit must not roll back"));
+        Assert.True(result.Success);
+        Assert.False(PortableServiceExitPolicy.HasUnsettledStartupTransaction(files.Directory));
+        // The frontend still has its old lifecycle snapshot while the UAC
+        // process completes. Saving a theme must preserve the new disk policy.
+        FrontendSettingsFile.Write(path, "{\"theme\":2,\"autoStartOnLogin\":false,\"removePortableServiceOnExit\":true}", preserveLifecycle: true);
+        using var stream = File.OpenRead(path);
+        var policy = PortableServiceExitPolicy.Read(stream);
+        Assert.True(policy.AutoStart);
+        Assert.False(policy.RemoveOnExit);
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.Equal(2, document.RootElement.GetProperty("theme").GetInt32());
+    }
+
+    [Fact]
+    public void LifecycleRollbackDoesNotOverwriteAnExternalPolicyChange()
+    {
+        using var files = new LifecycleFiles();
+        var path = Path.Combine(files.Directory, "frontend-settings.json");
+        FrontendSettingsFile.Write(path, "{}");
+        var previous = new PortableServiceExitPolicy(true, false, false);
+        FrontendSettingsFile.UpdateLifecycle(path, autoStart: true, removeOnExit: false, expected: previous);
+        Assert.Throws<IOException>(() => FrontendSettingsFile.UpdateLifecycle(path, false, true, expected: previous));
+        using var stream = File.OpenRead(path);
+        Assert.True(PortableServiceExitPolicy.Read(stream).AutoStart);
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("{\"removePortableServiceOnExit\":false,\"RemovePortableServiceOnExit\":true}")]
+    public void UnrelatedFrontendSaveCannotTurnCorruptPolicyIntoDeletionPermission(string json)
+    {
+        using var files = new LifecycleFiles();
+        var path = Path.Combine(files.Directory, "frontend-settings.json");
+        File.WriteAllText(path, json);
+        var settings = new FrontendSettingsService(null, path);
+        settings.UpdateShowTrayIcon(false);
+        using var stream = File.OpenRead(path);
+        Assert.False(PortableServiceExitPolicy.Read(stream).RemoveOnExit);
+    }
+
+    private sealed class LifecycleFiles : IDisposable
+    {
+        public string Directory { get; } = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Lifecycle-" + Guid.NewGuid().ToString("N"));
+        public LifecycleFiles() => System.IO.Directory.CreateDirectory(Directory);
+        public void Dispose() => System.IO.Directory.Delete(Directory, recursive: true);
+    }
+
+    [Theory]
+    [InlineData("\"C:\\App\\backend.exe\" --service", 42, true)]
+    [InlineData("\"C:\\OtherCopy\\backend.exe\" --service", 42, false)]
+    [InlineData("\"C:\\App\\backend.exe\" --service --other", 42, false)]
+    [InlineData("C:\\App\\backend.exe --service", 42, false)]
+    [InlineData("\"C:\\App\\backend.exe\" --service", 43, false)]
+    public void CleanupRequiresExactRunningRegistration(string imagePath, uint pid, bool expected)
+        => Assert.Equal(expected, PortableServiceCleanup.OwnsRegistration(imagePath, @"C:\App\backend.exe", pid, 42));
+
+    [Fact]
+    public void AnotherUserSessionTrayHostOrFrontendPreventsFrontendStop()
+    {
+        Assert.True(PortableServiceConsumers.IsExclusiveFrontend(42, 1, [1], [42]));
+        Assert.False(PortableServiceConsumers.IsExclusiveFrontend(42, 1, [1, 2], [42]));
+        Assert.False(PortableServiceConsumers.IsExclusiveFrontend(42, 1, [1], [42, 43]));
+        Assert.False(PortableServiceConsumers.IsExclusiveFrontend(42, 0, [], [42]));
+    }
+
+    [Theory]
+    [InlineData(0, "MarkedForDeletion")]
+    [InlineData(1072, "AlreadyMarkedForDeletion")]
+    [InlineData(1060, "Absent")]
+    [InlineData(5, "AccessDenied")]
+    [InlineData(1115, "ShutdownInProgress")]
+    [InlineData(1722, "ScmUnavailable")]
+    [InlineData(87, "NativeFailure")]
+    public void EveryDeletionOutcomePrecedesOneSuccessfulIntentionalStop(int error, string code)
+    {
+        var sequence = new ServiceStopSequence();
+        var calls = new List<string>();
+        var termination = new BackendServiceTerminationState();
+        sequence.Request(
+            () => { calls.Add(PortableCleanupResult.FromWin32("DeleteService", error).Code); },
+            () => sequence.Stop(null, () => { termination.MarkIntentionalStop(BackendServiceStopReason.FrontendRequest); calls.Add("stop"); }));
+        sequence.Request(() => throw new Exception("duplicate deletion"), () => throw new Exception("duplicate request"));
+        sequence.Stop(() => throw new Exception("shutdown race"), () => throw new Exception("duplicate cleanup"));
+        Assert.Equal(new[] { code, "stop" }, calls);
+        Assert.Equal(0, termination.ExitCode); // Existing non-crash SCM recovery must not restart this stop.
+    }
+
+    [Fact]
+    public void UnexpectedDeletionExceptionCannotBypassResourceCleanup()
+    {
+        var sequence = new ServiceStopSequence();
+        var stops = 0;
+        Assert.Throws<IOException>(() => sequence.Stop(() => throw new IOException("SCM unavailable"), () => stops++));
+        sequence.Stop(null, () => stops++);
+        Assert.Equal(1, stops);
+    }
+
+    [Fact]
+    public void ConcurrentFrontendAndWindowsShutdownDeleteAndCleanUpAtMostOnce()
+    {
+        var sequence = new ServiceStopSequence();
+        var deletions = 0;
+        var stops = 0;
+        Parallel.Invoke(
+            () => sequence.Request(() => Interlocked.Increment(ref deletions),
+                () => sequence.Stop(null, () => Interlocked.Increment(ref stops))),
+            () => sequence.Stop(() => Interlocked.Increment(ref deletions), () => Interlocked.Increment(ref stops)));
+        Assert.Equal(1, deletions);
+        Assert.Equal(1, stops);
+    }
+
+    [Fact]
+    public async Task FastReopenObservesPendingDeletionWithoutMutatingService()
+    {
+        var observations = new Queue<PortableServiceRegistrationState>([
+            PortableServiceRegistrationState.PendingDeletion, PortableServiceRegistrationState.Absent]);
+        var state = await PortableServiceStartup.WaitForSettledAsync(observations.Dequeue, TimeSpan.FromSeconds(2), CancellationToken.None);
+        Assert.Equal(PortableServiceRegistrationState.Absent, state);
+        state = await PortableServiceStartup.WaitForSettledAsync(() => PortableServiceRegistrationState.PendingDeletion, TimeSpan.Zero, CancellationToken.None);
+        Assert.Equal(PortableServiceRegistrationState.PendingDeletion, state);
+        state = await PortableServiceStartup.WaitForSettledAsync(() => PortableServiceRegistrationState.Foreign, TimeSpan.FromSeconds(2), CancellationToken.None);
+        Assert.Equal(PortableServiceRegistrationState.Foreign, state);
+    }
+
+    [Fact]
+    public void PinnedRuntimeIdentityPreventsReplacementUntilDeletionCheckCompletes()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Identity-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "backend.exe");
+        var replacement = Path.Combine(directory, "replacement.exe");
+        try
+        {
+            File.WriteAllText(path, "original");
+            File.WriteAllText(replacement, "replacement");
+            using (var files = new PortableRuntimeIdentity())
+            {
+                files.Pin(path);
+                Assert.True(Record.Exception(() => File.Move(replacement, path, overwrite: true)) is IOException or UnauthorizedAccessException);
+                Assert.True(Record.Exception(() => Directory.Move(directory, directory + "-moved")) is IOException or UnauthorizedAccessException);
+                Assert.Equal("original", File.ReadAllText(path));
+            }
+            File.Move(replacement, path, overwrite: true);
+            Assert.Equal("replacement", File.ReadAllText(path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public void FailedSettingsSaveRestoresEffectiveLifecycleSnapshot()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-Settings-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, "{\"autoStartOnLogin\":false,\"removePortableServiceOnExit\":false}");
+            var settings = new FrontendSettingsService(null, path);
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Assert.False(settings.TryUpdateLifecycleSettings(true, false));
+            Assert.False(settings.Current.AutoStartOnLogin);
+            Assert.False(settings.Current.RemovePortableServiceOnExit);
+            Assert.NotNull(settings.LastSaveError);
+            using var stream = File.OpenRead(path);
+            Assert.False(PortableServiceExitPolicy.Read(stream).AutoStart);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ExplicitScmStopNeverAcquiresPortableDeletionSemantics()
+    {
+        var sequence = new ServiceStopSequence();
+        var stops = 0;
+        sequence.Stop(null, () => stops++);
+        sequence.Request(() => throw new Exception("late frontend delete"), () => throw new Exception("late stop"));
+        sequence.Stop(() => throw new Exception("late shutdown delete"), () => stops++);
+        Assert.Equal(1, stops);
+    }
+
     private static ServiceAutostartTransitionResult ExecuteTransition(
         bool enabled,
         ServiceCommandResult configure,
@@ -333,6 +752,7 @@ public sealed class ServiceLifecycleTests
             },
             DelayedAutoStart: delayed,
             FailureActionsPresent: recoveryConfigured,
+            FailureActionsMatch: recoveryConfigured,
             FailureActionsOnNonCrashFailures: recoveryConfigured,
             CurrentStatus: status,
             SystemDrive: @"C:\",

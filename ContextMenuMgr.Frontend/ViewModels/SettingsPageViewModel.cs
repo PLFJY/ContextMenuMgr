@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -28,11 +29,14 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     private readonly ExplorerRestartStateService _explorerRestartState;
     private readonly PortablePackageTrustService _portablePackageTrustService;
     private bool _suppressProtectionSync;
-    private bool _suppressAutoStartSync;
     private bool _suppressTrayIconSync;
     private bool _suppressWin11ContextMenuSync;
     private bool _suppressThemeSync;
     private bool _pendingRegistryProtectionEnable;
+    private bool _lifecycleStateUncertain;
+    private bool _initializingSettings = true;
+    private bool _initialSettingsLoadInProgress;
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SettingsPageViewModel"/> class.
@@ -86,21 +90,23 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
         // Initialize with default values to avoid blocking UI thread
         AutoStartOnLogin = false;
+        RemovePortableServiceOnExit = IsPortablePackage && _settingsService.Current.RemovePortableServiceOnExit;
         ShowTrayIcon = _settingsService.Current.ShowTrayIcon;
         KeepBackgroundAfterClose = _settingsService.Current.KeepBackgroundAfterClose;
         LockNewContextMenuItems = _settingsService.Current.LockNewContextMenuItems;
-        _suppressWin11ContextMenuSync = true;
         Win11ModernContextMenuDisabled = IsWin11ModernContextMenuSupported
             && _settingsService.Current.Win11ModernContextMenuDisabled;
-        _suppressWin11ContextMenuSync = false;
+        _initializingSettings = false;
 
         _localization.LanguageChanged += OnLanguageChanged;
         _themeService.ThemePreferenceChanged += OnThemePreferenceChanged;
+        _workspace.PropertyChanged += OnWorkspacePropertyChanged;
         ApplicationThemeManager.Changed += OnApplicationThemeChanged;
         RefreshLocalizedText();
         RefreshServiceState();
 
-        // Load async settings in background to avoid blocking UI thread
+        // Backend settings wait for the workspace's verified Ping. Navigation
+        // during UAC/bootstrap must not issue requests against an absent pipe.
         _ = LoadInitialSettingsAsync();
         _ = RefreshPortableRuntimeTrustWarningAsync();
     }
@@ -142,7 +148,21 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     /// Gets or sets the auto Start On Login.
     /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ToggleAutoStartOnLoginCommand), nameof(ToggleRemovePortableServiceOnExitCommand))]
     public partial bool AutoStartOnLogin { get; set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ToggleAutoStartOnLoginCommand), nameof(ToggleRemovePortableServiceOnExitCommand))]
+    public partial bool RemovePortableServiceOnExit { get; set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ToggleAutoStartOnLoginCommand), nameof(ToggleRemovePortableServiceOnExitCommand))]
+    public partial bool IsLifecycleSettingsEnabled { get; set; }
+
+    public bool IsPortablePackage => RuntimePaths.PackageKind == RuntimePackageKind.Portable;
+
+    public string RemovePortableServiceOnExitLabel => _localization.Translate("Settings.RemovePortableServiceOnExit");
+    public string RemovePortableServiceOnExitDescription => _localization.Translate("Settings.RemovePortableServiceOnExit.Description");
 
     /// <summary>
     /// Gets or sets whether the TrayHost notification-area icon is visible.
@@ -298,16 +318,16 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedLanguageChanged(LanguageOptionViewModel? value)
     {
-        if (value is not null)
+        if (!_initializingSettings && value is not null)
         {
             _localization.SelectedLanguage = value.Option;
-            _ = NotifyTrayHostLocalizationChangedAsync();
+            if (_workspace.IsBackendReady) _ = NotifyTrayHostLocalizationChangedAsync();
         }
     }
 
     partial void OnSelectedThemeChanged(ThemeOptionViewModel? value)
     {
-        if (_suppressThemeSync)
+        if (_initializingSettings || _suppressThemeSync)
         {
             return;
         }
@@ -320,30 +340,37 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedLogLevelChanged(LogLevelOptionViewModel? value)
     {
-        if (value is null)
+        if (_initializingSettings || value is null)
         {
             return;
         }
 
         _settingsService.UpdateLogLevel(value.Option);
         FrontendDebugLog.Configure(value.Option);
-        _ = _workspace.SyncBackendLogLevelAsync();
-        _ = _workspace.SyncTrayHostLogLevelAsync();
-    }
-
-    partial void OnAutoStartOnLoginChanged(bool value)
-    {
-        if (_suppressAutoStartSync)
+        if (_workspace.IsBackendReady)
         {
-            return;
+            _ = _workspace.SyncBackendLogLevelAsync();
+            _ = _workspace.SyncTrayHostLogLevelAsync();
         }
-
-        _ = ApplyAutoStartOnLoginAsync(value);
     }
+
+    private bool CanToggleAutoStartOnLogin() => IsLifecycleSettingsEnabled
+        && (AutoStartOnLogin || !IsPortablePackage || !RemovePortableServiceOnExit);
+
+    private bool CanToggleRemovePortableServiceOnExit() => IsLifecycleSettingsEnabled && IsPortablePackage
+        && (RemovePortableServiceOnExit || !AutoStartOnLogin);
+
+    [RelayCommand(CanExecute = nameof(CanToggleAutoStartOnLogin))]
+    private Task ToggleAutoStartOnLoginAsync()
+        => ApplyLifecycleSettingsAsync(!AutoStartOnLogin, removeOnExit: null);
+
+    [RelayCommand(CanExecute = nameof(CanToggleRemovePortableServiceOnExit))]
+    private Task ToggleRemovePortableServiceOnExitAsync()
+        => ApplyLifecycleSettingsAsync(autoStart: null, removeOnExit: !RemovePortableServiceOnExit);
 
     partial void OnShowTrayIconChanged(bool value)
     {
-        if (_suppressTrayIconSync)
+        if (_initializingSettings || _suppressTrayIconSync)
         {
             return;
         }
@@ -358,7 +385,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     partial void OnLockNewContextMenuItemsChanged(bool value)
     {
-        if (_suppressProtectionSync)
+        if (_initializingSettings || _suppressProtectionSync)
         {
             return;
         }
@@ -384,7 +411,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     partial void OnWin11ModernContextMenuDisabledChanged(bool value)
     {
-        if (_suppressWin11ContextMenuSync)
+        if (_initializingSettings || _suppressWin11ContextMenuSync)
         {
             return;
         }
@@ -439,6 +466,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 _localization.Translate("InstallOrRepairService"));
         }
 
+        if (result.Success && IsPortablePackage) await LoadInitialSettingsAsync();
         RefreshServiceState();
     }
 
@@ -495,6 +523,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 ForceRepairServiceTitle);
         }
 
+        if (installResult.Success && IsPortablePackage) await LoadInitialSettingsAsync();
         RefreshServiceState();
     }
 
@@ -537,6 +566,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                     _localization.Translate("InstallOrRepairService"));
             }
 
+            if (result.Success && IsPortablePackage) await LoadInitialSettingsAsync();
             RefreshServiceState();
         }
         finally
@@ -642,9 +672,12 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ResetSettingsAsync()
     {
+        if (!IsLifecycleSettingsEnabled) return;
+        IsLifecycleSettingsEnabled = false;
+        _settingsService.IsLifecycleTransitionInProgress = true;
         try
         {
-            var startupResult = await _workspace.SetServiceAutoStartEnabledAsync(false);
+            var startupResult = await _workspace.SetServiceAutoStartEnabledAsync(false, removePortableServiceOnExit: true);
             if (!startupResult.Success)
             {
                 if (startupResult.Cancelled)
@@ -655,6 +688,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException(startupResult.Detail);
             }
 
+            if (IsPortablePackage) { _settingsService.ReloadLifecycleSettings(); RestoreLifecycleToggles(); }
+
             var registryProtectionEnabled = await _workspace.SetRegistryProtectionSettingAsync(false);
             if (registryProtectionEnabled)
             {
@@ -664,9 +699,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
             _settingsService.ResetToDefaults();
 
-            _suppressAutoStartSync = true;
             AutoStartOnLogin = false;
-            _suppressAutoStartSync = false;
+            RemovePortableServiceOnExit = IsPortablePackage;
 
             _suppressTrayIconSync = true;
             ShowTrayIcon = true;
@@ -728,6 +762,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 ex.Message,
                 _localization.Translate("DebugToolsTitle"));
         }
+        finally { IsLifecycleSettingsEnabled = !_disposed && _workspace.IsBackendReady && !_lifecycleStateUncertain; _settingsService.IsLifecycleTransitionInProgress = false; }
     }
 
     [RelayCommand]
@@ -773,6 +808,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(StartupBehaviorTitle));
         OnPropertyChanged(nameof(AutoStartOnLoginLabel));
         OnPropertyChanged(nameof(AutoStartOnLoginDescription));
+        OnPropertyChanged(nameof(RemovePortableServiceOnExitLabel));
+        OnPropertyChanged(nameof(RemovePortableServiceOnExitDescription));
         OnPropertyChanged(nameof(ShowTrayIconLabel));
         OnPropertyChanged(nameof(ShowTrayIconDescription));
         OnPropertyChanged(nameof(KeepBackgroundAfterCloseLabel));
@@ -888,19 +925,31 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Loads initial settings asynchronously to avoid blocking UI thread.
-    /// This method is called fire-and-forget from the constructor.
+    /// Loads backend settings only after startup has proved pipe readiness.
     /// </summary>
     private async Task LoadInitialSettingsAsync()
     {
+        if (_disposed || _initialSettingsLoadInProgress || !_workspace.IsBackendReady) return;
+        _initialSettingsLoadInProgress = true;
+        IsLifecycleSettingsEnabled = false;
+        var lifecyclePolicyLoaded = false;
         try
         {
             // Load auto-start setting from backend (async, non-blocking)
             var autoStartEnabled = await _startupService.IsAutoStartEnabledAsync(CancellationToken.None);
-            _suppressAutoStartSync = true;
             AutoStartOnLogin = autoStartEnabled;
-            _suppressAutoStartSync = false;
-            _settingsService.UpdateAutoStartOnLogin(autoStartEnabled);
+            // A malformed/unreadable file must not become deletion permission
+            // merely because the initial autostart query succeeded.
+            if (IsPortablePackage)
+            {
+                _settingsService.ReloadLifecycleSettings();
+                if (!_settingsService.TryUpdateLifecycleSettings(autoStartEnabled,
+                        _settingsService.Current.RemovePortableServiceOnExit))
+                    throw new IOException(_settingsService.LastSaveError);
+            }
+            else _settingsService.UpdateAutoStartOnLogin(autoStartEnabled);
+            RestoreLifecycleToggles();
+            lifecyclePolicyLoaded = true;
 
             // Load registry protection setting (async, non-blocking)
             await LoadRegistryProtectionSettingAsync();
@@ -912,6 +961,19 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         {
             FrontendDebugLog.Warning("SettingsPageViewModel", $"Failed to load initial settings: {ex.Message}");
         }
+        finally
+        {
+            _initialSettingsLoadInProgress = false;
+            _lifecycleStateUncertain = IsPortablePackage && PortableServiceExitPolicy.HasUnsettledStartupTransaction(RuntimePaths.DataDirectory);
+            IsLifecycleSettingsEnabled = !_disposed && lifecyclePolicyLoaded && _workspace.IsBackendReady && !_lifecycleStateUncertain;
+        }
+    }
+
+    private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ContextMenuWorkspaceService.IsBackendReady)) return;
+        if (!_workspace.IsBackendReady) IsLifecycleSettingsEnabled = false;
+        else if (!_settingsService.IsLifecycleTransitionInProgress) _ = LoadInitialSettingsAsync();
     }
 
     private async Task UpdateRegistryProtectionSettingAsync(bool value)
@@ -1021,6 +1083,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Dispose()
     {
+        _disposed = true;
+        _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
         _localization.LanguageChanged -= OnLanguageChanged;
         _themeService.ThemePreferenceChanged -= OnThemePreferenceChanged;
         ApplicationThemeManager.Changed -= OnApplicationThemeChanged;
@@ -1048,36 +1112,71 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             ?? "Unknown";
     }
 
-    private async Task ApplyAutoStartOnLoginAsync(bool value)
+    private void RestoreLifecycleToggles()
     {
+        AutoStartOnLogin = _settingsService.Current.AutoStartOnLogin;
+        RemovePortableServiceOnExit = IsPortablePackage && _settingsService.Current.RemovePortableServiceOnExit;
+        // ToggleButton changes its target value before executing Command. A
+        // failed operation must refresh OneWay bindings even if the model did
+        // not change, so the switch always reflects the committed policy.
+        OnPropertyChanged(nameof(AutoStartOnLogin));
+        OnPropertyChanged(nameof(RemovePortableServiceOnExit));
+    }
+
+    private async Task ApplyLifecycleSettingsAsync(bool? autoStart, bool? removeOnExit)
+    {
+        if (autoStart.HasValue ? !CanToggleAutoStartOnLogin() : !CanToggleRemovePortableServiceOnExit())
+        {
+            RestoreLifecycleToggles();
+            return;
+        }
+        IsLifecycleSettingsEnabled = false;
+        _settingsService.IsLifecycleTransitionInProgress = true;
         try
         {
-            // Machine realization comes first. The elevated bootstrap commits
-            // StartWithWindows only after SCM mode, recovery, Running, and pipe
-            // readiness converge, preventing policy/SCM split-brain success.
-            var result = await _workspace.SetServiceAutoStartEnabledAsync(value);
+            if (removeOnExit.HasValue)
+            {
+                // The opposite switch must already be off. Changing this
+                // preference never starts a hidden SCM/UAC transition.
+                if (!_settingsService.TryUpdateLifecycleSettings(_settingsService.Current.AutoStartOnLogin, removeOnExit.Value))
+                    throw new IOException(_settingsService.LastSaveError);
+                return;
+            }
+            var enabled = autoStart!.Value;
+            var removal = _settingsService.Current.RemovePortableServiceOnExit;
+            // The same elevated transaction verifies SCM, commits user policy
+            // and atomically updates Portable JSON, with in-process rollback.
+            var result = await _workspace.SetServiceAutoStartEnabledAsync(enabled, removal);
             if (!result.Success)
             {
+                if (result.Code == "PORTABLE_STARTUP_ROLLBACK_FAILED")
+                {
+                    _lifecycleStateUncertain = true;
+                    FrontendDebugLog.Warning("SettingsPageViewModel", result.Detail);
+                    throw new InvalidOperationException(_localization.Translate("PortableStartupPolicyUncertain"));
+                }
                 throw new InvalidOperationException(result.Cancelled
                     ? _localization.Translate("ServiceOperationCancelled")
                     : result.Detail);
             }
 
-            await _startupService.SetTrayIconPolicyAsync(ShowTrayIcon, CancellationToken.None);
-            _settingsService.UpdateAutoStartOnLogin(value);
+            if (IsPortablePackage) _settingsService.ReloadLifecycleSettings();
+            else _settingsService.UpdateAutoStartOnLogin(enabled);
             RefreshServiceState();
         }
         catch (Exception ex)
         {
-            // Use async version to avoid blocking UI thread
-            var actualValue = await _startupService.IsAutoStartEnabledAsync(CancellationToken.None);
-            _settingsService.UpdateAutoStartOnLogin(actualValue);
-            _suppressAutoStartSync = true;
-            AutoStartOnLogin = actualValue;
-            _suppressAutoStartSync = false;
+            // Failed transitions retain the prior snapshot. Never turn an
+            // unavailable backend query into an authoritative false value.
             await FrontendMessageBox.ShowErrorAsync(
                 ex.Message,
                 _localization.Translate("StartupBehaviorTitle"));
+        }
+        finally
+        {
+            RestoreLifecycleToggles();
+            IsLifecycleSettingsEnabled = !_disposed && _workspace.IsBackendReady && !_lifecycleStateUncertain;
+            _settingsService.IsLifecycleTransitionInProgress = false;
         }
     }
 

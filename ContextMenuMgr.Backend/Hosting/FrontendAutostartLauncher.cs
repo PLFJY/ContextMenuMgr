@@ -19,6 +19,22 @@ internal sealed class FrontendAutostartLauncher
     private readonly string _trayHostExePath;
     private readonly Lock _frontendActivationLock = new();
     private readonly Lock _trayHostActivationLock = new();
+    private volatile bool _stopping;
+
+    public bool PrepareForStop()
+    {
+        _stopping = true;
+        // Do not wait for a user-process handshake during OS shutdown. An
+        // in-flight activation makes self-removal uncertain, but never blocks stop.
+        if (!_trayHostActivationLock.TryEnter()) return false;
+        try
+        {
+            if (!_frontendActivationLock.TryEnter()) return false;
+            _frontendActivationLock.Exit();
+            return true;
+        }
+        finally { _trayHostActivationLock.Exit(); }
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FrontendAutostartLauncher"/> class.
@@ -52,6 +68,7 @@ internal sealed class FrontendAutostartLauncher
 
         lock (_trayHostActivationLock)
         {
+            if (_stopping) return false;
             if (IsTrayHostRunning(targetSessionId))
             {
                 return true;
@@ -157,6 +174,7 @@ internal sealed class FrontendAutostartLauncher
 
         lock (_frontendActivationLock)
         {
+            if (_stopping) return false;
             if (IsFrontendRunning(targetSessionId))
             {
                 if (FrontendControlPipeClient

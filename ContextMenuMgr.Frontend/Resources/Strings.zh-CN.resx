@@ -1608,4 +1608,19 @@
   <data name="Windows11Publisher" xml:space="preserve"><value>发布者：{0}</value></data>
   <data name="Windows11PackageIdentity" xml:space="preserve"><value>应用标识：{0}</value></data>
   <data name="Windows11FileLocation" xml:space="preserve"><value>文件位置：{0}</value></data>
+  <data name="Settings.RemovePortableServiceOnExit" xml:space="preserve">
+    <value>退出软件时自动卸载后台服务</value>
+  </data>
+  <data name="Settings.RemovePortableServiceOnExit.Description" xml:space="preserve">
+    <value>退出后台运行后移除服务注册。下次启动可能需要再次进行 UAC 授权。此选项与随 Windows 启动互斥，请先关闭已启用的选项，再开启另一项。</value>
+  </data>
+  <data name="PortableServicePendingDeletion" xml:space="preserve">
+    <value>上次运行的服务仍在等待删除。请关闭“服务”管理器或其他服务工具后重试；若持续等待，请重启 Windows。</value>
+  </data>
+  <data name="PortableServiceOwnershipUncertain" xml:space="preserve">
+    <value>后台服务属于其他安装或无法确认归属。请退出对应副本并显式卸载其服务后，再启动此便携版。</value>
+  </data>
+  <data name="PortableStartupPolicyUncertain" xml:space="preserve">
+    <value>无法可靠恢复启动策略。请先执行“安装或修复服务”，再修改这些选项。</value>
+  </data>
 </root>
