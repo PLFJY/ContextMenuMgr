@@ -22,8 +22,10 @@ public partial class DebugToolsWindow : Wpf.Ui.Controls.FluentWindow
     // Debug-only external-installer simulation. Normal management still uses the backend.
     private static RegistryKey? OpenDebugApplications(bool create)
     {
-        var sid = WindowsIdentity.GetCurrent().User;
-        if (sid?.IsAccountSid() != true) throw new InvalidOperationException("An interactive account SID is required.");
+        using var identity = WindowsIdentity.GetCurrent();
+        var sid = identity.User;
+        if (sid is null || !new WindowsPrincipal(identity).IsInRole(new SecurityIdentifier(WellKnownSidType.InteractiveSid, null)))
+            throw new InvalidOperationException("An interactive Windows user token is required.");
         using var users = RegistryKey.OpenBaseKey(RegistryHive.Users,
             Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
         using var classes = users.OpenSubKey($@"{sid.Value}\Software\Classes", writable: true)

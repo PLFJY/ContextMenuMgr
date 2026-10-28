@@ -15,6 +15,7 @@ namespace ContextMenuMgr.Backend.Services;
 /// </summary>
 public sealed class BackendUserContextResolver
 {
+    private static readonly SecurityIdentifier InteractiveSid = new(WellKnownSidType.InteractiveSid, null);
     private readonly FileLogger _logger;
 
     public BackendUserContextResolver(FileLogger logger)
@@ -23,37 +24,47 @@ public sealed class BackendUserContextResolver
     }
 
     public BackendUserContext? TryResolveFromPipeClient(NamedPipeServerStream stream)
+        => TryResolveFromPipeClient(stream, out _);
+
+    public BackendUserContext? TryResolveFromPipeClient(NamedPipeServerStream stream, out bool rejected)
     {
+        rejected = true;
         _logger.LogFireAndForget("UserContextResolveStart: Source=PipeClient.");
         try
         {
-            string? sid = null;
+            SecurityIdentifier? sid = null;
+            var isInteractive = false;
             stream.RunAsClient(() =>
             {
                 using var identity = WindowsIdentity.GetCurrent();
-                sid = identity.User?.Value;
+                sid = identity.User;
+                // The token must still be impersonated here: the check queries this
+                // token's group membership, not the service account's.
+                isInteractive = new WindowsPrincipal(identity).IsInRole(InteractiveSid);
                 // Do not read WindowsIdentity.Name here. Its managed
                 // RunImpersonated caches this native pipe token in AsyncLocal;
                 // RunAsClient's native RevertToSelf cannot clear that cache.
                 // A later await would then impersonate the client again.
             });
 
+            if (sid is null || !isInteractive)
+            {
+                _logger.LogFireAndForget(
+                    $"UserContextResolveFailure: Source=PipeClient, Reason={(sid is null ? "MissingSid" : "NonInteractiveToken")}.");
+                return null;
+            }
+
+            rejected = false;
+
             // Name is display metadata, resolved only after native impersonation
             // has ended. Authentication continues to use the captured token SID.
-            var userName = sid;
-            if (!string.IsNullOrWhiteSpace(sid))
-            {
-                try { userName = new SecurityIdentifier(sid).Translate(typeof(NTAccount)).Value; }
-                catch (IdentityNotMappedException) { }
-            }
+            var userName = sid.Value;
+            try { userName = sid.Translate(typeof(NTAccount)).Value; }
+            catch (IdentityNotMappedException) { }
             var sessionId = TryResolvePipeClientSessionId(stream);
-            var context = string.IsNullOrWhiteSpace(sid)
-                ? null
-                : CreateContext(sid, userName ?? sid, sessionId);
+            var context = CreateContext(sid, userName, sessionId);
             _logger.LogFireAndForget(
-                context is null
-                    ? "UserContextResolveFailure: Source=PipeClient, Reason=MissingSid."
-                    : $"UserContextResolveSuccess: Source=PipeClient, Sid={context.Sid}, UserName={context.UserName}, ProfilePath={context.ProfilePath}, SessionId={context.SessionId?.ToString() ?? "<null>"}.");
+                $"UserContextResolveSuccess: Source=PipeClient, Sid={context.Sid}, UserName={context.UserName}, ProfilePath={context.ProfilePath}, SessionId={context.SessionId?.ToString() ?? "<null>"}.");
             return context;
         }
         catch (Exception ex)
@@ -65,8 +76,8 @@ public sealed class BackendUserContextResolver
 
     public BackendUserContext? TryResolveFromPipeClientWithSessionFallback(NamedPipeServerStream stream)
     {
-        var pipeContext = TryResolveFromPipeClient(stream);
-        if (pipeContext?.SessionId is not null)
+        var pipeContext = TryResolveFromPipeClient(stream, out var rejected);
+        if (rejected || pipeContext?.SessionId is not null)
         {
             return pipeContext;
         }
@@ -209,10 +220,10 @@ public sealed class BackendUserContextResolver
         try
         {
             using var identity = new WindowsIdentity(token.DangerousGetHandle());
-            var sid = identity.User?.Value;
-            if (string.IsNullOrWhiteSpace(sid))
+            var sid = identity.User;
+            if (sid is null || !new WindowsPrincipal(identity).IsInRole(InteractiveSid))
             {
-                _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"UserContextSessionFailure: SessionId={sessionId}, Reason=MissingSid.");
+                _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"UserContextSessionFailure: SessionId={sessionId}, Reason={(sid is null ? "MissingSid" : "NonInteractiveToken")}.");
                 return false;
             }
 
@@ -226,13 +237,13 @@ public sealed class BackendUserContextResolver
         }
     }
 
-    private static BackendUserContext CreateContext(string sid, string userName, int? sessionId)
+    private static BackendUserContext CreateContext(SecurityIdentifier sid, string userName, int? sessionId)
     {
-        var profilePath = GetProfilePath(sid);
+        var profilePath = GetProfilePath(sid.Value);
         if (string.IsNullOrWhiteSpace(profilePath) || !Directory.Exists(profilePath))
         {
             // This exception is logged by the caller with the attempted session/source.
-            throw new InvalidOperationException($"Unable to resolve profile path for {sid}.");
+            throw new InvalidOperationException($"Unable to resolve profile path for {sid.Value}.");
         }
 
         return new BackendUserContext(

@@ -1030,6 +1030,15 @@ public sealed class OpenWithRegistrationTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.GetSnapshotAsync(SpecialMenuKind.OpenWith, wrongContext, default));
         using var unloaded = Registry.Users.OpenSubKey(unloadedSid);
         Assert.Null(unloaded);
+        // A structurally valid SID without a loaded hive is refused; the hive check is
+        // independent of the token fact.
+        const string unloadedEntraSid = "S-1-12-1-111-222-333-444";
+        var entraContext = fixture.Context with { Sid = unloadedEntraSid };
+        Assert.False((await fixture.Service.SetEnabledAsync(item, false, null, entraContext, default)).Success);
+        var hiveFailure = Assert.Throws<InvalidOperationException>(() => OpenWithRegistration.ValidateUser(entraContext));
+        Assert.Contains("hive is not loaded", hiveFailure.Message);
+        using var unloadedEntra = Registry.Users.OpenSubKey(unloadedEntraSid);
+        Assert.Null(unloadedEntra);
         var badMetadata = item with { Metadata = new Dictionary<string, string>(item.Metadata)
             { ["AppRegistryPath"] = $@"HKEY_USERS\{fixture.Context.Sid}\Software\Classes\Unrelated" } };
         Assert.False((await fixture.Service.DeleteAsync(badMetadata, null, fixture.Context, default)).Success);
@@ -1038,6 +1047,7 @@ public sealed class OpenWithRegistrationTests
         using var unchanged = fixture.Open();
         Assert.Null(unchanged!.GetValue("NoOpenWith"));
     }
+
 
     [Fact]
     public async Task ProtectedKeys_FailToggleDeleteUndoAndPurgeWithPhysicalSourcesRetained()

@@ -12,6 +12,9 @@ public sealed class Windows11BlockedMutationTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid().ToString("N"));
     private readonly Guid _clsid = Guid.NewGuid();
     private readonly string _sid = WindowsIdentity.GetCurrent().User!.Value;
+    // Synthetic Entra-shaped SID: only proves the ownership marker keeps any token SID
+    // verbatim. It is not a Windows token and it has no loaded hive.
+    private const string EntraShapedSid = "S-1-12-1-111-222-333-444";
     private readonly FileLogger _logger;
 
     public Windows11BlockedMutationTests()
@@ -122,11 +125,45 @@ public sealed class Windows11BlockedMutationTests : IDisposable
     }
 
     [Fact]
+    public void SyntheticEntraShapedSid_RoundTripsItsOwnershipMarker_WithoutShapeClassification()
+    {
+        using (var key = Registry.CurrentUser.CreateSubKey(_path)!)
+        {
+            var disable = Windows11BlocksService.CreateMutation(key, _clsid, EntraShapedSid, false, _logger);
+            disable.Apply();
+            Assert.True(disable.Verify());
+        }
+        using (var fresh = Registry.CurrentUser.OpenSubKey(_path)!)
+        {
+            Assert.Equal(RegistryValueKind.String, fresh.GetValueKind(_clsid.ToString("B")));
+            Assert.Equal($"ContextMenuMgrPlus.Win11Blocked.v1|{EntraShapedSid}|{_clsid:B}", fresh.GetValue(_clsid.ToString("B")));
+        }
+        using (var fresh = Registry.CurrentUser.OpenSubKey(_path, writable: true)!)
+        {
+            var enable = Windows11BlocksService.CreateMutation(fresh, _clsid, EntraShapedSid, true, _logger);
+            enable.Apply();
+            Assert.True(enable.Verify());
+        }
+        using var restored = Registry.CurrentUser.OpenSubKey(_path)!;
+        Assert.Null(restored.GetValue(_clsid.ToString("B")));
+    }
+
+    [Fact]
     public void MissingOrUnloadedUser_CannotMutate()
     {
-        Assert.Throws<InvalidOperationException>(() => Windows11BlocksService.CreateMutation(_clsid.ToString("B"), null, false, _logger));
-        var context = new BackendUserContext("S-1-5-21-111-222-333-444", "Unavailable", "", "", "", null);
-        Assert.Throws<InvalidOperationException>(() => Windows11BlocksService.CreateMutation(_clsid.ToString("B"), context, false, _logger));
+        var clsid = _clsid.ToString("B");
+        Assert.Throws<InvalidOperationException>(
+            () => Windows11BlocksService.CreateMutation(clsid, null, false, _logger));
+
+        var unloaded = new BackendUserContext("S-1-5-21-111-222-333-444", "Unavailable", "", "", "", null);
+        var hiveFailure = Assert.Throws<InvalidOperationException>(
+            () => Windows11BlocksService.CreateMutation(clsid, unloaded, false, _logger));
+        Assert.Contains("hive is not loaded", hiveFailure.Message);
+
+        var unloadedEntra = new BackendUserContext(EntraShapedSid, "Unavailable", "", "", "", null);
+        var entraHiveFailure = Assert.Throws<InvalidOperationException>(
+            () => Windows11BlocksService.CreateMutation(clsid, unloadedEntra, false, _logger));
+        Assert.Contains("hive is not loaded", entraHiveFailure.Message);
     }
 
     public void Dispose()

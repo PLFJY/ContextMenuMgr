@@ -19,9 +19,7 @@ internal static class OpenWithRegistration
 
     internal static void ValidateUser(BackendUserContext context)
     {
-        var sid = new System.Security.Principal.SecurityIdentifier(context.Sid);
-        if (!sid.IsAccountSid())
-            throw new InvalidOperationException("Open With requires an interactive account SID.");
+        ArgumentNullException.ThrowIfNull(context);
         using var hive = Registry.Users.OpenSubKey(context.Sid)
             ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
     }

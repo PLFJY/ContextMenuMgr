@@ -930,8 +930,8 @@ public sealed class NamedPipeBackendServer
         bool allowInteractiveFallback = true)
     {
         var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream);
-        if (userContext is null && allowInteractiveFallback)
+        var userContext = resolver.TryResolveFromPipeClient(stream, out var rejected);
+        if (userContext is null && !rejected && allowInteractiveFallback)
             userContext = resolver.TryResolveInteractiveUserFallback();
         if (userContext is null)
         {
@@ -972,8 +972,8 @@ public sealed class NamedPipeBackendServer
         bool allowInteractiveFallback = true)
     {
         var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream);
-        if (userContext is null && allowInteractiveFallback)
+        var userContext = resolver.TryResolveFromPipeClient(stream, out var rejected);
+        if (userContext is null && !rejected && allowInteractiveFallback)
             userContext = resolver.TryResolveInteractiveUserFallback();
         if (userContext is null)
         {
