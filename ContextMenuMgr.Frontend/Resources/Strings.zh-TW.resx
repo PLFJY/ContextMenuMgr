@@ -1577,6 +1577,7 @@
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可見性資料或歸屬標記與已驗證寫入不符，已保留。</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多個實體登錄，未確定最終生效的處理程式</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>受系統保護</value></data>
+  <data name="OpenWithProtectedGroup" xml:space="preserve"><value>受系統保護（{0}）</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>無法驗證程式身分。需為現有本機檔案的絕對路徑，不能使用環境變數或符號連結，檔案不能超過 128 MiB。</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>註冊已變更，請檢查來源與命令。</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>保護需要審核：身分、可見性歸屬或修正次數存在衝突，已停止自動寫入。可停止保護以接受註冊，或檢查後停用並重新授權。</value></data>
@@ -1653,7 +1654,7 @@
   <data name="DebugOpenWithPendingUnverified" xml:space="preserve"><value>登錄項目已建立，但尚未確認進入待審批。請先保留註冊並檢查後端記錄，再決定是否繼續建立。</value></data>
   <data name="OpenWithAllowRegistration" xml:space="preserve"><value>通過並放行</value></data>
   <data name="OpenWithReviewPreserveDisabled" xml:space="preserve"><value>此註冊原已停用。確認時保留可見性資料，拒絕則保持停用；審批不會刪除既有或第三方停用值。</value></data>
-  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>尚未完成隔離或隔離失敗，禁止放行。請檢查註冊與後端記錄；已確認失敗的操作退避重試，不確定寫入僅進行核對。</value></data>
+  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>隔離未成功，該註冊不會進入待審核。請檢查註冊與後端記錄；寫入結果不確定時僅進行核對。</value></data>
   <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>持續保護仍有獨立授權。請先檢查並停止該保護，再放行此隔離註冊。</value></data>
   <data name="OpenWithReviewRequired" xml:space="preserve"><value>此註冊正在等待審核，請先至待審批處理，再啟用或授權持續保護。</value></data>
 </root>

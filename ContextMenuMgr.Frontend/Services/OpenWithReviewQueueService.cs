@@ -113,8 +113,7 @@ public partial class OpenWithReviewQueueService(IBackendClient backend, Localiza
             throw new InvalidOperationException("Open With review scope mismatch.");
         var existing = Items.ToDictionary(i => i.Id, StringComparer.OrdinalIgnoreCase);
         var next = snapshot.Reviews.Where(r => r.Status is OpenWithReviewStatus.New or OpenWithReviewStatus.Changed
-            or OpenWithReviewStatus.ReRegistered or OpenWithReviewStatus.Conflict or OpenWithReviewStatus.Uncertain
-            or OpenWithReviewStatus.IsolationFailed).Select(review =>
+            or OpenWithReviewStatus.ReRegistered or OpenWithReviewStatus.Conflict or OpenWithReviewStatus.Uncertain).Select(review =>
         {
             if (!existing.TryGetValue(review.RegistryPath, out var item)) item = new(review, localization);
             item.Apply(review);

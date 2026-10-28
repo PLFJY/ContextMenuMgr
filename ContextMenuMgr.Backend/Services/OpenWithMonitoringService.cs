@@ -108,6 +108,13 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
             foreach (var (path, item) in settled)
             {
                 if (baseline.VisibilityIntents.ContainsKey(path)) continue;
+                // Older states could publish a failed isolation as a review. It is not an approval.
+                if (baseline.Reviews.GetValueOrDefault(path) == "IsolationFailed")
+                {
+                    baseline.Reviews.Remove(path);
+                    baseline.ReviewVersions.Remove(path);
+                    baseline.Quarantines.Remove(path);
+                }
                 var stamp = Stamp(item);
                 var status = baseline.PendingIsolations.GetValueOrDefault(path);
                 if (!baseline.Registrations.TryGetValue(path, out var previous))
@@ -226,17 +233,25 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
         catch (Exception ex)
         {
             logger.LogFireAndForget(RuntimeLogLevel.Warning, $"OpenWithIsolationFailed: Path={path}, Error={ex.Message}");
-            // A completed read-only reconciliation may already have committed the review after a lost save response.
+            // Keep an unresolved journal for read-back. A verified failed write is not an approval
+            // and needs no repeated mutation until the physical registration changes.
             return await store.WithOpenWithAsync(state =>
             {
                 var baseline = state.Users[context.Sid];
-                if (baseline.PendingIsolations.ContainsKey(path))
+                if (baseline.VisibilityIntents.ContainsKey(path)) return null;
+                var current = SpecialMenuService.ReadOpenWithRegistration(path, context);
+                if (Generation(current) != Generation(item)) return null;
+                if (current.IsEnabled)
                 {
-                    baseline.Reviews[path] = "IsolationFailed";
+                    baseline.PendingIsolations.Remove(path);
+                    baseline.Reviews.Remove(path);
+                    baseline.ReviewVersions.Remove(path);
+                    baseline.Quarantines.Remove(path);
                     return null;
                 }
-                var current = SpecialMenuService.ReadOpenWithRegistration(path, context);
-                return current.IsEnabled ? null : Decorate(current, context, state);
+                if (baseline.PendingIsolations.TryGetValue(path, out var pendingStatus))
+                    CompleteIsolation(baseline, path, current, pendingStatus, quarantineWritten: false);
+                return Decorate(current, context, state);
             }, true, token);
         }
     }
@@ -515,8 +530,9 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
     private static IEnumerable<string> PendingPaths(OpenWithMonitorState state, BackendUserContext context)
     {
         if (!state.Users.TryGetValue(context.Sid, out var baseline)) return [];
-        return baseline.Reviews.Where(p => p.Value is "New" or "Changed" or "ReRegistered" or "Conflict" or "Uncertain" or "IsolationFailed")
-            .Select(p => p.Key).Concat(baseline.VisibilityIntents.Keys).Concat(baseline.PendingIsolations.Keys)
+        return baseline.Reviews.Where(p => p.Value is "Conflict" or "Uncertain"
+            || (p.Value is "New" or "Changed" or "ReRegistered") && !baseline.PendingIsolations.ContainsKey(p.Key))
+            .Select(p => p.Key).Concat(baseline.VisibilityIntents.Keys)
             .Concat(state.Rules.Values.Where(r => r.Sid.Equals(context.Sid, StringComparison.OrdinalIgnoreCase)
                 && r.Authorized && r.Outcome is "Conflict" or "Uncertain").Select(r => r.Path))
             .Where(p => baseline.Registrations.ContainsKey(p) || baseline.VisibilityIntents.ContainsKey(p))
@@ -545,7 +561,8 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
                         CanEdit = false, CanDelete = false, Metadata = new Dictionary<string, string>
                         { ["AppRegistryPath"] = path, ["ReadOnlyReason"] = "OpenWithOperationUncertain" } };
                 }
-                reviews.Add(CreateReview(state, context, path, current));
+                var review = CreateReview(state, context, path, current);
+                if (review.Status != OpenWithReviewStatus.IsolationFailed) reviews.Add(review);
             }
             return new OpenWithReviewSnapshot(context.Sid, reviews, state.Users.ContainsKey(context.Sid));
         }, false, token);

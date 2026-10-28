@@ -22,7 +22,7 @@ WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护�
 
 | 行为 | 当前实现倾向 |
 | --- | --- |
-| 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，纳入带文件扩展名的应用 key；常规 command-bearing verb 保留旧物理 command Id。缺少 shell/verb/command、无可提取目标、DropTarget、DDE、DelegateExecute、ExplorerCommandHandler 或级联结构仍显示，但 CanEdit/CanDelete=false；开关可见但禁用，无删除/恢复操作，黄色标注“受系统保护”并排在正常项后；详细只读原因在 tooltip。无常规 command 的 Id 使用真实 app key，不制造 command。逐项访问失败保留只读物理路径。 |
+| 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，纳入带文件扩展名的应用 key；常规 command-bearing verb 保留旧物理 command Id。缺少 shell/verb/command、无可提取目标、DropTarget、DDE、DelegateExecute、ExplorerCommandHandler 或级联结构仍显示，但 CanEdit/CanDelete=false；开关可见但禁用，无删除/恢复操作，黄色标注“受系统保护”，并放入默认折叠的只读分组，用户点击后展开；搜索仍能筛选该分组，详细只读原因在 tooltip。无常规 command 的 Id 使用真实 app key，不制造 command。逐项访问失败保留只读物理路径。 |
 | 显示名 | 优先解析物理注册的 `FriendlyAppName`（不要求 app key 名与命令目标文件名相同），否则读取目标文件 `FileDescription`，最后回退到文件名；没有目标时使用 FriendlyAppName 或原 app 名。DefaultIcon 优先，无法解析时允许空图标，不制造 exe 路径。 |
 | 启用 / 禁用 | 禁用只在值不存在时写空 `REG_SZ NoOpenWith`，同时写独立 `ContextMenuMgrPlus.OpenWithVisibility` 归属值；两值在短生命周期 Windows 注册表事务中提交。启用只撤销匹配本物理路径、command generation 和值类型 / 内容的本程序写入；预存或第三方改写的值均保留并返回错误。 |
 | 新增 | 写入当前前端用户的 `HKU\<SID>\Software\Classes\Applications\<app.exe>\shell\open\command`，并写 `FriendlyAppName`；名称、command 与所有新子键使用同一 TxR 事务；通过事务中已打开的现有 SID hive handle 创建子键，避免用户 hive 并发卸载时创建替代 SID 根。检查 leaf disposition 必须为新建，已有或安装器抢先创建的 key 拒绝覆盖。失败/提交前取消回滚整次创建，不清除已有 `NoOpenWith`。创建目标必须是无环境变量的绝对文件路径。 |
@@ -82,22 +82,22 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 新监控或 session reset 等待 30 秒，且初始发现须 10 秒不变；单项和确认缺失也须稳定 10 秒。访问拒绝/不完整发现暂停采纳，记录失败并退避 30 秒；同一错误持续期间避免重复 attention。首次没有该 SID OpenWith baseline 时静默采纳当前项（可为零），与 regular/WPS markers 无关。已有 baseline 会在启动稳定后发现离线新增；完全在两次轮询之间出现又消失的变化不可见。
 
-**基础流程：发现新增、改变或重注册 → 核实隔离成功 → 送审；通过后仅解除本次隔离，拒绝则保持禁用。** 首次/重置基线仍静默采纳；第三方已有禁用值保留，无法隔离的项仅显示需处理状态，不能放行。OpenWith 使用独立 NoOpenWith/journal，不套用经典 Added/quarantine。每 SID/轮聚合一次通知。中央待审批是注册审核入口，普通 OpenWith 页保留状态、定位待审批按钮和独立持久保护管理，不再提供竞争性的接受操作。
+**基础流程：发现新增、改变或重注册 → 核实隔离成功 → 送审；通过后仅解除本次隔离，拒绝则保持禁用。** 首次/重置基线仍静默采纳；第三方已有禁用值保留。已核实隔离失败的注册保留物理状态与诊断日志，不进入待审批、不计入角标，同一物理代际不重复尝试；注册发生变化后重新评估。写入结果不确定时保留 journal 并只读核对，不能按已失败清除。OpenWith 使用独立 NoOpenWith/journal，不套用经典 Added/quarantine。每 SID/轮聚合一次通知。中央待审批是注册审核入口，普通 OpenWith 页保留状态、定位待审批按钮和独立持久保护管理，不再提供竞争性的接受操作。
 
 | 持久状态 | 中央队列语义 |
 | --- | --- |
 | New / Changed / ReRegistered | 已核实禁用，可按当前代际通过或拒绝。确认稳定缺失后保留独立缺失身份，重现归为 ReRegistered；未观察到缺失的同内容重写按 Changed。 |
 | Conflict | 显式 attention，须到 OpenWith 检查并停止或重新授权保护，不展示普通接受/拒绝。 |
 | Uncertain | 显示待核实，暂停审核 mutation；查询失败、物理代际尚未稳定或 visibility journal 未完成时同样禁止决策。 |
-| IsolationFailed | 尚未成功隔离，禁止审核放行；已核实失败每路径退避 30 秒，不确定写入只回读。 |
+| IsolationFailed（旧状态） | 不是待审批项；后端轮询清理旧审核记录，已核实失败不占角标、不重复写入。 |
 | Reapplied | 已核实保护结果，仅信息，不计入未解决队列。 |
 | Missing | 已确认缺失后不制造活动应用审批，规则仍在普通 OpenWith 页管理。尚无法确认的缺失保留 Uncertain。 |
 
-`GetOpenWithPendingReviews` 使用认证 SID、loaded hive/native view，只读取持久 review、未完成 journal 与保护 attention 的准确物理路径，不扫描全部 Applications、不建立 baseline、不写注册表或生成 review。最多 8192 个身份，后端 15 秒协作预算；单项读取不完整保留 Uncertain，可见性返回 null 并显示尚未核实，不使用占位布尔值猜测启用状态；状态库/身份/数量错误使整次查询失败，前端保留原列表。结果为独立强类型 OpenWithReviewSnapshot，包含用户、物理路径、SpecialMenuEntry 原始信息、status、capability/限制及 protection，并以 BaselineEstablished 明确表示该认证 SID 的持久基线是否存在；此只读标志不建立基线。HKU/HKLM 同名项分别决策。
+`GetOpenWithPendingReviews` 使用认证 SID、loaded hive/native view，只读取持久 review、未完成 journal 与保护 attention 的准确物理路径，不扫描全部 Applications、不建立 baseline、不写注册表或生成 review。未完成但尚无不确定写入的隔离及已核实失败均不列入队列。最多 8192 个身份，后端 15 秒协作预算；单项读取不完整保留 Uncertain，可见性返回 null 并显示尚未核实，不使用占位布尔值猜测启用状态；状态库/身份/数量错误使整次查询失败，前端保留原列表。结果为独立强类型 OpenWithReviewSnapshot，包含用户、物理路径、SpecialMenuEntry 原始信息、status、capability/限制及 protection，并以 BaselineEstablished 明确表示该认证 SID 的持久基线是否存在；此只读标志不建立基线。HKU/HKLM 同名项分别决策。
 
 `DecideOpenWithReview` 提交路径、审核 generation 和 Accept/Reject。generation 结合持久审核版本、SID/物理路径及完整注册 fingerprint；fingerprint 包含原始值/类型、子键及 last-write time，最多 512 个节点、深度 16、4096 个值、1 MiB 序列化指纹材料，超限 fail closed。不支持激活结构也有物理指纹。只接受与最新稳定观测和 fresh read 完全一致的 generation；解除本次隔离时还在原有 TxR 内再次核对，内容或同内容重建使旧决策失效。
 
-Accept 经原 TxR/read-back 解除归属仍匹配的本次隔离，提交成功才移出队列；原已禁用的项仅确认并保留原值。Reject 回读已禁用后持久解除审核，保持 NoOpenWith，不删除注册或自动授权保护。IsolationFailed/Conflict/Uncertain 仅提供检查；原有保护授权须先显式停止才能放行。
+Accept 经原 TxR/read-back 解除归属仍匹配的本次隔离，提交成功才移出队列；原已禁用的项仅确认并保留原值。Reject 回读已禁用后持久解除审核，保持 NoOpenWith，不删除注册或自动授权保护。Conflict/Uncertain 仅提供检查；原有保护授权须先显式停止才能放行。
 
 兼容决定：保留已发布 `ReviewOpenWithRegistration` nullable 协议：true/false 仅管理保护，null 将原 DTO 的准确代际转到同一 Accept 实现；缺少有效代际或已无未解决审核时拒绝并要求刷新。普通页面加载及上述查询均不建立 baseline。
 

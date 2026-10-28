@@ -39,11 +39,11 @@ public sealed class OpenWithRegistrationTests
         Assert.False((await fixture.Pending()).BaselineEstablished);
     }
 
-    // Permanent: a failed or unsupported isolation is attention, never a successful approval target.
+    // Permanent: a verified failed isolation must not occupy the review queue or retry unchanged input.
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task IsolationFailure_NeverPublishesAnActionableReviewOrAllowsBypass(bool unsupported)
+    public async Task IsolationFailure_DoesNotPublishReviewOrRetryUnchangedRegistration(bool unsupported)
     {
         using var fixture = new Fixture(monitoring: true);
         await fixture.Poll(0);
@@ -62,19 +62,16 @@ public sealed class OpenWithRegistrationTests
             fixture.Monitoring!.Changed += (_, notification) => notifications.Add(notification);
             await fixture.Poll(40);
             await fixture.Poll(55);
-            var attention = Assert.Single((await fixture.Pending()).Reviews);
-            Assert.Equal(OpenWithReviewStatus.IsolationFailed, attention.Status);
-            Assert.False(attention.CanAccept);
-            Assert.False(attention.CanReject);
-            Assert.False(attention.IsQuarantined);
-            Assert.True(attention.IsEnabled);
+            Assert.Empty((await fixture.Pending()).Reviews);
             Assert.Empty(notifications); // no successful-isolation approval notification
             using (var key = fixture.Open()!) Assert.Null(key.GetValue("NoOpenWith"));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(attention, OpenWithReviewDecision.Accept));
+            Assert.Empty(await fixture.Store!.WithOpenWithAsync(
+                state => state.Users[fixture.Context.Sid].PendingIsolations, false, default));
+            await fixture.Poll(90);
+            await fixture.Poll(125);
+            Assert.Empty((await fixture.Pending()).Reviews);
             fixture.RestartMonitoring();
-            var restored = Assert.Single((await fixture.Pending()).Reviews);
-            Assert.Equal(OpenWithReviewStatus.IsolationFailed, restored.Status);
-            Assert.False(restored.CanAccept);
+            Assert.Empty((await fixture.Pending()).Reviews);
             var toggle = await fixture.Service.SetEnabledAsync(await fixture.Read(), true, null, fixture.Context, default);
             Assert.False(toggle.Success);
             Assert.Empty(await fixture.Store!.WithOpenWithAsync(s => s.Rules, false, default));
@@ -585,6 +582,10 @@ public sealed class OpenWithRegistrationTests
         fixture.CreateLiteral();
         await fixture.Poll(40);
         await fixture.Poll(55);
+        var review = Assert.Single((await fixture.Pending()).Reviews);
+        Assert.False((await fixture.Read()).IsEnabled);
+        Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
+        await fixture.Decide(review, OpenWithReviewDecision.Accept);
         Assert.True((await fixture.Read()).IsEnabled);
         Assert.Equal("False", (await fixture.Read()).Metadata["PersistentProtection"]);
     }

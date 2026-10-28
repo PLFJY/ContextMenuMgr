@@ -88,7 +88,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         + (Entry.Metadata.GetValueOrDefault("MonitoringStatus") is { Length: > 0 } status
             ? _localization.Translate("OpenWithMonitor" + status) : string.Empty);
     public bool HasMonitoringText => !string.IsNullOrWhiteSpace(MonitoringText);
-    public bool ShowOpenWithReview => Entry.Metadata.GetValueOrDefault("MonitoringStatus") is "New" or "Changed" or "ReRegistered" or "Conflict" or "Uncertain" or "IsolationFailed";
+    public bool ShowOpenWithReview => Entry.Metadata.GetValueOrDefault("MonitoringStatus") is "New" or "Changed" or "ReRegistered" or "Conflict" or "Uncertain";
     public string OpenWithApprovalsText => _localization.Translate("PendingApprovalTitle");
     public bool HasRegistrationNotice => Entry.Kind == SpecialMenuKind.OpenWith && Entry.Id != "openwith:use-store";
     public string RegistrationNotice => _localization.Translate("OpenWithScope" + Entry.Metadata.GetValueOrDefault("RegistryScope"))

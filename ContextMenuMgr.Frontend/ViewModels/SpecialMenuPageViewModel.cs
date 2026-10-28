@@ -69,10 +69,19 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         ItemsView.Filter = FilterItem;
         if (kind == SpecialMenuKind.OpenWith)
         {
-            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith), ListSortDirection.Ascending));
+            ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith));
             ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
             ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
             ((ListCollectionView)ItemsView).IsLiveSorting = true;
+            var protectedItems = new ListCollectionView(Items) { IsLiveFiltering = true, IsLiveSorting = true };
+            foreach (var property in new[] { nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith),
+                nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
+                nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) })
+                protectedItems.LiveFilteringProperties.Add(property);
+            protectedItems.Filter = FilterProtectedOpenWithItem;
+            protectedItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+            protectedItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
+            OpenWithProtectedItemsView = protectedItems;
         }
         SearchLabel = _localization.Translate("SearchLabel");
         AddText = _localization.Translate("Add");
@@ -113,6 +122,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     public ICollectionView ItemsView { get; }
 
+    public ListCollectionView? OpenWithProtectedItemsView { get; }
+
     public string Title => _localization.Translate(_titleKey);
 
     public string Description => _localization.Translate(_descriptionKey);
@@ -121,6 +132,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     public string OpenWithInspectionLabel => _localization.Translate("OpenWithInspectionLabel");
     public string OpenWithInspectText => _localization.Translate("OpenWithInspect");
     public string OpenWithCancelText => _localization.Translate("DialogCancel");
+    public string OpenWithProtectedGroupText => _localization.Format("OpenWithProtectedGroup", OpenWithProtectedItemsView?.Count ?? 0);
+    public bool ShowOpenWithProtectedGroup => OpenWithProtectedItemsView?.IsEmpty == false;
+
+    [ObservableProperty]
+    public partial bool IsOpenWithProtectedExpanded { get; set; }
 
     [ObservableProperty]
     public partial string InspectionExtension { get; set; } = ".txt";
@@ -309,7 +325,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
                        || WinXGroups.All(static group => group.Items.Count == 0);
             }
 
-            return !ItemsView.Cast<object>().Any();
+            return ItemsView.IsEmpty && !ShowOpenWithProtectedGroup;
         }
     }
 
@@ -318,6 +334,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     partial void OnSearchTextChanged(string value)
     {
         ItemsView.Refresh();
+        OpenWithProtectedItemsView?.Refresh();
         RefreshListPlaceholderState();
     }
 
@@ -1462,11 +1479,16 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private bool FilterItem(object obj)
     {
-        if (obj is not SpecialMenuItemViewModel item)
-        {
-            return false;
-        }
+        return obj is SpecialMenuItemViewModel item
+            && (Kind != SpecialMenuKind.OpenWith || !item.IsReadOnlyOpenWith)
+            && MatchesSearch(item);
+    }
 
+    private bool FilterProtectedOpenWithItem(object obj)
+        => obj is SpecialMenuItemViewModel item && item.IsReadOnlyOpenWith && MatchesSearch(item);
+
+    private bool MatchesSearch(SpecialMenuItemViewModel item)
+    {
         if (string.IsNullOrWhiteSpace(SearchText))
         {
             return true;
@@ -1476,7 +1498,8 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         return Contains(item.DisplayName, search)
                || Contains(item.KeyName, search)
                || Contains(item.Subtitle, search)
-               || Contains(item.Detail, search);
+               || Contains(item.Detail, search)
+               || (Kind == SpecialMenuKind.OpenWith && Contains(item.Entry.RegistryPath, search));
     }
 
     private void OnNotificationReceived(object? sender, BackendNotification notification)
@@ -1849,6 +1872,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));
         OnPropertyChanged(nameof(ShowListPlaceholder));
+        if (Kind == SpecialMenuKind.OpenWith)
+        {
+            OnPropertyChanged(nameof(OpenWithProtectedGroupText));
+            OnPropertyChanged(nameof(ShowOpenWithProtectedGroup));
+        }
     }
 
     private List<(SpecialMenuItemViewModel Group, List<SpecialMenuItemViewModel> Items)> BuildWinXGroupSpecs()

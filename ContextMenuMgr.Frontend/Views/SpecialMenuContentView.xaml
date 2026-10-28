@@ -427,12 +427,9 @@
                 </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <ItemsControl
-                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-                    behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding ItemsView}"
-                    Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
+                <StackPanel Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <StackPanel.Resources>
+                    <DataTemplate x:Key="SpecialMenuEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
                         <Border Style="{StaticResource ContextMenuItemCardStyle}">
                             <Grid>
                                 <ui:TextBlock
@@ -646,8 +643,27 @@
                             </Grid>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                </StackPanel.Resources>
+                <ItemsControl
+                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+                    behaviors:MenuListTransitions.IsEnabled="True"
+                    ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
+                    ItemsSource="{Binding ItemsView}" />
+                <Expander Margin="0,12,0,0"
+                          IsExpanded="{Binding IsOpenWithProtectedExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          Visibility="{Binding ShowOpenWithProtectedGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Expander.Header>
+                        <ui:TextBlock FontSize="14" FontWeight="SemiBold"
+                                      Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                      Text="{Binding OpenWithProtectedGroupText}" />
+                    </Expander.Header>
+                    <ItemsControl Margin="0,6,0,0"
+                                  behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+                                  behaviors:MenuListTransitions.IsEnabled="True"
+                                  ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
+                                  ItemsSource="{Binding OpenWithProtectedItemsView}" />
+                </Expander>
+                </StackPanel>
 
                 </Grid>
 

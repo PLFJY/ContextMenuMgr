@@ -129,13 +129,11 @@ public sealed class MutationOutcomeTests
                     var isolationFailure = Review("isolation failed", OpenWithReviewStatus.IsolationFailed);
                     backend.Snapshot = new(sid, [pending, conflict, isolationFailure]);
                     await queue.RefreshAsync(default);
-                    var failedIsolation = Assert.Single(queue.Items, i => i.Id == isolationFailure.RegistryPath);
-                    Assert.False(failedIsolation.CanAccept);
-                    Assert.False(failedIsolation.CanReject);
-                    Assert.Equal("5", shell.ApprovalsBadge.Value);
+                    Assert.DoesNotContain(queue.Items, i => i.Id == isolationFailure.RegistryPath);
+                    Assert.Equal("4", shell.ApprovalsBadge.Value);
                     backend.Snapshot = new("S-1-5-21-1-2-3-1001", []);
                     Assert.False(await queue.RefreshAsync(default));
-                    Assert.Equal(3, queue.Items.Count); // cross-user response cannot clear this user's queue
+                    Assert.Equal(2, queue.Items.Count); // cross-user response cannot clear this user's queue
                     completion.SetResult();
                 }
                 catch (Exception ex) { completion.SetException(ex); }

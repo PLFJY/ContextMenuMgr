@@ -1577,6 +1577,7 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>Visibility data or ownership marker differs from the verified writer; it is preserved.</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>Multiple physical registrations; effective handler not determined</value></data>
   <data name="OpenWithProtectedText" xml:space="preserve"><value>System protected</value></data>
+  <data name="OpenWithProtectedGroup" xml:space="preserve"><value>System protected ({0})</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>Cannot verify the executable identity. Use a literal local path to an existing file without symbolic links. Files over 128 MiB are not eligible.</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>Registration changed — review its source and command.</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>Protection needs review. Identity, visibility ownership or correction limit conflicts; no automatic write. Stop protection to accept the registration, or disable and authorize it again after inspection.</value></data>
@@ -1653,7 +1654,7 @@ Continue anyway? (Not recommended)</value>
   <data name="DebugOpenWithPendingUnverified" xml:space="preserve"><value>The registry entry was created, but its pending review is not confirmed. Keep it registered and inspect the backend log before creating another entry.</value></data>
   <data name="OpenWithAllowRegistration" xml:space="preserve"><value>Allow registration</value></data>
   <data name="OpenWithReviewPreserveDisabled" xml:space="preserve"><value>This registration was already disabled. Acknowledgement preserves its visibility values; Reject keeps it disabled. Existing or third-party values are never removed by approval.</value></data>
-  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>Isolation is incomplete or failed. The registration cannot be allowed. Inspect the registration and backend log; verified failures retry after backoff, uncertain writes are only reconciled.</value></data>
+  <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>Isolation did not succeed, so this registration is not awaiting approval. Inspect the registration and backend log; uncertain writes are reconciled by read-back only.</value></data>
   <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>Persistent protection remains authorized. Inspect and stop that protection before allowing this isolated registration.</value></data>
   <data name="OpenWithReviewRequired" xml:space="preserve"><value>This registration is awaiting review. Allow it in Pending Approvals before enabling it or authorizing persistent protection.</value></data>
 </root>
