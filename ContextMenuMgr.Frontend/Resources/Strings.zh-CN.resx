@@ -1522,17 +1522,23 @@
   <data name="LoadingStatus" xml:space="preserve"><value>正在加载…</value></data>
   <data name="ManageSubMenuItems" xml:space="preserve"><value>管理子菜单</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>批量管理</value></data>
+  <data name="FileTypeBatchGroupedCountFormat" xml:space="preserve"><value>{0} 组操作 · {1} 个物理注册项</value></data>
+  <data name="FileTypeBatchExactEvidence" xml:space="preserve"><value>相同操作：键名与命令目标，或处理器 CLSID</value></data>
+  <data name="FileTypeBatchIdentityUnknown" xml:space="preserve"><value>命令身份不可用；仅显示有直接证据的关联。</value></data>
+  <data name="FileTypeBatchModuleEvidence" xml:space="preserve"><value>命令模块相同；操作不同</value></data>
+  <data name="FileTypeBatchCandidateEvidence" xml:space="preserve"><value>可能属于同一注册系列；选择此组即明确加入，可排除不需要的路径</value></data>
+  <data name="FileTypeBatchDeleteSelectedConfirmation" xml:space="preserve"><value>删除 {1} 组操作中的 {0} 个已选物理注册项吗？用户注册表：{2}；机器注册表：{3}。操作：{4}。每项删除都会保留可恢复备份。继续前请展开检查来源路径。</value></data>
+  <data name="FileTypeBatchProgress" xml:space="preserve"><value>已完成 {0}/{1} · 当前操作：{2}</value></data>
+  <data name="FileTypeBatchResult" xml:space="preserve"><value>已确认成功：{0}；失败：{1}；跳过：{2}；取消：{3}；不确定：{4}。重试不确定项前请刷新并检查恢复记录。</value></data>
   <data name="FileTypeBatchTitle" xml:space="preserve"><value>{0} 的相关项</value></data>
   <data name="FileTypeBatchCommandIdentity" xml:space="preserve"><value>命令程序：{0}</value></data>
   <data name="FileTypeBatchClsidIdentity" xml:space="preserve"><value>处理器 CLSID：{0}</value></data>
-  <data name="FileTypeBatchCountFormat" xml:space="preserve"><value>{0} 个相关菜单项</value></data>
   <data name="FileTypeBatchSourceRegistryPath" xml:space="preserve"><value>来源注册表路径</value></data>
   <data name="FileTypeBatchEnableAll" xml:space="preserve"><value>全部启用</value></data>
   <data name="FileTypeBatchDeleteAll" xml:space="preserve"><value>全部删除</value></data>
   <data name="FileTypeBatchUndoAll" xml:space="preserve"><value>全部撤销</value></data>
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>受保护的文件类型 open/edit 项不能在这里删除，请改用关闭开关。</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>未找到相关文件类型菜单项。</value></data>
-  <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>要删除 {0} 个相关菜单项吗？删除前会创建注册表备份。{1} 个受保护的 open/edit 项会被跳过。</value></data>
   <data name="CompactView" xml:space="preserve"><value>精简</value></data>
   <data name="DisplayMode" xml:space="preserve"><value>显示模式</value></data>
   <data name="DetailedView" xml:space="preserve"><value>详细</value></data>

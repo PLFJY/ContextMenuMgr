@@ -145,7 +145,11 @@ fallback 捕获原 Owner/Group/DACL，在服务 token 的私有可丢弃副本�
 
 例如 PowerShell 7 可把 `.ps1` 的 “Run with PowerShell 7” 注册到 `HKLM\SOFTWARE\Classes\Microsoft.PowerShellScript.1\Shell\PowerShell7x64`。Custom Extension `.ps1` 页面应通过 `.ps1` 的关联 ProgID 扫描到 `Microsoft.PowerShellScript.1\shell`，并把条目的真实来源保持为 `Microsoft.PowerShellScript.1\shell\PowerShell7x64`，这样禁用、恢复、删除和编辑仍写回实际 ProgID 路径，而不是误写到 `.ps1\shell`。
 
-File Types 的隐藏批量管理视图通过 `FindRelatedFileTypeMenuItems` 做一次性相关项扫描。该扫描覆盖 HKLM 与前端用户 `Software\Classes` 下的扩展名 key、ProgId key、以及 `SystemFileAssociations\<extension|perceivedType>` 的 `shell` / `shellex\ContextMenuHandlers` / disabled mirror 根；它不会在服务启动时运行，也不会把扫描到的文件类型项加入普通全局启动检测 baseline。ShellVerb 相关性要求命令程序路径规范化后相同并且 key name 相同；ShellExtension 相关性要求 Handler CLSID 相同；显示名只用于展示，不作为匹配依据。批量扫描会把匹配 query 的已删除备份状态合并回结果，因此删除后的相关项仍可在批量页撤销。批量视图中的开关和删除继续走普通 `SetEnabled` / `DeleteItem`，并通过 fallback `ContextMenuEntry` 支持不在普通 workspace snapshot 中的 scene-only 文件类型项。文件类型 `open` / `edit` 核心 ShellVerb 禁止删除；用户若想隐藏这类项，应使用禁用开关。
+File Types 的隐藏批量管理视图通过 `FindRelatedFileTypeMenuItems` 按需扫描。扫描根仍覆盖 HKLM 与认证前端用户 `HKEY_USERS\<SID>\Software\Classes` 下的扩展名、ProgID、`SystemFileAssociations\<extension|perceivedType>` 的 `shell`、`shellex\ContextMenuHandlers` 与 disabled mirror；启动 baseline 不扩展至全部文件类型。服务先以认证 SID 和真实物理路径重读入口，再扫描相关项，不信任请求中的命令身份。批量清单直接保留物理项，不经过按逻辑 Id 合并的普通 snapshot；同一逻辑 Id 的 HKLM/HKU 来源各获基于完整物理路径的批量 Id，精确重复路径才去重。
+
+ShellVerb 的 **ExactAction** 需要相同原始 verb 键名和可信命令目标；若命令目标不可确认，完全相同的命令文本与键名仍可证明同一操作。相同绝对命令模块但键名不同是 **SameModule**，作为独立操作组。`rundll32.exe`、`cmd.exe`、`powershell.exe`、`pwsh.exe`、`explorer.exe` 仅是通用启动器，不凭启动器路径建立同应用归属。数字序号加动作后缀的同注册键系列只能成为 **RegistrationFamilyCandidate**，初始不勾选任何物理项；相同标题、图标、文件名或目录不提供自动归属。ShellExtension 仍按 CLSID 匹配。命令解析不要求目标文件存在；后端不使用 LocalSystem 环境变量展开用户命令，未能可靠规范化的变量不构成模块身份。原始键名中的前导空格始终保留。
+
+已删除状态按物理批量 Id 合并回清单供 Undo。批量删除使用独立 Pipe 命令选中**一个**物理来源，在持久状态操作门内重读认证来源、命令/CLSID 与扫描时的整树指纹，导出前及导出后再次核对指纹，然后复用经典 `DeleteItemCoreAsync` 的写保护预检、`.reg` 备份、物理删除回读、状态保存、失败回滚及 Shell 通知。旧恢复记录与新出现的同路径注册冲突时拒绝删除，不覆盖旧备份。操作完成后需区分 Pipe 响应与物理及恢复记录核对；超时不得盲重试。普通单项 Delete 的影响范围保持原样。文件类型字面 `open` / `edit` 核心 ShellVerb 仍禁止批量删除，带 `_open` 的第三方键不因此受保护。实际 Explorer 可见性须另行验收。
 
 ## 删除、恢复与备份
 

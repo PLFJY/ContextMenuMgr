@@ -372,30 +372,41 @@ public sealed class ContextMenuRegistryCatalog
         FileTypeBatchQuery query,
         CancellationToken cancellationToken = default,
         BackendUserContext? userContext = null)
-    {
-        var roots = CreateRelatedFileTypeRoots(userContext).ToArray();
-        if (roots.Length == 0)
-        {
-            return [];
-        }
-
-        var includedRootPaths = roots
-            .Select(static root => root.StableRelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var snapshot = await BuildSnapshotAsync(
-            EnumerateEntries(roots, userContext),
-            state => includedRootPaths.Contains(state.SourceRootPath),
-            persistDiscoveredStates: false,
-            persistSnapshotUpdates: false,
-            baselineMarkerId: null,
-            allowBaselineInitialization: false,
+        => await RunPersistentStateOperationAsync(
+            () => FindRelatedFileTypeMenuItemsCoreAsync(query, cancellationToken, userContext),
             cancellationToken);
 
-        var relatedActual = snapshot
-            .Where(entry => IsRelatedFileTypeEntry(query, entry))
-            .Select(static entry => entry with
+    private async Task<IReadOnlyList<ContextMenuEntry>> FindRelatedFileTypeMenuItemsCoreAsync(
+        FileTypeBatchQuery query,
+        CancellationToken cancellationToken,
+        BackendUserContext? userContext)
+    {
+        if (userContext is null || string.IsNullOrWhiteSpace(query.SourceBackendRegistryPath)
+            || !IsAuthenticatedFileTypeBatchSource(query.SourceBackendRegistryPath, userContext))
+            return [];
+        var roots = CreateRelatedFileTypeRoots(userContext).ToArray();
+        if (roots.Length == 0) return [];
+        var states = await _stateStore.LoadAsync(cancellationToken);
+        var source = (await FindEntriesByIdAsync(query.SourceItemId, cancellationToken, userContext))
+            .FirstOrDefault(entry => string.Equals(entry.BackendRegistryPath,
+                query.SourceBackendRegistryPath, StringComparison.OrdinalIgnoreCase))
+            ?? states.Values.FirstOrDefault(state => state.IsDeleted
+                && string.Equals(state.BackendRegistryPath, query.SourceBackendRegistryPath,
+                    StringComparison.OrdinalIgnoreCase))?.ToDeletedEntry();
+        if (source is null || source.EntryKind != query.EntryKind || source.Category != ContextMenuCategory.File
+            || !IsSupportedFileTypeBatchRoot(source.SourceRootPath))
+            return [];
+
+        // This is an on-demand physical inventory. The general snapshot merges by
+        // logical Id and would hide an HKLM/HKU pair at the same association root.
+        var relatedActual = EnumerateEntries(roots, userContext)
+            .Select(entry => (Entry: entry, Match: GetFileTypeBatchMatch(source, entry)))
+            .Where(static pair => pair.Match != FileTypeBatchMatchKind.None)
+            .Select(pair => pair.Entry with
             {
+                Id = GetFileTypeBatchPhysicalId(pair.Entry.Id, pair.Entry.BackendRegistryPath),
+                FileTypeBatchMatchKind = pair.Match,
+                FileTypeBatchFingerprint = ReadFileTypeBatchFingerprint(pair.Entry.BackendRegistryPath),
                 IsPendingApproval = false,
                 DetectedChangeKind = ContextMenuChangeKind.None,
                 DetectedChangeDetails = null,
@@ -403,13 +414,16 @@ public sealed class ContextMenuRegistryCatalog
                 ConsistencyIssue = null
             });
 
-        var states = await _stateStore.LoadAsync(cancellationToken);
         var relatedDeleted = states.Values
             .Where(static state => state.IsDeleted && !string.IsNullOrWhiteSpace(state.BackupFilePath))
+            .Where(state => IsSupportedFileTypeBatchRoot(state.SourceRootPath))
+            .Where(state => IsAuthenticatedFileTypeBatchSource(state.BackendRegistryPath, userContext))
             .Select(static state => state.ToDeletedEntry())
-            .Where(entry => IsRelatedFileTypeEntry(query, entry))
-            .Select(static entry => entry with
+            .Select(entry => (Entry: entry, Match: GetFileTypeBatchMatch(source, entry)))
+            .Where(static pair => pair.Match != FileTypeBatchMatchKind.None)
+            .Select(pair => pair.Entry with
             {
+                FileTypeBatchMatchKind = pair.Match,
                 IsPendingApproval = false,
                 DetectedChangeKind = ContextMenuChangeKind.None,
                 DetectedChangeDetails = null,
@@ -426,7 +440,7 @@ public sealed class ContextMenuRegistryCatalog
             .ToArray();
 
         await _logger.LogAsync(
-            $"RelatedFileTypeMenuItemsScan: EntryKind={query.EntryKind}, KeyName={query.KeyName}, CommandExecutablePath={query.CommandExecutablePath}, HandlerClsid={query.HandlerClsid}, FrontendSid={DiagnosticLogFormatter.FormatSid(userContext)}, ResultCount={related.Length}.",
+            $"RelatedFileTypeMenuItemsScan: EntryKind={source.EntryKind}, FrontendSid={DiagnosticLogFormatter.FormatSid(userContext)}, Exact={related.Count(static item => item.FileTypeBatchMatchKind == FileTypeBatchMatchKind.ExactAction)}, SameModule={related.Count(static item => item.FileTypeBatchMatchKind == FileTypeBatchMatchKind.SameModule)}, Candidates={related.Count(static item => item.FileTypeBatchMatchKind == FileTypeBatchMatchKind.RegistrationFamilyCandidate)}, ResultCount={related.Length}.",
             cancellationToken);
 
         return related;
@@ -797,7 +811,11 @@ public sealed class ContextMenuRegistryCatalog
         var isWindows11Target = fallbackItem?.IsWindows11ContextMenu == true
             || itemId.StartsWith("win11|", StringComparison.OrdinalIgnoreCase)
             || itemId.StartsWith("win11-system|", StringComparison.OrdinalIgnoreCase);
-        var snapshot = resolvedSnapshot ?? (isWindows11Target
+        var isPhysicalBatchTarget = GetFileTypeBatchMarkerIndex(itemId) >= 0
+            && fallbackItem?.FileTypeBatchMatchKind is not null and not FileTypeBatchMatchKind.None;
+        var snapshot = resolvedSnapshot ?? (isPhysicalBatchTarget
+            ? (IReadOnlyList<ContextMenuEntry>)[]
+            : isWindows11Target
             ? userInitiated
                 ? await GetWindows11MutationSnapshotAsync(cancellationToken, userContext)
                 : await GetSnapshotAsync(cancellationToken, userContext)
@@ -855,6 +873,11 @@ public sealed class ContextMenuRegistryCatalog
                 return CreateFailure("The selected physical registry source no longer exists; no mutation was attempted.",
                     fallbackItem, PipeErrorCodes.RegistryMutationVerificationFailed);
             item = sourceState.Item;
+            if (isPhysicalBatchTarget && !string.Equals(
+                    ReadFileTypeBatchFingerprint(item.BackendRegistryPath),
+                    fallbackItem.FileTypeBatchFingerprint, StringComparison.Ordinal))
+                return CreateFailure("The selected registration changed after discovery; refresh before changing it.",
+                    item, PipeErrorCodes.RegistryMutationVerificationFailed);
         }
 
         if (item.IsDeleted)
@@ -2241,12 +2264,78 @@ public sealed class ContextMenuRegistryCatalog
             () => DeleteItemCoreAsync(itemId, cancellationToken, userContext, fallbackItem),
             cancellationToken);
 
+    public async Task<PipeResponse> DeleteFileTypeBatchItemAsync(
+        ContextMenuEntry expected, CancellationToken cancellationToken, BackendUserContext? userContext,
+        Guid? operationId = null)
+        => await RunPersistentStateOperationAsync(async () =>
+        {
+            if (userContext is null || expected.Category != ContextMenuCategory.File
+                || string.IsNullOrWhiteSpace(expected.FileTypeBatchFingerprint)
+                || string.IsNullOrWhiteSpace(expected.BackendRegistryPath))
+                return CreateFailure("The batch target has no authenticated physical source.", expected,
+                    PipeErrorCodes.RegistryMutationVerificationFailed);
+            var marker = GetFileTypeBatchMarkerIndex(expected.Id);
+            if (marker < 0 || !string.Equals(expected.Id,
+                    GetFileTypeBatchPhysicalId(expected.Id[..marker], expected.BackendRegistryPath),
+                    StringComparison.OrdinalIgnoreCase))
+                return CreateFailure("The batch target has no valid physical identity.", expected,
+                    PipeErrorCodes.RegistryMutationVerificationFailed);
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            if (states.TryGetValue(expected.Id, out var oldState) && oldState.IsDeleted)
+                return CreateFailure("A recovery record already owns this physical source; refresh and resolve it first.",
+                    expected, PipeErrorCodes.RegistryMutationRollbackConflict);
+            var current = (await FindEntriesByIdAsync(expected.Id, cancellationToken, userContext))
+                .FirstOrDefault(candidate => string.Equals(candidate.BackendRegistryPath,
+                    expected.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
+            if (current is null || current.EntryKind != expected.EntryKind
+                || !string.Equals(current.KeyName, expected.KeyName, StringComparison.Ordinal)
+                || !string.Equals(current.CommandText, expected.CommandText, StringComparison.Ordinal)
+                || !string.Equals(current.HandlerClsid, expected.HandlerClsid, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(ReadFileTypeBatchFingerprint(current.BackendRegistryPath),
+                    expected.FileTypeBatchFingerprint, StringComparison.Ordinal))
+                return CreateFailure("The selected registration changed after discovery; refresh before deleting.",
+                    expected, PipeErrorCodes.RegistryMutationVerificationFailed);
+            await _logger.LogAsync($"FileTypeBatchDeleteStarted: OperationId={operationId}, Sid={DiagnosticLogFormatter.FormatSid(userContext)}, PhysicalSource={current.BackendRegistryPath}, Match={expected.FileTypeBatchMatchKind}.", cancellationToken);
+            var result = await DeleteItemCoreAsync(expected.Id, cancellationToken, userContext, null,
+                current with { FileTypeBatchFingerprint = expected.FileTypeBatchFingerprint },
+                expected.FileTypeBatchFingerprint);
+            await _logger.LogAsync($"FileTypeBatchDeleteCompleted: OperationId={operationId}, Sid={DiagnosticLogFormatter.FormatSid(userContext)}, PhysicalSource={current.BackendRegistryPath}, Success={result.Success}, ErrorCode={result.ErrorCode ?? "<none>"}.", CancellationToken.None);
+            return result;
+        }, cancellationToken);
+
+    public async Task<PipeResponse> GetFileTypeBatchItemStateAsync(
+        ContextMenuEntry expected, CancellationToken cancellationToken, BackendUserContext? userContext)
+        => await RunPersistentStateOperationAsync(async () =>
+        {
+            if (userContext is null || string.IsNullOrWhiteSpace(expected.BackendRegistryPath)
+                || !IsAuthenticatedFileTypeBatchSource(expected.BackendRegistryPath, userContext))
+                return CreateFailure("The authenticated physical source is unavailable.", expected);
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            if (states.TryGetValue(expected.Id, out var state) && state.IsDeleted
+                && string.Equals(state.BackendRegistryPath, expected.BackendRegistryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                using var present = OpenRegistryKey(expected.BackendRegistryPath, writable: false);
+                if (present is not null)
+                    return CreateFailure("The deleted path was recreated while its recovery record remains.",
+                        state.ToDeletedEntry(), PipeErrorCodes.RegistryMutationRollbackConflict);
+                return new PipeResponse { Success = true, Item = state.ToDeletedEntry(), Message = "Recoverable deletion confirmed." };
+            }
+            var current = (await FindEntriesByIdAsync(expected.Id, cancellationToken, userContext))
+                .FirstOrDefault(candidate => string.Equals(candidate.BackendRegistryPath,
+                    expected.BackendRegistryPath, StringComparison.OrdinalIgnoreCase));
+            return new PipeResponse { Success = true, Item = current is null ? null : current with
+            {
+                FileTypeBatchFingerprint = ReadFileTypeBatchFingerprint(current.BackendRegistryPath)
+            }, Message = current is null ? "The physical source is missing without a recovery record." : "Physical source loaded." };
+        }, cancellationToken);
+
     private async Task<PipeResponse> DeleteItemCoreAsync(
         string itemId,
         CancellationToken cancellationToken,
         BackendUserContext? userContext,
         ContextMenuEntry? fallbackItem,
-        ContextMenuEntry? resolvedItem = null)
+        ContextMenuEntry? resolvedItem = null,
+        string? expectedFingerprint = null)
     {
         if (string.Equals(itemId, RecycleBinPinToStartMutation.Id, StringComparison.OrdinalIgnoreCase))
             return CreateFailure("The synthetic Pin to Start item only supports the enabled switch.");
@@ -2308,6 +2397,10 @@ public sealed class ContextMenuRegistryCatalog
             }
 
             deleteRegistryPath = backendRegistryPath;
+            if (expectedFingerprint is not null && !string.Equals(
+                    ReadFileTypeBatchFingerprint(backendRegistryPath), expectedFingerprint, StringComparison.Ordinal))
+                return CreateFailure("The selected registration changed after discovery; refresh before deleting.",
+                    item, PipeErrorCodes.RegistryMutationVerificationFailed);
             var preflight = await CreateRegistryWriteProtectionPreflightFailureAsync(
                 "DeleteItem", [backendRegistryPath], cancellationToken);
             if (preflight is not null)
@@ -2317,6 +2410,13 @@ public sealed class ContextMenuRegistryCatalog
 
             var backupFilePath = await _backupService.ExportKeyAsync(backendRegistryPath, cancellationToken);
             exportedBackupPath = backupFilePath;
+            if (expectedFingerprint is not null && !string.Equals(
+                    ReadFileTypeBatchFingerprint(backendRegistryPath), expectedFingerprint, StringComparison.Ordinal))
+            {
+                _backupService.DeleteBackupFile(backupFilePath);
+                return CreateFailure("The selected registration changed during backup; no deletion was attempted.",
+                    item, PipeErrorCodes.RegistryMutationVerificationFailed);
+            }
             _logger.LogFireAndForget($"ClassicDeleteStarted: ItemId={itemId}, BackendRegistryPath={backendRegistryPath}, BackupFilePath={backupFilePath}.");
             DeleteRegistryKeyTree(backendRegistryPath);
             using (var deletionVerification = OpenRegistryKey(backendRegistryPath, writable: false))
@@ -2403,14 +2503,16 @@ public sealed class ContextMenuRegistryCatalog
         CancellationToken cancellationToken,
         BackendUserContext? userContext = null)
     {
-        var separatorIndex = itemId.LastIndexOf('|');
+        var markerIndex = GetFileTypeBatchMarkerIndex(itemId);
+        var logicalId = markerIndex < 0 ? itemId : itemId[..markerIndex];
+        var separatorIndex = logicalId.LastIndexOf('|');
         if (separatorIndex < 0)
         {
             return [];
         }
 
-        var stableRelativePath = itemId[..separatorIndex];
-        var keyName = itemId[(separatorIndex + 1)..];
+        var stableRelativePath = logicalId[..separatorIndex];
+        var keyName = logicalId[(separatorIndex + 1)..];
         var candidates = new List<ContextMenuEntry>();
         var category = DetermineCategoryFromPath(stableRelativePath);
         var entryKind = stableRelativePath.Contains(@"\shellex\", StringComparison.OrdinalIgnoreCase)
@@ -2515,7 +2617,9 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         await Task.CompletedTask;
-        return candidates;
+        return markerIndex < 0 ? candidates : candidates
+            .Where(candidate => string.Equals(GetFileTypeBatchPhysicalId(logicalId, candidate.BackendRegistryPath),
+                itemId, StringComparison.OrdinalIgnoreCase)).ToArray();
     }
 
     private async Task<ContextMenuEntry?> TryFindEntryByIdAsync(
@@ -2801,6 +2905,10 @@ public sealed class ContextMenuRegistryCatalog
         {
             return CreateFailure($"No backup was found for '{itemId}'.");
         }
+
+        if (GetFileTypeBatchMarkerIndex(itemId) >= 0
+            && (userContext is null || !IsAuthenticatedFileTypeBatchSource(state.BackendRegistryPath, userContext)))
+            return CreateFailure("The batch recovery source does not belong to the authenticated user.");
 
         var restoredRegistry = false;
         string? restoredFingerprint = null;
@@ -5694,6 +5802,7 @@ public sealed class ContextMenuRegistryCatalog
         "TypeLib",
         "AppID",
         "Applications",
+        "SystemFileAssociations",
         "PackagedCom",
         "Protocols"
     };
@@ -5930,43 +6039,97 @@ public sealed class ContextMenuRegistryCatalog
         return extension;
     }
 
-    private static bool IsRelatedFileTypeEntry(FileTypeBatchQuery query, ContextMenuEntry entry)
+    private static FileTypeBatchMatchKind GetFileTypeBatchMatch(ContextMenuEntry source, ContextMenuEntry entry)
     {
-        if (entry.IsWindows11ContextMenu || entry.EntryKind != query.EntryKind)
+        if (entry.IsWindows11ContextMenu || entry.EntryKind != source.EntryKind)
         {
-            return false;
+            return FileTypeBatchMatchKind.None;
         }
 
-        return query.EntryKind switch
+        return source.EntryKind switch
         {
-            ContextMenuEntryKind.ShellVerb => IsRelatedShellVerb(query, entry),
-            ContextMenuEntryKind.ShellExtension => IsRelatedShellExtension(query, entry),
-            _ => false
+            ContextMenuEntryKind.ShellVerb => GetShellVerbBatchMatch(source, entry),
+            ContextMenuEntryKind.ShellExtension when !string.IsNullOrWhiteSpace(source.HandlerClsid)
+                && string.Equals(source.HandlerClsid, entry.HandlerClsid, StringComparison.OrdinalIgnoreCase)
+                => FileTypeBatchMatchKind.ExactAction,
+            _ => FileTypeBatchMatchKind.None
         };
     }
 
-    private static bool IsRelatedShellVerb(FileTypeBatchQuery query, ContextMenuEntry entry)
+    private static FileTypeBatchMatchKind GetShellVerbBatchMatch(ContextMenuEntry source, ContextMenuEntry entry)
     {
-        if (string.IsNullOrWhiteSpace(query.KeyName)
-            || string.IsNullOrWhiteSpace(entry.KeyName)
-            || !string.Equals(query.KeyName, entry.KeyName, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var queryExecutable = NormalizeExecutableIdentity(query.CommandExecutablePath);
-        var entryExecutable = NormalizeExecutableIdentity(entry.FilePath)
-                              ?? NormalizeExecutableIdentity(ExtractCommandExecutablePath(entry.CommandText));
-        return !string.IsNullOrWhiteSpace(queryExecutable)
-               && !string.IsNullOrWhiteSpace(entryExecutable)
-               && string.Equals(queryExecutable, entryExecutable, StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(source.BackendRegistryPath, entry.BackendRegistryPath, StringComparison.OrdinalIgnoreCase))
+            return FileTypeBatchMatchKind.ExactAction;
+        var sameKey = string.Equals(source.KeyName, entry.KeyName, StringComparison.OrdinalIgnoreCase);
+        // FilePath may have been inferred from an icon, resource or service-side
+        // environment. Only the command target is evidence for a verb match.
+        var sourceTarget = NormalizeExecutableIdentity(ExtractCommandExecutablePath(source.CommandText));
+        var target = NormalizeExecutableIdentity(ExtractCommandExecutablePath(entry.CommandText));
+        var sameTarget = sourceTarget is not null && string.Equals(sourceTarget, target, StringComparison.OrdinalIgnoreCase);
+        if (sameTarget && sourceTarget is not null && !IsGenericCommandLauncher(sourceTarget))
+            return sameKey ? FileTypeBatchMatchKind.ExactAction : FileTypeBatchMatchKind.SameModule;
+        if (sameKey && string.Equals(source.CommandText, entry.CommandText, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(source.CommandText))
+            return FileTypeBatchMatchKind.ExactAction;
+        var sourceFamily = GetRegistrationFamily(source.KeyName);
+        return sourceFamily is not null && string.Equals(sourceFamily, GetRegistrationFamily(entry.KeyName), StringComparison.OrdinalIgnoreCase)
+            ? FileTypeBatchMatchKind.RegistrationFamilyCandidate
+            : FileTypeBatchMatchKind.None;
     }
 
-    private static bool IsRelatedShellExtension(FileTypeBatchQuery query, ContextMenuEntry entry)
+    private static string? GetRegistrationFamily(string keyName)
     {
-        return !string.IsNullOrWhiteSpace(query.HandlerClsid)
-               && !string.IsNullOrWhiteSpace(entry.HandlerClsid)
-               && string.Equals(query.HandlerClsid, entry.HandlerClsid, StringComparison.OrdinalIgnoreCase);
+        var match = System.Text.RegularExpressions.Regex.Match(keyName,
+            @"^(?<family>.+?)\d+_[^_]+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return match.Success && match.Groups["family"].Length >= 4 ? match.Groups["family"].Value : null;
+    }
+
+    private static bool IsGenericCommandLauncher(string path)
+    {
+        var file = Path.GetFileName(path);
+        return file.Equals("rundll32.exe", StringComparison.OrdinalIgnoreCase)
+            || file.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase)
+            || file.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase)
+            || file.Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase)
+            || file.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ReadFileTypeBatchFingerprint(string path)
+    {
+        using var key = OpenRegistryKey(path, writable: false);
+        return key is null ? null : ComputeRegistryKeyTreeFingerprint(key);
+    }
+
+    private static bool IsAuthenticatedFileTypeBatchSource(string? path, BackendUserContext userContext)
+        => !string.IsNullOrWhiteSpace(path)
+           && (path.StartsWith(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\", StringComparison.OrdinalIgnoreCase)
+           || path.StartsWith($@"HKEY_USERS\{userContext.Sid}\Software\Classes\", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSupportedFileTypeBatchRoot(string stablePath)
+    {
+        var suffix = ContextMenuSubRootRelativePaths.FirstOrDefault(relative =>
+            stablePath.EndsWith("\\" + relative, StringComparison.OrdinalIgnoreCase));
+        if (suffix is null) return false;
+        var classRoot = stablePath[..^(suffix.Length + 1)];
+        if (classRoot.StartsWith(@"SystemFileAssociations\", StringComparison.OrdinalIgnoreCase))
+            return classRoot.Length > @"SystemFileAssociations\".Length
+                && !classRoot[@"SystemFileAssociations\".Length..].Contains('\\');
+        return IsRelatedFileTypeClassRootName(classRoot);
+    }
+
+    private static string GetFileTypeBatchPhysicalId(string logicalId, string path)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(path.ToUpperInvariant()));
+        return $"{logicalId}|@{Convert.ToHexString(bytes)}";
+    }
+
+    private static int GetFileTypeBatchMarkerIndex(string id)
+    {
+        var marker = id.LastIndexOf("|@", StringComparison.Ordinal);
+        return marker >= 0 && id.Length - marker - 2 == 64
+            && id[(marker + 2)..].All(static character => char.IsAsciiHexDigit(character))
+            ? marker : -1;
     }
 
     private static bool IsProtectedFileTypeDeleteItem(ContextMenuEntry entry)
@@ -5984,23 +6147,29 @@ public sealed class ContextMenuRegistryCatalog
             return null;
         }
 
-        var expanded = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
-        if (string.IsNullOrWhiteSpace(expanded))
+        var expanded = path.Trim().Trim('"');
+        // LocalSystem must not expand a frontend user's variables. Unresolved
+        // variables are insufficient for automatic module identity.
+        if (string.IsNullOrWhiteSpace(expanded) || expanded.Contains('%'))
         {
             return null;
         }
 
         try
         {
-            return Path.IsPathRooted(expanded)
+            return Path.IsPathFullyQualified(expanded)
                 ? Path.GetFullPath(expanded).TrimEnd('\\')
-                : expanded;
+                : null;
         }
         catch
         {
-            return expanded;
+            return null;
         }
     }
+
+    private static readonly Regex FileTypeBatchCommandTargetRegex = new(
+        "^(?:\\\"(?<path>[^\\\"]+\\.(?:exe|dll))\\\"|(?<path>.+?\\.(?:exe|dll)))(?=\\s|$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static string? ExtractCommandExecutablePath(string? commandText)
     {
@@ -6009,26 +6178,8 @@ public sealed class ContextMenuRegistryCatalog
             return null;
         }
 
-        var expanded = Environment.ExpandEnvironmentVariables(commandText.Trim());
-        if (expanded.StartsWith('"'))
-        {
-            var closingQuoteIndex = expanded.IndexOf('"', 1);
-            if (closingQuoteIndex > 1)
-            {
-                return expanded[1..closingQuoteIndex];
-            }
-        }
-
-        foreach (var extension in new[] { ".exe", ".dll" })
-        {
-            var extensionIndex = expanded.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
-            if (extensionIndex > 0)
-            {
-                return expanded[..(extensionIndex + extension.Length)].Trim().Trim('"');
-            }
-        }
-
-        return null;
+        var match = FileTypeBatchCommandTargetRegex.Match(commandText.Trim());
+        return match.Success ? match.Groups["path"].Value : null;
     }
 
     private const string UserClassesPath = @"Software\Classes";

@@ -219,7 +219,6 @@ public partial class FileTypesPageViewModel : ObservableObject, IDisposable
             _localization,
             _iconPreviewService,
             _actionsService,
-            _settingsService,
             BackFromBatchManagementAsync);
         IsBatchManagementActive = true;
         await BatchManagement.RefreshAsync();

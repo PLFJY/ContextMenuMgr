@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Contracts;
@@ -15,10 +14,11 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
     private readonly LocalizationService _localization;
     private readonly IconPreviewService _iconPreviewService;
     private readonly ContextMenuItemActionsService _actionsService;
-    private readonly FrontendSettingsService _settingsService;
     private readonly Func<Task> _backAsync;
     private bool _disposed;
     private bool _deferRefresh;
+    private bool _hasInitializedSelection;
+    private CancellationTokenSource? _batchCancellation;
 
     public FileTypeBatchManagementViewModel(
         ContextMenuItemViewModel sourceItem,
@@ -28,7 +28,6 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         LocalizationService localization,
         IconPreviewService iconPreviewService,
         ContextMenuItemActionsService actionsService,
-        FrontendSettingsService settingsService,
         Func<Task> backAsync)
     {
         SourceItem = sourceItem;
@@ -40,12 +39,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         _localization = localization;
         _iconPreviewService = iconPreviewService;
         _actionsService = actionsService;
-        _settingsService = settingsService;
         _backAsync = backAsync;
-
-        ItemsView = new ListCollectionView(Items) { IsLiveSorting = true };
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.RegistryPath), ListSortDirection.Ascending));
-        ItemsView.SortDescriptions.Add(new SortDescription(nameof(ContextMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
 
         _localization.LanguageChanged += OnLanguageChanged;
     }
@@ -56,15 +50,24 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
 
     public ObservableCollection<ContextMenuItemViewModel> Items { get; } = [];
 
-    public ICollectionView ItemsView { get; }
+    public ObservableCollection<FileTypeBatchActionGroup> ActionGroups { get; } = [];
 
     public string Title => _localization.Format("FileTypeBatchTitle", SourceItem.DisplayName);
 
-    public string IdentityText => !string.IsNullOrWhiteSpace(Query.CommandExecutablePath)
-        ? _localization.Format("FileTypeBatchCommandIdentity", Query.CommandExecutablePath)
-        : _localization.Format("FileTypeBatchClsidIdentity", Query.HandlerClsid ?? string.Empty);
+    public string IdentityText => Query.EntryKind == ContextMenuEntryKind.ShellExtension
+        && !string.IsNullOrWhiteSpace(Query.HandlerClsid)
+            ? _localization.Format("FileTypeBatchClsidIdentity", Query.HandlerClsid)
+            : !string.IsNullOrWhiteSpace(Query.CommandExecutablePath)
+                ? _localization.Format("FileTypeBatchCommandIdentity", Query.CommandExecutablePath)
+                : _localization.Translate("FileTypeBatchIdentityUnknown");
 
-    public string CountText => _localization.Format("FileTypeBatchCountFormat", Items.Count);
+    public string CountText => _localization.Format("FileTypeBatchGroupedCountFormat", ActionGroups.Count, Items.Count);
+
+    public string? ProgressText { get; private set; }
+
+    public string? ResultText { get; private set; }
+
+    public string CancelText => _localization.Translate("DialogCancel");
 
     public string SourceRegistryPathLabel => _localization.Translate("FileTypeBatchSourceRegistryPath");
 
@@ -82,8 +85,6 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
 
     public string UndoAllText => _localization.Translate("FileTypeBatchUndoAll");
 
-    public string DeleteText => _localization.Translate("Delete");
-
     public string ProtectedDeleteText => _localization.Translate("FileTypeBatchProtectedDelete");
 
     public string EmptyText => IsBusy
@@ -92,13 +93,15 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
 
     public bool ShowPlaceholder => Items.Count == 0;
 
-    public bool CanDisableAll => !IsBusy && Items.Any(static item => item.IsEnabled && item.CanToggle);
+    public bool CanEditBatchRows => !IsBusy;
 
-    public bool CanEnableAll => !IsBusy && Items.Any(static item => !item.IsEnabled && item.CanToggle);
+    public bool CanDisableAll => !IsBusy && SelectedItems().Any(static item => item.IsEnabled && item.CanToggle);
 
-    public bool CanDeleteAll => !IsBusy && Items.Any(static item => CanDeleteBatchItem(item));
+    public bool CanEnableAll => !IsBusy && SelectedItems().Any(static item => !item.IsEnabled && item.CanToggle);
 
-    public bool CanUndoAll => !IsBusy && Items.Any(static item => item.IsDeleted && item.HasBackup);
+    public bool CanDeleteAll => !IsBusy && SelectedItems().Any(CanDeleteBatchItem);
+
+    public bool CanUndoAll => !IsBusy && SelectedItems().Any(static item => item.IsDeleted && item.HasBackup);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(EmptyText))]
@@ -107,6 +110,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
     [NotifyPropertyChangedFor(nameof(CanEnableAll))]
     [NotifyPropertyChangedFor(nameof(CanDeleteAll))]
     [NotifyPropertyChangedFor(nameof(CanUndoAll))]
+    [NotifyPropertyChangedFor(nameof(CanEditBatchRows))]
     public partial bool IsBusy { get; private set; }
 
     [RelayCommand]
@@ -117,17 +121,12 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
             return;
         }
 
+        var preserveBusy = _batchCancellation is not null;
         IsBusy = true;
         NotifyBulkCommands();
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            if (Items.Count == 0)
-            {
-                var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
-                    Command = PipeCommand.FindRelatedFileTypeMenuItems, FileTypeBatchQuery = Query }, cts.Token);
-                if (cached is not null && !_disposed) ApplySnapshot(cached);
-            }
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             var entries = await _backendClient.FindRelatedFileTypeMenuItemsAsync(Query, cts.Token);
             if (!_disposed) ApplySnapshot(entries);
         }
@@ -140,7 +139,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         }
         finally
         {
-            IsBusy = false;
+            if (!preserveBusy) IsBusy = false;
             NotifyBulkCommands();
         }
     }
@@ -157,17 +156,27 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
     [RelayCommand(CanExecute = nameof(CanDeleteAll))]
     private async Task DeleteAllAsync()
     {
-        var deleteCandidates = Items.Where(static item => CanDeleteBatchItem(item)).ToArray();
+        var deleteCandidates = SelectedItems().Where(CanDeleteBatchItem).ToArray();
         if (deleteCandidates.Length == 0)
         {
             return;
         }
 
+        var userCount = deleteCandidates.Count(item => item.Entry.BackendRegistryPath.StartsWith(
+            "HKEY_USERS\\", StringComparison.OrdinalIgnoreCase));
+        var actionScope = string.Join("; ", ActionGroups.Where(group => group.IsSelected)
+            .Select(group => $"{group.Name} ({group.Registrations.Count(registration =>
+                registration.IsIncluded && CanDeleteBatchItem(registration.Item))})")
+            .Take(12));
+
         var shouldDelete = await FrontendMessageBox.ShowConfirmAsync(
             _localization.Format(
-                "FileTypeBatchDeleteAllConfirmation",
+                "FileTypeBatchDeleteSelectedConfirmation",
                 deleteCandidates.Length,
-                Items.Count(static item => IsProtectedBatchDeleteItem(item))),
+                ActionGroups.Count(group => group.IsSelected),
+                userCount,
+                deleteCandidates.Length - userCount,
+                actionScope),
             _localization.Translate("FileTypeBatchDeleteAll"),
             _localization.Translate("FileTypeBatchDeleteAll"),
             _localization.Translate("DialogCancel"));
@@ -178,48 +187,68 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
 
         IsBusy = true;
         NotifyBulkCommands();
+        using var batchCancellation = new CancellationTokenSource();
+        _batchCancellation = batchCancellation;
+        var operationId = Guid.NewGuid();
+        var successes = 0;
+        var failures = 0;
+        var skipped = Items.Count - deleteCandidates.Length;
+        var uncertain = 0;
+        var completed = 0;
         try
         {
             _deferRefresh = true;
             foreach (var item in deleteCandidates)
             {
-                await _workspace.DeleteOrUndoAsync(item);
+                if (batchCancellation.IsCancellationRequested) break;
+                ProgressText = _localization.Format("FileTypeBatchProgress", completed, deleteCandidates.Length, item.KeyName);
+                OnPropertyChanged(nameof(ProgressText));
+                var outcome = await _workspace.DeleteOrUndoFileTypeBatchItemAsync(item, batchCancellation.Token, operationId);
+                switch (outcome.Status)
+                {
+                    case FileTypeBatchOperationStatus.ConfirmedSuccess: successes++; break;
+                    case FileTypeBatchOperationStatus.ConfirmedFailure: failures++; break;
+                    case FileTypeBatchOperationStatus.Skipped: skipped++; break;
+                    case FileTypeBatchOperationStatus.Uncertain: uncertain++; break;
+                    case FileTypeBatchOperationStatus.Cancelled: break;
+                }
+                if (outcome.Status is FileTypeBatchOperationStatus.ConfirmedFailure or FileTypeBatchOperationStatus.Uncertain)
+                    FrontendDebugLog.Warning(nameof(FileTypeBatchManagementViewModel),
+                        $"BatchItemResult: OperationId={operationId}, Source={item.Entry.BackendRegistryPath}, Status={outcome.Status}, ErrorCode={outcome.ErrorCode}.");
+                completed++;
             }
-
+            var cancelled = deleteCandidates.Length - completed;
+            ResultText = _localization.Format("FileTypeBatchResult", successes, failures, skipped, cancelled, uncertain);
+            OnPropertyChanged(nameof(ResultText));
+            FrontendDebugLog.Info(nameof(FileTypeBatchManagementViewModel),
+                $"BatchCompleted: OperationId={operationId}, Requested={Items.Count}, Selected={deleteCandidates.Length}, Criteria=SelectedActionAndPhysicalPath, Success={successes}, Failed={failures}, Skipped={skipped}, Cancelled={cancelled}, Uncertain={uncertain}.");
             _deferRefresh = false;
             await RefreshAsync();
         }
         finally
         {
             _deferRefresh = false;
+            _batchCancellation = null;
+            ProgressText = null;
+            OnPropertyChanged(nameof(ProgressText));
             IsBusy = false;
             NotifyBulkCommands();
         }
     }
+
+    [RelayCommand]
+    private void CancelBatch() => _batchCancellation?.Cancel();
+
+    private IEnumerable<ContextMenuItemViewModel> SelectedItems()
+        => ActionGroups.Where(static group => group.IsSelected)
+            .SelectMany(static group => group.Registrations)
+            .Where(static registration => registration.IsIncluded)
+            .Select(static registration => registration.Item);
 
     [RelayCommand(CanExecute = nameof(CanUndoAll))]
-    private async Task UndoAllAsync()
-    {
-        IsBusy = true;
-        NotifyBulkCommands();
-        try
-        {
-            _deferRefresh = true;
-            foreach (var item in Items.Where(static item => item.IsDeleted && item.HasBackup).ToArray())
-            {
-                await _workspace.DeleteOrUndoAsync(item);
-            }
-
-            _deferRefresh = false;
-            await RefreshAsync();
-        }
-        finally
-        {
-            _deferRefresh = false;
-            IsBusy = false;
-            NotifyBulkCommands();
-        }
-    }
+    private Task UndoAllAsync() => RunSelectedBatchAsync(
+        SelectedItems().Where(static item => item.IsDeleted && item.HasBackup).ToArray(),
+        (item, token) => _workspace.DeleteOrUndoFileTypeBatchItemAsync(item, token), "Undo");
 
     [RelayCommand]
     private async Task DeleteItemAsync(ContextMenuItemViewModel? item)
@@ -235,28 +264,79 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
             return;
         }
 
-        await _workspace.DeleteOrUndoAsync(item);
+        var outcome = await _workspace.DeleteOrUndoFileTypeBatchItemAsync(item, CancellationToken.None);
+        ResultText = _localization.Format("FileTypeBatchResult",
+            outcome.Status == FileTypeBatchOperationStatus.ConfirmedSuccess ? 1 : 0,
+            outcome.Status == FileTypeBatchOperationStatus.ConfirmedFailure ? 1 : 0,
+            outcome.Status == FileTypeBatchOperationStatus.Skipped ? 1 : 0,
+            outcome.Status == FileTypeBatchOperationStatus.Cancelled ? 1 : 0,
+            outcome.Status == FileTypeBatchOperationStatus.Uncertain ? 1 : 0);
+        OnPropertyChanged(nameof(ResultText));
         await RefreshAsync();
     }
 
-    private async Task SetAllEnabledAsync(bool enable)
+    private Task SetAllEnabledAsync(bool enable) => RunSelectedBatchAsync(
+        SelectedItems().Where(item => item.CanToggle && !item.IsToggleOutcomeUncertain
+            && item.IsEnabled != enable).ToArray(),
+        async (item, _) =>
+        {
+            var applied = await _workspace.SetEnabledAsync(item, enable);
+            return new(item.IsToggleOutcomeUncertain ? FileTypeBatchOperationStatus.Uncertain
+                : applied ? FileTypeBatchOperationStatus.ConfirmedSuccess
+                : FileTypeBatchOperationStatus.ConfirmedFailure);
+        },
+        enable ? "Enable" : "Disable");
+
+    private async Task RunSelectedBatchAsync(IReadOnlyList<ContextMenuItemViewModel> targets,
+        Func<ContextMenuItemViewModel, CancellationToken, Task<FileTypeBatchOperationOutcome>> operation,
+        string operationName)
     {
+        if (targets.Count == 0) return;
         IsBusy = true;
         NotifyBulkCommands();
+        using var cancellation = new CancellationTokenSource();
+        _batchCancellation = cancellation;
+        var operationId = Guid.NewGuid();
+        var success = 0;
+        var failed = 0;
+        var uncertain = 0;
+        var skipped = Items.Count - targets.Count;
+        var completed = 0;
         try
         {
             _deferRefresh = true;
-            foreach (var item in Items.Where(item => item.CanToggle && item.IsEnabled != enable).ToArray())
+            foreach (var item in targets)
             {
-                await _workspace.SetEnabledAsync(item, enable);
+                if (cancellation.IsCancellationRequested) break;
+                ProgressText = _localization.Format("FileTypeBatchProgress", completed, targets.Count, item.KeyName);
+                OnPropertyChanged(nameof(ProgressText));
+                var outcome = await operation(item, cancellation.Token);
+                switch (outcome.Status)
+                {
+                    case FileTypeBatchOperationStatus.ConfirmedSuccess: success++; break;
+                    case FileTypeBatchOperationStatus.ConfirmedFailure: failed++; break;
+                    case FileTypeBatchOperationStatus.Uncertain: uncertain++; break;
+                    case FileTypeBatchOperationStatus.Skipped: skipped++; break;
+                }
+                completed++;
+                if (outcome.Status is FileTypeBatchOperationStatus.ConfirmedFailure or FileTypeBatchOperationStatus.Uncertain)
+                    FrontendDebugLog.Warning(nameof(FileTypeBatchManagementViewModel),
+                        $"BatchItemResult: OperationId={operationId}, Operation={operationName}, Source={item.Entry.BackendRegistryPath}, Status={outcome.Status}, ErrorCode={outcome.ErrorCode}.");
             }
-
+            ResultText = _localization.Format("FileTypeBatchResult", success, failed, skipped,
+                targets.Count - completed, uncertain);
+            OnPropertyChanged(nameof(ResultText));
+            FrontendDebugLog.Info(nameof(FileTypeBatchManagementViewModel),
+                $"BatchCompleted: OperationId={operationId}, Operation={operationName}, Requested={Items.Count}, Selected={targets.Count}, Success={success}, Failed={failed}, Skipped={skipped}, Cancelled={targets.Count - completed}, Uncertain={uncertain}.");
             _deferRefresh = false;
             await RefreshAsync();
         }
         finally
         {
             _deferRefresh = false;
+            _batchCancellation = null;
+            ProgressText = null;
+            OnPropertyChanged(nameof(ProgressText));
             IsBusy = false;
             NotifyBulkCommands();
         }
@@ -287,6 +367,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
             if (_disposed || e.Request.SpecialItem is not null) return;
             foreach (var item in Items.Where(item => e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray())
             { item.PropertyChanged -= OnItemPropertyChanged; Items.Remove(item); item.Dispose(); }
+            RebuildGroups();
             NotifyBulkCommands();
         }
         if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply); else Apply();
@@ -321,10 +402,83 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
             Items.Remove(stale);
         }
 
+        RebuildGroups();
+
         OnPropertyChanged(nameof(CountText));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(ShowPlaceholder));
         NotifyBulkCommands();
+    }
+
+    private void RebuildGroups()
+    {
+        var selectedGroups = ActionGroups.Where(static group => group.IsSelected)
+            .Select(static group => group.Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var excludedPaths = ActionGroups.SelectMany(static group => group.Registrations)
+            .Where(static item => !item.IsIncluded)
+            .Select(static item => item.Item.Entry.BackendRegistryPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in ActionGroups)
+        {
+            group.PropertyChanged -= OnGroupPropertyChanged;
+            foreach (var registration in group.Registrations)
+                registration.PropertyChanged -= OnRegistrationPropertyChanged;
+        }
+        ActionGroups.Clear();
+        foreach (var items in Items.GroupBy(item => item.Entry.EntryKind == ContextMenuEntryKind.ShellExtension
+                     ? item.Entry.HandlerClsid ?? item.KeyName : item.KeyName, StringComparer.OrdinalIgnoreCase))
+        {
+            var first = items.First();
+            var match = items.Min(static item => item.Entry.FileTypeBatchMatchKind);
+            var evidence = match switch
+            {
+                FileTypeBatchMatchKind.ExactAction => _localization.Translate("FileTypeBatchExactEvidence"),
+                FileTypeBatchMatchKind.SameModule => _localization.Translate("FileTypeBatchModuleEvidence"),
+                _ => _localization.Translate("FileTypeBatchCandidateEvidence")
+            };
+            var registrations = items.Select(item => new FileTypeBatchRegistration(item,
+                (item.Entry.FileTypeBatchMatchKind != FileTypeBatchMatchKind.RegistrationFamilyCandidate
+                 || selectedGroups.Contains(items.Key))
+                && !excludedPaths.Contains(item.Entry.BackendRegistryPath),
+                item.Entry.FileTypeBatchMatchKind switch
+                {
+                    FileTypeBatchMatchKind.ExactAction => _localization.Translate("FileTypeBatchExactEvidence"),
+                    FileTypeBatchMatchKind.SameModule => _localization.Translate("FileTypeBatchModuleEvidence"),
+                    _ => _localization.Translate("FileTypeBatchCandidateEvidence")
+                })).ToArray();
+            foreach (var registration in registrations)
+                registration.PropertyChanged += OnRegistrationPropertyChanged;
+            var label = string.Equals(first.DisplayName, first.KeyName, StringComparison.Ordinal)
+                ? first.KeyName : $"{first.DisplayName} ({first.KeyName})";
+            var group = new FileTypeBatchActionGroup(items.Key, label, match, registrations, evidence)
+            {
+                IsSelected = selectedGroups.Contains(items.Key)
+                    || !_hasInitializedSelection
+                       && string.Equals(items.Key, Query.EntryKind == ContextMenuEntryKind.ShellExtension
+                           ? Query.HandlerClsid : Query.KeyName, StringComparison.OrdinalIgnoreCase)
+                       && match == FileTypeBatchMatchKind.ExactAction
+            };
+            group.PropertyChanged += OnGroupPropertyChanged;
+            ActionGroups.Add(group);
+        }
+        _hasInitializedSelection = true;
+        OnPropertyChanged(nameof(CountText));
+        NotifyBulkCommands();
+    }
+
+    private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(FileTypeBatchActionGroup.IsSelected)) return;
+        if (sender is FileTypeBatchActionGroup
+            { IsSelected: true, MatchKind: FileTypeBatchMatchKind.RegistrationFamilyCandidate } candidate)
+            foreach (var registration in candidate.Registrations)
+                registration.IsIncluded = true;
+        NotifyBulkCommands();
+    }
+
+    private void OnRegistrationPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(FileTypeBatchRegistration.IsIncluded)) NotifyBulkCommands();
     }
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -354,6 +508,7 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(IdentityText));
         OnPropertyChanged(nameof(CountText));
+        OnPropertyChanged(nameof(CancelText));
         OnPropertyChanged(nameof(SourceRegistryPathLabel));
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(BackText));
@@ -361,7 +516,6 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         OnPropertyChanged(nameof(EnableAllText));
         OnPropertyChanged(nameof(DeleteAllText));
         OnPropertyChanged(nameof(UndoAllText));
-        OnPropertyChanged(nameof(DeleteText));
         OnPropertyChanged(nameof(ProtectedDeleteText));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(ShowPlaceholder));
@@ -370,7 +524,8 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
     public static bool CanDeleteBatchItem(ContextMenuItemViewModel item)
         => !item.IsDeleted
            && item.IsPresentInRegistry
-           && !IsProtectedBatchDeleteItem(item);
+           && !IsProtectedBatchDeleteItem(item)
+           && !string.IsNullOrWhiteSpace(item.Entry.FileTypeBatchFingerprint);
 
     public static bool IsProtectedBatchDeleteItem(ContextMenuItemViewModel item)
         => ProtectedMenuItemGuard.IsProtectedFileTypeBatchDeleteItem(item);
@@ -386,6 +541,13 @@ public partial class FileTypeBatchManagementViewModel : ObservableObject, IDispo
         _backendClient.ItemsRemoved -= OnItemsRemoved;
         _workspace.PropertyChanged -= OnBackendAvailabilityChanged;
         _localization.LanguageChanged -= OnLanguageChanged;
+        _batchCancellation?.Cancel();
+        foreach (var group in ActionGroups)
+        {
+            group.PropertyChanged -= OnGroupPropertyChanged;
+            foreach (var registration in group.Registrations)
+                registration.PropertyChanged -= OnRegistrationPropertyChanged;
+        }
         foreach (var item in Items)
         {
             item.PropertyChanged -= OnItemPropertyChanged;

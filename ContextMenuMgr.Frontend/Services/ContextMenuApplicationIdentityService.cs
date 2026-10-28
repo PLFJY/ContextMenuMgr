@@ -8,7 +8,7 @@ namespace ContextMenuMgr.Frontend.Services;
 public sealed class ContextMenuApplicationIdentityService
 {
     private static readonly Regex CommandPathRegex = new(
-        "^(?:\\\"(?<path>[^\\\"]+\\.(?:exe|dll))\\\"|(?<path>[^\\s]+\\.(?:exe|dll)))",
+        "^(?:\\\"(?<path>[^\\\"]+\\.(?:exe|dll))\\\"|(?<path>.+?\\.(?:exe|dll)))(?=\\s|$)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public ContextMenuApplicationIdentity GetIdentity(ContextMenuItemViewModel item)
@@ -61,8 +61,7 @@ public sealed class ContextMenuApplicationIdentityService
         var identity = GetIdentity(item);
         return item.Entry.EntryKind switch
         {
-            ContextMenuEntryKind.ShellVerb => !string.IsNullOrWhiteSpace(identity.CommandExecutablePath)
-                                              && !string.IsNullOrWhiteSpace(identity.KeyName),
+            ContextMenuEntryKind.ShellVerb => !string.IsNullOrWhiteSpace(identity.KeyName),
             ContextMenuEntryKind.ShellExtension => !string.IsNullOrWhiteSpace(identity.HandlerClsid),
             _ => false
         };
@@ -87,13 +86,15 @@ public sealed class ContextMenuApplicationIdentityService
 
     private static string? ResolveCommandExecutablePath(ContextMenuEntry entry)
     {
-        if (!string.IsNullOrWhiteSpace(entry.FilePath))
-        {
+        if (entry.EntryKind == ContextMenuEntryKind.ShellExtension
+            && !string.IsNullOrWhiteSpace(entry.FilePath))
             return entry.FilePath.Trim();
-        }
-
         var commandMatch = CommandPathRegex.Match(entry.CommandText?.Trim() ?? string.Empty);
-        return commandMatch.Success ? commandMatch.Groups["path"].Value.Trim() : null;
+        if (!commandMatch.Success) return null;
+        var path = Environment.ExpandEnvironmentVariables(commandMatch.Groups["path"].Value.Trim());
+        if (path.Contains('%')) return null;
+        try { return Path.IsPathFullyQualified(path) ? Path.GetFullPath(path) : null; }
+        catch (ArgumentException) { return null; }
     }
 
 }

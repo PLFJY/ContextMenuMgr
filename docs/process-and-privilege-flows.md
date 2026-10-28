@@ -71,6 +71,8 @@ catalog `_persistentStateGate` 串行状态敏感工作，前端多连接不意�
 
 `PipeErrorCodes.MenuItemRemoved` (`MENU_ITEM_REMOVED`) 搭配明确的 `RemovedItemIds`，用于经认证原来源已经确认不存在、且不是可恢复软删除记录的请求。客户端 `BackendRequestException` 保留这些字段，不解析英文消息。普通 mutation 遇到该结果走非阻塞 InfoBar 和关联列表移除，不重试写入。只读通知核对不弹操作提示。
 
+File Types 的 `FindRelatedFileTypeMenuItems` 只用请求中的 Id/物理路径定位认证来源，相关身份由服务端当前注册表计算。`DeleteFileTypeBatchItem` 每次只提交一个批量物理 Id、完整路径和扫描时的指纹；每项保留独立 `ClientOperationId` 供迟到通知去重，同一批另用 `FileTypeBatchOperationId` 关联日志。服务端按 Pipe 认证 SID 限定 HKU 来源，并在持久状态门内核实后复用经典删除事务。`GetFileTypeBatchItemState` 只读核对同一物理来源及其恢复记录，供响应超时、丢失或失败后的结果分类；“物理键缺失但无恢复记录”是不确定，不等于成功。客户端先核对再决定是否可重试，批量取消不把已发出的请求视为未执行。
+
 `GetSpecialMenuItemState` 追加在 PipeCommand 末尾，使用现有 `SpecialItem` 输入返回当前 SpecialItem 或结构化缺失；保留各 kind 身份策略。SendTo/WinX 先验证用户范围和可访问根，再用 GetAttributes 区分缺失与访问失败；其它来源复用该职责的发现和完整性核查。普通 classic `GetContextMenuItemState` 保留原 HKLM/认证 HKU 与 handler 身份，原来源缺失不换另一 hive。已有缓存不能授权新建替代键。访问拒绝、profile/hive 缺失、发现不完整和代际冲突均不能转换成已移除。 发现结果缺少 Id 后还须核实该 kind 的允许物理根；注册结构改变但原 key 仍存在时保持失败/刷新处理。未能映射为认证物理来源的历史 HKCU 别名不作为缺失证明。只读单项核对不广播 ItemStateChanged，避免多客户端核对通知循环。
 
 ## 验证与维护

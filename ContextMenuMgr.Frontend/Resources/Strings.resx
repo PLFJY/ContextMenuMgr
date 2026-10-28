@@ -1522,17 +1522,23 @@ Continue anyway? (Not recommended)</value>
   <data name="LoadingStatus" xml:space="preserve"><value>Loading…</value></data>
   <data name="ManageSubMenuItems" xml:space="preserve"><value>Manage submenu items</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>Batch manage</value></data>
+  <data name="FileTypeBatchGroupedCountFormat" xml:space="preserve"><value>{0} actions · {1} physical registrations</value></data>
+  <data name="FileTypeBatchExactEvidence" xml:space="preserve"><value>Exact action: key and command target or handler CLSID</value></data>
+  <data name="FileTypeBatchIdentityUnknown" xml:space="preserve"><value>Command identity unavailable; only directly evidenced relationships are shown.</value></data>
+  <data name="FileTypeBatchModuleEvidence" xml:space="preserve"><value>Same command module; separate action</value></data>
+  <data name="FileTypeBatchCandidateEvidence" xml:space="preserve"><value>Possible registration family; select this group to opt in, then exclude unwanted paths</value></data>
+  <data name="FileTypeBatchDeleteSelectedConfirmation" xml:space="preserve"><value>Delete {0} selected physical registrations in {1} action groups? User hive: {2}; machine hive: {3}. Actions: {4}. Each deletion keeps a recoverable backup. Review the expanded source paths before continuing.</value></data>
+  <data name="FileTypeBatchProgress" xml:space="preserve"><value>{0}/{1} completed · current action: {2}</value></data>
+  <data name="FileTypeBatchResult" xml:space="preserve"><value>Confirmed: {0}; failed: {1}; skipped: {2}; cancelled: {3}; uncertain: {4}. Refresh and inspect recovery before retrying uncertain items.</value></data>
   <data name="FileTypeBatchTitle" xml:space="preserve"><value>Related items for {0}</value></data>
   <data name="FileTypeBatchCommandIdentity" xml:space="preserve"><value>Command executable: {0}</value></data>
   <data name="FileTypeBatchClsidIdentity" xml:space="preserve"><value>Handler CLSID: {0}</value></data>
-  <data name="FileTypeBatchCountFormat" xml:space="preserve"><value>{0} related entries</value></data>
   <data name="FileTypeBatchSourceRegistryPath" xml:space="preserve"><value>Source registry path</value></data>
   <data name="FileTypeBatchEnableAll" xml:space="preserve"><value>Enable all</value></data>
   <data name="FileTypeBatchDeleteAll" xml:space="preserve"><value>Delete all</value></data>
   <data name="FileTypeBatchUndoAll" xml:space="preserve"><value>Undo all</value></data>
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>Protected file-type open/edit items cannot be deleted here. Disable them instead.</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>No related file-type entries were found.</value></data>
-  <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>Delete {0} related entries? Registry backups will be created before deleting. {1} protected open/edit entries will be skipped.</value></data>
   <data name="CompactView" xml:space="preserve"><value>Compact</value></data>
   <data name="DisplayMode" xml:space="preserve"><value>Display mode</value></data>
   <data name="DetailedView" xml:space="preserve"><value>Detailed</value></data>

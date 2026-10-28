@@ -84,6 +84,10 @@ public interface IBackendClient : IAsyncDisposable
 
     Task<ContextMenuEntry?> DeleteItemAsync(string itemId, CancellationToken cancellationToken, ContextMenuEntry? item = null);
 
+    Task<ContextMenuEntry?> DeleteFileTypeBatchItemAsync(ContextMenuEntry item, Guid operationId, CancellationToken cancellationToken);
+
+    Task<ContextMenuEntry?> GetFileTypeBatchItemStateAsync(ContextMenuEntry item, CancellationToken cancellationToken);
+
     Task<ContextMenuEntry?> UndoDeleteAsync(string itemId, CancellationToken cancellationToken);
 
     Task PurgeDeletedItemAsync(string itemId, CancellationToken cancellationToken);

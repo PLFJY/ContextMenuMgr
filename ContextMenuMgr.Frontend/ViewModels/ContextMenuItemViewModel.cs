@@ -221,16 +221,15 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         && !string.IsNullOrWhiteSpace(Entry.BackendRegistryPath)
         && Entry.EntryKind switch
         {
-            ContextMenuEntryKind.ShellVerb => !string.IsNullOrWhiteSpace(Entry.KeyName)
-                                              && (!string.IsNullOrWhiteSpace(Entry.FilePath)
-                                                  || !string.IsNullOrWhiteSpace(ExtractCommandExecutablePath(Entry.CommandText))),
+            ContextMenuEntryKind.ShellVerb => !string.IsNullOrWhiteSpace(Entry.KeyName),
             ContextMenuEntryKind.ShellExtension => !string.IsNullOrWhiteSpace(Entry.HandlerClsid),
             _ => false
         };
 
     public bool IsProtectedFileTypeBatchDelete => ProtectedMenuItemGuard.IsProtectedFileTypeBatchDeleteItem(Entry);
 
-    public bool CanDeleteInFileTypeBatch => !IsDeleted && IsPresentInRegistry && !IsProtectedFileTypeBatchDelete;
+    public bool CanDeleteInFileTypeBatch => !IsDeleted && IsPresentInRegistry
+        && !IsProtectedFileTypeBatchDelete && !string.IsNullOrWhiteSpace(Entry.FileTypeBatchFingerprint);
 
     /// <summary>
     /// Gets or sets a value indicating whether enabled.
@@ -1221,40 +1220,6 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
         return normalized;
     }
-
-    private static string? ExtractCommandExecutablePath(string? commandText)
-    {
-        if (string.IsNullOrWhiteSpace(commandText))
-        {
-            return null;
-        }
-
-        var trimmed = commandText.Trim();
-        if (trimmed.StartsWith('"'))
-        {
-            var closingQuoteIndex = trimmed.IndexOf('"', 1);
-            if (closingQuoteIndex > 1)
-            {
-                var quoted = trimmed[1..closingQuoteIndex];
-                return EndsWithExecutableExtension(quoted) ? quoted : null;
-            }
-        }
-
-        foreach (var extension in new[] { ".exe", ".dll" })
-        {
-            var extensionIndex = trimmed.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
-            if (extensionIndex > 0)
-            {
-                return trimmed[..(extensionIndex + extension.Length)].Trim().Trim('"');
-            }
-        }
-
-        return null;
-    }
-
-    private static bool EndsWithExecutableExtension(string value)
-        => value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-           || value.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
 
     private string GetWpsAffectedCount()
     {

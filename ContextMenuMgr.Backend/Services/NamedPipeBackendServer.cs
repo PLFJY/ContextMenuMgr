@@ -553,6 +553,12 @@ public sealed class NamedPipeBackendServer
                         cancellationToken,
                         await ResolveFrontendUserContextAsync(stream, cancellationToken))
                 },
+            PipeCommand.DeleteFileTypeBatchItem when request.Item is not null
+                => await _catalog.DeleteFileTypeBatchItemAsync(request.Item, cancellationToken,
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken), request.FileTypeBatchOperationId),
+            PipeCommand.GetFileTypeBatchItemState when request.Item is not null
+                => await _catalog.GetFileTypeBatchItemStateAsync(request.Item, cancellationToken,
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.RestartExplorer
                 => await HandleRestartExplorerRequestAsync(stream, cancellationToken),
             PipeCommand.RepairRuntimeDataAcl

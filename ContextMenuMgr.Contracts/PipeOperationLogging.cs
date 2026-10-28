@@ -12,7 +12,7 @@ public static class PipeOperationLogging
         PipeCommand.GetRegistryProtectionSetting or PipeCommand.GetWin11BlockedItems or
         PipeCommand.GetWin11ContextMenuSnapshot or PipeCommand.GetWin11ModernContextMenuDisabled or
         PipeCommand.GetAutoStartEnabled or PipeCommand.AnalyzeFileTypeContext or
-        PipeCommand.FindRelatedFileTypeMenuItems or PipeCommand.GetEnhanceMenuDefinitions or
+        PipeCommand.FindRelatedFileTypeMenuItems or PipeCommand.GetFileTypeBatchItemState or PipeCommand.GetEnhanceMenuDefinitions or
         PipeCommand.GetEnhanceMenuState or PipeCommand.GetOfficeSuiteCoexistenceStatus or
         PipeCommand.GetWpsOfficePendingApprovals or PipeCommand.InspectOpenWithSources or PipeCommand.GetShellNewOrderLock or
         PipeCommand.GetOpenWithPendingReviews;

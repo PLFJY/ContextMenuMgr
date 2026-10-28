@@ -1522,17 +1522,23 @@
   <data name="LoadingStatus" xml:space="preserve"><value>正在載入…</value></data>
   <data name="ManageSubMenuItems" xml:space="preserve"><value>管理子選單</value></data>
   <data name="FileTypeBatchManageAction" xml:space="preserve"><value>批次管理</value></data>
+  <data name="FileTypeBatchGroupedCountFormat" xml:space="preserve"><value>{0} 組操作 · {1} 個實體登錄項目</value></data>
+  <data name="FileTypeBatchExactEvidence" xml:space="preserve"><value>相同操作：鍵名與命令目標，或處理器 CLSID</value></data>
+  <data name="FileTypeBatchIdentityUnknown" xml:space="preserve"><value>命令身分不可用；僅顯示有直接證據的關聯。</value></data>
+  <data name="FileTypeBatchModuleEvidence" xml:space="preserve"><value>命令模組相同；操作不同</value></data>
+  <data name="FileTypeBatchCandidateEvidence" xml:space="preserve"><value>可能屬於同一登錄系列；選取此組即明確加入，可排除不需要的路徑</value></data>
+  <data name="FileTypeBatchDeleteSelectedConfirmation" xml:space="preserve"><value>刪除 {1} 組操作中的 {0} 個已選實體登錄項目嗎？使用者登錄：{2}；機器登錄：{3}。操作：{4}。每項刪除都會保留可復原備份。繼續前請展開檢查來源路徑。</value></data>
+  <data name="FileTypeBatchProgress" xml:space="preserve"><value>已完成 {0}/{1} · 目前操作：{2}</value></data>
+  <data name="FileTypeBatchResult" xml:space="preserve"><value>已確認成功：{0}；失敗：{1}；略過：{2}；取消：{3}；不確定：{4}。重試不確定項目前請重新整理並檢查復原記錄。</value></data>
   <data name="FileTypeBatchTitle" xml:space="preserve"><value>{0} 的相關項目</value></data>
   <data name="FileTypeBatchCommandIdentity" xml:space="preserve"><value>命令程式：{0}</value></data>
   <data name="FileTypeBatchClsidIdentity" xml:space="preserve"><value>處理器 CLSID：{0}</value></data>
-  <data name="FileTypeBatchCountFormat" xml:space="preserve"><value>{0} 個相關項目</value></data>
   <data name="FileTypeBatchSourceRegistryPath" xml:space="preserve"><value>來源登錄路徑</value></data>
   <data name="FileTypeBatchEnableAll" xml:space="preserve"><value>全部啟用</value></data>
   <data name="FileTypeBatchDeleteAll" xml:space="preserve"><value>全部刪除</value></data>
   <data name="FileTypeBatchUndoAll" xml:space="preserve"><value>全部復原</value></data>
   <data name="FileTypeBatchProtectedDelete" xml:space="preserve"><value>受保護的檔案類型 open/edit 項目不能在這裡刪除，請改用關閉開關。</value></data>
   <data name="FileTypeBatchNoItems" xml:space="preserve"><value>找不到相關檔案類型選單項目。</value></data>
-  <data name="FileTypeBatchDeleteAllConfirmation" xml:space="preserve"><value>要刪除 {0} 個相關項目嗎？刪除前會建立登錄備份。{1} 個受保護的 open/edit 項目會被略過。</value></data>
   <data name="CompactView" xml:space="preserve"><value>精簡</value></data>
   <data name="DisplayMode" xml:space="preserve"><value>顯示模式</value></data>
   <data name="DetailedView" xml:space="preserve"><value>詳細</value></data>

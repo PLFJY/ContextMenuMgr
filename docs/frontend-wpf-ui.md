@@ -47,7 +47,7 @@ App 以实际 Closed 触发 await 退出请求，取消 Closing 不停服；IPC 
 
 转场支持 Entrance/Fade/Slide/Suppress，旧内容退出清理后新内容进入，后退反向；快速导航取消旧 Storyboard/PageHost/过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；等待就位订阅事件，不固定 Task.Delay。
 
-File Types 批量管理是内部隐藏 UserControl，不新增导航 Page/TabItem；返回保留原 tab。按需查询 scene-only 相关项，单项/批量操作复用后端安全和备份，删除项仍留供 Undo；物理匹配范围见[注册表模型](registry-model.md)。
+File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/TabItem；返回保留原 tab。按需查询后以动作组折叠展示物理来源，组头显示 ExactAction、SameModule 或 RegistrationFamilyCandidate 证据；组内列表限制高度并启用回收虚拟化，显示完整 HKLM/HKU 路径。组选择加物理项包含开关共同决定批量范围；候选组初始不选中，用户明确选择该组才纳入该组物理项，仍可逐项排除。混在强关系组内的弱候选物理项仍单独排除，须逐项加入。确认删除前显示组数、物理项数和用户 hive 数，普通删除保留恢复备份，Undo 不等于永久清理。批量完成显示已确认成功、失败、跳过、取消与不确定数量；取消仅停止后续项，正在进行的后端事务继续至结束或回滚。批量扫描不从旧版呈现缓存恢复缺少物理指纹的行，失败刷新保留已显示来源；真实 Explorer 可见性仍需人工验证。物理匹配和提交前核对见[注册表模型](registry-model.md)。
 
 ## 滚动、输入与渲染
 

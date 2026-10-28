@@ -517,6 +517,32 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Item;
     }
 
+    public async Task<ContextMenuEntry?> DeleteFileTypeBatchItemAsync(
+        ContextMenuEntry item, Guid operationId, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest
+        {
+            Command = PipeCommand.DeleteFileTypeBatchItem,
+            Item = item,
+            ItemId = item.Id,
+            ClientOperationId = Guid.NewGuid(),
+            FileTypeBatchOperationId = operationId
+        }, cancellationToken);
+        return response.Item;
+    }
+
+    public async Task<ContextMenuEntry?> GetFileTypeBatchItemStateAsync(
+        ContextMenuEntry item, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest
+        {
+            Command = PipeCommand.GetFileTypeBatchItemState,
+            Item = item,
+            ItemId = item.Id
+        }, cancellationToken);
+        return response.Item;
+    }
+
     /// <summary>
     /// Executes undo Delete Async.
     /// </summary>

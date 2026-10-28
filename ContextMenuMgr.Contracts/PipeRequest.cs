@@ -159,6 +159,8 @@ public sealed record PipeRequest
 
     public FileTypeBatchQuery? FileTypeBatchQuery { get; init; }
 
+    public Guid? FileTypeBatchOperationId { get; init; }
+
     public DefaultDropEffect? DefaultDropEffect { get; init; }
 
     /// <summary>

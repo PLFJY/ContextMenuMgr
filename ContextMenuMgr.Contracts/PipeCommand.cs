@@ -66,5 +66,7 @@ public enum PipeCommand
     RequestPortableExit,
     GetSpecialMenuItemState,
     GetOpenWithPendingReviews,
-    DecideOpenWithReview
+    DecideOpenWithReview,
+    DeleteFileTypeBatchItem,
+    GetFileTypeBatchItemState
 }

@@ -477,6 +477,72 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
     }
 
+    public async Task<FileTypeBatchOperationOutcome> DeleteOrUndoFileTypeBatchItemAsync(
+        ContextMenuItemViewModel item, CancellationToken cancellationToken, Guid? operationId = null)
+    {
+        var deleting = !item.IsDeleted;
+        if (cancellationToken.IsCancellationRequested)
+            return new(FileTypeBatchOperationStatus.Cancelled);
+        if (deleting && (ProtectedMenuItemGuard.IsProtectedFileTypeBatchDeleteItem(item)
+            || RegistryProtectionDialog.ShouldBlockNormalContextMenuRegistryMutation(_settingsService, item.Entry)))
+            return new(FileTypeBatchOperationStatus.Skipped);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            // Cancellation stops scheduling the next item. A request already sent
+            // is allowed to complete its Backend transaction and rollback.
+            var updated = deleting
+                ? await _backendClient.DeleteFileTypeBatchItemAsync(item.Entry, operationId ?? Guid.NewGuid(), timeout.Token)
+                : await _backendClient.UndoDeleteAsync(item.Id, timeout.Token);
+            return deleting
+                ? updated is { IsDeleted: true, HasBackup: true }
+                    ? new(FileTypeBatchOperationStatus.ConfirmedSuccess)
+                    : await ReconcileFileTypeBatchOperationAsync(item.Entry, deleting: true)
+                : await ReconcileFileTypeBatchOperationAsync(item.Entry, deleting: false);
+        }
+        catch (BackendRequestException ex)
+        {
+            var reconciled = await ReconcileFileTypeBatchOperationAsync(item.Entry, deleting);
+            return reconciled.Status == FileTypeBatchOperationStatus.ConfirmedFailure
+                ? reconciled with { ErrorCode = ex.ErrorCode }
+                : reconciled;
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or TimeoutException)
+        {
+            return await ReconcileFileTypeBatchOperationAsync(item.Entry, deleting);
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error(nameof(ContextMenuWorkspaceService), ex,
+                $"File-type batch item failed. ItemId={item.Id}.");
+            return await ReconcileFileTypeBatchOperationAsync(item.Entry, deleting);
+        }
+    }
+
+    private async Task<FileTypeBatchOperationOutcome> ReconcileFileTypeBatchOperationAsync(
+        ContextMenuEntry expected, bool deleting)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var current = await _backendClient.GetFileTypeBatchItemStateAsync(expected, timeout.Token);
+            if (deleting && current is { IsDeleted: true, HasBackup: true }
+                || !deleting && current is { IsPresentInRegistry: true, IsDeleted: false })
+                return new(FileTypeBatchOperationStatus.ConfirmedSuccess);
+            if (deleting && current is { IsPresentInRegistry: true, IsDeleted: false }
+                && string.Equals(current.FileTypeBatchFingerprint, expected.FileTypeBatchFingerprint,
+                    StringComparison.Ordinal))
+                return new(FileTypeBatchOperationStatus.ConfirmedFailure, "PHYSICAL_SOURCE_UNCHANGED");
+            return new(FileTypeBatchOperationStatus.Uncertain, "RECONCILIATION_INCONCLUSIVE");
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Warning(nameof(ContextMenuWorkspaceService),
+                $"File-type batch reconciliation failed. ItemId={expected.Id}, Error={ex.GetType().Name}.");
+            return new(FileTypeBatchOperationStatus.Uncertain, "RECONCILIATION_UNAVAILABLE");
+        }
+    }
+
     /// <summary>
     /// Executes permanently Delete Async.
     /// </summary>

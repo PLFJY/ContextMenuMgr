@@ -45,6 +45,12 @@ public sealed record ContextMenuEntry
     /// </summary>
     public string BackendRegistryPath { get; init; } = string.Empty;
 
+    /// <summary>On-demand file-type batch relationship; never an authorization to mutate.</summary>
+    public FileTypeBatchMatchKind FileTypeBatchMatchKind { get; init; }
+
+    /// <summary>Fingerprint of the physical registry tree at batch discovery time.</summary>
+    public string? FileTypeBatchFingerprint { get; init; }
+
     /// <summary>
     /// Gets or sets the source Root Path.
     /// </summary>
