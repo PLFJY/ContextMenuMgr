@@ -39,7 +39,7 @@ public sealed class OfficeSuiteCoexistenceApprovalTests
                 stateStore,
                 new RegistryBackupService(Path.Combine(directory, "backups"), logger),
                 new BackendProtectionSettingsStore(Path.Combine(directory, "settings.json"), logger));
-            var userContext = new BackendUserContext("S-1-5-21-test", "test", directory, directory, directory, SessionId: 1);
+            var userContext = new BackendUserContext("S-1-5-21-111-222-333-444", "test", directory, directory, directory, SessionId: 1);
 
             await catalog.RecordUserSelectedDocumentIconProviderAsync(userContext, CancellationToken.None);
 

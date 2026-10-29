@@ -1,4 +1,3 @@
-using System.Security.Principal;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
@@ -17,7 +16,7 @@ public sealed class Windows11BlocksService(FileLogger logger)
         if (!Guid.TryParse(handlerClsid, out var clsid))
             throw new InvalidOperationException("A valid handler CLSID is required.");
         using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, Windows11ClsidImpactIndex.NativeView);
-        using var user = OpenUser(users, context?.Sid ?? string.Empty, writable: true);
+        using var user = OpenUser(users, context, writable: true);
         using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, Windows11ClsidImpactIndex.NativeView);
         using var machineBlocked = machine.OpenSubKey(BlockedPath);
         if (enable && MatchingNames(machineBlocked, clsid).Length > 0 && !restoreMachine)
@@ -30,8 +29,8 @@ public sealed class Windows11BlocksService(FileLogger logger)
     internal static Windows11BlockMutation CreateMutation(
         RegistryKey blocked, Guid clsid, string sid, bool enable, FileLogger logger, RegistryKey? machineBlocked = null)
     {
-        if (!new SecurityIdentifier(sid).IsAccountSid())
-            throw new InvalidOperationException("An authenticated frontend account SID is required.");
+        if (string.IsNullOrWhiteSpace(sid))
+            throw new InvalidOperationException("An authenticated frontend user SID is required.");
         var marker = OwnershipPrefix + sid + "|" + clsid.ToString("B");
         var mutation = new Windows11BlockMutation(clsid, sid, enable, marker);
         mutation.AddTarget(blocked);
@@ -82,13 +81,13 @@ public sealed class Windows11BlocksService(FileLogger logger)
     private static string[] MatchingNames(RegistryKey? blocked, Guid clsid) => blocked?.GetValueNames()
         .Where(name => Guid.TryParse(name, out var parsed) && parsed == clsid).ToArray() ?? [];
 
-    private static RegistryKey OpenUser(RegistryKey users, BackendUserContext? context)
-        => OpenUser(users, context?.Sid ?? string.Empty);
+    private static RegistryKey OpenUser(RegistryKey users, BackendUserContext? context, bool writable = false)
+        => OpenUser(users, context?.Sid ?? string.Empty, writable);
 
     private static RegistryKey OpenUser(RegistryKey users, string sid, bool writable = false)
     {
-        if (string.IsNullOrWhiteSpace(sid) || !new SecurityIdentifier(sid).IsAccountSid())
-            throw new InvalidOperationException("An authenticated frontend account SID is required.");
+        if (string.IsNullOrWhiteSpace(sid))
+            throw new InvalidOperationException("An authenticated frontend user SID is required.");
         return users.OpenSubKey(sid, writable)
             ?? throw new InvalidOperationException("The frontend user's registry hive is not loaded.");
     }

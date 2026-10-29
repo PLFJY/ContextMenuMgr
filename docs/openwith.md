@@ -31,7 +31,7 @@ WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护�
 | 永久删除 | 仅删除经过路径和请求状态校验的所选 `.deleted` 备份，逐层加入同一注册表事务；任一子键访问拒绝 / 并发冲突会回滚，提交后确认备份不存在。失败不报告成功，不触碰重新出现的原 app key。 |
 | 应用商店入口 | 保留既有 `NoUseStoreOpenWith` policy 项；开关同步 HKLM 和当前用户 HKU policy 值并回读结果。某一 hive 失败时返回失败，已完成的 policy 写入可能仍存在，应刷新核对。 |
 
-OpenWith 需要 SID，但不需要 SessionId。请求只能使用 Pipe 客户端认证身份；解析失败不退回另一个交互用户。快照和修改先验证 account SID 与已加载的用户 hive；即使所选项属于 HKLM，用户上下文缺失也拒绝操作。服务不能用 LocalSystem `HKCU`、重建未加载的 SID hive，或信任不匹配的 `AppRegistryPath` / `DeletedPath`。
+OpenWith 需要 SID，但不需要 SessionId。请求只能使用 Pipe 客户端认证身份；解析失败不退回另一个交互用户。`BackendUserContextResolver` 在身份解析边界直接核验已启用的 `INTERACTIVE`（`S-1-5-4`）组成员资格，非交互 token 在 Pipe 边界被拒绝且不生成用户上下文；快照和修改统一使用 `context.Sid` 并验证对应已加载的用户 hive。本地账户、域账户和 Entra ID（`S-1-12-1-...`）交互用户同一条件，不做 `IsAccountSid()` 或 SID 形态分类。传统服务/批处理/网络登录令牌无法通过边界门禁，即使所选项属于 HKLM，缺用户上下文也拒绝操作；同一账户交互登录仍允许，锁屏、RDP 与断开的交互会话仍允许。服务不能用 LocalSystem `HKCU`、重建未加载的 SID hive，或信任不匹配的 `AppRegistryPath` / `DeletedPath`。
 
 后端串行化本程序 OpenWith 快照与 mutation，校验请求携带的 visibility stamp / command；注册表事务中的非事务并发写入会使事务失败，项目不会覆盖第三方结果。成功是提交后 fresh read-back 的结论，不是永久禁止第三方重建注册。事务创建 / 提交不可用时直接报错，没有放弃验证的 fallback。
 
@@ -62,7 +62,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 在可恢复的测试机上准备唯一应用 key 和测试扩展名，先导出测试注册；只清理自己创建的测试数据，不修改真实 `UserChoice` / Hash。分别在 Windows 10、Windows 11 执行：
 
-1. 同一 app 分别注册在 HKU 当前 SID 和 HKLM，含 command、FriendlyAppName、ExpandString 和 nested values；运行普通权限前端 / 后端服务，分别开关。直接核对所选 hive 的空 `NoOpenWith`、归属值及刷新状态，另一 hive 不改变。服务 x86 / x64 构建应操作同一 native view。对两个用户重复，不能读取或改写另一 SID；认证失败 / hive 未加载返回错误，不新建 SID 根。
+1. 同一 app 分别注册在 HKU 当前 SID 和 HKLM，含 command、FriendlyAppName、ExpandString 和 nested values；运行普通权限前端 / 后端服务，分别开关。直接核对所选 hive 的空 `NoOpenWith`、归属值及刷新状态，另一 hive 不改变。服务 x86 / x64 构建应操作同一 native view。对两个用户重复，不能读取或改写另一 SID；认证失败 / hive 未加载返回错误，不新建 SID 根。分别在本地账户、域账户和真实 Entra 登录下重复快照、开关、编辑/删除/恢复及 WTS 监控/通知，确认另一用户 hive 不可操作、未加载 hive 仍拒绝；以服务/网络/批处理非交互 token 验证即使 SID 相同也拒绝，并验证锁屏、RDP 与断开的交互会话仍允许。普通账户单测不替代这些登录形态。
 2. 预先设置空字符串、非空字符串、DWORD / Binary `NoOpenWith`。刷新后未知/改写归属的开关不可操作，来源说明 tooltip 给出导出/核查步骤，物理值与类型保持不变；通过后端请求启用也必须拒绝。旧版本无 marker 的值同样保留。由第三方改写 NoOpenWith、marker 或 command 后重试，旧请求拒绝，刷新准确反映当前值。
 3. 使用唯一 GUID 夹具：扩展名 .cmm136-<GUID>、应用 Cmm136-<GUID>.exe、独立 ProgID Cmm136.<GUID>；只对这些键操作。准备一个可丢弃测试 exe 的常规 Applications 注册、另一个仅 shell/open/DropTarget/CLSID 的注册和仅 FriendlyAppName/SupportedTypes 的注册。后两者必须展示只读且不能被伪造 DTO 启用/删除。分别测试 Applications-only、同时通过 `OpenWithProgIDs`、用户 FileExts、RegisteredApplications/Capabilities 和打包应用提供的候选。对同一扩展名同时创建 HKU Classes OpenWithProgIDs、FileExts OpenWithList/OpenWithProgids、RegisteredApplications/Capabilities 引用；点击检查，确认同一标识符分组中保留每条准确物理路径，独立 ProgID 始终只读，Applications 引用显示对应可管理注册。输入路径穿越/无效扩展名应拒绝，取消不会卡住页面，访问失败/包扫描失败显示不完整。观察实际文件的子菜单及“选择其他应用”对话框，记录 Windows 版本和文件类型；注册表成功而 Explorer 仍显示候选属于范围限制，不能判为已验证 Explorer 移除。默认应用通过 Windows 设置选择，比较操作前后的只读 UserChoice / 默认处理行为，不手工写 Hash。
 4. 连续至少三次开关、刷新、删除 / 重启服务 / 恢复：原 key 与 backup 必须互斥，ACL、值类型、未展开文本、command 与原开关状态完整恢复。人为预置 `.deleted` 冲突（包括残缺副本）时不覆盖；原 app 被安装器重建后 Undo 拒绝，两项仍可查看，Purge 只清理选中备份。验证历史重复后缀只恢复指定副本。
@@ -76,7 +76,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 [OpenWithMonitoringService](../ContextMenuMgr.Backend/Services/OpenWithMonitoringService.cs) 由 `ContextMenuRegistryMonitor` 管理独立的 Applications 轮询任务，默认每轮结束后等五秒；不等待常规/Win11 全量扫描及其 catalog gate，也不做扩展名来源扫描。两个任务共用停止令牌，Stop/Completion 等待两者退出。每轮重新打开 native HKU/HKLM Applications，无长期 Registry handle/RegNotify watcher；每 root 最多 4096 名，发现预算 15 秒协作取消，单次同步 Windows API 无法抢占。
 
-认证 Pipe 上下文和每 30 秒枚举一次的 WTS active/connected/disconnected token 提供用户。执行前独立验证 SID、loaded hive 和 Classes root；同 SID 多 Session 共用一个 baseline，不同 SID 独立。HKLM/HKU 同名项始终是不同物理来源。通知 `OpenWithChanged` 带 UserSid，只向相同认证 SID 的订阅者发送；普通 OpenWith mutation 广播也按 SID 过滤。通知 DTO 只触发 fresh snapshot，不作为状态直接覆盖 UI。TrayHost 只为持久未解决审核数量大于零的监控通知显示既有 Win32 气泡，Information 级别的 OpenWithApprovalNotificationReceived 记录收到的审核信号，不能作为 Windows 实际显示证明；激活统一通过 `OpenApprovals` 打开中央待审批并重新查询。气泡回调只有图标身份，不能从代表性的 SpecialItem 或最近一次全局状态推断历史点击目标；单条、聚合和重叠气泡均采用安全的通用待审批入口。监控不可用诊断不构造待审批，也不产生审核气泡；隐藏图标时仍可接收通知。兼容决定：保留已发布 `FrontendControlCommand.OpenWith` / `--open-openwith` 的显式页面激活，但 TrayHost 不再使用它转接审核。
+认证 Pipe 上下文和每 30 秒枚举一次的 WTS active/connected/disconnected token 提供用户。resolver 在解析会话与 Pipe 时均验证已启用的 `INTERACTIVE`（`S-1-5-4`）事实，非交互会话在枚举阶段即被忽略；因此 `OpenWithMonitoringService` 接收到的上下文均已具备交互登录身份。执行前独立验证 SID、loaded hive 和 Classes root；同 SID 多 Session 共用一个 baseline，不同 SID 独立。HKLM/HKU 同名项始终是不同物理来源。通知 `OpenWithChanged` 带 UserSid，只向相同认证 SID 的订阅者发送；普通 OpenWith mutation 广播也按 SID 过滤。通知 DTO 只触发 fresh snapshot，不作为状态直接覆盖 UI。TrayHost 只为持久未解决审核数量大于零的监控通知显示既有 Win32 气泡，Information 级别的 OpenWithApprovalNotificationReceived 记录收到的审核信号，不能作为 Windows 实际显示证明；激活统一通过 `OpenApprovals` 打开中央待审批并重新查询。气泡回调只有图标身份，不能从代表性的 SpecialItem 或最近一次全局状态推断历史点击目标；单条、聚合和重叠气泡均采用安全的通用待审批入口。监控不可用诊断不构造待审批，也不产生审核气泡；隐藏图标时仍可接收通知。兼容决定：保留已发布 `FrontendControlCommand.OpenWith` / `--open-openwith` 的显式页面激活，但 TrayHost 不再使用它转接审核。
 
 ### 稳定与审核
 

@@ -9,7 +9,7 @@
 | PackagedCom | 认证用户安装的 AppX/MSIX manifest 声明；CLSID 的用户/机器 Blocked 值 |
 | SystemCommandStore | HKLM Explorer CommandStore 白名单 Windows.SendToMyPhone、Windows.Share；ShellVerbVisibility，不是 GUID Block |
 
-支持门槛为 Windows >=10.0.22000。无用户上下文 catalog 跳过；专用 Pipe 与 GetSnapshot、通用 Win11 SetEnabled/ApplyDecision 使用认证 SID，不 fallback 到其它登录用户。mutation 需有效 account SID 与 loaded hive/native view，不用服务 HKCU；blocked mutation 不需要 SessionId。前端 DI 始终注册页面/服务，正常导航按 OS 隐藏，防意外导航解析崩溃；不用 HKCR/PackagedCom 存在性作支持门槛。
+支持门槛为 Windows >=10.0.22000。无用户上下文 catalog 跳过；专用 Pipe 与 GetSnapshot、通用 Win11 SetEnabled/ApplyDecision 使用认证交互 SID，不 fallback 到其它登录用户。`BackendUserContextResolver` 在身份解析边界直接核验已启用的 `INTERACTIVE`（`S-1-5-4`）组成员资格，非交互 token 在 Pipe/WTS 边界被拒绝且不生成用户上下文，因而无法进入 PackagedCom 用户 Blocked 读取与 mutation。本地账户、域账户与 Entra ID（`S-1-12-1-...`）交互登录一律统一解析，不调用 `IsAccountSid()`，也不做任何 SID 前缀/形态分类。`Windows11BlocksService` 直接使用 `context.Sid` 并验证对应 `HKEY_USERS/<SID>` hive 已加载；仍须 loaded hive/native view，不用服务 HKCU；blocked mutation 不需要 SessionId。SystemCommandStore 属机器级来源，不依赖用户上下文。前端 DI 始终注册页面/服务，正常导航按 OS 隐藏，防意外导航解析崩溃；不用 HKCR/PackagedCom 存在性作支持门槛。
 
 [PackagedContextMenuDiscovery](../ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs) 用 PackageManager.FindPackagesForUser(SID)，按 full name 去重，读 AppxManifest.xml（缺失时 bundle manifest fallback）。按 AppX namespace family、Extension Category 与元素 LocalName 解析 windows.fileExplorerContextMenus、windows.comServer，关联 SurrogateServer/ExeServer class CLSID 与 verb。缺 manifest/XML/无效 CLSID/无法关联等局部跳过/告警，不证明完整发现。
 
@@ -84,5 +84,6 @@ VM 验收应记录 OS build、SID/native view、package/full family/CLSID/contex
 3. 两用户和 HKLM block；取消所有用户确认无更改，确认只恢复选定应用，不触动无关 policy；x86-on-x64 native view 和 RDP 需真实服务验证。
 4. 一个应用请求、完整 Items 成功不额外 snapshot；timeout/response loss 查询全部目标且不重写；旧服务拒绝新命令无部分写入。缓存冷/热、首次 baseline、gate 排队分别计时。
 5. WPF 浅/深/窄窗、混合状态、备注/搜索、固定详细视图与经典偏好独立；Windows 系统命令保护失败无 ACL hack。
+6. 分别在本地账户、域账户与真实 Entra 登录下验证 Win11 读取、应用开关、Blocked mutation 与恢复，确认归属值含该 token SID；用服务/网络/批处理非交互 token 作为负例（即使 SID 相同也拒绝），并验证锁屏、RDP 与断开的交互会话仍允许。另一用户 hive 不可操作，未加载 hive 即使 INTERACTIVE=true 仍拒绝。普通账户单测不能替代这些登录形态，也不能据此宣称 Explorer 行为已验证。
 
 已有 Windows11BlockedMutationTests、PackagedContextMenuDiscoveryTests/ScanCacheTests、ContextMenuStateStoreTests 保护物理写入/回滚/发现/恢复元数据，不证明 Explorer/SCM/真实升级。修改发现、Id、Blocked/备份、impact、应用控制域、旧格式或页面核对更新本文；动态探测必须走 [ProbeHost](deep-analysis-probehost.md)，不直接移入服务。
