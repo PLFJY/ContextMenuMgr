@@ -372,7 +372,7 @@ public sealed class NamedPipeBackendServer
                 Message = "Snapshot loaded.",
                 Items = await _catalog.GetSnapshotAsync(
                     cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false))
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken))
             },
             PipeCommand.GetSceneSnapshot when request.SceneKind is not null
                 => new PipeResponse
@@ -446,22 +446,22 @@ public sealed class NamedPipeBackendServer
                 {
                     Success = true,
                     OpenWithInspection = await _specialMenuService.InspectOpenWithSourcesAsync(request.ScopeValue,
-                        await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false),
+                        await ResolveSpecialMenuUserContextAsync(stream, cancellationToken),
                         cancellationToken)
                 },
             PipeCommand.ReviewOpenWithRegistration when request.SpecialItem is not null
                 && _specialMenuService.OpenWithMonitoring is { } monitoring
                 => await monitoring.ReviewAsync(request.SpecialItem, request.OpenWithProtection,
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
                         ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
             PipeCommand.GetOpenWithPendingReviews when _specialMenuService.OpenWithMonitoring is { } reviewQuery
                 => new PipeResponse { Success = true, OpenWithReviews = await reviewQuery.GetPendingReviewsAsync(
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
                         ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken) },
             PipeCommand.DecideOpenWithReview when request.OpenWithReview is not null
                 && _specialMenuService.OpenWithMonitoring is { } decisions
                 => await decisions.DecideReviewAsync(request.OpenWithReview,
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false)
+                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
                         ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
             PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
                 => new PipeResponse
@@ -524,7 +524,7 @@ public sealed class NamedPipeBackendServer
                     await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
                     cancellationToken),
             PipeCommand.GetShellNewOrderLock => await _specialMenuService.GetShellNewOrderLockAsync(
-                await ResolveSpecialMenuUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false), cancellationToken),
+                await ResolveSpecialMenuUserContextAsync(stream, cancellationToken), cancellationToken),
             PipeCommand.SetShellNewOrderLock when request.ShellNewLock is not null
                 => await _specialMenuService.SetShellNewOrderLockAsync(
                     request.ShellNewLock.Lock,
@@ -627,9 +627,7 @@ public sealed class NamedPipeBackendServer
         NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken,
-            allowInteractiveFallback: request.Item?.IsWindows11ContextMenu != true
-                && request.ItemId?.StartsWith("win11", StringComparison.OrdinalIgnoreCase) != true);
+        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
         return await _catalog.ApplyDesiredStateAsync(
             request.ItemId ?? string.Empty,
             request.Enable.GetValueOrDefault(),
@@ -676,9 +674,7 @@ public sealed class NamedPipeBackendServer
         NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken,
-            allowInteractiveFallback: request.Item?.IsWindows11ContextMenu != true
-                && request.ItemId?.StartsWith("win11", StringComparison.OrdinalIgnoreCase) != true);
+        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
         return await _catalog.ApplyDecisionAsync(
             request.ItemId ?? string.Empty,
             request.Decision.GetValueOrDefault(),
@@ -689,7 +685,7 @@ public sealed class NamedPipeBackendServer
     private async Task<PipeResponse> HandleWin11ToggleAsync(
         PipeRequest request, NamedPipeServerStream stream, bool enable, bool applicationScope, CancellationToken cancellationToken)
     {
-        var context = await ResolveFrontendUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false);
+        var context = await ResolveFrontendUserContextAsync(stream, cancellationToken);
         return await _catalog.SetWindows11EnabledAsync(request.ItemId ?? string.Empty,
             enable, (enable ? request.UnblockMachine : request.BlockMachine) ?? false,
             request.ClientOperationId, context, cancellationToken, applicationScope);
@@ -700,7 +696,7 @@ public sealed class NamedPipeBackendServer
         NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false);
+        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
         await LogWin11CommandAsync(
             PipeCommand.GetWin11BlockedItems,
             userContext,
@@ -730,7 +726,7 @@ public sealed class NamedPipeBackendServer
         NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken, allowInteractiveFallback: false);
+        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
         await LogWin11CommandAsync(
             PipeCommand.GetWin11ContextMenuSnapshot,
             userContext,
@@ -854,7 +850,7 @@ public sealed class NamedPipeBackendServer
             (PipeCommand.SetShellAttribute or PipeCommand.SetDisplayText or PipeCommand.SetCommandText or PipeCommand.DeleteItem))
         {
             var state = await _catalog.GetContextMenuItemStateAsync(original.Id, original, token,
-                await ResolveFrontendUserContextAsync(stream, token, allowInteractiveFallback: false));
+                await ResolveFrontendUserContextAsync(stream, token));
             if (!state.Success) return state;
         }
         return null;
@@ -871,8 +867,7 @@ public sealed class NamedPipeBackendServer
             return null;
         }
 
-        return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken,
-            allowInteractiveFallback: kind is not (SpecialMenuKind.OpenWith or SpecialMenuKind.ShellNew));
+        return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken);
     }
 
     private static bool RequiresSpecialMenuUserContext(SpecialMenuKind kind)
@@ -926,13 +921,10 @@ public sealed class NamedPipeBackendServer
         return null;
     }
 
-    private async Task<BackendUserContext?> ResolveFrontendUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken,
-        bool allowInteractiveFallback = true)
+    private async Task<BackendUserContext?> ResolveFrontendUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
     {
         var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream, out var rejected);
-        if (userContext is null && !rejected && allowInteractiveFallback)
-            userContext = resolver.TryResolveInteractiveUserFallback();
+        var userContext = resolver.TryResolveFromPipeClient(stream);
         if (userContext is null)
         {
             MenuDiscoveryCoverage.MarkIncomplete();
@@ -968,13 +960,10 @@ public sealed class NamedPipeBackendServer
     // Resolve only for context-aware special menus. OpenWith requires the authenticated pipe caller.
     // Do not call this from ordinary catalog, Win11, registry protection,
     // auto-start, file-type scene, or restart routes.
-    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken,
-        bool allowInteractiveFallback = true)
+    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
     {
         var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream, out var rejected);
-        if (userContext is null && !rejected && allowInteractiveFallback)
-            userContext = resolver.TryResolveInteractiveUserFallback();
+        var userContext = resolver.TryResolveFromPipeClient(stream);
         if (userContext is null)
         {
             MenuDiscoveryCoverage.MarkIncomplete();

@@ -17,17 +17,16 @@ B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-l
 
 权限、SID、hive 和 SessionId 是四个维度。LocalSystem 的 HKCU 不是前端用户 HKCU；用户写入明确选 `HKEY_USERS/<SID>`，不因权限高而扩大到 HKLM。显示名/路径不是认证依据。
 
-`TryResolveFromPipeClient` 的同步 `RunAsClient` callback 取得 token SID（`SecurityIdentifier`）与 INTERACTIVE 事实；**不能在 callback 中读取 WindowsIdentity.Name 或引入受管理 impersonation helper/异步任务**。INTERACTIVE 由 `new WindowsPrincipal(identity).IsInRole(InteractiveSid)` 查询当前被模拟 token 的已启用组（`S-1-5-4`），不回退到服务账户 token；若 SID 为空或非交互 token 则在边界直接拒绝并返回 null（记录 `NonInteractiveToken`），且通过 `out bool rejected` 显式阻断 `TryResolveFromPipeClientWithSessionFallback` 与服务端 helper 的交互用户/Session fallback，防止非交互调用方借 fallback 落到另一登录用户的上下文或重启其 Explorer。显示名在 callback 外 SID.Translate，SessionId 从 Pipe 客户端 PID 解析，profile 从 ProfileList 读取。原 Name 读取可将 token 经 AsyncLocal 流到下一 await；当前边界由真实 Pipe 身份回归保护。该机制不证明历史所有 error 5/1314 都有同一原因。
+`TryResolveFromPipeClient` 的同步 `RunAsClient` callback 取得 token SID（`SecurityIdentifier`）与 INTERACTIVE 事实；**不能在 callback 中读取 WindowsIdentity.Name 或引入受管理 impersonation helper/异步任务**。INTERACTIVE 由 `new WindowsPrincipal(identity).IsInRole(InteractiveSid)` 查询当前被模拟 token 的已启用组（`S-1-5-4`），不回退到服务账户 token；若 SID 为空、非交互 token 或后续上下文构建（如 `ProfilePath`）失败，均直接返回 null，且 Pipe 请求不回退到 `TryResolveInteractiveUserFallback()`，防止非交互调用方或上下文解析失败的用户落到另一登录用户的上下文。显示名在 callback 外 SID.Translate，SessionId 从 Pipe 客户端 PID 解析，profile 从 ProfileList 读取。原 Name 读取可将 token 经 AsyncLocal 流到下一 await；当前边界由真实 Pipe 身份回归保护。该机制不证明历史所有 error 5/1314 都有同一原因。
 
 `BackendUserContextResolver` 在身份解析边界对 Pipe 和 WTS token 均统一核验已启用的 `INTERACTIVE`（`S-1-5-4`）组成员资格，直接将解析成功的 `SecurityIdentifier`（`UserSid` / `Sid`）存入 `BackendUserContext`。本地账户、域账户与 Entra ID（`S-1-12-1-...`）交互登录一律统一解析，不调用 `IsAccountSid()`，也不做任何 SID 前缀/形态分类。下游业务服务（如 `Windows11BlocksService`、`OpenWithRegistration`）直接使用 `context.Sid` 并验证对应 `HKEY_USERS/<SID>` hive 已加载。传统服务、批处理、网络登录等非交互令牌在 resolver 边界即被拒绝，无法获取有效用户上下文；锁屏、快速切换、RDP 和断开的交互会话由于 token 仍具 INTERACTIVE 组因而保留解析能力，未加载 hive 仍在下游拒绝。机器级操作与生命周期等非 per-user 操作不依赖用户上下文。
 
 | 请求 | 当前身份策略 |
 | --- | --- |
-| GetSnapshot、GetWin11ContextMenuSnapshot、Win11 PackagedCom query/mutation，通用 SetEnabled/ApplyDecision 等 | 认证 Pipe 用户（不 fallback 到另一登录用户）；resolver 边界已确保 token 具已启用的 INTERACTIVE 组并生成强类型 `UserSid`。下游验证 loaded hive/native view；Win11 blocked mutation 不需要 SessionId。SystemCommandStore 机器级来源不依赖用户上下文 |
+| GetSnapshot、GetWin11ContextMenuSnapshot、Win11 PackagedCom query/mutation，通用 SetEnabled/ApplyDecision 等所有 Pipe 用户级请求 | 认证 Pipe 用户（不 fallback 到另一登录用户）；resolver 边界已确保 token 具已启用的 INTERACTIVE 组并生成强类型 `UserSid`。下游验证 loaded hive/native view；Win11 blocked mutation 不需要 SessionId。SystemCommandStore 机器级来源不依赖用户上下文 |
 | ShellNew | 认证 SID；merged HKCR 另验证 WTS token SID/SessionId、profile/hive loaded；无用户/部分发现拒绝，不回服务 HKCR |
 | OpenWith snapshot/mutation/inspection/review、GetOpenWithPendingReviews/DecideOpenWithReview | 仅认证交互 SID（resolver 边界核验 INTERACTIVE）且验证 loaded hive/native view；HKLM 项也不允许缺用户，不需要 SessionId |
-| 部分 classic/其它用户请求 | resolver 仍有交互用户 fallback，必须逐 handler 检查，不宣称全局已禁用 fallback |
-| Restart Explorer | Pipe session context，匹配用户的 session fallback；只处理该桌面 |
+| Restart Explorer | 必须先成功解析认证 Pipe 用户上下文；仅当客户端 SessionId 缺失时允许同 SID 的 session fallback，只处理该桌面 |
 | 后台常规 monitor | 每轮交互用户 fallback；缺上下文保留 baseline，不隔离/纠偏/清理；OpenWith 另维护多 SID |
 
 ShellNew 的 `FrontendUserClassesRoot` 在同步退出即恢复的服务 scope 中取 WTS token，不启用进程权限，持有 token/merged handle 至发现结束。WTSQueryUserToken 需要 LocalSystem/SeTcb，RegOpenUserClassesRoot 返回独立状态码并需要已加载 profile；失败必须区分 API 阶段/native error、incoming/process identity、权限 present/enabled 和期望/实际 SID/session，不能从总错误猜缺哪个权限。

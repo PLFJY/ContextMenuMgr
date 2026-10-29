@@ -24,11 +24,7 @@ public sealed class BackendUserContextResolver
     }
 
     public BackendUserContext? TryResolveFromPipeClient(NamedPipeServerStream stream)
-        => TryResolveFromPipeClient(stream, out _);
-
-    public BackendUserContext? TryResolveFromPipeClient(NamedPipeServerStream stream, out bool rejected)
     {
-        rejected = true;
         _logger.LogFireAndForget("UserContextResolveStart: Source=PipeClient.");
         try
         {
@@ -54,13 +50,11 @@ public sealed class BackendUserContextResolver
                 return null;
             }
 
-            rejected = false;
-
             // Name is display metadata, resolved only after native impersonation
             // has ended. Authentication continues to use the captured token SID.
             var userName = sid.Value;
             try { userName = sid.Translate(typeof(NTAccount)).Value; }
-            catch (IdentityNotMappedException) { }
+            catch (Exception) { }
             var sessionId = TryResolvePipeClientSessionId(stream);
             var context = CreateContext(sid, userName, sessionId);
             _logger.LogFireAndForget(
@@ -76,26 +70,17 @@ public sealed class BackendUserContextResolver
 
     public BackendUserContext? TryResolveFromPipeClientWithSessionFallback(NamedPipeServerStream stream)
     {
-        var pipeContext = TryResolveFromPipeClient(stream, out var rejected);
-        if (rejected || pipeContext?.SessionId is not null)
+        var pipeContext = TryResolveFromPipeClient(stream);
+        if (pipeContext is not { SessionId: null })
         {
             return pipeContext;
         }
 
         var fallbackContext = TryResolveInteractiveUserFallback();
-
-        if (pipeContext is null)
-        {
-            return fallbackContext;
-        }
-
-        if (fallbackContext is not null
-            && string.Equals(fallbackContext.Sid, pipeContext.Sid, StringComparison.OrdinalIgnoreCase))
-        {
-            return fallbackContext;
-        }
-
-        return pipeContext;
+        return fallbackContext is not null
+            && string.Equals(fallbackContext.Sid, pipeContext.Sid, StringComparison.OrdinalIgnoreCase)
+            ? fallbackContext
+            : pipeContext;
     }
 
     public BackendUserContext? TryResolveInteractiveUserFallback()
