@@ -1576,8 +1576,8 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith ownership is unknown (including older versions); automatic removal is refused.</value></data>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>Visibility data or ownership marker differs from the verified writer; it is preserved.</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>Multiple physical registrations; effective handler not determined</value></data>
-  <data name="OpenWithProtectedText" xml:space="preserve"><value>System protected</value></data>
-  <data name="OpenWithProtectedGroup" xml:space="preserve"><value>System protected ({0})</value></data>
+  <data name="OpenWithReadOnlyText" xml:space="preserve"><value>Read-only registration</value></data>
+  <data name="OpenWithReadOnlyGroup" xml:space="preserve"><value>Read-only registrations ({0})</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>Cannot verify the executable identity. Use a literal local path to an existing file without symbolic links. Files over 128 MiB are not eligible.</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>Registration changed — review its source and command.</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>Protection needs review. Identity, visibility ownership or correction limit conflicts; no automatic write. Stop protection to accept the registration, or disable and authorize it again after inspection.</value></data>

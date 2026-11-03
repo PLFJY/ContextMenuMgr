@@ -144,8 +144,6 @@
                         <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCommand}" Content="{Binding OpenWithInspectText}" />
                         <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCancelCommand}" Content="{Binding OpenWithCancelText}" />
                     </WrapPanel>
-                    <TextBox Margin="0,6,0,0" MaxHeight="220" IsReadOnly="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto" Text="{Binding InspectionText, Mode=OneWay}" />
                 </StackPanel>
                 <ui:TextBlock
                     Margin="0,8,0,0"
@@ -482,7 +480,7 @@
                                                     Margin="0,6,0,0"
                                                     FontSize="12"
                                                     Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                                                    Text="{Binding OpenWithProtectedText}"
+                                                    Text="{Binding OpenWithReadOnlyText}"
                                                     ToolTip="{Binding RegistrationToolTip}"
                                                     Visibility="{Binding IsReadOnlyOpenWith, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <Border
@@ -650,18 +648,18 @@
                     ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
                     ItemsSource="{Binding ItemsView}" />
                 <Expander Margin="0,12,0,0"
-                          IsExpanded="{Binding IsOpenWithProtectedExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                          Visibility="{Binding ShowOpenWithProtectedGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                          IsExpanded="{Binding IsOpenWithReadOnlyExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          Visibility="{Binding ShowOpenWithReadOnlyGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Expander.Header>
                         <ui:TextBlock FontSize="14" FontWeight="SemiBold"
                                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                                      Text="{Binding OpenWithProtectedGroupText}" />
+                                      Text="{Binding OpenWithReadOnlyGroupText}" />
                     </Expander.Header>
                     <ItemsControl Margin="0,6,0,0"
                                   behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
                                   behaviors:MenuListTransitions.IsEnabled="True"
                                   ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
-                                  ItemsSource="{Binding OpenWithProtectedItemsView}" />
+                                  ItemsSource="{Binding OpenWithReadOnlyItemsView}" />
                 </Expander>
                 </StackPanel>
 

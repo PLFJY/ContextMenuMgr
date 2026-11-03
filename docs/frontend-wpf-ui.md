@@ -86,7 +86,9 @@ OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞�
 
 workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。
 
-OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合视图把 `IsReadOnlyOpenWith` 项放入“受系统保护”折叠分组；分组默认关闭、显示当前搜索结果数量，用户展开后仍显示原物理项和只读原因。搜索分别筛选可管理项与受保护项，受保护项是唯一匹配时保留分组入口而不显示空列表占位。刷新、通知和行更新继续使用原有身份与差量集合，不改变注册表权限或后端扫描范围。
+OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合视图把 `IsReadOnlyOpenWith` 项放入“只读注册项”折叠分组；分组默认关闭、显示当前搜索结果数量，用户展开后仍显示原物理项和只读原因。这里的“只读”不表示 Windows ACL 保护。搜索分别筛选可管理项与只读项，只读项是唯一匹配时保留分组入口而不显示空列表占位。刷新、通知和行更新继续使用原有身份与差量集合，不改变注册表权限或后端扫描范围。
+
+普通 OpenWith 页保留按扩展名“检查来源”的输入、检查和取消按钮，仅不呈现原始检查结果文本框；查询仍走原有只读 Pipe 接口，维护契约见 [OpenWith](openwith.md#按扩展名检查来源)。
 
 ## 列表缓存、差量刷新与通知
 

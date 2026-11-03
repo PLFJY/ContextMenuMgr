@@ -108,6 +108,13 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
             foreach (var (path, item) in settled)
             {
                 if (baseline.VisibilityIntents.ContainsKey(path)) continue;
+                if (!item.CanEdit)
+                {
+                    // A read-only registration cannot be quarantined or decided. Adopt its
+                    // observed generation and retire ordinary reviews from older builds.
+                    if (ObserveReadOnlyRegistration(baseline, path, item)) notifications.Add(item);
+                    continue;
+                }
                 // Older states could publish a failed isolation as a review. It is not an approval.
                 if (baseline.Reviews.GetValueOrDefault(path) == "IsolationFailed")
                 {
@@ -202,6 +209,22 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
                  || item.Metadata.GetValueOrDefault("VisibilityOwnership") != "Owned") baseline.Quarantines.Remove(path);
     }
 
+    private static bool ObserveReadOnlyRegistration(OpenWithUserBaseline baseline, string path, SpecialMenuEntry item)
+    {
+        var retired = baseline.PendingIsolations.Remove(path);
+        baseline.Registrations[path] = Stamp(item);
+        baseline.Generations[path] = Generation(item);
+        baseline.MissingRegistrations.Remove(path);
+        baseline.Quarantines.Remove(path);
+        if (baseline.Reviews.GetValueOrDefault(path) is "New" or "Changed" or "ReRegistered" or "IsolationFailed")
+        {
+            retired = true;
+            baseline.Reviews.Remove(path);
+            baseline.ReviewVersions.Remove(path);
+        }
+        return retired;
+    }
+
     private async Task<SpecialMenuEntry?> IsolateForReviewAsync(SpecialMenuEntry item, string status,
         BackendUserContext context, CancellationToken token)
     {
@@ -214,13 +237,13 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
                 ShellChangeNotifier.NotifyAssociationsChanged();
                 return isolated;
             }
-            // Existing disabled registrations need no write, including third-party NoOpenWith values.
+            // An existing disabled value still requires a manageable registration for review.
             return await store.WithOpenWithAsync<SpecialMenuEntry?>(state =>
             {
                 lock (OpenWithRegistration.Sync)
                 {
                     var current = SpecialMenuService.ReadOpenWithRegistration(path, context);
-                    if (Generation(current) != Generation(item) || current.IsEnabled)
+                    if (Generation(current) != Generation(item) || current.IsEnabled || !current.CanEdit)
                         throw new InvalidOperationException("OpenWithStaleReview");
                     var baseline = state.Users[context.Sid];
                     if (baseline.VisibilityIntents.ContainsKey(path)) throw new InvalidOperationException("OpenWithOperationUncertain");
@@ -241,6 +264,11 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
                 if (baseline.VisibilityIntents.ContainsKey(path)) return null;
                 var current = SpecialMenuService.ReadOpenWithRegistration(path, context);
                 if (Generation(current) != Generation(item)) return null;
+                if (!current.CanEdit)
+                {
+                    ObserveReadOnlyRegistration(baseline, path, current);
+                    return Decorate(current, context, state);
+                }
                 if (current.IsEnabled)
                 {
                     baseline.PendingIsolations.Remove(path);
@@ -562,7 +590,15 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
                         { ["AppRegistryPath"] = path, ["ReadOnlyReason"] = "OpenWithOperationUncertain" } };
                 }
                 var review = CreateReview(state, context, path, current);
-                if (review.Status != OpenWithReviewStatus.IsolationFailed) reviews.Add(review);
+                if (!current.CanEdit && current.Metadata.GetValueOrDefault("ReadOnlyReason") == "OpenWithUnsupportedRegistration"
+                    && state.Users[context.Sid].Reviews.GetValueOrDefault(path) is ("New" or "Changed" or "ReRegistered")
+                    && !state.Users[context.Sid].VisibilityIntents.ContainsKey(path)
+                    && (!state.Rules.TryGetValue(RuleKey(context.Sid, path), out var rule)
+                        || rule.Outcome is not ("Conflict" or "Uncertain")))
+                    continue;
+                if (review.Status != OpenWithReviewStatus.IsolationFailed
+                    && (current.CanEdit || review.Status is not (OpenWithReviewStatus.New or OpenWithReviewStatus.Changed or OpenWithReviewStatus.ReRegistered)))
+                    reviews.Add(review);
             }
             return new OpenWithReviewSnapshot(context.Sid, reviews, state.Users.ContainsKey(context.Sid));
         }, false, token);
@@ -587,7 +623,7 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
         var quarantined = !current.IsEnabled && current.Metadata.GetValueOrDefault("VisibilityOwnership") == "Owned"
             && baseline.Quarantines.TryGetValue(path, out var visibility) && visibility == current.Metadata.GetValueOrDefault("VisibilityStamp");
         var protectedItem = decorated.Metadata.GetValueOrDefault("PersistentProtection") == "True";
-        var canAccept = ordinary && !current.IsEnabled && (!quarantined || current.CanEdit && !protectedItem);
+        var canAccept = ordinary && !current.IsEnabled && current.CanEdit && (!quarantined || !protectedItem);
         var canReject = ordinary && !current.IsEnabled && current.CanEdit;
         var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n',
             context.Sid, path.ToUpperInvariant(), baseline.ReviewVersions.GetValueOrDefault(path),

@@ -82,6 +82,8 @@ v1.7.10 起，持久 lease 位于 `RuntimePaths.LocksDirectory`（`RootDirectory
 
 默认 Warning 不再强制记录成功的 Ping、快照、WPS 待审核等 routine query Start/End；Information 可恢复这些记录。mutation/进程维护操作的 Start/End、失败、超时、不确定结果保持关联 ID、命令、目标及耗时证据，即使配置 Error 也保留 request 失败。内部 Backend Warning/Error 独立按级别处理，不能被 query 分类吞掉。
 
+OpenWith 审核的 BackendOperationStart/End 记录 `OpenWithReviewDecision=Accept/Reject` 和 `OpenWithRegistryPath`，与现有 CorrelationId、ClientOperationId、Success 一起用于区分请求意图和已核实结果；旧 `ReviewOpenWithRegistration` 空保护决定按 Accept 记录。升级前缺少决策字段的历史日志不能仅凭成功响应推断通过或拒绝。
+
 Package discovery 按 SID 和 metadata/enumeration/manifest 阶段聚合：首个条件立即 Warning；全部失败的 package/stage/异常/HRESULT/消息与数量参与签名，前三个样本用于定位。相同条件每 15 分钟输出 `PackageDiscoveryWarningSummary` 和 `SuppressedOccurrences`；变化、恢复或容量淘汰时汇总已抑制次数。最多保留 32 个 SID/阶段条件，每条件最多 8192 字符样本；部分 enumeration 失败不会宣称其它阶段已恢复。不全局忽略任何 HRESULT，也不改变 package 枚举或 registry 行为。
 
 “清除全部日志”在后台执行一次维护：逐流取得相同双 lease，删除精确归档名、截断活动文件，涵盖上述七种固定文件名、当前用户 emergency TEMP，以及机器 `SystemTemp`（默认 Windows `SystemTemp`）和旧机器 TMP/TEMP（默认 Windows `Temp`）内的应用日志子目录。没有活动日志/归档的流不创建 lease。未知 `.log`、状态库、设置、备份和 reparse-point 文件不处理；不搜索其它用户 profile 或自定义 service-process-only TEMP。锁住/保护或无法检查的目录/文件显示部分失败及具体路径；SYSTEM TEMP 的 ACL 可能拒绝普通前端访问，需管理员单独清理。已清理的文件不会被误报为全部成功；不停止服务，继续记录，Frontend 自动补回会话头。清理不删除 Locks 目录或持久 lease、不删除其它进程持有的旧 lock；仅在本次完整 lease 结束后按上述规则退休自己的旧路径。

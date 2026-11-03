@@ -22,7 +22,7 @@ WPS / Microsoft Office 共存保护不在 OpenWith 普通页面展示受保护�
 
 | 行为 | 当前实现倾向 |
 | --- | --- |
-| 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，纳入带文件扩展名的应用 key；常规 command-bearing verb 保留旧物理 command Id。缺少 shell/verb/command、无可提取目标、DropTarget、DDE、DelegateExecute、ExplorerCommandHandler 或级联结构仍显示，但 CanEdit/CanDelete=false；开关可见但禁用，无删除/恢复操作，黄色标注“受系统保护”，并放入默认折叠的只读分组，用户点击后展开；搜索仍能筛选该分组，详细只读原因在 tooltip。无常规 command 的 Id 使用真实 app key，不制造 command。逐项访问失败保留只读物理路径。 |
+| 枚举 | 读取 `HKU\<SID>\Software\Classes\Applications` 和 `HKLM\SOFTWARE\Classes\Applications`，纳入带文件扩展名的应用 key；常规 command-bearing verb 保留旧物理 command Id。缺少 shell/verb/command、无可提取目标、DropTarget、DDE、DelegateExecute、ExplorerCommandHandler 或级联结构仍显示，但 CanEdit/CanDelete=false；开关可见但禁用，无删除/恢复操作，黄色标注“只读注册项”，并放入默认折叠的只读分组，用户点击后展开；搜索仍能筛选该分组，详细只读原因在 tooltip。“只读”表示当前激活结构没有经过验证的修改支持，不表示 Windows ACL 保护。无常规 command 的 Id 使用真实 app key，不制造 command。逐项访问失败保留只读物理路径。 |
 | 显示名 | 优先解析物理注册的 `FriendlyAppName`（不要求 app key 名与命令目标文件名相同），否则读取目标文件 `FileDescription`，最后回退到文件名；没有目标时使用 FriendlyAppName 或原 app 名。DefaultIcon 优先，无法解析时允许空图标，不制造 exe 路径。 |
 | 启用 / 禁用 | 禁用只在值不存在时写空 `REG_SZ NoOpenWith`，同时写独立 `ContextMenuMgrPlus.OpenWithVisibility` 归属值；两值在短生命周期 Windows 注册表事务中提交。启用只撤销匹配本物理路径、command generation 和值类型 / 内容的本程序写入；预存或第三方改写的值均保留并返回错误。 |
 | 新增 | 写入当前前端用户的 `HKU\<SID>\Software\Classes\Applications\<app.exe>\shell\open\command`，并写 `FriendlyAppName`；名称、command 与所有新子键使用同一 TxR 事务；通过事务中已打开的现有 SID hive handle 创建子键，避免用户 hive 并发卸载时创建替代 SID 根。检查 leaf disposition 必须为新建，已有或安装器抢先创建的 key 拒绝覆盖。失败/提交前取消回滚整次创建，不清除已有 `NoOpenWith`。创建目标必须是无环境变量的绝对文件路径。 |
@@ -43,14 +43,14 @@ OpenWith 需要 SID，但不需要 SessionId。请求只能使用 Pipe 客户端
 
 ## 按扩展名检查来源
 
-页面输入如 .txt 后点击“检查来源”，通过新增 PipeCommand.InspectOpenWithSources（ScopeValue=扩展名）返回独立 OpenWithAssociationInspection DTO。检查结果不使用 SpecialMenuEntry.RegistryPath 或 IsEnabled 表示关联状态，也不提供直接关联修改按钮。所有证据只读，Resolved 仅表示物理引用已解析，不表示 Explorer 一定显示候选。
+页面保留扩展名输入、“检查来源”和取消按钮。`PipeCommand.InspectOpenWithSources`（`ScopeValue` 为扩展名）返回独立 `OpenWithAssociationInspection` DTO；普通页面不展示原始检查结果文本框。结果不使用 `SpecialMenuEntry.RegistryPath` 或 `IsEnabled` 表示关联状态，也不提供直接关联修改。`Resolved` 仅表示物理引用已解析，不表示 Explorer 一定显示候选。
 
 - Applications：只对所选扩展名检查 SupportedTypes；FileExts OpenWithList 的明确 app 名也可解析到 HKU/HKLM Applications。复用现有 Applications reader 判断可管理 Id，不把相同 exe 的 ProgID 猜成可删除的 Applications 注册。
 - Classes 扩展名 OpenWithProgIDs、用户 FileExts OpenWithProgids：复用 ContextMenuRegistryCatalog.ReadOpenWithProgIdReferences 的原始来源读取。传统菜单 resolver 的 HasAnyContextMenuSubkey 过滤不适合这里，因此检查保留无 command 的 ProgID。后续按用户/机器物理 Classes 解析引用；两棵树都有 key 时显示 MultipleRegistrations，不猜合并后的有效处理程序。
 - RegisteredApplications 与 Capabilities/FileAssociations：只读取所选扩展名，并分别保留声明值和间接 FileAssociations 值的准确路径。标识符分组不丢失独立物理来源。
 - AppX/MSIX：只对认证用户的已安装包读取 manifest 中匹配扩展名的 FileTypeAssociation，显示 package family、Application Id、manifest 路径与 association 名，始终只读。不改包、UserChoice/Hash、UCPD 或任何关联 ACL。
 
-结果区可选择/复制，包含本地化来源、解析状态和物理路径。未找到注册、无效标识符、拒绝访问及扫描不完整分别呈现；诊断数量最多 64。常规加载/定时刷新不触发关联检查。每个来源目录最多检查 4096 个名、总证据最多 4096 条；包最多 512 个、单 manifest 最多 8 MiB 字符；超限明确标记不完整。后端 25 秒协作取消预算，前端 30 秒等待预算和独立取消按钮；操作系统单次同步 registry/package API 本身无法被 token 抢占。取消前端请求只停止等待，不把它当成已停止服务端调用；服务端继续受自己的预算约束。结果只代表当次读取，不是跨来源原子快照。
+接口保留未找到注册、无效标识符、拒绝访问及扫描不完整的诊断，最多 64 条。常规加载/定时刷新不触发关联检查。每个来源目录最多检查 4096 个名、总证据最多 4096 条；包最多 512 个、单 manifest 最多 8 MiB 字符；超限明确标记不完整。后端 25 秒协作取消预算，前端 30 秒等待预算和独立取消按钮；操作系统单次同步 registry/package API 本身无法被 token 抢占。取消前端请求只停止等待，不把它当成已停止服务端调用；服务端继续受自己的预算约束。结果只代表当次读取，不是跨来源原子快照。
 
 NoOpenWith 归属分为 Enabled（无值且无 marker；孤立 marker 归为 Changed）、Owned（当前 marker 和精确数据匹配）、Unknown（无 marker，含可能来自旧版本的值）、Changed（marker/数据/command 代际不符）。Unknown 与 Changed 都保留原值并拒绝普通启用；界面禁用该开关并在来源说明 tooltip 提供导出/核查步骤；旧版值不会自动认领。界面说明先导出准确物理 Applications key，再与应用厂商/注册表编辑器核查。未实现带持久恢复快照的显式 legacy recovery，因为当前没有能证明旧值来源的资料；不能为了兼容而弱化 provenance。
 
@@ -64,7 +64,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 1. 同一 app 分别注册在 HKU 当前 SID 和 HKLM，含 command、FriendlyAppName、ExpandString 和 nested values；运行普通权限前端 / 后端服务，分别开关。直接核对所选 hive 的空 `NoOpenWith`、归属值及刷新状态，另一 hive 不改变。服务 x86 / x64 构建应操作同一 native view。对两个用户重复，不能读取或改写另一 SID；认证失败 / hive 未加载返回错误，不新建 SID 根。分别在本地账户、域账户和真实 Entra 登录下重复快照、开关、编辑/删除/恢复及 WTS 监控/通知，确认另一用户 hive 不可操作、未加载 hive 仍拒绝；以服务/网络/批处理非交互 token 验证即使 SID 相同也拒绝，并验证锁屏、RDP 与断开的交互会话仍允许。普通账户单测不替代这些登录形态。
 2. 预先设置空字符串、非空字符串、DWORD / Binary `NoOpenWith`。刷新后未知/改写归属的开关不可操作，来源说明 tooltip 给出导出/核查步骤，物理值与类型保持不变；通过后端请求启用也必须拒绝。旧版本无 marker 的值同样保留。由第三方改写 NoOpenWith、marker 或 command 后重试，旧请求拒绝，刷新准确反映当前值。
-3. 使用唯一 GUID 夹具：扩展名 .cmm136-<GUID>、应用 Cmm136-<GUID>.exe、独立 ProgID Cmm136.<GUID>；只对这些键操作。准备一个可丢弃测试 exe 的常规 Applications 注册、另一个仅 shell/open/DropTarget/CLSID 的注册和仅 FriendlyAppName/SupportedTypes 的注册。后两者必须展示只读且不能被伪造 DTO 启用/删除。分别测试 Applications-only、同时通过 `OpenWithProgIDs`、用户 FileExts、RegisteredApplications/Capabilities 和打包应用提供的候选。对同一扩展名同时创建 HKU Classes OpenWithProgIDs、FileExts OpenWithList/OpenWithProgids、RegisteredApplications/Capabilities 引用；点击检查，确认同一标识符分组中保留每条准确物理路径，独立 ProgID 始终只读，Applications 引用显示对应可管理注册。输入路径穿越/无效扩展名应拒绝，取消不会卡住页面，访问失败/包扫描失败显示不完整。观察实际文件的子菜单及“选择其他应用”对话框，记录 Windows 版本和文件类型；注册表成功而 Explorer 仍显示候选属于范围限制，不能判为已验证 Explorer 移除。默认应用通过 Windows 设置选择，比较操作前后的只读 UserChoice / 默认处理行为，不手工写 Hash。
+3. 使用唯一 GUID 夹具：扩展名 .cmm136-<GUID>、应用 Cmm136-<GUID>.exe、独立 ProgID Cmm136.<GUID>；只对这些键操作。准备一个可丢弃测试 exe 的常规 Applications 注册、另一个仅 shell/open/DropTarget/CLSID 的注册和仅 FriendlyAppName/SupportedTypes 的注册。后两者必须展示只读且不能被伪造 DTO 启用/删除。分别测试 Applications-only、同时通过 `OpenWithProgIDs`、用户 FileExts、RegisteredApplications/Capabilities 和打包应用提供的候选。对同一扩展名同时创建 HKU Classes OpenWithProgIDs、FileExts OpenWithList/OpenWithProgids、RegisteredApplications/Capabilities 引用；通过后端只读检查接口核对同一标识符分组中的每条准确物理路径，独立 ProgID 始终只读，Applications 引用对应可管理注册。输入路径穿越/无效扩展名应拒绝，取消应返回，访问失败/包扫描失败应标记不完整；普通页面保留检查输入和按钮，但不显示原始结果框。观察实际文件的子菜单及“选择其他应用”对话框，记录 Windows 版本和文件类型；注册表成功而 Explorer 仍显示候选属于范围限制，不能判为已验证 Explorer 移除。默认应用通过 Windows 设置选择，比较操作前后的只读 UserChoice / 默认处理行为，不手工写 Hash。
 4. 连续至少三次开关、刷新、删除 / 重启服务 / 恢复：原 key 与 backup 必须互斥，ACL、值类型、未展开文本、command 与原开关状态完整恢复。人为预置 `.deleted` 冲突（包括残缺副本）时不覆盖；原 app 被安装器重建后 Undo 拒绝，两项仍可查看，Purge 只清理选中备份。验证历史重复后缀只恢复指定副本。
 5. 在测试 key / 某个 backup 子键设置可恢复的权限拒绝，分别尝试 toggle、Delete、Undo、Purge。错误不得显示完成；事务失败不留半对 marker/NoOpenWith 或残缺备份。解除测试 ACL 后重试，并直接检查树和前端状态。模拟进程在原生 rename / 事务提交前后退出，不能出现半棵复制树。
 6. 编辑同时更改名称和目标 exe 为另一程序，操作必须失败且名称/command/ACL 完全不变。合法的名称+参数编辑必须一起提交，ExpandString 类型和未展开变量保留。表单打开后在外部改名称或 command，提交旧表单必须拒绝；事务不可用、提交前取消/写入拒绝不得留下半初始化 app key。
@@ -82,7 +82,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 新监控或 session reset 等待 30 秒，且初始发现须 10 秒不变；单项和确认缺失也须稳定 10 秒。访问拒绝/不完整发现暂停采纳，记录失败并退避 30 秒；同一错误持续期间避免重复 attention。首次没有该 SID OpenWith baseline 时静默采纳当前项（可为零），与 regular/WPS markers 无关。已有 baseline 会在启动稳定后发现离线新增；完全在两次轮询之间出现又消失的变化不可见。
 
-**基础流程：发现新增、改变或重注册 → 核实隔离成功 → 送审；通过后仅解除本次隔离，拒绝则保持禁用。** 首次/重置基线仍静默采纳；第三方已有禁用值保留。已核实隔离失败的注册保留物理状态与诊断日志，不进入待审批、不计入角标，同一物理代际不重复尝试；注册发生变化后重新评估。写入结果不确定时保留 journal 并只读核对，不能按已失败清除。OpenWith 使用独立 NoOpenWith/journal，不套用经典 Added/quarantine。每 SID/轮聚合一次通知。中央待审批是注册审核入口，普通 OpenWith 页保留状态、定位待审批按钮和独立持久保护管理，不再提供竞争性的接受操作。
+**基础流程：发现可管理注册新增、改变或重注册 → 核实隔离成功 → 送审；通过后仅解除本次隔离，拒绝则保持禁用。** 首次/重置基线仍静默采纳；第三方已有禁用值保留。`CanEdit=false` 的注册只作物理观测，不尝试隔离、不进入普通 New/Changed/ReRegistered 审核；即使它原本带 `NoOpenWith`，也不能把外部禁用值当成本程序完成隔离。升级前留下的此类普通审核在只读查询中隐藏，并在稳定轮询后清除；已有未完成写入 journal 仍须核对，既有持久保护冲突仍保留 attention。已核实隔离失败的注册保留物理状态与诊断日志，不进入待审批、不计入角标，同一物理代际不重复尝试；注册发生变化后重新评估。写入结果不确定时保留 journal 并只读核对，不能按已失败清除。OpenWith 使用独立 NoOpenWith/journal，不套用经典 Added/quarantine。每 SID/轮聚合一次通知。中央待审批是注册审核入口，普通 OpenWith 页保留状态、定位待审批按钮和独立持久保护管理，不再提供竞争性的接受操作。
 
 | 持久状态 | 中央队列语义 |
 | --- | --- |
@@ -95,7 +95,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 `GetOpenWithPendingReviews` 使用认证 SID、loaded hive/native view，只读取持久 review、未完成 journal 与保护 attention 的准确物理路径，不扫描全部 Applications、不建立 baseline、不写注册表或生成 review。未完成但尚无不确定写入的隔离及已核实失败均不列入队列。最多 8192 个身份，后端 15 秒协作预算；单项读取不完整保留 Uncertain，可见性返回 null 并显示尚未核实，不使用占位布尔值猜测启用状态；状态库/身份/数量错误使整次查询失败，前端保留原列表。结果为独立强类型 OpenWithReviewSnapshot，包含用户、物理路径、SpecialMenuEntry 原始信息、status、capability/限制及 protection，并以 BaselineEstablished 明确表示该认证 SID 的持久基线是否存在；此只读标志不建立基线。HKU/HKLM 同名项分别决策。
 
-`DecideOpenWithReview` 提交路径、审核 generation 和 Accept/Reject。generation 结合持久审核版本、SID/物理路径及完整注册 fingerprint；fingerprint 包含原始值/类型、子键及 last-write time，最多 512 个节点、深度 16、4096 个值、1 MiB 序列化指纹材料，超限 fail closed。不支持激活结构也有物理指纹。只接受与最新稳定观测和 fresh read 完全一致的 generation；解除本次隔离时还在原有 TxR 内再次核对，内容或同内容重建使旧决策失效。
+`DecideOpenWithReview` 提交路径、审核 generation 和 Accept/Reject。generation 结合持久审核版本、SID/物理路径及完整注册 fingerprint；fingerprint 包含原始值/类型、子键及 last-write time，最多 512 个节点、深度 16、4096 个值、1 MiB 序列化指纹材料，超限 fail closed。不支持激活结构仍可生成物理指纹以供观测，但不能因此获得审核决策能力。只接受与最新稳定观测和 fresh read 完全一致的 generation；解除本次隔离时还在原有 TxR 内再次核对，内容或同内容重建使旧决策失效。后端操作起止日志对审核请求同时记录 `OpenWithReviewDecision=Accept/Reject`、物理 `OpenWithRegistryPath`、关联 ID 与结果；旧协议的空保护决定明确记为 Accept。历史日志没有该字段时不能从 `Success=True` 推断通过或拒绝。
 
 Accept 经原 TxR/read-back 解除归属仍匹配的本次隔离，提交成功才移出队列；原已禁用的项仅确认并保留原值。Reject 回读已禁用后持久解除审核，保持 NoOpenWith，不删除注册或自动授权保护。Conflict/Uncertain 仅提供检查；原有保护授权须先显式停止才能放行。
 

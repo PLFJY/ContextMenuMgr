@@ -1576,8 +1576,8 @@
   <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith 归属未知（可能来自旧版或其他程序），拒绝自动移除。</value></data>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可见性数据或归属标记与已验证写入不符，已保留。</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多个物理注册，未确定最终生效的处理程序</value></data>
-  <data name="OpenWithProtectedText" xml:space="preserve"><value>受系统保护</value></data>
-  <data name="OpenWithProtectedGroup" xml:space="preserve"><value>受系统保护（{0}）</value></data>
+  <data name="OpenWithReadOnlyText" xml:space="preserve"><value>只读注册项</value></data>
+  <data name="OpenWithReadOnlyGroup" xml:space="preserve"><value>只读注册项（{0}）</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>无法验证程序身份。需为现有本地文件的绝对路径，不能使用环境变量或符号链接，文件不能超过 128 MiB。</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>注册已改变，请核查来源与命令。</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>保护需要审核：身份、可见性归属或纠正次数存在冲突，已停止自动写入。可停止保护以接受注册，或核查后禁用并重新授权。</value></data>

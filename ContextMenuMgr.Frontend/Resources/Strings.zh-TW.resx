@@ -1576,8 +1576,8 @@
   <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith 歸屬未知（可能來自舊版或其他程式），拒絕自動移除。</value></data>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>可見性資料或歸屬標記與已驗證寫入不符，已保留。</value></data>
   <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>存在多個實體登錄，未確定最終生效的處理程式</value></data>
-  <data name="OpenWithProtectedText" xml:space="preserve"><value>受系統保護</value></data>
-  <data name="OpenWithProtectedGroup" xml:space="preserve"><value>受系統保護（{0}）</value></data>
+  <data name="OpenWithReadOnlyText" xml:space="preserve"><value>唯讀登錄項目</value></data>
+  <data name="OpenWithReadOnlyGroup" xml:space="preserve"><value>唯讀登錄項目（{0}）</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>無法驗證程式身分。需為現有本機檔案的絕對路徑，不能使用環境變數或符號連結，檔案不能超過 128 MiB。</value></data>
   <data name="OpenWithMonitorChanged" xml:space="preserve"><value>註冊已變更，請檢查來源與命令。</value></data>
   <data name="OpenWithMonitorConflict" xml:space="preserve"><value>保護需要審核：身分、可見性歸屬或修正次數存在衝突，已停止自動寫入。可停止保護以接受註冊，或檢查後停用並重新授權。</value></data>

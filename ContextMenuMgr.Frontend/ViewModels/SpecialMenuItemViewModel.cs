@@ -73,7 +73,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool IsReadOnlyOpenWith => Entry.Kind == SpecialMenuKind.OpenWith && !Entry.CanEdit
         && Entry.Metadata.GetValueOrDefault("RuleOnly") != "true";
-    public string OpenWithProtectedText => _localization.Translate("OpenWithProtectedText");
+    public string OpenWithReadOnlyText => _localization.Translate("OpenWithReadOnlyText");
     public bool HasPersistentProtection => Entry.Metadata.GetValueOrDefault("PersistentProtection") == "True";
     public bool ShowProtection => HasPersistentProtection || Entry.Kind == SpecialMenuKind.OpenWith
         && Entry.CanEdit && !IsEnabled && !IsDeleted && Entry.Metadata.GetValueOrDefault("RegistryScope") == "User"
@@ -291,7 +291,7 @@ public partial class SpecialMenuItemViewModel : ObservableObject
     public void RefreshLocalization()
     {
         RefreshMonitoringProperties();
-        OnPropertyChanged(nameof(OpenWithProtectedText));
+        OnPropertyChanged(nameof(OpenWithReadOnlyText));
         OnPropertyChanged(nameof(RegistrationNotice));
         OnPropertyChanged(nameof(RegistrationToolTip));
         OnPropertyChanged(nameof(ToggleLabel));

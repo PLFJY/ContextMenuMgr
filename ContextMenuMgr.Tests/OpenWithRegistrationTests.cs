@@ -372,24 +372,48 @@ public sealed class OpenWithRegistrationTests
     }
 
     [Fact]
-    public async Task PendingReadOnlyRegistration_CanAcknowledgeButCannotReject()
+    public async Task PendingReadOnlyRegistration_IsRemovedFromApprovalWithoutChangingVisibility()
     {
         using var fixture = new Fixture(monitoring: true);
-        await fixture.CreatePending(initiallyDisabled: true);
+        var pending = await fixture.CreatePending(initiallyDisabled: true);
+        var signals = new List<BackendNotification>();
+        fixture.Monitoring!.Changed += (_, signal) => signals.Add(signal);
         using (var verb = fixture.Open(@"\shell\open", true)!) verb.SetValue("DelegateExecute", "{00000000-0000-0000-0000-000000000000}");
+        Assert.Empty((await fixture.Pending()).Reviews);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(pending, OpenWithReviewDecision.Accept));
         await fixture.Poll(80);
         await fixture.Poll(95);
-        var readOnly = Assert.Single((await fixture.Pending()).Reviews);
-        Assert.True(readOnly.CanAccept);
-        Assert.False(readOnly.CanReject);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Decide(readOnly, OpenWithReviewDecision.Reject));
-        await fixture.Decide(readOnly, OpenWithReviewDecision.Accept);
         Assert.Empty((await fixture.Pending()).Reviews);
+        Assert.Equal(0, Assert.Single(signals).OpenWithPendingCount);
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(
+            state => state.Users[fixture.Context.Sid].PendingIsolations, false, default));
         using var actual = fixture.Open()!;
         Assert.Equal("", actual.GetValue("NoOpenWith"));
         Assert.Null(actual.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
         using var actualVerb = actual.OpenSubKey(@"shell\open");
         Assert.Equal("{00000000-0000-0000-0000-000000000000}", actualVerb!.GetValue("DelegateExecute"));
+    }
+
+    [Fact]
+    public async Task DisabledReadOnlyRegistration_NeverEntersApproval()
+    {
+        using var fixture = new Fixture(monitoring: true);
+        await fixture.Poll(0);
+        await fixture.Poll(35);
+        fixture.Create(complete: false);
+        using (var key = fixture.Open(writable: true)!)
+        {
+            key.SetValue("IsHostApp", Array.Empty<byte>(), RegistryValueKind.None);
+            key.SetValue("NoOpenWith", Array.Empty<byte>(), RegistryValueKind.None);
+        }
+        await fixture.Poll(40);
+        await fixture.Poll(55);
+        Assert.Empty((await fixture.Pending()).Reviews);
+        Assert.Empty(await fixture.Store!.WithOpenWithAsync(
+            state => state.Users[fixture.Context.Sid].PendingIsolations, false, default));
+        using var actual = fixture.Open()!;
+        Assert.Equal(RegistryValueKind.None, actual.GetValueKind("NoOpenWith"));
+        Assert.Null(actual.GetValue("ContextMenuMgrPlus.OpenWithVisibility"));
     }
 
     [Fact]
