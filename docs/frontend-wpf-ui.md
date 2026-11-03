@@ -88,7 +88,7 @@ workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅�
 
 OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合视图把 `IsReadOnlyOpenWith` 项放入“只读注册项”折叠分组；分组默认关闭、显示当前搜索结果数量，用户展开后仍显示原物理项和只读原因。这里的“只读”不表示 Windows ACL 保护。搜索分别筛选可管理项与只读项，只读项是唯一匹配时保留分组入口而不显示空列表占位。刷新、通知和行更新继续使用原有身份与差量集合，不改变注册表权限或后端扫描范围。
 
-普通 OpenWith 页保留按扩展名“检查来源”的输入、检查和取消按钮，仅不呈现原始检查结果文本框；查询仍走原有只读 Pipe 接口，维护契约见 [OpenWith](openwith.md#按扩展名检查来源)。
+普通 OpenWith 页不呈现按扩展名“检查来源”的输入、检查和取消按钮，也不呈现原始结果框。已发布的只读检查接口由后端保留，维护契约见 [OpenWith](openwith.md#按扩展名检查来源的只读接口)。
 
 ## 列表缓存、差量刷新与通知
 

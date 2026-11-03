@@ -137,14 +137,6 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
-                <StackPanel Margin="0,8,0,0" Visibility="{Binding ShowOpenWithInspection, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock Text="{Binding OpenWithInspectionLabel}" TextWrapping="Wrap" />
-                    <WrapPanel Margin="0,6,0,0">
-                        <TextBox Width="120" Text="{Binding InspectionExtension, UpdateSourceTrigger=PropertyChanged}" />
-                        <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCommand}" Content="{Binding OpenWithInspectText}" />
-                        <ui:Button Margin="8,0,0,0" Command="{Binding InspectOpenWithCancelCommand}" Content="{Binding OpenWithCancelText}" />
-                    </WrapPanel>
-                </StackPanel>
                 <ui:TextBlock
                     Margin="0,8,0,0"
                     Foreground="#C75000"

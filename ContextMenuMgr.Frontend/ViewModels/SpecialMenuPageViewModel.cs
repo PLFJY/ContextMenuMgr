@@ -128,58 +128,11 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     public string Description => _localization.Translate(_descriptionKey);
 
-    public bool ShowOpenWithInspection => Kind == SpecialMenuKind.OpenWith;
-    public string OpenWithInspectionLabel => _localization.Translate("OpenWithInspectionLabel");
-    public string OpenWithInspectText => _localization.Translate("OpenWithInspect");
-    public string OpenWithCancelText => _localization.Translate("DialogCancel");
     public string OpenWithReadOnlyGroupText => _localization.Format("OpenWithReadOnlyGroup", OpenWithReadOnlyItemsView?.Count ?? 0);
     public bool ShowOpenWithReadOnlyGroup => OpenWithReadOnlyItemsView?.IsEmpty == false;
 
     [ObservableProperty]
     public partial bool IsOpenWithReadOnlyExpanded { get; set; }
-
-    [ObservableProperty]
-    public partial string InspectionExtension { get; set; } = ".txt";
-
-    [ObservableProperty]
-    public partial string InspectionText { get; set; } = string.Empty;
-
-    [RelayCommand(IncludeCancelCommand = true)]
-    private async Task InspectOpenWithAsync(CancellationToken cancellationToken)
-    {
-        if (!ShowOpenWithInspection) return;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token, _disposeCts.Token);
-        InspectionText = _localization.Translate("LoadingItemsText");
-        try
-        {
-            var result = await _backendClient.InspectOpenWithSourcesAsync(InspectionExtension, linked.Token);
-            linked.Token.ThrowIfCancellationRequested();
-            var lines = new List<string> { result.Extension, _localization.Translate("OpenWithInspectionNotice") };
-            foreach (var candidate in result.Candidates)
-            {
-                lines.Add(string.Empty);
-                lines.Add(candidate.Identifier);
-                foreach (var source in candidate.Sources)
-                {
-                    lines.Add(_localization.Translate("OpenWithSource" + source.Kind) + " · "
-                        + _localization.Translate("OpenWithResolution" + source.Resolution));
-                    lines.Add(source.SourcePath + " [" + source.ValueName + "]");
-                    lines.AddRange(source.RegistrationPaths.Select(p => "  → " + p));
-                    lines.Add(_localization.Translate(source.ManageableRegistrationIds.Count > 0
-                        ? "OpenWithManageableReference" : "OpenWithReadOnlySource"));
-                }
-            }
-            if (result.Candidates.Count == 0) lines.Add(_localization.Translate("EmptyItemsText"));
-            lines.AddRange(result.Diagnostics.Select(d => _localization.Translate(d.Code) + " " + d.SourcePath));
-            InspectionText = string.Join(Environment.NewLine, lines);
-        }
-        catch (OperationCanceledException)
-        {
-            InspectionText = _localization.Translate("OpenWithInspectionCanceled");
-        }
-        catch (Exception ex) { InspectionText = ex.Message; }
-    }
 
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
@@ -1570,9 +1523,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Description));
-        OnPropertyChanged(nameof(OpenWithInspectionLabel));
-        OnPropertyChanged(nameof(OpenWithInspectText));
-        OnPropertyChanged(nameof(OpenWithCancelText));
         OnPropertyChanged(nameof(LoadingItemsText));
         OnPropertyChanged(nameof(EmptyItemsText));
         RefreshListPlaceholderState();

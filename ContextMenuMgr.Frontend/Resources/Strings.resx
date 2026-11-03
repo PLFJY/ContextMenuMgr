@@ -1551,31 +1551,12 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithOperationUncertain" xml:space="preserve">
     <value>The Open With operation outcome could not be confirmed. Refresh to check the registry state before trying again.</value>
   </data>
-  <data name="OpenWithInspectionLabel" xml:space="preserve"><value>Inspect registration sources for a file extension (read-only)</value></data>
-  <data name="OpenWithInspect" xml:space="preserve"><value>Inspect sources</value></data>
-  <data name="OpenWithInspectionNotice" xml:space="preserve"><value>Registry evidence only. Resolved does not confirm Explorer visibility. Applications updates do not remove independent association sources.</value></data>
-  <data name="OpenWithSourceApplications" xml:space="preserve"><value>Applications supported types</value></data>
-  <data name="OpenWithSourceClassesProgIds" xml:space="preserve"><value>Classes · OpenWithProgIDs</value></data>
-  <data name="OpenWithSourceExplorerList" xml:space="preserve"><value>Explorer · OpenWithList history</value></data>
-  <data name="OpenWithSourceExplorerProgIds" xml:space="preserve"><value>Explorer · OpenWithProgids</value></data>
-  <data name="OpenWithSourceCapabilities" xml:space="preserve"><value>RegisteredApplications / Capabilities declaration</value></data>
-  <data name="OpenWithSourcePackage" xml:space="preserve"><value>AppX/MSIX manifest declaration</value></data>
-  <data name="OpenWithResolutionResolved" xml:space="preserve"><value>Reference resolved</value></data>
-  <data name="OpenWithResolutionUnresolved" xml:space="preserve"><value>Registration not resolved</value></data>
-  <data name="OpenWithResolutionInvalid" xml:space="preserve"><value>Invalid identifier</value></data>
-  <data name="OpenWithResolutionInaccessible" xml:space="preserve"><value>Resolution incomplete: access failed</value></data>
-  <data name="OpenWithManageableReference" xml:space="preserve"><value>Links to manageable Applications registrations below; this source remains read-only.</value></data>
-  <data name="OpenWithReadOnlySource" xml:space="preserve"><value>Read-only association source; no validated Applications mutation target.</value></data>
-  <data name="OpenWithInspectionIncomplete" xml:space="preserve"><value>Inspection is incomplete: some sources could not be read or resolved.</value></data>
-  <data name="OpenWithInspectionLimited" xml:space="preserve"><value>Inspection reached its safety limit; results are incomplete.</value></data>
-  <data name="OpenWithInspectionCanceled" xml:space="preserve"><value>Inspection canceled or timed out. Run it again to get fresh evidence.</value></data>
   <data name="OpenWithUnsupportedRegistration" xml:space="preserve"><value>Read-only · activation structure has no validated mutation support</value></data>
   <data name="OpenWithInaccessibleRegistration" xml:space="preserve"><value>Read-only · registration metadata could not be read</value></data>
   <data name="OpenWithScopeUser" xml:space="preserve"><value>Current user · Applications</value></data>
   <data name="OpenWithScopeMachine" xml:space="preserve"><value>Machine · Applications</value></data>
   <data name="OpenWithVisibilityUnknown" xml:space="preserve"><value>NoOpenWith ownership is unknown (including older versions); automatic removal is refused.</value></data>
   <data name="OpenWithVisibilityChanged" xml:space="preserve"><value>Visibility data or ownership marker differs from the verified writer; it is preserved.</value></data>
-  <data name="OpenWithResolutionMultipleRegistrations" xml:space="preserve"><value>Multiple physical registrations; effective handler not determined</value></data>
   <data name="OpenWithReadOnlyText" xml:space="preserve"><value>Read-only registration</value></data>
   <data name="OpenWithReadOnlyGroup" xml:space="preserve"><value>Read-only registrations ({0})</value></data>
   <data name="OpenWithIdentityUnavailable" xml:space="preserve"><value>Cannot verify the executable identity. Use a literal local path to an existing file without symbolic links. Files over 128 MiB are not eligible.</value></data>

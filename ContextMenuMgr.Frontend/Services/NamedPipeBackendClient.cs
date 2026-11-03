@@ -588,13 +588,6 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.SpecialItems;
     }
 
-    public async Task<OpenWithAssociationInspection> InspectOpenWithSourcesAsync(string extension, CancellationToken cancellationToken)
-    {
-        var response = await SendRequestAsync(new PipeRequest
-        { Command = PipeCommand.InspectOpenWithSources, ScopeValue = extension }, cancellationToken);
-        return response.OpenWithInspection ?? throw new InvalidOperationException("Missing Open With inspection response.");
-    }
-
     public async Task<IReadOnlyList<SpecialMenuEntry>> ReviewOpenWithRegistrationAsync(SpecialMenuEntry item,
         bool? protect, CancellationToken cancellationToken)
     {
