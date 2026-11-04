@@ -816,7 +816,8 @@ public sealed class SpecialMenuService
                 budget.CancelAfter(TimeSpan.FromSeconds(8));
                 items = GetShellNewItems(context, budget.Token, includePackaged: false).Where(IsClassicShellNewEntry).ToArray();
             }
-            transaction.Execute(locked, items?.Select(x => x.KeyName).ToArray(), items?.Select(x => x.KeyName).ToArray(), cancellationToken);
+            var orderEntries = items?.SelectMany(GetShellNewAssociatedExtensions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            transaction.Execute(locked, orderEntries, orderEntries, cancellationToken);
             return new PipeResponse { Success = true, ShellNewOrderLocked = locked, ClientOperationId = operationId };
         }
         catch (Exception ex)
@@ -891,21 +892,133 @@ public sealed class SpecialMenuService
         }
     }
 
-    private static IReadOnlyList<SpecialMenuEntry> CreateShellNewPresentation(
+    internal static IReadOnlyList<SpecialMenuEntry> CreateShellNewPresentation(
         IReadOnlyList<SpecialMenuEntry> entries,
         IReadOnlyDictionary<string, int> ordered,
         bool orderLocked)
     {
-        var sortableEntries = entries
-            .OrderBy(item => ordered.TryGetValue(item.KeyName, out var index) ? index : int.MaxValue)
+        var physicalEntries = DeduplicateShellNewPhysicalRegistrations(entries);
+        var ambiguousExtensions = physicalEntries.Where(IsClassicShellNewEntry)
+            .SelectMany(GetShellNewAssociatedExtensions)
+            .GroupBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+            .Where(static group => group.Count() > 1)
+            .Select(static group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var sortableEntries = physicalEntries
+            .OrderBy(item => GetShellNewOrderIndex(item, ordered))
             .ThenBy(item => item.KeyName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var beforeSeparator = sortableEntries.Where(static item => IsBeforeSeparatorEntry(item)).Select(static item => item with { CanMove = false }).ToArray();
-        var afterSeparator = sortableEntries.Where(static item => !IsBeforeSeparatorEntry(item)).Select(item => item with { CanMove = item.CanEdit && orderLocked }).ToArray();
+        var afterSeparator = sortableEntries.Where(static item => !IsBeforeSeparatorEntry(item)).Select(item => item with
+        {
+            CanMove = item.CanMove && item.CanEdit && orderLocked
+                && !GetShellNewAssociatedExtensions(item).Any(ambiguousExtensions.Contains)
+        }).ToArray();
         return beforeSeparator
             .Concat(new[] { CreateShellNewSeparatorEntry() })
             .Concat(afterSeparator)
             .ToArray();
+    }
+
+    private static IReadOnlyList<SpecialMenuEntry> DeduplicateShellNewPhysicalRegistrations(IReadOnlyList<SpecialMenuEntry> entries)
+    {
+        var result = new List<SpecialMenuEntry>(entries.Count);
+        var physical = new Dictionary<string, List<SpecialMenuEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in entries)
+        {
+            if (item.Metadata.GetValueOrDefault("ProviderType") == PackagedShellNewDiscovery.ProviderType)
+            {
+                result.Add(item);
+                continue;
+            }
+
+            var path = item.RegistryPath;
+            if (string.IsNullOrWhiteSpace(path))
+                throw new InvalidOperationException($"ShellNew physical registration has no RegistryPath (Id={item.Id}).");
+            var normalizedPath = NormalizeShellNewPhysicalPath(path);
+            var expectedId = EncodeId(SpecialMenuKind.ShellNew, path);
+            if (!string.Equals(item.Id, expectedId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"ShellNew physical registration identity does not match its RegistryPath (Id={item.Id}, RegistryPath={path}).");
+            if (!physical.TryGetValue(normalizedPath, out var group))
+                physical.Add(normalizedPath, group = []);
+            group.Add(item);
+        }
+
+        foreach (var (_, group) in physical.OrderBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var first = group[0];
+            foreach (var item in group.Skip(1))
+            {
+                if (item.IsEnabled != first.IsEnabled
+                    || !string.Equals(item.Metadata.GetValueOrDefault("SourceScope"), first.Metadata.GetValueOrDefault("SourceScope"), StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(item.Metadata.GetValueOrDefault("ProgId"), first.Metadata.GetValueOrDefault("ProgId"), StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(item.Metadata.GetValueOrDefault("CreationKind"), first.Metadata.GetValueOrDefault("CreationKind"), StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(item.Metadata.GetValueOrDefault("DisabledRegistryPath"), first.Metadata.GetValueOrDefault("DisabledRegistryPath"), StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(item.CommandText, first.CommandText, StringComparison.Ordinal)
+                    || !string.Equals(item.RegistryPath, first.RegistryPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Conflicting ShellNew discoveries share physical identity {first.RegistryPath}; refusing to discard conflicting state or provenance.");
+                }
+            }
+
+            var extensions = group
+                .SelectMany(GetShellNewAssociatedExtensions)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static extension => extension, StringComparer.Ordinal)
+                .ToArray();
+            var representative = group
+                .OrderBy(static item => item.Metadata.GetValueOrDefault("Extension") ?? item.KeyName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static item => item.Metadata.GetValueOrDefault("Extension") ?? item.KeyName, StringComparer.Ordinal)
+                .First();
+            var metadata = representative.Metadata.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            metadata["AssociatedExtensions"] = System.Text.Json.JsonSerializer.Serialize(extensions);
+            metadata["SharedPhysicalRegistration"] = (extensions.Length > 1).ToString();
+            var beforeSeparator = extensions.Any(extension => group.Any(item =>
+                string.Equals(item.Metadata.GetValueOrDefault("Extension") ?? item.KeyName, extension, StringComparison.OrdinalIgnoreCase)
+                && IsBeforeSeparatorEntry(item)));
+            metadata["BeforeSeparator"] = beforeSeparator.ToString();
+            result.Add(representative with
+            {
+                Id = EncodeId(SpecialMenuKind.ShellNew, representative.RegistryPath!),
+                KeyName = extensions[0],
+                Notes = extensions.Length > 1 ? string.Join(", ", extensions) : representative.Notes,
+                CanMove = representative.CanMove && extensions.Length == 1,
+                Metadata = metadata
+            });
+        }
+
+        return result;
+    }
+
+    private static string NormalizeShellNewPhysicalPath(string path)
+        => path.Trim().Replace('/', '\\').TrimEnd('\\');
+
+    private static IReadOnlyList<string> GetShellNewAssociatedExtensions(SpecialMenuEntry item)
+    {
+        if (item.Metadata.TryGetValue("AssociatedExtensions", out var json))
+        {
+            try
+            {
+                var extensions = System.Text.Json.JsonSerializer.Deserialize<string[]>(json);
+                if (extensions is { Length: > 0 }) return extensions;
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                throw new InvalidOperationException($"ShellNew association metadata is invalid for {item.RegistryPath}.", ex);
+            }
+        }
+
+        var extension = item.Metadata.GetValueOrDefault("Extension") ?? item.KeyName;
+        return string.IsNullOrWhiteSpace(extension) ? [] : [extension];
+    }
+
+    private static int GetShellNewOrderIndex(SpecialMenuEntry item, IReadOnlyDictionary<string, int> ordered)
+    {
+        var indexes = GetShellNewAssociatedExtensions(item)
+            .Where(ordered.ContainsKey)
+            .Select(extension => ordered[extension]);
+        return indexes.DefaultIfEmpty(int.MaxValue).Min();
     }
 
     private void AddPackagedShellNewItems(List<SpecialMenuEntry> entries, BackendUserContext context, RegistryKey? mergedClassesRoot, CancellationToken cancellationToken)
@@ -993,7 +1106,7 @@ public sealed class SpecialMenuService
         return (string.IsNullOrWhiteSpace(displayName) ? extension : StripAcceleratorPrefix(displayName), iconPath, iconIndex);
     }
 
-    private IEnumerable<SpecialMenuEntry> EnumerateShellNewForExtension(RegistryKey mergedClassesRoot, string extension, BackendUserContext context, CancellationToken cancellationToken)
+    internal IEnumerable<SpecialMenuEntry> EnumerateShellNewForExtension(RegistryKey mergedClassesRoot, string extension, BackendUserContext context, CancellationToken cancellationToken)
     {
         using var extensionKey = mergedClassesRoot.OpenSubKey(extension, writable: false);
         if (extensionKey is null)
@@ -1488,17 +1601,20 @@ public sealed class SpecialMenuService
                 throw new InvalidOperationException("ShellNew ordering requires the new-menu lock to be enabled first.");
             }
 
-            var registryPath = DecodeId(request.Id);
-            var extension = registryPath.Split('\\').FirstOrDefault(static part => part.StartsWith('.')) ?? string.Empty;
             ThrowIfReadOnlyPackagedShellNewId(request.Id);
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             budget.CancelAfter(TimeSpan.FromSeconds(8));
             var allRealItems = GetShellNewItems(context, budget.Token, includePackaged: false).Where(IsClassicShellNewEntry).ToList();
+            var requestedItem = allRealItems.FirstOrDefault(item => string.Equals(item.Id, request.Id, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("ShellNew item was not found in the authoritative snapshot.");
+            if (!requestedItem.CanMove)
+                throw new InvalidOperationException("This ShellNew registration is shared by multiple extensions and cannot be reordered safely.");
+            var extension = requestedItem.KeyName;
             var movableItems = allRealItems.Where(static item => item.CanMove).ToList();
             await _logger.LogAsync(
                 $"MoveShellNewStart: Sid={context.Sid}, OrderLocked=true, RequestId={request.Id}, Extension={extension}, MoveUp={request.MoveUp}, AllRealItemsBefore={JoinShellNewOrder(allRealItems)}, MovableItemsBefore={JoinShellNewOrder(movableItems)}.",
                 cancellationToken);
-            var index = movableItems.FindIndex(item => string.Equals(item.KeyName, extension, StringComparison.OrdinalIgnoreCase));
+            var index = movableItems.FindIndex(item => string.Equals(item.Id, request.Id, StringComparison.OrdinalIgnoreCase));
             var target = request.MoveUp ? index - 1 : index + 1;
             if (index < 0 || target < 0 || target >= movableItems.Count)
             {
@@ -1513,11 +1629,11 @@ public sealed class SpecialMenuService
             }
 
             await _logger.LogAsync($"MoveShellNewSwap: Sid={context.Sid}, SourceIndex={index}, TargetIndex={target}, SourceAllIndex={sourceAllIndex}, TargetAllIndex={targetAllIndex}.", cancellationToken);
-            var discovered = allRealItems.Select(x => x.KeyName).ToArray();
+            var discovered = allRealItems.SelectMany(GetShellNewAssociatedExtensions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             (allRealItems[sourceAllIndex], allRealItems[targetAllIndex]) = (allRealItems[targetAllIndex], allRealItems[sourceAllIndex]);
             var movedItem = allRealItems[targetAllIndex];
 
-            transaction.Execute(true, discovered, allRealItems.Select(x => x.KeyName).ToArray(), cancellationToken, requireLocked: true);
+            transaction.Execute(true, discovered, allRealItems.SelectMany(GetShellNewAssociatedExtensions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), cancellationToken, requireLocked: true);
 
             return movedItem;
         }

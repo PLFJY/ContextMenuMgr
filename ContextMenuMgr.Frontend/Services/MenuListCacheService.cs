@@ -98,7 +98,15 @@ public sealed class MenuListCacheService : IAsyncDisposable
             if (generation is int expected && expected != _epoch) throw new OperationCanceledException("The list cache was reset during discovery.");
             epoch = _epoch;
             var previous = _states.GetValueOrDefault((typeof(T), scope)) as ListState<T>;
-            var result = scanned.ToDictionary(Id, StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in scanned)
+            {
+                var id = Id(item);
+                if (string.IsNullOrWhiteSpace(id))
+                    throw new InvalidOperationException($"The {typeof(T).Name} scan for '{scope}' contained an empty item identity; the previous snapshot was retained.");
+                if (!result.TryAdd(id, item))
+                    throw new InvalidOperationException($"The {typeof(T).Name} scan for '{scope}' contained duplicate item identity '{id}'; the previous snapshot was retained.");
+            }
             if (previous is not null)
                 foreach (var item in previous.Items)
                 {

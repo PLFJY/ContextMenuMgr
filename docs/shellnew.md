@@ -9,7 +9,7 @@ WPS/Office 共存检测和图标选择见 [SpecialMenu](special-menus.md#wps-与
 | 概念 | 当前实现说明 |
 | --- | --- |
 | `ShellNew` 子键 | 位于扩展名 Classes 下，例如 `Software\Classes\.txt\ShellNew`。发现使用前端交互用户的合并 HKCR；修改仍使用明确的物理 HKU/HKLM 路径。 |
-| 文件扩展名与新建项 | 每个扩展名可能对应一个“新建”菜单项，显示名按 Windows / BluePointLilac 语义解析。 |
+| 文件扩展名与新建项 | 多个扩展名可能关联同一个 ProgID 和物理 ShellNew key；列表按物理注册显示一项，并保存全部关联扩展名。显示名按 Windows / BluePointLilac 语义解析。 |
 | `NullFile` | 表示创建空文件。当前创建请求未提供 `DataText` 时倾向写入 `NullFile`。 |
 | `Data` | 当前 `ShellNewCreateRequest` 支持 `DataText`，后端会写入二进制 `Data`。 |
 | `Command` | `ShellNewUpdateRequest` 支持更新 `Command`。 |
@@ -22,6 +22,8 @@ WPS/Office 共存检测和图标选择见 [SpecialMenu](special-menus.md#wps-与
 ShellNew 快照发现通过 `RegOpenUserClassesRoot` 打开前端交互用户的合并 HKCR（`HKU\<SID>\Software\Classes` + `HKLM\SOFTWARE\Classes`），而不是服务进程的 `Registry.ClassesRoot` 或手工叠加两棵树。它从这个有效视图枚举扩展名、解析 ProgID、`ShellNew`/`-ShellNew`、显示名和图标；因此用户扩展名关联到机器 ProgID 的跨 hive 注册也能与 Explorer 一致。服务使用请求携带的 SessionId 取得 WTS 用户 token，以只读方式打开句柄；无法取得 token、profile 未加载或 API 失败时分阶段记录 `ShellNewMergedClassesOpenFailed` 并使发现失败，不退回到 LocalSystem 的 HKCR。WTS token 的 SID 和 TokenSessionId 必须与认证 Pipe 用户一致；ShellNew 不使用另一交互用户 fallback。64 位系统请求 64 位 Classes view，以匹配 64 位 Explorer。
 
 每个发现项同时解析实际提供 `ShellNew` 值的物理来源：优先用户 `HKU\<SID>\Software\Classes\...`，否则机器 `HKLM\SOFTWARE\Classes\...`，并将该物理路径作为 `RegistryPath` 和 `DisabledRegistryPath` 返回。合并视图只用于发现和有效元数据，绝不作为写入目标；开关、软删除、恢复、导出/定位和 ShellNew-local 编辑都使用此物理来源。扩展名/ProgID 的元数据来源可以不同于 ShellNew 的可变来源。
+
+经典快照在缓存、差量合并及排序前按规范化的物理注册表路径（Windows 大小写不敏感）去重。发现项的 `Id` 必须与 `RegistryPath` 匹配；同一物理身份若有冲突的启用状态、物理来源、ProgID、创建类型、命令或 alternate sibling provenance，则整个扫描失败并记录诊断，不丢弃冲突项。扩展名相关的图标与显示内容按确定性首项展示，不作为物理来源冲突。共享项 metadata 保存排序后的 `AssociatedExtensions`，`KeyName` 使用确定性首项；同一物理 key 下的 `ShellNew` 与 `-ShellNew` 路径始终分开。不同 SID 的 HKU 和 HKLM 路径不会被合并。
 
 除传统物理注册外，快照还使用 `PackageManager.FindPackagesForUser(frontendSid)` 扫描该前台用户已安装 AppX/MSIX 包的 `AppxManifest.xml`。带有 `uap4:ShellNewFileName` 的 `FileType` 声明会作为 `PackagedShellNew` 返回，并携带 package full/family name、Application ID、FileTypeAssociation、原始 `FileType` 声明、`ShellNewFileName` / `ShellNewDisplayName` / `ShellNewCommandParameters` 元数据。它们在同一列表显示“应用提供 · 只读”，不参与 ShellNew order lock 或排序；`CanEdit`、`CanDelete`、`CanMove` 都为 false，服务端也拒绝开关、编辑、删除和恢复请求。前端为保持列表右侧布局，会保留禁用的开关、编辑和删除按钮，但不显示排序按钮。不得修改 `AppxManifest.xml`、安装目录、UserChoice、ProgID 或为此类项目制造注册表 ShellNew key；目前没有已验证的独立 Windows 开关。
 
@@ -47,7 +49,7 @@ ShellNew 开关会在同一物理来源的 `ShellNew` 与 `-ShellNew` sibling ke
 
 `GetShellNewItems` 只有完整的经典发现成功后才返回列表；成功的零项与失败不同。WTS token、合并 HKCR、逐扩展名读取、物理来源解析、枚举期间候选集合变化或取消均使整个发现失败，不返回部分列表，也不继续用 packaged-only 结果充当经典发现。枚举只读，不修复注册或关联。包声明仍按原有只读/best-effort 方式发现，但必须先完成经典扫描，包失败不能为经典结果背书。
 
-排序锁定和 `MoveShellNewAsync` 共用 `ShellNewOrderTransaction`，替代原先分开的 unlock / 无条件覆盖 Classes / relock 路径：
+排序锁定和 `MoveShellNewAsync` 共用 `ShellNewOrderTransaction`，替代原先分开的 unlock / 无条件覆盖 Classes / relock 路径。共享物理注册按所有关联扩展名展开为 Explorer order targets，重复扩展名只提交一次；展示位置采用其中最早的现有 order index。共享项以及与其它物理项争用同一扩展名排序目标的项目禁用 Move Up / Move Down，因为单行重排无法无歧义地表示这些目标；其它唯一物理项仍可排序。锁定/解锁保留并验证现有 Explorer order 值：
 
 1. 串行化本服务的锁定、解锁、移动和锁状态查询；发现前捕获同一用户物理 HKU order key 的 Classes 是否存在、原始类型/数据及 Owner、Group、DACL。锁定/移动必须取得完整且非空的经典发现，不扫描包清单；单独解锁不依赖发现，也不创建或清空 Classes。
 2. proposed entries 必须是权威经典条目的完整排列，不允许未知/缺失/重复输入。Classes 用原生 value API 捕获/比较原始类型及字节；已有类型异常、非规范 MULTI_SZ 或含歧义空条目时拒绝排序，不自动规范化；已有未知项保留原文和相对槽位，已发现项在其槽位中排列，新增已发现项追加。不会删除未确定归属的现有项，不会写空列表。候选减少时也不会据此删除原列表中的其它项。

@@ -94,6 +94,8 @@ OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合�
 
 `MenuListCacheService` 是 DI 单例，只保存前端呈现 DTO；缓存身份、路径、容量和原子写见[运行时数据](runtime-data-and-logging.md#列表呈现缓存)。传统分类、应用分组和审批复用 workspace；Win11、SpecialMenu、按范围查询的 Scene/FileTypes、批量管理和子菜单各恢复自己的缓存。缓存恢复不触发 ItemDetected/托盘审核通知，不建立后端 baseline，也不恢复 Busy、Uncertain 或 ShellNew 锁状态。缓存开关须等 backend 就绪，实际请求仍由后端验证原物理来源。
 
+扫描合并时空 ID 或重复 ID 会以包含列表 scope 和冲突 ID 的诊断失败；不会静默保留首项，也不会替换已有完整快照。SpecialMenu 的物理来源去重必须由对应后端责任先完成，缓存不承担推断/合并物理身份。
+
 有效空缓存也是已有快照。首次无缓存才显示延迟加载占位；后续扫描保留列表及失败前的数据，顶部刷新图标以 ProgressRing 表示真实列表查询。顶部命令由当前导航内容路由：共享传统页/应用分组/审批刷新 workspace，Win11 刷新应用数据源，FileTypes/OtherRules 刷新当前 tab 或活动批量管理。重复的同范围扫描复用在途任务；选择另一个 Scene 范围使旧代次结果失效，不把两个范围合并。
 
 Pipe 结果保留整体和经典发现完整性，旧服务未提供字段时按未知处理。传统/Win11、ShellNew 物理项/包声明分区合并：包发现失败不能阻断已完整经典部分的缓存和删除 diff；不完整分区保留未返回项，不覆盖其最后完整磁盘快照。
