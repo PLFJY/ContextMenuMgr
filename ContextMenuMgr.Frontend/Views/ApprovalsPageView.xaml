@@ -27,17 +27,65 @@
                 <ui:TextBlock Margin="0,6,0,0" TextWrapping="Wrap"
                     Foreground="{DynamicResource SystemFillColorCautionBrush}"
                     Text="{Binding OpenWithReviews.StatusText}" />
-                <StackPanel Margin="0,12,0,0">
-                    <ui:TextBlock
-                        Margin="0,0,0,6"
-                        FontSize="12"
-                        Opacity="0.72"
-                        Text="{Binding SearchLabel}" />
-                    <TextBox
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                        <CheckBox
+                            Margin="0,0,10,0"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="{Binding SelectAllText}"
+                            Command="{Binding ToggleAllFilteredCommand}"
+                            IsChecked="{Binding IsAllFilteredChecked, Mode=OneWay}"
+                            IsThreeState="True"
+                            ToolTip="{Binding SelectAllText}">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsBulkBusy}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+                        <ui:Button
+                            Padding="12,5"
+                            Appearance="Primary"
+                            Command="{Binding AllowSelectedCommand}"
+                            Content="{Binding AllowText}"
+                            Icon="{ui:SymbolIcon Symbol=Checkmark24}" />
+                        <ui:Button
+                            Margin="8,0,0,0"
+                            Padding="12,5"
+                            Appearance="Secondary"
+                            Command="{Binding DenySelectedCommand}"
+                            Content="{Binding DenyText}"
+                            Icon="{ui:SymbolIcon Symbol=Dismiss24}" />
+                        <ui:TextBlock
+                            Margin="10,0,0,0"
+                            VerticalAlignment="Center"
+                            Opacity="0.72"
+                            Text="{Binding SelectedCountText}" />
+                        <ui:ProgressRing
+                            Width="18"
+                            Height="18"
+                            Margin="10,0,0,0"
+                            VerticalAlignment="Center"
+                            IsIndeterminate="True"
+                            Visibility="{Binding IsBulkBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+                    <ui:TextBox
+                        Grid.Column="1"
                         MinWidth="220"
-                        Padding="10,6"
+                        Margin="12,0,0,0"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="{Binding SearchLabel}"
+                        PlaceholderText="{Binding SearchLabel}"
                         Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                </StackPanel>
+                </Grid>
             </StackPanel>
         </Border>
 
@@ -53,7 +101,27 @@
             SelectedItem="{Binding SelectedItem, Mode=TwoWay}">
             <ListBox.Resources>
                 <DataTemplate DataType="{x:Type viewModels:OpenWithApprovalItemViewModel}">
-                    <Border Margin="0,0,0,10" Padding="12" CornerRadius="8" BorderThickness="1"
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox
+                            Margin="2,10,10,0"
+                            VerticalAlignment="Top"
+                            AutomationProperties.Name="{Binding DisplayName}"
+                            IsChecked="{Binding IsChecked, Mode=TwoWay}">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DataContext.IsBulkBusy, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+                    <Border Grid.Column="1" Padding="12" CornerRadius="8" BorderThickness="1"
                         Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
                         BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}">
                         <StackPanel>
@@ -93,10 +161,31 @@
                             </WrapPanel>
                         </StackPanel>
                     </Border>
+                    </Grid>
                 </DataTemplate>
                 <DataTemplate DataType="{x:Type viewModels:ApprovalQueueItemViewModel}">
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox
+                            Margin="2,10,10,0"
+                            VerticalAlignment="Top"
+                            AutomationProperties.Name="{Binding DisplayName}"
+                            IsChecked="{Binding IsChecked, Mode=TwoWay}">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DataContext.IsBulkBusy, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
                     <Border
-                        Margin="0,0,0,10"
+                        Grid.Column="1"
                         Padding="12"
                         Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
                         BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}"
@@ -242,6 +331,7 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                    </Grid>
                 </DataTemplate>
             </ListBox.Resources>
         </ListBox>

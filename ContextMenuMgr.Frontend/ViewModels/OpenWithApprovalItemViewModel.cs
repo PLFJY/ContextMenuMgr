@@ -37,6 +37,12 @@ public partial class OpenWithApprovalItemViewModel(OpenWithPendingReview review,
     [NotifyPropertyChangedFor(nameof(Explanation))]
     public partial bool IsStateUncertain { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the row is selected for a bulk review decision.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsChecked { get; set; }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanAccept))]
     [NotifyPropertyChangedFor(nameof(CanReject))]

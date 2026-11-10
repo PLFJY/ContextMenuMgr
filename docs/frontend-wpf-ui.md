@@ -80,6 +80,8 @@ AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，
 
 待审批由 ApprovalsPageViewModel 合并常规/Win11/WPS 的既有分组行与独立 OpenWithApprovalItemViewModel，以 IApprovalQueueItem 只共享呈现属性和稳定身份；不同物理修改语义不共享。OpenWith 使用独立 DataTemplate，显示 New/Changed/ReRegistered、作用域、原物理路径、command、当前可见性与限制；搜索包含这些字段及 OpenWith 分类标签。已隔离项显示“通过并放行”，原已禁用项仅确认保留原值；Conflict/Uncertain 提供检查入口。已核实隔离失败不占待审批角标，也不显示跳转待审批按钮。
 
+待审批行在卡片左侧提供复选框，头部的批量“允许/拒绝”只在存在勾选行时可点击；批量按钮左侧的三态方块汇总当前搜索筛选下的可见行（全不选显示空、部分选中显示减号、全选显示勾），点击时未全选则勾选全部可见行、已全选则取消全部可见行，被筛选隐藏的行不受影响，搜索条件变化后按新的可见集合重算；勾选是行 VM 的呈现状态，不依赖 ListBox 选择或视图可见性，因此搜索筛选、语言切换和差量刷新都保留勾选，批量操作作用于全部勾选行（含被筛选隐藏的行），头部同时显示已选数量防止遗漏。批量期间批量按钮与各行复选框同时禁用并显示进度，循环逐行仍重读勾选意图，期间的勾选变化不生效于本批次；行内沿用各自 Busy 呈现防重复提交。批量决策仍逐行分发到所属域既有入口：经典分组走 Allow/Deny（含受保护项确认门槛），OpenWith 走 Accept/Reject；不可操作行（Busy/Uncertain/后端不可用）被跳过并保持勾选，已尝试行取消勾选，失败行可由用户重新勾选重试。卡片逐项按钮语义不变。审批页搜索框与批量按钮同行，框内占位（PlaceholderText）使用本页面文案并附等价的 AutomationProperties.Name，筛选算法与其它页一致，不为批量功能新建第二套匹配。
+
 OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞刷新且保留期间收到的 invalidation；按物理路径复用行，保留选择/动画，失败刷新保留条目并暂停决策。按钮先 Busy、防重复提交，不乐观移除。45 秒决策等待失败后另用 10 秒权威查询核对；核对失败锁定 Uncertain，后续成功查询才恢复安全状态。旧响应、通知 payload/计数不直接改队列；相同 SID 的通知只触发当前查询。Shell 徽标在既有常规/WPS 数量上加未解决 OpenWith 行，排除 Reapplied/Missing。
 
 中央检查按钮导航普通 OpenWith 并按精确物理路径筛选；普通页的审核导航将该物理路径交给 FrontendNavigationState，中央刷新后选择对应行。普通 OpenWith 注册变更不重复显示顶部横幅，监控不可用等诊断仍保留。Win32 气泡只有图标身份，统一走无单项目标的待审批激活，不能依据旧代表 DTO 猜焦点。气泡、SID 与持久规则详见 [OpenWith](openwith.md#监控审核与显式持久保护)。
