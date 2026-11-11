@@ -85,6 +85,17 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     public bool HasServiceAttention => !string.IsNullOrWhiteSpace(ServiceAttentionText);
 
+    /// <summary>
+    /// Gets a value indicating whether the approvals queue has at least one item.
+    /// Shares the same source count as the navigation badge.
+    /// </summary>
+    public bool HasPendingApprovals => PendingApprovalCount > 0;
+
+    private int PendingApprovalCount =>
+        _workspace.Items.Count(static item => item.IsPendingApproval)
+        + _workspace.WpsOfficeApprovalItems.Count(static item => item.IsPendingApproval)
+        + _workspace.OpenWithReviews.Items.Count;
+
     public string FileCategoryName => _localization.Translate("FileCategoryName");
 
     public string AllObjectsCategoryName => _localization.Translate("AllObjectsCategoryName");
@@ -391,9 +402,7 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     private void UpdateApprovalBadge()
     {
-        var count = _workspace.Items.Count(static item => item.IsPendingApproval)
-                    + _workspace.WpsOfficeApprovalItems.Count(static item => item.IsPendingApproval)
-                    + _workspace.OpenWithReviews.Items.Count;
+        var count = PendingApprovalCount;
         _approvalsBadge.Value = count > 0 ? count.ToString() : string.Empty;
         _approvalsBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }

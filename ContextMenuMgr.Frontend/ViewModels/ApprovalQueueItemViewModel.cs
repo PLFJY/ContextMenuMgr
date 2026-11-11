@@ -107,6 +107,12 @@ public partial class ApprovalQueueItemViewModel : ObservableObject, IApprovalQue
     /// </summary>
     [ObservableProperty]
     public partial bool IsApprovalRemoveFlyoutOpen { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the row is selected for a bulk review decision.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsChecked { get; set; }
 }
 
 /// <summary>

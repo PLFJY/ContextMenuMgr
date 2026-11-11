@@ -85,6 +85,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     /// <summary>
+    /// Gets a value indicating whether the navigation host is currently showing the given page type.
+    /// Before the window loads, the pending page type is what OnLoaded will show.
+    /// </summary>
+    public bool IsShowingPage(Type pageType)
+        => IsLoaded
+            ? RootNavigation.CurrentContent?.GetType() == pageType
+            : (_pendingPageType ?? typeof(FileContextMenuPage)) == pageType;
+
+    /// <summary>
     /// Executes bring To Foreground.
     /// </summary>
     public void BringToForeground()

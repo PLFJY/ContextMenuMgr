@@ -252,6 +252,15 @@
   <data name="Deny" xml:space="preserve">
     <value>拒絕</value>
   </data>
+  <data name="ApprovalsSearchLabel" xml:space="preserve">
+    <value>在待審核項搜尋…</value>
+  </data>
+  <data name="SelectedItemsCount" xml:space="preserve">
+    <value>已選擇 {0} 項</value>
+  </data>
+  <data name="SelectAllFilteredItems" xml:space="preserve">
+    <value>選擇目前篩選下的全部待審核項</value>
+  </data>
   <data name="KeepDisabled" xml:space="preserve">
     <value>保持停用</value>
   </data>

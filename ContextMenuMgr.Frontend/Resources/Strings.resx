@@ -252,6 +252,15 @@
   <data name="Deny" xml:space="preserve">
     <value>Deny</value>
   </data>
+  <data name="ApprovalsSearchLabel" xml:space="preserve">
+    <value>Search pending items…</value>
+  </data>
+  <data name="SelectedItemsCount" xml:space="preserve">
+    <value>{0} selected</value>
+  </data>
+  <data name="SelectAllFilteredItems" xml:space="preserve">
+    <value>Select all pending items in the current filter</value>
+  </data>
   <data name="KeepDisabled" xml:space="preserve">
     <value>Keep disabled</value>
   </data>

@@ -47,6 +47,8 @@ App 以实际 Closed 触发 await 退出请求，取消 Closing 不停服；IPC 
 
 转场支持 Entrance/Fade/Slide/Suppress，旧内容退出清理后新内容进入，后退反向；快速导航取消旧 Storyboard/PageHost/过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；等待就位订阅事件，不固定 Task.Delay。
 
+未指定目标页的进入渠道（托盘默认激活、`--show-main`、`TryShowMainWindowForActiveSession`）在审批队列至少有一项时默认落在待审核页，否则维持传统文件菜单页。审批队列异步加载，新窗口先按默认页显示，初始化完成后只在仍显示传统页且未被其它渠道改变时切换到待审核；已指定目标页的渠道（`--open-approvals`/控制 Pipe OpenApprovals、`--open-openwith`/OpenWith、协议 `contextmenumgrplus://open-approvals` 及带 itemId 的审核激活）不参与该默认选择。默认选择与导航徽标使用同一审批来源计数。
+
 File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/TabItem；返回保留原 tab。按需查询后以动作组折叠展示物理来源，组头显示 ExactAction、SameModule 或 RegistrationFamilyCandidate 证据；组内列表限制高度并启用回收虚拟化，显示完整 HKLM/HKU 路径。组选择加物理项包含开关共同决定批量范围；候选组初始不选中，用户明确选择该组才纳入该组物理项，仍可逐项排除。混在强关系组内的弱候选物理项仍单独排除，须逐项加入。确认删除前显示组数、物理项数和用户 hive 数，普通删除保留恢复备份，Undo 不等于永久清理。批量完成显示已确认成功、失败、跳过、取消与不确定数量；取消仅停止后续项，正在进行的后端事务继续至结束或回滚。批量扫描不从旧版呈现缓存恢复缺少物理指纹的行，失败刷新保留已显示来源；真实 Explorer 可见性仍需人工验证。物理匹配和提交前核对见[注册表模型](registry-model.md)。
 
 ## 滚动、输入与渲染
@@ -79,6 +81,8 @@ AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，
 `GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。早期只显示目标子项的描述已不符合当前 `RebuildNavigationFilterGroup`。不以滚动定位或新扫描补救。
 
 待审批由 ApprovalsPageViewModel 合并常规/Win11/WPS 的既有分组行与独立 OpenWithApprovalItemViewModel，以 IApprovalQueueItem 只共享呈现属性和稳定身份；不同物理修改语义不共享。OpenWith 使用独立 DataTemplate，显示 New/Changed/ReRegistered、作用域、原物理路径、command、当前可见性与限制；搜索包含这些字段及 OpenWith 分类标签。已隔离项显示“通过并放行”，原已禁用项仅确认保留原值；Conflict/Uncertain 提供检查入口。已核实隔离失败不占待审批角标，也不显示跳转待审批按钮。
+
+待审批行在卡片左侧提供复选框，头部的批量“允许/拒绝”只在存在勾选行时可点击；批量按钮左侧的三态方块汇总当前搜索筛选下的可见行（全不选显示空、部分选中显示减号、全选显示勾），点击时未全选则勾选全部可见行、已全选则取消全部可见行，被筛选隐藏的行不受影响，搜索条件变化后按新的可见集合重算；勾选是行 VM 的呈现状态，不依赖 ListBox 选择或视图可见性，因此搜索筛选、语言切换和差量刷新都保留勾选，批量操作作用于全部勾选行（含被筛选隐藏的行），头部同时显示已选数量防止遗漏。批量期间批量按钮与各行复选框同时禁用并显示进度，循环逐行仍重读勾选意图，期间的勾选变化不生效于本批次；行内沿用各自 Busy 呈现防重复提交。批量决策仍逐行分发到所属域既有入口：经典分组走 Allow/Deny（含受保护项确认门槛），OpenWith 走 Accept/Reject；不可操作行（Busy/Uncertain/后端不可用）被跳过并保持勾选，已尝试行取消勾选，失败行可由用户重新勾选重试。卡片逐项按钮语义不变。审批页搜索框与批量按钮同行，框内占位（PlaceholderText）使用本页面文案并附等价的 AutomationProperties.Name，筛选算法与其它页一致，不为批量功能新建第二套匹配。
 
 OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞刷新且保留期间收到的 invalidation；按物理路径复用行，保留选择/动画，失败刷新保留条目并暂停决策。按钮先 Busy、防重复提交，不乐观移除。45 秒决策等待失败后另用 10 秒权威查询核对；核对失败锁定 Uncertain，后续成功查询才恢复安全状态。旧响应、通知 payload/计数不直接改队列；相同 SID 的通知只触发当前查询。Shell 徽标在既有常规/WPS 数量上加未解决 OpenWith 行，排除 Reapplied/Missing。
 
