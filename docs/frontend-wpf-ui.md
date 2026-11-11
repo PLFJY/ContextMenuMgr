@@ -47,6 +47,8 @@ App 以实际 Closed 触发 await 退出请求，取消 Closing 不停服；IPC 
 
 转场支持 Entrance/Fade/Slide/Suppress，旧内容退出清理后新内容进入，后退反向；快速导航取消旧 Storyboard/PageHost/过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；等待就位订阅事件，不固定 Task.Delay。
 
+未指定目标页的进入渠道（托盘默认激活、`--show-main`、`TryShowMainWindowForActiveSession`）在审批队列至少有一项时默认落在待审核页，否则维持传统文件菜单页。审批队列异步加载，新窗口先按默认页显示，初始化完成后只在仍显示传统页且未被其它渠道改变时切换到待审核；已指定目标页的渠道（`--open-approvals`/控制 Pipe OpenApprovals、`--open-openwith`/OpenWith、协议 `contextmenumgrplus://open-approvals` 及带 itemId 的审核激活）不参与该默认选择。默认选择与导航徽标使用同一审批来源计数。
+
 File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/TabItem；返回保留原 tab。按需查询后以动作组折叠展示物理来源，组头显示 ExactAction、SameModule 或 RegistrationFamilyCandidate 证据；组内列表限制高度并启用回收虚拟化，显示完整 HKLM/HKU 路径。组选择加物理项包含开关共同决定批量范围；候选组初始不选中，用户明确选择该组才纳入该组物理项，仍可逐项排除。混在强关系组内的弱候选物理项仍单独排除，须逐项加入。确认删除前显示组数、物理项数和用户 hive 数，普通删除保留恢复备份，Undo 不等于永久清理。批量完成显示已确认成功、失败、跳过、取消与不确定数量；取消仅停止后续项，正在进行的后端事务继续至结束或回滚。批量扫描不从旧版呈现缓存恢复缺少物理指纹的行，失败刷新保留已显示来源；真实 Explorer 可见性仍需人工验证。物理匹配和提交前核对见[注册表模型](registry-model.md)。
 
 ## 滚动、输入与渲染

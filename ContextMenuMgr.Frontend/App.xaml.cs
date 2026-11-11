@@ -31,6 +31,10 @@ public partial class App : Application
     private FrontendSettingsService? _frontendSettingsService;
     private bool _isShuttingDown;
 
+    // The most recent entry request had no explicit target page, so the default landing
+    // page still applies once the asynchronously loaded approval queue is available.
+    private bool _lastEntryRequestWasDefault;
+
     /// <summary>
     /// Gets or sets the startup Arguments.
     /// </summary>
@@ -328,6 +332,8 @@ public partial class App : Application
             return;
         }
 
+        ShellViewModel? createdShell = null;
+        _lastEntryRequestWasDefault = request.Command is not (FrontendControlCommand.OpenApprovals or FrontendControlCommand.OpenWith);
         if (_mainWindow is null)
         {
             _mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
@@ -338,7 +344,7 @@ public partial class App : Application
             _mainWindow.ShowInTaskbar = true;
 
             _shellViewModel = _mainWindow.DataContext as ShellViewModel;
-            _ = _shellViewModel?.InitializeAsync(suppressBootstrapPrompt: false);
+            createdShell = _shellViewModel;
         }
 
         if (request.Command == FrontendControlCommand.OpenApprovals)
@@ -354,7 +360,16 @@ public partial class App : Application
         else
         {
             _navigationState?.ClearFocusItem();
-            _mainWindow.NavigateTo(typeof(FileContextMenuPage));
+            _mainWindow.NavigateTo(_shellViewModel?.HasPendingApprovals == true
+                ? typeof(ApprovalsPage)
+                : typeof(FileContextMenuPage));
+        }
+
+        // Start initialization only after this call has chosen the entry page, so its awaited
+        // continuation can never race the navigation above.
+        if (createdShell is not null)
+        {
+            _ = InitializeShellAndApplyDefaultLandingAsync(createdShell);
         }
 
         if (_mainWindow.WindowState == WindowState.Minimized)
@@ -374,6 +389,32 @@ public partial class App : Application
         else
         {
             _mainWindow.Activate();
+        }
+    }
+
+    // The approval queue is loaded asynchronously after the window is shown, so a default entry
+    // only learns whether anything is pending once initialization finishes. Redirect then, but
+    // never over an explicit channel or a page the user already navigated to.
+    private async Task InitializeShellAndApplyDefaultLandingAsync(ShellViewModel shell)
+    {
+        try
+        {
+            await shell.InitializeAsync(suppressBootstrapPrompt: false);
+            if (_isShuttingDown
+                || _shellViewModel != shell
+                || _mainWindow is null
+                || !_lastEntryRequestWasDefault
+                || !shell.HasPendingApprovals
+                || !_mainWindow.IsShowingPage(typeof(FileContextMenuPage)))
+            {
+                return;
+            }
+
+            _mainWindow.NavigateTo(typeof(ApprovalsPage));
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("App", ex, "Failed to initialize the shell or apply the default landing page.");
         }
     }
 
