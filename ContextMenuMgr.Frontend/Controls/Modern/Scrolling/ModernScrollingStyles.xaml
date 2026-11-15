@@ -9,4 +9,27 @@
         <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
         <Setter Property="modernScroll:ModernListScroll.IsEnabled" Value="True" />
     </Style>
+    <Style x:Key="ModernVirtualizedListBoxStyle" TargetType="ListBox"
+           BasedOn="{StaticResource ModernScrollableListBoxStyle}">
+        <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+        <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+        <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="ItemContainerStyle" Value="{DynamicResource ScrollableListBoxItemStyle}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <modernScroll:ModernScrollViewer x:Name="PART_ScrollViewer" Focusable="False"
+                        Padding="{TemplateBinding Padding}" CanContentScroll="True"
+                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <ItemsPresenter />
+                    </modernScroll:ModernScrollViewer>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="ItemsPanel">
+            <Setter.Value><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

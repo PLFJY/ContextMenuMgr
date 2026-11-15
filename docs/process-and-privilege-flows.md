@@ -49,6 +49,10 @@ OpenWith 监控消息带可空 OpenWithPendingCount；只有明确大于零才�
 
 Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
 
+`AcknowledgeItemState` 使用既有可选 Item 携带原物理来源，客户端仍支持不带 Item 的调用；服务优先从持久来源安全解析。普通传统确认复用认证 HKLM/HKU 原来源核对，不全量扫描。前端 20 秒等待后另用 10 秒只读核对，传输断开同样不证明未提交，不能重发确认猜结果。
+
+`PurgeDeletedItems` 追加在 PipeCommand 末尾，请求 DeletedItemsPurge 包含分类及固定 Id/DeletedAtUtc 清单（最多 4096、拒绝重复身份），响应返回带删除时间的 PurgedItems、SkippedItemIds 和 BackupCleanupFailedItemIds。服务一次状态提交后清理备份；返回字段缺失或旧服务不支持时明确提示更新，不拆成单项兼容写循环。DeletedItemsPurged 通知先于直响应发布并限定认证 SID，客户端按删除时间及缓存代次处理，不能让迟到清理删除已恢复/重新删除的行。超时只刷新核对记录，不能凭快照缺失声称备份已清理。
+
 ## 请求、迟到通知与不确定结果
 
 每个请求有 `CorrelationId`；客户端为未提供的 `ClientOperationId` 生成 ID 并登记。后端响应继承请求 ID，成功状态变化先广播再尝试直响应，因此 Pipe 断开不能吞掉已成功 mutation 通知。独立 monitor 通知没有本地操作 ID。

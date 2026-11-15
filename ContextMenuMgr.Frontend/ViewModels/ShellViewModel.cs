@@ -161,8 +161,6 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string GlobalSearchText { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial bool IsGlobalSearchSuggestionListOpen { get; set; }
 
     public event EventHandler<ContextMenuEntry>? PendingApprovalDetected;
 
@@ -289,7 +287,7 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void OpenGlobalSearchResult(GlobalSearchResultViewModel? result)
     {
-        if (result is null)
+        if (result is null || result.IsPlaceholder)
         {
             return;
         }
@@ -311,7 +309,6 @@ public partial class ShellViewModel : ObservableObject, IDisposable
             result.TargetFilterText,
             result.Id);
         _navigationService.Navigate(result.TargetPageType);
-        IsGlobalSearchSuggestionListOpen = false;
     }
 
     public void OpenFirstGlobalSearchResult()
@@ -445,21 +442,9 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     private void RefreshGlobalSearchResults()
     {
-        GlobalSearchResults.Clear();
-        foreach (var result in _globalSearchService.Search(GlobalSearchText))
-        {
-            GlobalSearchResults.Add(result);
-        }
-
-        IsGlobalSearchSuggestionListOpen = !string.IsNullOrWhiteSpace(GlobalSearchText)
-                                           && GlobalSearchResults.Count > 0;
-
-        FrontendDebugLog.Info(
-            nameof(ShellViewModel),
-            "GlobalSearchUpdated: "
-            + $"Text='{SanitizeLogText(GlobalSearchText)}', "
-            + $"ResultCount={GlobalSearchResults.Count}, "
-            + $"SuggestionListOpen={IsGlobalSearchSuggestionListOpen}.");
+        var results = _globalSearchService.Search(GlobalSearchText);
+        IncrementalCollection.Apply(GlobalSearchResults, results.Count > 0 ? results :
+            new[] { new GlobalSearchResultViewModel { IsPlaceholder = true, DisplayName = GlobalSearchNoResults } });
     }
 
     private static string SanitizeLogText(string? text)

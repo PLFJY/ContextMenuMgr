@@ -254,7 +254,7 @@ public sealed class NamedPipeBackendServer
 
                 var deliveryFailure = await PublishAndDeliverResponseAsync(
                     envelope.Request, response,
-                    notification => notification.SpecialKind == SpecialMenuKind.OpenWith
+                    notification => notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged
                         ? connection.UserContext is { } caller
                             ? BroadcastNotificationAsync(notification with { UserSid = caller.Sid }, cancellationToken)
                             : Task.CompletedTask
@@ -273,7 +273,8 @@ public sealed class NamedPipeBackendServer
                 {
                     var notificationPublished = response.Item is not null
                         && envelope.Request.Command != PipeCommand.GetContextMenuItemState
-                        || response.SpecialItem is not null && envelope.Request.Command != PipeCommand.GetSpecialMenuItemState;
+                        || response.SpecialItem is not null && envelope.Request.Command != PipeCommand.GetSpecialMenuItemState
+                        || response.DeletedItemsPurge is { PurgedItems.Count: > 0 };
                     await _logger.LogAsync(RuntimeLogLevel.Warning,
                         $"DirectResponseWriteFailed: CorrelationId={envelope.CorrelationId}, ClientOperationId={response.ClientOperationId}, Command={envelope.Request.Command}, ItemId={response.Item?.Id}, NotificationBroadcastBeforeResponseFailure={notificationPublished}, Message={deliveryFailure.Message}.", CancellationToken.None);
                     break;
@@ -311,6 +312,13 @@ public sealed class NamedPipeBackendServer
         Func<BackendNotification, Task> publish,
         Func<Task> deliver)
     {
+        if (response.Success && response.DeletedItemsPurge is { } purged && purged.PurgedItems.Count > 0)
+            await publish(new BackendNotification
+            {
+                Kind = PipeNotificationKind.DeletedItemsPurged,
+                DeletedItemsPurge = purged,
+                ClientOperationId = response.ClientOperationId
+            });
         if (response.Success && response.Item is not null
             && request.Command != PipeCommand.GetContextMenuItemState)
             await publish(new BackendNotification
@@ -401,7 +409,7 @@ public sealed class NamedPipeBackendServer
                 => await _catalog.AcknowledgeItemStateAsync(
                     request.ItemId,
                     cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken), request.Item),
             PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
                 => await HandleSetEnabledAsync(request, stream, cancellationToken),
             PipeCommand.GetContextMenuItemState when request.ItemId is not null && request.Item is not null
@@ -439,6 +447,9 @@ public sealed class NamedPipeBackendServer
                     await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.PurgeDeletedItem when request.ItemId is not null
                 => await _catalog.PurgeDeletedItemAsync(request.ItemId, cancellationToken),
+            PipeCommand.PurgeDeletedItems when request.DeletedItemsPurge is not null
+                => await _catalog.PurgeDeletedItemsAsync(request.DeletedItemsPurge, cancellationToken,
+                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.ResetStateDatabase
                 => await _catalog.ResetStateDatabaseAsync(cancellationToken),
             PipeCommand.InspectOpenWithSources when request.ScopeValue is not null

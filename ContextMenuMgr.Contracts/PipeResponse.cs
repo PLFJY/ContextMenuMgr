@@ -38,6 +38,8 @@ public sealed record PipeResponse
     /// </summary>
     public ContextMenuEntry? Item { get; init; }
 
+    public DeletedItemsPurgeResult? DeletedItemsPurge { get; init; }
+
     public IReadOnlyList<ShellSubMenuItem> ShellSubMenuItems { get; init; } = [];
 
     public ShellSubMenuItem? ShellSubMenuItem { get; init; }

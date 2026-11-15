@@ -127,6 +127,21 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SystemCommands.CloseWindow(this);
     }
 
+    private void GlobalSearchBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel viewModel) return;
+        viewModel.UpdateGlobalSearchText(GlobalSearchBox.Text);
+        GlobalSearchBox.SetCurrentValue(Wpf.Ui.Controls.AutoSuggestBox.ItemsSourceProperty, viewModel.GlobalSearchResults);
+        GlobalSearchBox.SetCurrentValue(Wpf.Ui.Controls.AutoSuggestBox.IsSuggestionListOpenProperty, true);
+    }
+
+    private void GlobalSearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        GlobalSearchBox.SetCurrentValue(Wpf.Ui.Controls.AutoSuggestBox.IsSuggestionListOpenProperty, false);
+        e.Handled = true;
+    }
+
     private void GlobalSearchBox_QuerySubmitted(
         Wpf.Ui.Controls.AutoSuggestBox sender,
         Wpf.Ui.Controls.AutoSuggestBoxQuerySubmittedEventArgs args)
@@ -138,7 +153,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
-        var result = viewModel.GlobalSearchResults.FirstOrDefault();
+        var result = viewModel.GlobalSearchResults.FirstOrDefault(result => !result.IsPlaceholder);
         FrontendDebugLog.Info(
             nameof(MainWindow),
             "GlobalSearchQuerySubmitted: "
@@ -158,7 +173,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         args.Handled = true;
 
-        if (args.SelectedItem is not GlobalSearchResultViewModel result)
+        if (args.SelectedItem is not GlobalSearchResultViewModel { IsPlaceholder: false } result)
         {
             return;
         }
@@ -189,9 +204,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         viewModel.UpdateGlobalSearchText(args.Text);
-        sender.ItemsSource = viewModel.GlobalSearchResults;
-        sender.IsSuggestionListOpen = !string.IsNullOrWhiteSpace(args.Text)
-                                      && viewModel.GlobalSearchResults.Count > 0;
+        sender.SetCurrentValue(Wpf.Ui.Controls.AutoSuggestBox.ItemsSourceProperty, viewModel.GlobalSearchResults);
+        sender.IsSuggestionListOpen = sender.IsKeyboardFocusWithin;
 
         FrontendDebugLog.Info(
             nameof(MainWindow),

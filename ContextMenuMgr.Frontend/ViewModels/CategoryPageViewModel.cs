@@ -24,6 +24,12 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private readonly HashSet<string> _loggedDesktopCompatibilityItemIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _lastHideDisabledItems;
+    private CancellationTokenSource? _searchDebounce;
+    private string _appliedSearchText = string.Empty;
+    private IReadOnlyList<DeletedItemReference> _purgeSelection = [];
+    private System.Windows.Threading.DispatcherOperation? _pendingDeletedCount;
+    private int _deletedCandidateCount;
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CategoryPageViewModel"/> class.
@@ -55,8 +61,11 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         }
 
         var itemsView = new ListCollectionView(_workspace.Items);
-        itemsView.Filter = FilterItem;
-        ContextMenuListPresentation.ConfigureSort(itemsView);
+        using (itemsView.DeferRefresh())
+        {
+            itemsView.Filter = FilterItem;
+            ContextMenuListPresentation.ConfigureSort(itemsView);
+        }
         ItemsView = itemsView;
 
         RefreshLocalizedText();
@@ -124,6 +133,48 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     public partial string SearchText { get; set; } = string.Empty;
 
     public string PermanentDeleteText => _localization.Translate("PermanentDelete");
+
+    public string PurgeDeletedItemsText => _localization.Translate("PurgeDeletedItems");
+    public string PurgeDeletedItemsTooltip => _localization.Translate("PurgeDeletedItemsTooltip");
+    public string ConfirmPurgeDeletedItemsText => _localization.Translate("ConfirmPurgeDeletedItems");
+    public string PurgeDeletedItemsConfirmationText => _localization.Format("PurgeDeletedItemsPrompt", Title, _purgeSelection.Count);
+    public string ScrollToTopText => _localization.Translate("ScrollToTop");
+    public string ScrollToBottomText => _localization.Translate("ScrollToBottom");
+    public bool CanPurgeDeletedItems => _workspace.IsBackendReady && !IsPurgingDeletedItems && _deletedCandidateCount > 0;
+
+    [ObservableProperty]
+    public partial bool IsPurgeDeletedItemsFlyoutOpen { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanPurgeDeletedItems))]
+    public partial bool IsPurgingDeletedItems { get; private set; }
+
+    private IEnumerable<ContextMenuItemViewModel> GetDeletedCandidates() => _workspace.Items.Where(item =>
+        !item.IsWindows11ContextMenu && item.IsDeleted && !item.IsDeleteBusy && !item.IsDeleteOutcomeUncertain
+        && IsItemVisibleInCurrentCategory(item));
+
+    [RelayCommand]
+    private void OpenPurgeDeletedItemsFlyout()
+    {
+        if (!CanPurgeDeletedItems) return;
+        _purgeSelection = GetDeletedCandidates().Select(item => new DeletedItemReference(item.Id, item.DeletedAtUtc)).ToArray();
+        OnPropertyChanged(nameof(PurgeDeletedItemsConfirmationText));
+        IsPurgeDeletedItemsFlyoutOpen = true;
+    }
+
+    [RelayCommand]
+    private void ClosePurgeDeletedItemsFlyout() => IsPurgeDeletedItemsFlyoutOpen = false;
+
+    [RelayCommand]
+    private async Task ConfirmPurgeDeletedItemsAsync()
+    {
+        if (IsPurgingDeletedItems || _purgeSelection.Count == 0) return;
+        var request = new DeletedItemsPurgeRequest { Category = Category, Items = _purgeSelection };
+        IsPurgeDeletedItemsFlyoutOpen = false;
+        IsPurgingDeletedItems = true;
+        try { await _workspace.PurgeDeletedItemsAsync(request); }
+        finally { IsPurgingDeletedItems = false; }
+    }
 
     public string RegistryMissingText => _localization.Translate("RegistryMissingText");
 
@@ -361,6 +412,34 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     partial void OnSearchTextChanged(string value)
     {
+        CancelPendingSearch();
+        if (string.IsNullOrWhiteSpace(value)) { RefreshSearchImmediately(); return; }
+        _searchDebounce = new CancellationTokenSource();
+        _ = RefreshSearchAsync(_searchDebounce.Token);
+    }
+
+    private async Task RefreshSearchAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(120, token);
+            if (!token.IsCancellationRequested) RefreshSearchImmediately();
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    public void CancelPendingSearch()
+    {
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
+        _searchDebounce = null;
+    }
+
+    public void RefreshSearchImmediately()
+    {
+        CancelPendingSearch();
+        if (string.Equals(_appliedSearchText, SearchText, StringComparison.Ordinal)) return;
+        _appliedSearchText = SearchText;
         ItemsView.Refresh();
         RefreshListPlaceholderState();
     }
@@ -393,8 +472,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
         }
 
         SearchText = filterText;
-        ItemsView.Refresh();
-        RefreshListPlaceholderState();
+        RefreshSearchImmediately();
 
         FrontendDebugLog.Info(
             nameof(CategoryPageViewModel),
@@ -410,6 +488,12 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     {
         RefreshLocalizedText();
         OnPropertyChanged(nameof(PermanentDeleteText));
+        OnPropertyChanged(nameof(PurgeDeletedItemsText));
+        OnPropertyChanged(nameof(PurgeDeletedItemsTooltip));
+        OnPropertyChanged(nameof(ConfirmPurgeDeletedItemsText));
+        OnPropertyChanged(nameof(PurgeDeletedItemsConfirmationText));
+        OnPropertyChanged(nameof(ScrollToTopText));
+        OnPropertyChanged(nameof(ScrollToBottomText));
         OnPropertyChanged(nameof(RegistryMissingText));
         OnPropertyChanged(nameof(SearchLabel));
         OnPropertyChanged(nameof(AddMenuItemText));
@@ -443,6 +527,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(ContextMenuWorkspaceService.IsBackendReady)) OnPropertyChanged(nameof(CanPurgeDeletedItems));
         if (e.PropertyName is nameof(ContextMenuWorkspaceService.IsLoading)
             or nameof(ContextMenuWorkspaceService.IsServiceBootstrapInProgress)
             or nameof(ContextMenuWorkspaceService.MenuLoadFailureText)
@@ -469,7 +554,7 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
 
     private bool MatchesSearch(ContextMenuItemViewModel item)
     {
-        return ContextMenuSearchMatcher.MatchesClassicItem(item, SearchText);
+        return string.IsNullOrWhiteSpace(_appliedSearchText) || ContextMenuSearchMatcher.MatchesClassicItem(item, _appliedSearchText);
     }
 
     private static Type GetTargetPageType(ContextMenuCategory category) => category switch
@@ -573,12 +658,23 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ContextMenuItemViewModel.IsEnabled) or nameof(ContextMenuItemViewModel.IsDeleted)
-            or nameof(ContextMenuItemViewModel.DisplayName) or nameof(ContextMenuItemViewModel.IsPendingApproval))
+            or nameof(ContextMenuItemViewModel.DisplayName) or nameof(ContextMenuItemViewModel.IsPendingApproval)
+            or nameof(ContextMenuItemViewModel.IsDeleteBusy) or nameof(ContextMenuItemViewModel.IsDeleteOutcomeUncertain))
             RefreshListPlaceholderState();
     }
 
     private void RefreshListPlaceholderState()
     {
+        if (_pendingDeletedCount is null)
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            _pendingDeletedCount = dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.DataBind, (Action)(() =>
+            {
+                _pendingDeletedCount = null;
+                _deletedCandidateCount = GetDeletedCandidates().Count();
+                OnPropertyChanged(nameof(CanPurgeDeletedItems));
+            }));
+        }
         OnPropertyChanged(nameof(IsListLoading));
         OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(HasListLoadFailure));
@@ -592,6 +688,8 @@ public partial class CategoryPageViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Dispose()
     {
+        CancelPendingSearch();
+        _pendingDeletedCount?.Abort();
         _localization.LanguageChanged -= OnLanguageChanged;
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _workspace.PropertyChanged -= OnWorkspacePropertyChanged;

@@ -1647,4 +1647,15 @@
   <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>隔離未成功，該註冊不會進入待審核。請檢查註冊與後端記錄；寫入結果不確定時僅進行核對。</value></data>
   <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>持續保護仍有獨立授權。請先檢查並停止該保護，再放行此隔離註冊。</value></data>
   <data name="OpenWithReviewRequired" xml:space="preserve"><value>此註冊正在等待審核，請先至待審批處理，再啟用或授權持續保護。</value></data>
+  <data name="AcknowledgementUncertain" xml:space="preserve"><value>無法確認是否已儲存此次確認，請重新整理以核對結果。</value></data>
+  <data name="PurgeDeletedItems" xml:space="preserve"><value>清空已刪除項</value></data>
+  <data name="PurgeDeletedItemsTooltip" xml:space="preserve"><value>永久清理本分類全部已刪除功能表項目及還原備份。</value></data>
+  <data name="ConfirmPurgeDeletedItems" xml:space="preserve"><value>永久清理</value></data>
+  <data name="PurgeDeletedItemsPrompt" xml:space="preserve"><value>將永久清理「{0}」中的 {1} 個已刪除功能表項目，並移除還原備份。此操作無法復原。</value></data>
+  <data name="PurgeDeletedItemsResult" xml:space="preserve"><value>已清理 {0} 項，略過 {1} 項；其中 {2} 項的備份清理失敗。</value></data>
+  <data name="PurgeDeletedItemsUncertain" xml:space="preserve"><value>無法完整確認清理結果，請重新整理核對；備份清理結果尚未確認。</value></data>
+  <data name="PurgeDeletedItemsFailed" xml:space="preserve"><value>清理失敗。請確認背景服務已更新並重試。</value></data>
+  <data name="ScrollToTop" xml:space="preserve"><value>回到頂端</value></data>
+  <data name="ScrollToBottom" xml:space="preserve"><value>前往底端</value></data>
+  <data name="PurgeDeletedItemsBusy" xml:space="preserve"><value>另一個刪除或還原操作仍在進行，請完成後重試。</value></data>
 </root>

@@ -45,7 +45,9 @@ App 以实际 Closed 触发 await 退出请求，取消 Closing 不停服；IPC 
 
 [ModernFrame](../ContextMenuMgr.Frontend/Controls/Modern/Frame/ModernFrame.cs) 是 Page 宿主，依次尝试 IServiceProvider、INavigationViewPageProvider、Activator 创建。Page 不直接放 Border/Grid/TabItem/普通 ContentControl；复用内容用 `SpecialMenuContentView : UserControl` + `SpecialMenuPageView : Page`，不靠嵌套 Frame 掩盖组合错误。
 
-转场支持 Entrance/Fade/Slide/Suppress，旧内容退出清理后新内容进入，后退反向；快速导航取消旧 Storyboard/PageHost/过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；等待就位订阅事件，不固定 Task.Delay。
+转场支持 Entrance/Fade/Slide/Suppress，内容 Loaded 后在 Loaded dispatcher 阶段同时启动同一完整时间线内的退场与入场，不等待 ApplicationIdle，也不通过缩短或省略 Fluent 动画处理性能问题。默认 Entrance 对照 [WinUI ThemeTransitions.cpp](https://github.com/microsoft/microsoft-ui-xaml/blob/main/dxaml/phone/lib/ThemeTransitions.cpp#L2861)：140 DIP、150 ms 退场，接着 300 ms 入场，总计 450 ms；前进在 150 ms 时显示新页面并由下向上移动，后退先将旧页移下再淡入返回页，曲线为 (0.7,0)/(1,0.5) 与 (0.1,0.9)/(0.2,1)。Slide 水平方向使用同源码的 150/300 ms、退出 150 DIP/进入 200 DIP；垂直方向使用 [NavigateTransitionHelper.h](https://github.com/microsoft/microsoft-ui-xaml/blob/main/dxaml/phone/lib/NavigateTransitionHelper.h#L124) 的 250/350 ms、200 DIP、Exponent=6。WPF-UI INavigationView 的 TransitionDuration 契约保留为入口总时长（默认 450），不再由 MainWindow 覆盖成 140 ms；系统关闭动画仍生效，软件渲染不主动省略动画。
+
+动画期间禁止新旧内容命中，导航按钮仍可打断转场。快速导航取消旧 Storyboard、Loaded 订阅、PageHost 和过期完成回调。重复当前页在创建前短路，不增 journal；带子项父节点只展开/折叠。内容呈现后 ModernFrame reset 自己的 ContentScrollHost，再调用 INavigationScrollTarget，最后 NavigationCompleted；Self 页面通过 INavigationScrollOwner 在内容就位后处理自己的滚动位置，新导航回顶、后退恢复。等待就位订阅事件，不固定 Task.Delay。INavigationPresentation 在真正的转场完成回调后激活按应用分组及 SpecialMenu 首次请求/列表呈现，取消或快速切页不会启动被放弃页面的初次加载；嵌入的 SpecialMenuContentView 沿用自身 Loaded 生命周期。Information 日志记录 NavigationPageCreated 耗时和 NavigationTransitionStarted 阶段，便于区分页面构造、动画开始与后端加载。
 
 未指定目标页的进入渠道（托盘默认激活、`--show-main`、`TryShowMainWindowForActiveSession`）在审批队列至少有一项时默认落在待审核页，否则维持传统文件菜单页。审批队列异步加载，新窗口先按默认页显示，初始化完成后只在仍显示传统页且未被其它渠道改变时切换到待审核；已指定目标页的渠道（`--open-approvals`/控制 Pipe OpenApprovals、`--open-openwith`/OpenWith、协议 `contextmenumgrplus://open-approvals` 及带 itemId 的审核激活）不参与该默认选择。默认选择与导航徽标使用同一审批来源计数。
 
@@ -53,7 +55,7 @@ File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/Tab
 
 ## 滚动、输入与渲染
 
-共享外层为 `ModernFrame.ContentScrollHost` 的 [ModernScrollViewer](../ContextMenuMgr.Frontend/Controls/Modern/Scrolling/ModernScrollViewer.cs)。OtherRules/FileTypes 声明 `ModernScroll.Ownership=Self`、内部 ModernScrollViewer 自管；其它页沿用 Frame，不另包无约束宿主。导航只 reset 外层，不改内层列表 offset。
+共享外层为 `ModernFrame.ContentScrollHost` 的 [ModernScrollViewer](../ContextMenuMgr.Frontend/Controls/Modern/Scrolling/ModernScrollViewer.cs)。OtherRules/FileTypes 声明 `ModernScroll.Ownership=Self`、内部 ModernScrollViewer 自管；传统分类页同样声明 Self，由一个有界、Recycling/Pixel 虚拟化 ListBox 承担整页滚动；视图层 CompositeCollection 只组合页头和既有 ItemsView，页头/空状态随列表滚动，不复制业务集合。按应用页将页头、组头及既有行 VM 平铺到一个自管虚拟化列表，单个应用包含大量条目也不会实现所有子行。SpecialMenuPageView 声明 Self，普通项与已展开的 OpenWith 只读项共用有界虚拟化 ListBox，WinX 树单独使用原有有界滚动容器，避免 Frame/页面两层滚动互相提供无限高度；普通页头保留原顶部区域。其它页沿用 Frame，不另包无约束宿主。导航仅通过各宿主的明确协议设置位置。
 
 | 输入/条件 | 当前策略 |
 | --- | --- |
@@ -66,19 +68,21 @@ File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/Tab
 
 `ModernListScroll`、WheelScrollController/Policy 共用上述策略；沿 source ancestor 找模板 viewer，不每次扫描整树/缓存过期模板。opt-in 列表保持 CanContentScroll=True、Pixel ScrollUnit 与虚拟化，不全局改成 False。所有应用显式创建的滚动容器（含独立窗口/表单/Debug）复用 ModernScrollViewer，控件内部 TextBox/ComboBox/TreeView 模板保留原生交互。完成/卸载移除 Rendering handler，用单调 Stopwatch 计时。
 
-刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
+传统分类页在视口右下角固定“回到顶部／前往底部”按钮，顶部仅向下、中间同时显示、底部仅向上，无滚动范围时隐藏，使用 1 DIP 容差。按钮位于预留侧栏，不遮挡行操作；列表不预留按钮高度的底部 Padding，滚动视口延伸到页面底边；复用 ScrollAnimationHelper 的 300 ms 缓出动画，向底部期间跟随虚拟化修正后的 ScrollableHeight。滚轮、触摸、滚动键与卸载取消旧动画；系统禁用动画时遵从系统设置。
 
-Application Groups 保留 Frame 平滑滚动：后台对 UI 捕获的只读输入分组，约 120 ms 防抖，先呈现 40 组，再 Normal 优先级 DispatcherTimer 每 60 ms 追加 12 组，差量更新保留已有组，后续分组取消旧 timer；避免 Background yield 饥饿。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
+刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ListBox/WinX ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
+
+Application Groups 的查询字段在 UI 线程捕获为不可变输入，身份解析、匹配和分组全部放到后台，约 120 ms 防抖；导航精确筛选同样走后台投影，仍展示目标组全部子项。分组与行在 UI 线程差量复用，实际模板由视口虚拟化，不再使用“40 组首批／每 60 ms 追加 12 组”的非虚拟化呈现。离页取消旧投影并保留脏标记，动画完成才消费；未变化的返回页复用既有分组。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
 
 ## 搜索、筛选与集合归属
 
 [ContextMenuGlobalSearchService](../ContextMenuMgr.Frontend/Services/ContextMenuGlobalSearchService.cs) 只搜索已加载 workspace 传统分类和 Windows11ContextMenuService.CurrentItems。**不覆盖** ShellNew/SendTo/WinX/OpenWith、FileTypes、OtherRules、Approvals、Settings。Win11 以应用 family 分组但保留声明字段，传统应用分组不包含 Win11。
 
-候选随集合、显示/状态/备注、语言、设置变化重建。字段含名称、key、registry/backend/source path、command、CLSID、file、备注、分类/状态与 package/publisher/context。ContextMenuSearchMatcher 忽略标点/分隔符，如 7zip→7-Zip。输入只本地评分，不查 backend、registry 或磁盘；icon best-effort 使用 IconPreviewService，缺失用分类 fallback。
+候选随集合、显示/状态/备注变化按稳定 Id 差量更新，连续失效在 Dispatcher 合并；语言/设置变化重建当前索引。图标只异步更新对应呈现对象，不重建文字索引。字段含名称、key、registry/backend/source path、command、CLSID、file、备注、分类/状态与 package/publisher/context。ContextMenuSearchMatcher 忽略标点/分隔符，如 7zip→7-Zip。输入只本地评分，不查 backend、registry 或磁盘；仅为已展示的最多 12 个结果异步加载图标，best-effort 使用 IconPreviewService，缺失用分类 fallback；候选构造和搜索评分不提取图标。
 
-AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，更新结果/ItemsSource/IsSuggestionListOpen，避免默认 OriginalItemsSource 过滤覆盖。SuggestionChosen 用 SelectedItem，QuerySubmitted 仅 QueryText，Enter 打开首项；UpdateTextOnSelect=False。建议行仅展示，不放依赖外层 VM/标题栏模板的复杂按钮。
+AutoSuggestBox 自定义 TextChanged 在 UserInput 设置 `args.Handled=true`，更新结果/ItemsSource/IsSuggestionListOpen，避免默认 OriginalItemsSource 过滤覆盖。SuggestionChosen 用 SelectedItem，QuerySubmitted 仅 QueryText，Enter 打开首项；UpdateTextOnSelect=False。键盘焦点进入搜索框内部时立即展开；空文字按当前语言名称排序显示最多 12 个已加载候选，有文字显示匹配结果，无候选显示不可导航的空状态。Escape、选择和外部点击关闭；后台候选更新不重新打开弹层。建议行仅展示，不放依赖外层 VM/标题栏模板的复杂按钮。
 
-`GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。早期只显示目标子项的描述已不符合当前 `RebuildNavigationFilterGroup`。不以滚动定位或新扫描补救。
+`GlobalSearchNavigationFilterService` 保存目标页、分类、文本、item id 后导航，目标 VM 消费 pending filter。Application Groups 精确定位用 id 找所属分组，**显示该组全部子项**；用户编辑/清空搜索退出导航筛选。导航筛选由同一后台投影处理，不再保留同步的单组重建路径。不以滚动定位或新扫描补救。
 
 待审批由 ApprovalsPageViewModel 合并常规/Win11/WPS 的既有分组行与独立 OpenWithApprovalItemViewModel，以 IApprovalQueueItem 只共享呈现属性和稳定身份；不同物理修改语义不共享。OpenWith 使用独立 DataTemplate，显示 New/Changed/ReRegistered、作用域、原物理路径、command、当前可见性与限制；搜索包含这些字段及 OpenWith 分类标签。已隔离项显示“通过并放行”，原已禁用项仅确认保留原值；Conflict/Uncertain 提供检查入口。已核实隔离失败不占待审批角标，也不显示跳转待审批按钮。
 
@@ -88,11 +92,15 @@ OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞�
 
 中央检查按钮导航普通 OpenWith 并按精确物理路径筛选；普通页的审核导航将该物理路径交给 FrontendNavigationState，中央刷新后选择对应行。普通 OpenWith 注册变更不重复显示顶部横幅，监控不可用等诊断仍保留。Win32 气泡只有图标身份，统一走无单项目标的待审批激活，不能依据旧代表 DTO 猜焦点。气泡、SID 与持久规则详见 [OpenWith](openwith.md#监控审核与显式持久保护)。
 
-workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。
+workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。简洁模式的管理应用、删除/撤销、永久删除动作位于“更多”；详细模式对应行按钮保留而弹出菜单隐藏重复项，模式绑定通过 PlacementTarget.Tag 桥接。简洁模式的永久删除 Flyout 保留已加载的零尺寸锚点，不能把锚点 Collapsed。
 
 OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合视图把 `IsReadOnlyOpenWith` 项放入“只读注册项”折叠分组；分组默认关闭、显示当前搜索结果数量，用户展开后仍显示原物理项和只读原因。这里的“只读”不表示 Windows ACL 保护。搜索分别筛选可管理项与只读项，只读项是唯一匹配时保留分组入口而不显示空列表占位。刷新、通知和行更新继续使用原有身份与差量集合，不改变注册表权限或后端扫描范围。
 
 普通 OpenWith 页不呈现按扩展名“检查来源”的输入、检查和取消按钮，也不呈现原始结果框。已发布的只读检查接口由后端保留，维护契约见 [OpenWith](openwith.md#按扩展名检查来源的只读接口)。
+
+传统分类和 Scene 的输入筛选约 120 ms 可取消防抖，清空立即刷新；传统分类和 Scene 页卸载取消未完成筛选，重新导航应用当前文字。搜索导航立即应用目标筛选，不重复 Refresh。传统条目的 IconSource 先返回已有图标或占位，使用 GetIconAsync 后台提取，按来源身份丢弃过期结果，Dispose 取消未完成任务。
+
+传统分类页的“清空已删除项”与“新增菜单项”并排，作用于本页分类全部已删除记录，不受搜索/隐藏禁用项影响，桌面分类沿用 Directory Background 兼容投影。打开 Flyout 时固定 Id 和 DeletedAtUtc 清单并显示分类、数量和不可恢复说明；确认后阻止所选行的重复删除/恢复，报告清理、跳过和备份清理失败数量。后端校验、提交顺序和超时契约见[注册表模型](registry-model.md)与[IPC](process-and-privilege-flows.md)。
 
 ## 列表缓存、差量刷新与通知
 
@@ -104,7 +112,7 @@ OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合�
 
 Pipe 结果保留整体和经典发现完整性，旧服务未提供字段时按未知处理。传统/Win11、ShellNew 物理项/包声明分区合并：包发现失败不能阻断已完整经典部分的缓存和删除 diff；不完整分区保留未返回项，不覆盖其最后完整磁盘快照。
 
-client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价对象。UI 使用当前缓存代次重新取得合并结果，再仅修改变化行；`IncrementalCollection` 保留分组、审批和 Win11 行实例，集合不发 Reset。普通属性变化由 live sorting/filtering 处理，明确更改搜索、语言或筛选时才重算视图。应用分组在 UI 线程捕获身份/搜索输入，后台只分组不可变输入，不访问 WPF ViewModel；分组 ViewModel 在 UI 线程创建。
+client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价对象。UI 使用当前缓存代次重新取得合并结果，再仅修改变化行；`IncrementalCollection` 保留分组、审批和 Win11 行实例，集合不发 Reset。普通属性变化由 live sorting/filtering 处理，明确更改搜索、语言或筛选时才重算视图。应用分组在 UI 线程捕获身份/搜索输入，后台只分组不可变输入，不访问 WPF ViewModel；分组 ViewModel 在 UI 线程创建。批量永久清理在缓存锁内完成整组选中项的 mutation 计数、删除时间核对和移除标记，每个受影响 scope 只持久化一次；旧扫描及迟到通知不能恢复已清理项，也不能移除较新的删除记录。
 
 扫描版本、逐项 mutation 计数、权威结果及移除标记共用缓存协调锁。旧扫描不能覆盖新操作，已返回但尚未应用到 UI 的结果也会重新合并；只读核对不得结束在途写入。软件 reset 增加缓存代次，旧扫描和延迟写盘不能恢复 reset 前缓存。普通迟到通知先定向核对原来源，再更新已有 workspace 项；scene-only 项仍不进入全局池。OpenWith/WinX 保留专有通知刷新和事务门，不拆除 catalog/store 串行化。
 
@@ -114,7 +122,7 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 ## 异步操作与结果
 
-`DelayedLoadingPresentation` 在真实 loading 超过 140 ms 才显示，显示后至少约 250 ms；新状态/Dispose 取消旧回调。快加载不人为延长 IsLoading；Busy 不等于整页加载。Application Groups 本地筛选不激活全页加载，placeholder 时折叠列表、隐藏 empty。
+`DelayedLoadingPresentation` 在真实 loading 超过 140 ms 才显示，显示后至少约 250 ms；新状态/Dispose 取消旧回调。快加载不人为延长 IsLoading；Busy 不等于整页加载。Application Groups 本地筛选不激活全页加载，首次加载提示保留在虚拟列表页头中，隐藏 empty。
 
 `AsyncToggleSwitch` 在固定槽显示开/关或 ProgressRing，单项 Busy 同步置位，`ToggleBusyPresentation.WaitForFirstFrameAsync` 最多 100 ms/两个渲染事件后再写入；隐藏窗口有超时。写入期间禁重复操作，不因 Busy 折叠本来存在的按钮。普通开关仅 HideDisabled 开启时在完成后刷新过滤，避免全表 Reset 阻挡首帧。
 
@@ -122,9 +130,9 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 classic SetEnabled 的 request→独立物理状态核对、20/10 秒预算和迟到广播见 [IPC](process-and-privilege-flows.md#请求迟到通知与不确定结果)。ProgressRing 覆盖核对阶段。权威 requested state 成功、旧 state 回退；无法确认保留当前乐观值并锁操作，直到 fresh update。item version 防旧失败覆盖新结果。Win11 核对应用全部目标，OpenWith 页串行门/IsStateUncertain 和 ShellNew 三态分别在各主文档定义，不重发写入猜结果。
 
-`DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` **必须先 Acknowledge 成功才本地隐藏**，失败保留提示。成功后同时设置本地 dismissed；结构冲突可能仍存在，`ApplyEntry` 保持相同 issue signature 的本地忽略，签名变化重新提示。旧文档“无论后端成功与否都忽略”与当前实现不符。
+`DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` 点击后立即本地隐藏，先让 UI 呈现再后台确认，单项在途或结果未知时禁止重复确认。明确失败恢复同一次变化的提示并显示错误；超时/传输中断仅定向读回，不重发写入。仍无法核实时显示“无法确认是否已保存”，直到新权威更新解除；旧请求的失败/成功不能覆盖新版本或新物理内容。结构冲突的同一 issue signature 保持本地忽略；新的检测元数据（即使描述同为“命令改变”）重新提示。Workspace 和 Scene 都直接合并确认返回的条目，Scene 不再为确认触发整页扫描。
 
-SpecialMenu 首屏先呈现加载再请求；CommandStore 首次分批加入、图标异步，后续差量更新且不做定时全量刷新。其它 SpecialMenu 的定时刷新见各责任文档。新 Loading/Empty 不能引入全局模拟服务；DebugToolsWindow/强制更新入口仅 Debug 编译。F12 调试窗口还提供当前用户 OpenWith 测试注册的创建与按归属清理；创建前验证后端持久基线，创建后有界查询并显示真实送审结果，等待期间禁止提前清理，操作范围和基线等待见 [OpenWith 验收](openwith.md#监控验收)。
+SpecialMenu 普通列表首屏在完整导航动画结束后发出请求，集中提交首批 DTO，并在完成后统一更新加载/空状态（DeferRefresh 仅用于配置筛选和排序，不用于 ObservableCollection 的增删）；条目图标仅在可见行请求时异步读取，后续差量更新保持行身份。CommandStore 不做定时全量刷新。其它 SpecialMenu 的定时刷新见各责任文档。新 Loading/Empty 不能引入全局模拟服务；DebugToolsWindow/强制更新入口仅 Debug 编译。F12 调试窗口还提供当前用户 OpenWith 测试注册的创建与按归属清理；创建前验证后端持久基线，创建后有界查询并显示真实送审结果，等待期间禁止提前清理，操作范围和基线等待见 [OpenWith 验收](openwith.md#监控验收)。
 
 ## 本地动作、错误与清理
 

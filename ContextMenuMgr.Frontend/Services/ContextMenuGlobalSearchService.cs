@@ -1,7 +1,7 @@
-using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.Windows.Media;
+using System.Windows;
+using System.Windows.Threading;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.ViewModels;
 using ContextMenuMgr.Frontend.Views.Pages;
@@ -20,6 +20,13 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
     private readonly object _gate = new();
     private List<Candidate> _candidates = [];
     private bool _disposed;
+    private readonly Dictionary<string, Candidate> _classic = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _dirtyIds = new(StringComparer.OrdinalIgnoreCase);
+    private List<Candidate> _windows11 = [];
+    private bool _rebuildAll = true;
+    private bool _windows11Dirty = true;
+    private DispatcherOperation? _pendingUpdate;
+    private readonly CancellationTokenSource _lifetime = new();
 
     public ContextMenuGlobalSearchService(
         ContextMenuWorkspaceService workspace,
@@ -51,25 +58,38 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
 
     public IReadOnlyList<GlobalSearchResultViewModel> Search(string? query, int limit = DefaultResultLimit)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        if (_pendingUpdate is not null)
         {
-            return [];
+            _pendingUpdate.Abort();
+            _pendingUpdate = null;
+            RebuildCandidates(notify: false);
         }
-
         List<Candidate> snapshot;
-        lock (_gate)
-        {
-            snapshot = _candidates;
-        }
+        lock (_gate) snapshot = _candidates;
+        var matches = string.IsNullOrWhiteSpace(query)
+            ? snapshot.OrderBy(candidate => candidate.Result.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(candidate => candidate.Result.Id, StringComparer.OrdinalIgnoreCase).Take(limit).ToArray()
+            : snapshot.Select(candidate => new ScoredCandidate(candidate, Score(candidate, query)))
+                .Where(candidate => candidate.Score > 0).OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.Candidate.Result.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .Take(limit).Select(candidate => candidate.Candidate).ToArray();
+        foreach (var candidate in matches) _ = LoadResultIconAsync(candidate);
+        return matches.Select(candidate => candidate.Result).ToArray();
+    }
 
-        return snapshot
-            .Select(candidate => new ScoredCandidate(candidate, Score(candidate, query)))
-            .Where(static candidate => candidate.Score > 0)
-            .OrderByDescending(static candidate => candidate.Score)
-            .ThenBy(static candidate => candidate.Candidate.Result.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-            .Take(limit)
-            .Select(static candidate => candidate.Candidate.Result)
-            .ToList();
+    private async Task LoadResultIconAsync(Candidate candidate)
+    {
+        if (candidate.IconRequested || _disposed) return;
+        candidate.IconRequested = true;
+        try
+        {
+            var entry = candidate.Entry ?? candidate.Windows11Definitions?.FirstOrDefault()?.Entry;
+            var icon = await _iconPreviewService.GetIconAsync(entry?.IconPath, entry?.IconIndex ?? 0,
+                entry?.FilePath ?? candidate.Result.FilePath, _lifetime.Token);
+            if (!_disposed) candidate.Result.IconSource = icon;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { FrontendDebugLog.Warning(nameof(ContextMenuGlobalSearchService), $"Search icon skipped: {ex.Message}"); }
     }
 
     public void Dispose()
@@ -80,6 +100,9 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         }
 
         _disposed = true;
+        _pendingUpdate?.Abort();
+        _lifetime.Cancel();
+        _lifetime.Dispose();
         _workspace.Items.CollectionChanged -= OnWorkspaceItemsChanged;
         foreach (var item in _workspace.Items)
         {
@@ -129,73 +152,74 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
             : 0;
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e)
-    {
-        RebuildCandidates();
-    }
-
-    private void OnSettingsChanged(object? sender, EventArgs e)
-    {
-        RebuildCandidates();
-    }
-
-    private void OnWindows11ItemsChanged(object? sender, EventArgs e)
-    {
-        RebuildCandidates();
-    }
+    private void OnLanguageChanged(object? sender, EventArgs e) => QueueUpdate(all: true);
+    private void OnSettingsChanged(object? sender, EventArgs e) => QueueUpdate(all: true);
+    private void OnWindows11ItemsChanged(object? sender, EventArgs e) => QueueUpdate(windows11: true);
 
     private void OnWorkspaceItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.NewItems is not null)
-        {
             foreach (ContextMenuItemViewModel item in e.NewItems)
             {
                 item.PropertyChanged += OnWorkspaceItemPropertyChanged;
+                _dirtyIds.Add(item.Id);
             }
-        }
-
         if (e.OldItems is not null)
-        {
             foreach (ContextMenuItemViewModel item in e.OldItems)
             {
                 item.PropertyChanged -= OnWorkspaceItemPropertyChanged;
+                _dirtyIds.Add(item.Id);
             }
-        }
-
-        RebuildCandidates();
+        QueueUpdate(all: e.Action == NotifyCollectionChangedAction.Reset);
     }
 
     private void OnWorkspaceItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ContextMenuItemViewModel.DisplayName)
-            or nameof(ContextMenuItemViewModel.IsEnabled)
-            or nameof(ContextMenuItemViewModel.IsDeleted)
-            or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu)
-            or nameof(ContextMenuItemViewModel.IconSource)
+        if (sender is not ContextMenuItemViewModel item) return;
+        if (e.PropertyName == nameof(ContextMenuItemViewModel.IconSource))
+        {
+            if (_classic.TryGetValue(item.Id, out var candidate)) candidate.Result.IconSource = item.IconSource;
+            return;
+        }
+        if (e.PropertyName is nameof(ContextMenuItemViewModel.DisplayName) or nameof(ContextMenuItemViewModel.IsEnabled)
+            or nameof(ContextMenuItemViewModel.IsDeleted) or nameof(ContextMenuItemViewModel.IsWindows11ContextMenu)
             or nameof(ContextMenuItemViewModel.UserNote))
         {
-            RebuildCandidates();
+            _dirtyIds.Add(item.Id);
+            QueueUpdate();
         }
     }
 
-    private void RebuildCandidates()
+    private void QueueUpdate(bool all = false, bool windows11 = false)
     {
-        var candidates = new List<Candidate>();
-        candidates.AddRange(_workspace.Items
-            .Where(IsClassicGlobalSearchItem)
-            .Select(CreateClassicCandidate));
-
-        if (_windows11Service.IsSupported)
+        if (_disposed) return;
+        _rebuildAll |= all;
+        _windows11Dirty |= windows11 || all;
+        if (_pendingUpdate is not null) return;
+        var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        _pendingUpdate = dispatcher.BeginInvoke(DispatcherPriority.Background, (Action)(() =>
         {
-            candidates.AddRange(CreateWindows11Candidates(_windows11Service.CurrentItems));
-        }
+            _pendingUpdate = null;
+            if (!_disposed) RebuildCandidates();
+        }));
+    }
 
-        lock (_gate)
-        {
-            _candidates = candidates;
-        }
-
-        CandidatesChanged?.Invoke(this, EventArgs.Empty);
+    private void RebuildCandidates(bool notify = true)
+    {
+        if (_rebuildAll) { _classic.Clear(); _dirtyIds.Clear(); }
+        foreach (var item in _workspace.Items)
+            if (_rebuildAll || _dirtyIds.Remove(item.Id))
+            {
+                if (IsClassicGlobalSearchItem(item)) _classic[item.Id] = CreateClassicCandidate(item);
+                else _classic.Remove(item.Id);
+            }
+        foreach (var removed in _dirtyIds) _classic.Remove(removed);
+        _dirtyIds.Clear();
+        if (_windows11Dirty)
+            _windows11 = _windows11Service.IsSupported ? CreateWindows11Candidates(_windows11Service.CurrentItems).ToList() : [];
+        _rebuildAll = _windows11Dirty = false;
+        lock (_gate) _candidates = _classic.Values.Concat(_windows11).ToList();
+        if (notify) CandidatesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private static bool IsClassicGlobalSearchItem(ContextMenuItemViewModel item)
@@ -232,7 +256,6 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
             CommandText = item.Entry.CommandText,
             FilePath = item.Entry.FilePath,
             HandlerClsid = item.Entry.HandlerClsid,
-            IconSource = TryGetClassicIcon(item),
             FallbackIconSymbol = GetFallbackIconSymbol(item.Category),
             JumpText = _localization.Translate("GlobalSearchJump"),
             SearchBlob = ContextMenuSearchMatcher.CreateSearchBlob(
@@ -275,7 +298,7 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         var stateLabel = _localization.Translate(!isEnabled && definitions.Any(definition => definition.IsEnabled)
             ? "Windows11PartiallyEnabled" : isEnabled ? "Enabled" : "Disabled");
         var contextTypesText = string.Join(
-            "  ·  ",
+            "  路  ",
             definitions
                 .SelectMany(static definition => definition.ContextTypes)
                 .Where(static contextType => !string.IsNullOrWhiteSpace(contextType))
@@ -283,7 +306,6 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
                 .Select(LocalizeContextType));
         var scopeLabel = _localization.Translate("GlobalSearchWin11Scope");
         var filePath = primary.ComServer.Path ?? primary.Entry?.FilePath ?? primary.Package.InstallPath;
-        var iconSource = TryGetWindows11Icon(primary);
         var userNote = _settingsService.GetContextMenuItemNote(primary.Id);
         var result = new GlobalSearchResultViewModel
         {
@@ -301,7 +323,6 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
             CommandText = primary.Entry?.CommandText,
             FilePath = filePath,
             HandlerClsid = primary.ComServer.Id ?? primary.Entry?.HandlerClsid,
-            IconSource = iconSource,
             FallbackIconSymbol = SymbolRegular.AppsListDetail20,
             JumpText = _localization.Translate("GlobalSearchJump"),
             SearchBlob = ContextMenuSearchMatcher.CreateSearchBlob(
@@ -372,47 +393,6 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         _ => typeof(FileContextMenuPage)
     };
 
-    private ImageSource? TryGetWindows11Icon(Windows11ContextMenuItemDefinition definition)
-    {
-        if (definition.Entry is { } entry)
-        {
-            return TryGetEntryIcon(entry, definition.ComServer.Path ?? definition.Package.InstallPath);
-        }
-
-        if (!string.IsNullOrWhiteSpace(definition.ComServer.Path))
-        {
-            return _iconPreviewService.GetIcon(null, 0, definition.ComServer.Path);
-        }
-
-        if (!string.IsNullOrWhiteSpace(definition.Package.InstallPath))
-        {
-            return _iconPreviewService.GetIcon(null, 0, definition.Package.InstallPath);
-        }
-
-        return null;
-    }
-
-    private ImageSource? TryGetClassicIcon(ContextMenuItemViewModel item)
-    {
-        return HasIconSourceData(item.Entry.IconPath, item.Entry.FilePath)
-            ? item.IconSource
-            : null;
-    }
-
-    private ImageSource? TryGetEntryIcon(ContextMenuEntry entry, string? fallbackFilePath)
-    {
-        var resolvedFallbackFilePath = entry.FilePath ?? fallbackFilePath;
-        return HasIconSourceData(entry.IconPath, resolvedFallbackFilePath)
-            ? _iconPreviewService.GetIcon(entry.IconPath, entry.IconIndex, resolvedFallbackFilePath)
-            : null;
-    }
-
-    private static bool HasIconSourceData(string? iconPath, string? fallbackFilePath)
-    {
-        return !string.IsNullOrWhiteSpace(iconPath)
-               || !string.IsNullOrWhiteSpace(fallbackFilePath);
-    }
-
     private static SymbolRegular GetFallbackIconSymbol(ContextMenuCategory category) => category switch
     {
         ContextMenuCategory.Folder
@@ -427,6 +407,7 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
 
     private sealed record Candidate(GlobalSearchScope Scope, GlobalSearchResultViewModel Result)
     {
+        public bool IconRequested { get; set; }
         public ContextMenuEntry? Entry { get; init; }
 
         public IReadOnlyList<Windows11ContextMenuItemDefinition>? Windows11Definitions { get; init; }

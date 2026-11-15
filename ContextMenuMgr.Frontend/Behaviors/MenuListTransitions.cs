@@ -120,7 +120,7 @@ public static class MenuListTransitions
             foreach (var container in Containers(_list))
             {
                 var item = _list.ItemContainerGenerator.ItemFromContainer(container);
-                if (item == DependencyProperty.UnsetValue || item is null || container.ActualWidth <= 0 || container.ActualHeight <= 0 || !InViewport(container)) continue;
+                if (item == DependencyProperty.UnsetValue || item is null || Key(item) is null || container.ActualWidth <= 0 || container.ActualHeight <= 0 || !InViewport(container)) continue;
                 var position = container.TranslatePoint(default, _list);
                 var bounds = new Rect(position, container.RenderSize);
                 var row = new Row(container, bounds);
@@ -167,7 +167,7 @@ public static class MenuListTransitions
             ContextMenuItemViewModel row => row.Id,
             SpecialMenuItemViewModel row => row.Id,
             Windows11ContextMenuItemViewModel row => row.IsSystemCommand ? row.Id : row.PackageFamilyName,
-            ApplicationGroupViewModel row => row.Identity,
+            ApplicationGroupViewModel row => "application-group:" + row.Identity,
             ApprovalQueueItemViewModel row => ContextMenuApprovalIdentity.CreateLogicalItemKey(row.PrimaryItem.Entry),
             OpenWithApprovalItemViewModel row => row.Id,
             ShellSubMenuItemViewModel row => row.Item.Id,

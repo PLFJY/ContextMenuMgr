@@ -75,6 +75,8 @@ public sealed class NamedPipeBackendClient : IBackendClient
             request = request with { Item = _listCache.FindItem<ContextMenuEntry>(itemId) };
         var version = _listCache.Version;
         var generation = _listCache.Generation;
+        var purgeSelection = request.DeletedItemsPurge?.Items ?? [];
+        foreach (var selected in purgeSelection) _listCache.BeginMutation<ContextMenuEntry>(selected.Id);
         var mutation = request.Command is PipeCommand.SetEnabled or PipeCommand.SetShellAttribute
             or PipeCommand.SetDisplayText or PipeCommand.SetCommandText or PipeCommand.DeleteItem or PipeCommand.UndoDelete
             or PipeCommand.PurgeDeletedItem or PipeCommand.ApplyDecision or PipeCommand.AcknowledgeItemState
@@ -95,7 +97,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
         try
         {
             result = await SendRequestCoreAsync(request, token).ConfigureAwait(false);
-            if (mutation && generation != _listCache.Generation)
+            if ((mutation || request.Command == PipeCommand.PurgeDeletedItems) && generation != _listCache.Generation)
                 throw new OperationCanceledException("The menu state was reset while the operation was completing.");
             if (request.Command == PipeCommand.ResetStateDatabase) await _listCache.InvalidateAsync().ConfigureAwait(false);
             if (request.Command is PipeCommand.PurgeDeletedItem or PipeCommand.PurgeSpecialMenuItem
@@ -155,6 +157,11 @@ public sealed class NamedPipeBackendClient : IBackendClient
         }
         finally
         {
+            if (purgeSelection.Count > 0)
+            {
+                var removedIds = _listCache.ApplyDeletedItemsPurge(purgeSelection, result?.DeletedItemsPurge, completesMutation: true, generation);
+                if (removedIds.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, removedIds));
+            }
             if (mutation && !removedResult && !mutationResultApplied)
             {
                 if (request.SubMenuItemId is not null) _listCache.ApplyResult(id, result?.ShellSubMenuItem, generation: generation);
@@ -162,6 +169,12 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 else _listCache.ApplyResult(id, result?.Item ?? result?.Items.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase)), generation: generation);
             }
         }
+    }
+
+    private void ApplyPurgedItems(DeletedItemsPurgeResult result, PipeRequest request, int generation)
+    {
+        var accepted = _listCache.ApplyDeletedItemsPurge(result.PurgedItems, result, completesMutation: false, generation);
+        if (accepted.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, accepted));
     }
 
     private readonly object _notificationSync = new();
@@ -331,13 +344,14 @@ public sealed class NamedPipeBackendClient : IBackendClient
     /// <summary>
     /// Executes acknowledge Item State Async.
     /// </summary>
-    public async Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken)
+    public async Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken, ContextMenuEntry? item = null)
     {
         var response = await SendRequestAsync(
             new PipeRequest
             {
                 Command = PipeCommand.AcknowledgeItemState,
-                ItemId = itemId
+                ItemId = itemId,
+                Item = item
             },
             cancellationToken);
 
@@ -571,6 +585,17 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 ItemId = itemId
             },
             cancellationToken);
+    }
+
+    public async Task<DeletedItemsPurgeResult> PurgeDeletedItemsAsync(DeletedItemsPurgeRequest request, CancellationToken cancellationToken)
+    {
+        var response = await SendRequestAsync(new PipeRequest
+        {
+            Command = PipeCommand.PurgeDeletedItems,
+            DeletedItemsPurge = request
+        }, cancellationToken);
+        return response.DeletedItemsPurge
+            ?? throw new InvalidOperationException("The backend does not support bulk cleanup. Update the backend service.");
     }
 
     public async Task<IReadOnlyList<SpecialMenuEntry>> GetSpecialMenuSnapshotAsync(
@@ -1054,7 +1079,7 @@ public sealed class NamedPipeBackendClient : IBackendClient
                 var line = await reader.ReadLineAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null)
                 {
-                    throw new InvalidOperationException("The backend pipe closed before returning a response.");
+                    throw new IOException("The backend pipe closed before returning a response.");
                 }
 
                 var responseEnvelope = JsonSerializer.Deserialize<PipeEnvelope>(line, JsonOptions);
@@ -1068,13 +1093,9 @@ public sealed class NamedPipeBackendClient : IBackendClient
                     FrontendDebugLog.Info(
                         "NamedPipeBackendClient",
                         $"Notification received on request channel: {responseEnvelope.Notification.Kind}, ItemId={responseEnvelope.Notification.Item?.Id}");
-                    if (responseEnvelope.Notification.ClientOperationId != request.ClientOperationId
-                        && (responseEnvelope.Notification.SpecialKind != SpecialMenuKind.OpenWith
-                            || string.Equals(responseEnvelope.Notification.UserSid,
-                                System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        NotificationReceived?.Invoke(this, responseEnvelope.Notification);
-                    }
+                    if (responseEnvelope.Notification.ClientOperationId != request.ClientOperationId)
+                        TryForwardSubscriptionNotification(responseEnvelope.Notification);
+
                     continue;
                 }
 
@@ -1275,13 +1296,16 @@ public sealed class NamedPipeBackendClient : IBackendClient
 
     internal bool TryForwardSubscriptionNotification(BackendNotification notification)
     {
-        if (notification.SpecialKind == SpecialMenuKind.OpenWith && !string.Equals(notification.UserSid,
+        if ((notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged) && !string.Equals(notification.UserSid,
             System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)) return false;
         if (_recentLocalOperations.Contains(notification.ClientOperationId))
         {
             return false;
         }
 
+        if (notification.Kind == PipeNotificationKind.DeletedItemsPurged && notification.DeletedItemsPurge is { } purged)
+            ApplyPurgedItems(purged, new PipeRequest { Command = PipeCommand.PurgeDeletedItems,
+                DeletedItemsPurge = new DeletedItemsPurgeRequest { Items = purged.PurgedItems } }, _listCache.Generation);
         NotificationReceived?.Invoke(this, notification);
         return true;
     }

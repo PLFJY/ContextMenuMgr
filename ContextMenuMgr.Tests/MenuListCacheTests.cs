@@ -19,6 +19,31 @@ public sealed class MenuListCacheTests : IAsyncLifetime
     { var cache = new MenuListCacheService(_root, fingerprint); _caches.Add(cache); return cache; }
 
     [Fact]
+    public async Task BulkPurge_PersistsOnlyConfirmedGenerationAndRejectsStaleScansAndLateRemovalOfANewerDeletion()
+    {
+        var cache = Cache();
+        var timestamp = DateTimeOffset.UtcNow;
+        var purged = Entry("purged") with { IsDeleted = true, DeletedAtUtc = timestamp };
+        var retained = Entry("retained") with { IsDeleted = true, DeletedAtUtc = timestamp };
+        await cache.MergeAsync(Scope, new[] { purged, retained }, true, cache.Version);
+        var oldVersion = cache.Version;
+        cache.BeginMutation<ContextMenuEntry>(purged.Id);
+        cache.BeginMutation<ContextMenuEntry>(retained.Id);
+        var selected = new[] { new DeletedItemReference(purged.Id, timestamp), new DeletedItemReference(retained.Id, timestamp) };
+        var result = new DeletedItemsPurgeResult { PurgedItems = [selected[0]], SkippedItemIds = [retained.Id] };
+        Assert.Equal(purged.Id, Assert.Single(cache.ApplyDeletedItemsPurge(selected, result, true, cache.Generation)));
+        var merged = await cache.MergeAsync(Scope, new[] { purged, retained }, true, oldVersion);
+        Assert.Equal(retained.Id, Assert.Single(merged).Id);
+        await cache.FlushAsync();
+        Assert.Equal(retained.Id, Assert.Single((await Cache().ReadAsync<ContextMenuEntry>(Scope))!).Id);
+        var newer = retained with { DeletedAtUtc = timestamp.AddMinutes(1) };
+        cache.ApplyResult(retained.Id, newer);
+        var lateResult = new DeletedItemsPurgeResult { PurgedItems = [selected[1]] };
+        Assert.Empty(cache.ApplyDeletedItemsPurge(lateResult.PurgedItems, lateResult, false, cache.Generation));
+        Assert.Equal(newer.DeletedAtUtc, (await cache.ReadAsync<ContextMenuEntry>(Scope))![0].DeletedAtUtc);
+    }
+
+    [Fact]
     public async Task RestartReadsCompleteSnapshotIncludingEmptyResult()
     {
         var cache = Cache();

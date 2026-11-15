@@ -25,7 +25,8 @@
     mc:Ignorable="d">
     <ui:FluentWindow.Resources>
         <DataTemplate x:Key="GlobalSearchResultTemplate" DataType="{x:Type viewModels:GlobalSearchResultViewModel}">
-            <Grid Margin="0,2" VerticalAlignment="Center">
+            <Grid>
+            <Grid Margin="0,2" VerticalAlignment="Center" Visibility="{Binding IsPlaceholder, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -129,6 +130,8 @@
                     Opacity="0.72"
                     Text="{Binding JumpText}" />
             </Grid>
+                <ui:TextBlock Margin="12" Text="{Binding DisplayName}" Visibility="{Binding IsPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </Grid>
         </DataTemplate>
     </ui:FluentWindow.Resources>
 
@@ -187,6 +190,8 @@
                 ItemsSource="{Binding GlobalSearchResults}"
                 MaxSuggestionListHeight="420"
                 PlaceholderText="{Binding GlobalSearchPlaceholder}"
+                GotKeyboardFocus="GlobalSearchBox_GotKeyboardFocus"
+                PreviewKeyDown="GlobalSearchBox_PreviewKeyDown"
                 QuerySubmitted="GlobalSearchBox_QuerySubmitted"
                 SuggestionChosen="GlobalSearchBox_SuggestionChosen"
                 Text="{Binding GlobalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -280,8 +285,7 @@
                 IsPaneOpen="True"
                 IsPaneToggleVisible="False"
                 OpenPaneLength="257"
-                PaneDisplayMode="Left"
-                TransitionDuration="140">
+                PaneDisplayMode="Left">
                 <modernNavigation:ModernNavigationView.MenuItems>
                     <ui:NavigationViewItem
                         Content="{Binding LegacyContextMenuItemsName}"

@@ -16,24 +16,36 @@ public sealed class SlideNavigationTransitionInfo : ModernNavigationTransitionIn
         set => SetValue(EffectProperty, value);
     }
 
+    // WinUI ThemeTransitions.cpp SlideNavigationTransitionInfo and NavigateTransitionHelper.h.
+    // Horizontal: exit 150 ms / enter 300 ms; vertical: hold 250 ms / enter 350 ms, exponent 6.
     internal override Storyboard CreateEnterStoryboard(FrameworkElement element, bool movingBackwards, TimeSpan duration)
     {
         element.RenderTransform = new TranslateTransform();
         var storyboard = new Storyboard();
         if (Effect == SlideNavigationTransitionEffect.FromBottom)
         {
-            storyboard.Children.Add(movingBackwards
-                ? EntranceNavigationTransitionInfo.Opacity(0, 1, duration, DecelerateKeySpline)
-                : EntranceNavigationTransitionInfo.Translate(TranslateYPath, 48, 0, duration, DecelerateKeySpline));
+            var middle = ProfileTime(250, duration);
+            if (!movingBackwards)
+            {
+                var translation = new DoubleAnimationUsingKeyFrames
+                {
+                    KeyFrames = { new DiscreteDoubleKeyFrame(200, TimeSpan.Zero), new DiscreteDoubleKeyFrame(200, middle),
+                        new EasingDoubleKeyFrame(0, ProfileTime(600, duration),
+                            new ExponentialEase { Exponent = 6, EasingMode = EasingMode.EaseOut }) }
+                };
+                Storyboard.SetTargetProperty(translation, TranslateYPath);
+                storyboard.Children.Add(translation);
+            }
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.StepOpacity(0, 1, middle));
         }
         else
         {
-            var fromLeft = Effect == SlideNavigationTransitionEffect.FromLeft ? !movingBackwards : movingBackwards;
-            storyboard.Children.Add(EntranceNavigationTransitionInfo.Translate(
-                TranslateXPath, fromLeft ? -96 : 96, 0, duration, DecelerateKeySpline));
+            var factor = Effect == SlideNavigationTransitionEffect.FromLeft ? 1 : -1;
+            var from = (movingBackwards ? 150 : -200) * factor;
+            var exit = ProfileTime(150, duration);
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.StagedSpline(TranslateXPath, from, 0, exit, duration, DecelerateKeySpline));
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.StepOpacity(0, 1, exit));
         }
-
-        storyboard.Children.Add(EntranceNavigationTransitionInfo.ImmediateOpacity(1));
         return storyboard;
     }
 
@@ -45,19 +57,27 @@ public sealed class SlideNavigationTransitionInfo : ModernNavigationTransitionIn
         {
             if (movingBackwards)
             {
-                storyboard.Children.Add(EntranceNavigationTransitionInfo.Translate(
-                    TranslateYPath, 0, 48, duration, AccelerateKeySpline));
+                var translation = new DoubleAnimationUsingKeyFrames
+                {
+                    KeyFrames = { new DiscreteDoubleKeyFrame(0, TimeSpan.Zero),
+                        new EasingDoubleKeyFrame(200, ProfileTime(600, duration),
+                            new ExponentialEase { Exponent = 6, EasingMode = EasingMode.EaseIn }) }
+                };
+                Storyboard.SetTargetProperty(translation, TranslateYPath);
+                storyboard.Children.Add(translation);
             }
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.StepOpacity(1, 0, ProfileTime(250, duration)));
         }
         else
         {
-            var toLeft = Effect == SlideNavigationTransitionEffect.FromLeft ? movingBackwards : !movingBackwards;
-            storyboard.Children.Add(EntranceNavigationTransitionInfo.Translate(
-                TranslateXPath, 0, toLeft ? -96 : 96, duration, AccelerateKeySpline));
+            var factor = Effect == SlideNavigationTransitionEffect.FromLeft ? 1 : -1;
+            var to = (movingBackwards ? -200 : 150) * factor;
+            var exit = ProfileTime(150, duration);
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.Translate(TranslateXPath, 0, to, exit, AccelerateKeySpline));
+            storyboard.Children.Add(EntranceNavigationTransitionInfo.StepOpacity(1, 0, exit));
         }
-
-        storyboard.Children.Add(EntranceNavigationTransitionInfo.Opacity(
-            1, 0, TimeSpan.FromMilliseconds(Math.Min(150, duration.TotalMilliseconds)), AccelerateKeySpline));
         return storyboard;
     }
+
+    private static TimeSpan ProfileTime(int milliseconds, TimeSpan duration) => TimeSpan.FromTicks(duration.Ticks * milliseconds / 450);
 }

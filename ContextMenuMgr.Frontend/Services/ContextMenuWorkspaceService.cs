@@ -28,6 +28,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private readonly Dictionary<string, (ContextMenuDecision Decision, DateTimeOffset RetryAfterUtc)> _uncertainDecisions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _decisionsInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _decisionSync = new();
+    private readonly HashSet<string> _deleteOperations = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private readonly SemaphoreSlim _wpsOfficeApprovalRefreshLock = new(1, 1);
     private readonly CancellationTokenSource _shutdownCts = new();
@@ -401,20 +402,20 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async Task<bool> AcknowledgeItemStateAsync(ContextMenuItemViewModel item)
     {
+        var original = item.Entry;
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var updated = await _backendClient.AcknowledgeItemStateAsync(item.Id, cts.Token);
-            if (updated is not null)
+            var result = await AcknowledgeOperationResolver.ExecuteAsync(_backendClient, original, _shutdownCts.Token);
+            if (!ReferenceEquals(item.Entry, original)) return true;
+            if (result.Outcome == AcknowledgementOutcome.Uncertain)
             {
-                UpsertItem(updated);
+                item.MarkAcknowledgementUncertain();
+                ConnectionStatus = _localization.Translate("AcknowledgementUncertain");
+                return false;
             }
-            else
-            {
-                RemoveItem(item.Id);
-            }
-
-            return true;
+            if (result.Item is { } updated) UpsertItem(updated);
+            else if (result.Removed) RemoveItem(item.Id);
+            return result.Outcome == AcknowledgementOutcome.Applied;
         }
         catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.MenuItemRemoved)
         {
@@ -424,6 +425,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, $"AcknowledgeItemStateAsync failed for {item.Id}.");
             ConnectionStatus = _localization.Format("ItemUpdateFailedStatus", item.DisplayName, ex.Message);
+            _infoBarService?.ShowInformationalInfoBar(_localization.Translate("WindowTitle"), ConnectionStatus);
             return false;
         }
     }
@@ -433,6 +435,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async Task DeleteOrUndoAsync(ContextMenuItemViewModel item)
     {
+        if (item.IsDeleteBusy || item.IsDeleteOutcomeUncertain || !_deleteOperations.Add(item.Id)) return;
+        item.IsDeleteBusy = true;
         try
         {
             if (!item.IsDeleted
@@ -474,6 +478,11 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
                 item.IsDeleted ? "UndoDeleteFailedStatus" : "DeleteFailedStatus",
                 ex,
                 item.IsDeleted ? "UndoDeleteAsync" : "DeleteItemAsync");
+        }
+        finally
+        {
+            _deleteOperations.Remove(item.Id);
+            item.IsDeleteBusy = false;
         }
     }
 
@@ -548,6 +557,8 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     /// </summary>
     public async Task PermanentlyDeleteAsync(ContextMenuItemViewModel item)
     {
+        if (item.IsDeleteBusy || item.IsDeleteOutcomeUncertain || !_deleteOperations.Add(item.Id)) return;
+        item.IsDeleteBusy = true;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -561,6 +572,58 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         catch (Exception ex)
         {
             await HandleItemOperationFailureAsync(item, "PermanentDeleteFailedStatus", ex, "PurgeDeletedItemAsync");
+        }
+        finally
+        {
+            _deleteOperations.Remove(item.Id);
+            item.IsDeleteBusy = false;
+        }
+    }
+
+    public async Task PurgeDeletedItemsAsync(DeletedItemsPurgeRequest request)
+    {
+        var ids = request.Items.Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selected = Items.Where(item => ids.Contains(item.Id)).ToArray();
+        var reserved = request.Items.Where(item => _deleteOperations.Add(item.Id)).ToArray();
+        if (reserved.Length != request.Items.Count)
+        {
+            foreach (var item in reserved) _deleteOperations.Remove(item.Id);
+            _infoBarService?.ShowInformationalInfoBar(_localization.Translate("PurgeDeletedItems"), _localization.Translate("PurgeDeletedItemsBusy"));
+            return;
+        }
+        foreach (var item in selected) item.IsDeleteBusy = true;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token);
+            timeout.CancelAfter(BackendRequestBudgets.ClassicMutation);
+            var result = await _backendClient.PurgeDeletedItemsAsync(request, timeout.Token);
+            foreach (var purged in result.PurgedItems)
+                if (Items.FirstOrDefault(item => item.Id.Equals(purged.Id, StringComparison.OrdinalIgnoreCase)) is { IsDeleted: true } current
+                    && current.DeletedAtUtc == purged.DeletedAtUtc) RemoveItem(purged.Id);
+            var message = _localization.Format("PurgeDeletedItemsResult", result.PurgedItems.Count,
+                result.SkippedItemIds.Count, result.BackupCleanupFailedItemIds.Count);
+            ConnectionStatus = message;
+            _infoBarService?.ShowInformationalInfoBar(_localization.Translate("PurgeDeletedItems"), message);
+        }
+        catch (Exception ex) when (!_shutdownCts.IsCancellationRequested
+            && ex is OperationCanceledException or TimeoutException or IOException)
+        {
+            foreach (var item in selected) { item.IsDeleteOutcomeUncertain = true; item.IsDeleteBusy = false; }
+            // A fresh complete snapshot can reconcile the records, but cannot prove backup cleanup.
+            await RefreshAsync();
+            ConnectionStatus = _localization.Translate("PurgeDeletedItemsUncertain");
+            _infoBarService?.ShowInformationalInfoBar(_localization.Translate("PurgeDeletedItems"), ConnectionStatus);
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error(nameof(ContextMenuWorkspaceService), ex, "Bulk deleted-item cleanup failed.");
+            await FrontendMessageBox.ShowErrorAsync(_localization.Translate("PurgeDeletedItemsFailed"),
+                _localization.Translate("PurgeDeletedItems"));
+        }
+        finally
+        {
+            foreach (var item in request.Items) _deleteOperations.Remove(item.Id);
+            foreach (var item in selected) item.IsDeleteBusy = false;
         }
     }
 
@@ -1306,7 +1369,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             if (existing.Remove(entry.Id, out var item))
             {
-                if (!item.IsToggleBusy && !item.IsAttributesBusy && (beforeScan is null || !beforeScan.TryGetValue(entry.Id, out var before) || ReferenceEquals(before, item.Entry)))
+                if (!item.IsToggleBusy && !item.IsAttributesBusy && !item.IsDeleteBusy && (beforeScan is null || !beforeScan.TryGetValue(entry.Id, out var before) || ReferenceEquals(before, item.Entry)))
                     item.Update(entry);
             }
             else
@@ -1317,7 +1380,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
         foreach (var removed in existing.Values.Where(item => MenuListData.AllowsRemoval(snapshot, item.Entry)).ToList())
         {
-            if (removed.IsToggleBusy || removed.IsAttributesBusy || beforeScan is not null && (!beforeScan.TryGetValue(removed.Id, out var before) || !ReferenceEquals(before, removed.Entry))) continue;
+            if (removed.IsToggleBusy || removed.IsAttributesBusy || removed.IsDeleteBusy || beforeScan is not null && (!beforeScan.TryGetValue(removed.Id, out var before) || !ReferenceEquals(before, removed.Entry))) continue;
             removed.Dispose();
             Items.Remove(removed);
         }
@@ -1414,7 +1477,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     private void OnItemsRemoved(object? sender, MenuItemsRemovedEventArgs e)
     {
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
-        void Apply() { foreach (var id in e.ItemIds) RemoveItem(id); }
+        void Apply() { foreach (var item in Items.Concat(WpsOfficeApprovalItems).Where(item => e.Matches(item.Entry)).ToArray()) RemoveItem(item.Id); }
         if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply);
         else Apply();
     }

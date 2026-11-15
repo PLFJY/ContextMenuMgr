@@ -11,6 +11,120 @@ namespace ContextMenuMgr.Tests;
 
 public sealed class MutationOutcomeTests
 {
+    [Fact]
+    public async Task BulkPurge_CompletesEverySelectedCacheMutationAndPublishesOnlyCommittedRemovals()
+    {
+        var pipeName = "ContextMenuMgr.Test." + Guid.NewGuid().ToString("N");
+        var purged = new DeletedItemReference("classic|purged", DateTimeOffset.UtcNow);
+        var skipped = new DeletedItemReference("classic|skipped", DateTimeOffset.UtcNow);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var serving = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync(timeout.Token);
+            using var reader = new StreamReader(server, leaveOpen: true);
+            using var writer = new StreamWriter(server, leaveOpen: true) { AutoFlush = true };
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            var request = JsonSerializer.Deserialize<PipeEnvelope>((await reader.ReadLineAsync(timeout.Token))!, options)!;
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new PipeEnvelope { MessageType = PipeMessageType.Response,
+                CorrelationId = request.CorrelationId, Response = new PipeResponse { Success = true,
+                    DeletedItemsPurge = new() { PurgedItems = [purged], SkippedItemIds = [skipped.Id] } } }, options));
+        });
+        await using var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        MenuItemsRemovedEventArgs? removed = null;
+        client.ItemsRemoved += (_, e) => removed = e;
+        await client.PurgeDeletedItemsAsync(new() { Items = [purged, skipped] }, timeout.Token);
+        await serving;
+        Assert.NotNull(removed);
+        Assert.Equal(purged.Id, Assert.Single(removed.ItemIds));
+        Assert.True(removed.Matches(new ContextMenuEntry { Id = purged.Id, IsDeleted = true, DeletedAtUtc = purged.DeletedAtUtc }));
+        Assert.False(removed.Matches(new ContextMenuEntry { Id = purged.Id, IsDeleted = true, DeletedAtUtc = purged.DeletedAtUtc!.Value.AddMinutes(1) }));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AcknowledgementTimeout_ReadsBackWithoutRepeatingTheCommit(bool queryFails)
+    {
+        var client = DispatchProxy.Create<IBackendClient, TimedOutBackend>();
+        var backend = (TimedOutBackend)client;
+        var original = new ContextMenuEntry { Id = "classic|acknowledge", DetectedChangeKind = ContextMenuChangeKind.Modified };
+        backend.State = original with { DetectedChangeKind = ContextMenuChangeKind.None };
+        backend.QueryFails = queryFails;
+        var result = await AcknowledgeOperationResolver.ExecuteAsync(client, original);
+        Assert.Equal(queryFails ? AcknowledgementOutcome.Uncertain : AcknowledgementOutcome.Applied, result.Outcome);
+        Assert.Equal(1, backend.Mutations);
+        Assert.Equal(1, backend.Queries);
+    }
+
+    [Fact]
+    public async Task OptimisticAcknowledgement_RestoresFailuresAndDoesNotHideANewerChangeWithTheSameDescription()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext(dispatcher));
+            dispatcher.BeginInvoke(async () =>
+            {
+                var directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr-ack-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var settings = new FrontendSettingsService(null, Path.Combine(directory, "settings.json"));
+                    var localization = new LocalizationService(settings);
+                    var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var commit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var original = new ContextMenuEntry { Id = "classic|ack", IsPresentInRegistry = true,
+                        CommandText = "first", DetectedChangeKind = ContextMenuChangeKind.Modified, DetectedChangeDetails = "Command changed" };
+                    using var item = new ContextMenuItemViewModel(original, localization, new IconPreviewService(), null!,
+                        acknowledgeItemStateAsync: _ => { started.TrySetResult(); return commit.Task; });
+                    var operation = item.DismissDetectedChangeCommand.ExecuteAsync(null);
+                    Assert.False(item.HasDetectedChange); // Feedback is synchronous, before the commit starts.
+                    await started.Task;
+                    commit.SetResult(false);
+                    await operation;
+                    Assert.True(item.HasDetectedChange);
+
+                    started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    commit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    operation = item.DismissDetectedChangeCommand.ExecuteAsync(null);
+                    await started.Task;
+                    item.Update(original with { CommandText = "second" });
+                    Assert.True(item.HasDetectedChange);
+                    commit.SetResult(true);
+                    await operation;
+                    Assert.True(item.HasDetectedChange);
+                    Assert.Equal("second", item.Entry.CommandText);
+
+                    started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    commit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                    operation = item.DismissDetectedChangeCommand.ExecuteAsync(null);
+                    await started.Task;
+                    item.MarkAcknowledgementUncertain();
+                    commit.SetResult(false);
+                    await operation;
+                    Assert.False(item.HasDetectedChange);
+                    Assert.False(item.CanDismissDetectedChange);
+                    item.Update(item.Entry);
+                    Assert.False(item.IsAcknowledgementUncertain);
+                    Assert.True(item.HasDetectedChange);
+                    completion.SetResult();
+                }
+                catch (Exception ex) { completion.SetException(ex); }
+                finally
+                {
+                    if (Directory.Exists(directory)) Directory.Delete(directory, true);
+                    dispatcher.BeginInvokeShutdown(System.Windows.Threading.DispatcherPriority.Normal);
+                }
+            });
+            System.Windows.Threading.Dispatcher.Run();
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(thread.Join(TimeSpan.FromSeconds(2)));
+    }
+
     // Permanent: authoritative queue refresh/decision ordering, uncertain outcomes and SID filtering.
     [Fact]
     public async Task OpenWithQueue_RefreshRacesTimeoutsAndLateSignalsCannotLoseOrResurrectReviews()
@@ -735,7 +849,7 @@ public sealed class MutationOutcomeTests
                     ? Task.FromException<IReadOnlyList<ContextMenuEntry>>(new TimeoutException("Verification unavailable."))
                     : Task.FromResult<IReadOnlyList<ContextMenuEntry>>(States ?? (State is null ? [] : [State]));
             }
-            if (targetMethod?.Name == nameof(IBackendClient.SetEnabledAsync))
+            if (targetMethod?.Name is nameof(IBackendClient.SetEnabledAsync) or nameof(IBackendClient.AcknowledgeItemStateAsync))
             {
                 Mutations++;
                 return Task.FromException<ContextMenuEntry?>(MutationFailure ?? new TimeoutException("Response was not delivered."));

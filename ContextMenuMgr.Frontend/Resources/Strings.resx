@@ -1410,7 +1410,7 @@ Continue anyway? (Not recommended)</value>
     <value>&gt;&gt;&gt;&gt;&gt;&gt; Separator &lt;&lt;&lt;&lt;&lt;&lt;</value>
   </data>
   <data name="LegacyContextMenuItems" xml:space="preserve">
-    <value>Legacy Context Menu Items</value>
+    <value>Legacy Context Menu</value>
   </data>
   <data name="MenuFormName" xml:space="preserve">
     <value>Menu Item Name</value>
@@ -1647,4 +1647,15 @@ Continue anyway? (Not recommended)</value>
   <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>Isolation did not succeed, so this registration is not awaiting approval. Inspect the registration and backend log; uncertain writes are reconciled by read-back only.</value></data>
   <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>Persistent protection remains authorized. Inspect and stop that protection before allowing this isolated registration.</value></data>
   <data name="OpenWithReviewRequired" xml:space="preserve"><value>This registration is awaiting review. Allow it in Pending Approvals before enabling it or authorizing persistent protection.</value></data>
+  <data name="AcknowledgementUncertain" xml:space="preserve"><value>Saving this acknowledgement could not be confirmed. Refresh to check the result.</value></data>
+  <data name="PurgeDeletedItems" xml:space="preserve"><value>Clear deleted items</value></data>
+  <data name="PurgeDeletedItemsTooltip" xml:space="preserve"><value>Permanently clear all deleted menu items and recovery backups in this category.</value></data>
+  <data name="ConfirmPurgeDeletedItems" xml:space="preserve"><value>Clear permanently</value></data>
+  <data name="PurgeDeletedItemsPrompt" xml:space="preserve"><value>Permanently clear {1} deleted items in “{0}” and their recovery backups? This cannot be undone.</value></data>
+  <data name="PurgeDeletedItemsResult" xml:space="preserve"><value>Cleared: {0}; skipped: {1}; backup cleanup failures: {2}.</value></data>
+  <data name="PurgeDeletedItemsUncertain" xml:space="preserve"><value>The cleanup result could not be fully confirmed. Refresh to check; backup cleanup has not been verified.</value></data>
+  <data name="PurgeDeletedItemsFailed" xml:space="preserve"><value>Cleanup failed. No further cleanup requests were sent. Update the backend service if it does not support bulk cleanup.</value></data>
+  <data name="ScrollToTop" xml:space="preserve"><value>Back to top</value></data>
+  <data name="ScrollToBottom" xml:space="preserve"><value>Go to bottom</value></data>
+  <data name="PurgeDeletedItemsBusy" xml:space="preserve"><value>Another delete or restore operation is still running. Try again when it finishes.</value></data>
 </root>

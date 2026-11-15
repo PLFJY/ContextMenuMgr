@@ -8,7 +8,7 @@ public sealed class FadeNavigationTransitionInfo : ModernNavigationTransitionInf
     internal override Storyboard CreateEnterStoryboard(FrameworkElement element, bool movingBackwards, TimeSpan duration)
     {
         var storyboard = new Storyboard();
-        storyboard.Children.Add(EntranceNavigationTransitionInfo.Opacity(0, 1, duration, DecelerateKeySpline));
+        storyboard.Children.Add(EntranceNavigationTransitionInfo.StagedSpline(OpacityPath, 0, 1, TimeSpan.FromTicks(duration.Ticks / 3), duration, DecelerateKeySpline));
         return storyboard;
     }
 
@@ -16,7 +16,7 @@ public sealed class FadeNavigationTransitionInfo : ModernNavigationTransitionInf
     {
         var storyboard = new Storyboard();
         storyboard.Children.Add(EntranceNavigationTransitionInfo.Opacity(
-            1, 0, TimeSpan.FromMilliseconds(Math.Min(150, duration.TotalMilliseconds)), AccelerateKeySpline));
+            1, 0, TimeSpan.FromTicks(duration.Ticks / 3), AccelerateKeySpline));
         return storyboard;
     }
 }

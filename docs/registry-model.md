@@ -162,6 +162,8 @@ ShellVerb 的 **ExactAction** 需要相同原始 verb 键名和可信命令目�
 | Undo delete | 面向用户的恢复入口，依赖备份存在。 |
 | Purge backup | 清理已保留的删除备份，之后恢复能力会下降。 |
 
+传统分类的批量永久清理只移除已删除恢复记录及其备份，不再操作注册表。服务验证分类（含桌面页既有 Directory Background 投影）、常规来源、认证 SID/loaded hive、备份目录和确认时的 DeletedAtUtc；其它分类、File Types 物理批量 Id、Win11/特殊来源、已恢复或重新删除记录不能纳入。一次 Load/校验/Save 仍持有 catalog gate，Save 失败或当前 host 未可信时不清理备份。提交成功后逐个清理备份，失败单独记录和返回；取消/超时不能撤销已提交的状态，也不能据此盲重试。
+
 保留备份是为了降低误删风险，也让审核中的 Remove 操作可回滚。备份本身不是注册表真实状态，导入失败或目标权限变化仍可能导致恢复失败。
 
 经典注册项删除先执行 Registry Write Protection preflight，再导出真实 `BackendRegistryPath`。共享的树删除实现先只申请 `ReadKey | Delete`，检查整个子树，随后从叶到根使用 `DeleteSubKey` 删除并逐键重新打开验证；不申请 `SetValue`、不预先清空 value、不接管所有权或改 ACL。不要换回 `DeleteSubKeyTree(..., false)`：它内部请求 value-write 权限，打开被拒绝时可能把现存 key 当作缺失而静默跳过。允许 DELETE 但拒绝 SetValue 的注册项仍应能删除；确实拒绝 DELETE 时应在删除任何子键前失败。外部并发修改仍可能导致执行阶段失败，`.reg` 备份不包含 ACL，不能据此宣称安全描述符已恢复。

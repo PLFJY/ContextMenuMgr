@@ -1,19 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Frontend.Services;
+using ContextMenuMgr.Frontend.Views;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
-public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposable
+public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposable, INavigationPresentation
 {
     private const int RebuildDebounceMilliseconds = 120;
-    private const int GroupChunkSize = 12;
-    private const int InitialVisibleGroupCount = 40;
-    private const int AppendIntervalMilliseconds = 60;
 
     private readonly ContextMenuWorkspaceService _workspace;
     private readonly LocalizationService _localization;
@@ -22,7 +19,8 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     private readonly DelayedLoadingPresentation _loadingPresentation = new();
     private bool _applyingNavigationFilter;
     private CancellationTokenSource? _rebuildCts;
-    private DispatcherTimer? _appendTimer;
+    private bool _presentationActive;
+    private bool _rebuildPending;
 
     public ApplicationGroupsPageViewModel(
         ContextMenuWorkspaceService workspace,
@@ -42,13 +40,11 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         }
         _localization.LanguageChanged += OnLanguageChanged;
         _navigationFilterService.FilterRequested += OnNavigationFilterRequested;
+        IsLoading = true;
         if (!ApplyPendingNavigationRequest())
         {
-            // Defer the initial full rebuild so the page frame renders its
-            // header/search/loading placeholder immediately. Groups are then
-            // computed and populated in chunks to keep the UI responsive while
-            // the (potentially large) grouped list is built.
-            IsLoading = true;
+            // The frame activates presentation after its complete Fluent transition.
+            // Group metadata is computed off-thread and rows remain virtualized.
             ScheduleRebuildGroups();
         }
     }
@@ -109,20 +105,35 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         ScheduleRebuildGroups();
     }
 
-    private void ScheduleRebuildGroups()
+    public void OnNavigationStarted() => _presentationActive = false;
+
+    public void OnNavigationCompleted()
     {
-        _appendTimer?.Stop();
+        _presentationActive = true;
+        if (_rebuildPending) ScheduleRebuildGroups(debounce: false);
+    }
+
+    public void OnNavigatingAway()
+    {
+        _presentationActive = false;
+        if (_rebuildCts is { IsCancellationRequested: false }) _rebuildCts.Cancel();
+    }
+
+    private void ScheduleRebuildGroups(bool debounce = true)
+    {
+        _rebuildPending = true;
+        if (!_presentationActive) return;
         _rebuildCts?.Cancel();
         _rebuildCts?.Dispose();
         var cts = _rebuildCts = new CancellationTokenSource();
-        _ = RebuildAfterDebounceAsync(cts);
+        _ = RebuildAfterDebounceAsync(cts, debounce);
     }
 
-    private async Task RebuildAfterDebounceAsync(CancellationTokenSource cts)
+    private async Task RebuildAfterDebounceAsync(CancellationTokenSource cts, bool debounce)
     {
         try
         {
-            await Task.Delay(RebuildDebounceMilliseconds, cts.Token);
+            if (debounce) await Task.Delay(RebuildDebounceMilliseconds, cts.Token);
             if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts))
             {
                 return;
@@ -142,27 +153,29 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     private async Task RebuildGroupsAsync(CancellationTokenSource cts)
     {
-        // Navigation-focus mode targets a single group; rebuild it synchronously.
-        if (IsNavigationFilterActive
-            && !string.IsNullOrWhiteSpace(NavigationFocusItemId)
-            && !string.IsNullOrWhiteSpace(NavigationFocusGroupIdentity))
-        {
-            RebuildNavigationFilterGroup();
-            return;
-        }
-
-        // Snapshot the workspace and query on the UI thread, then compute the
-        // grouped result off the UI thread so typing in the search box never
-        // blocks input handling. Items are only read off-thread; UI updates
-        // below always run on the UI thread.
+        // Capture immutable search inputs on the dispatcher; identity resolution and matching
+        // must not run on the input/animation thread or read mutable ViewModels in Task.Run.
+        var query = SearchText;
+        var focusedIdentity = IsNavigationFilterActive ? NavigationFocusGroupIdentity : null;
+        var focusedItemId = NavigationFocusItemId;
         var candidates = _workspace.Items.Where(item => !item.IsWindows11ContextMenu && IsClassicCategory(item.Category))
-            .Select(item => (Item: item, Identity: GetGroupIdentity(item))).Select(candidate =>
-                (candidate.Item, candidate.Identity, Matches: MatchesItem(candidate.Identity, candidate.Item, SearchText))).ToArray();
-        var specs = await Task.Run(() => candidates.Where(candidate => candidate.Matches)
+            .Select(item => (Item: item, Entry: item.Entry, Fields: new[] { item.DisplayName, item.CategoryName,
+                item.StateLabel, item.RegistryPath, item.UserNote, item.Entry.FilePath, item.Entry.HandlerClsid, item.Entry.CommandText })).ToArray();
+        var specs = await Task.Run(() => candidates
+            .Select(candidate => (candidate.Item, Identity: _identityService.GetIdentity(candidate.Entry).Identity, candidate.Fields))
+            .Where(candidate => focusedIdentity is not null
+                ? string.Equals(candidate.Identity, focusedIdentity, StringComparison.OrdinalIgnoreCase)
+                : string.IsNullOrWhiteSpace(query) || ContextMenuSearchMatcher.MatchesFields(query, [candidate.Identity, .. candidate.Fields]))
             .GroupBy(candidate => candidate.Identity, StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
             .Select(group => (Identity: group.Key, Items: group.Select(candidate => candidate.Item).ToArray())).ToArray(), cts.Token);
         if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts)) return;
+        if (focusedIdentity is not null && !specs.SelectMany(spec => spec.Items).Any(item => item.Id.Equals(focusedItemId, StringComparison.OrdinalIgnoreCase)))
+        {
+            ClearNavigationFilterState();
+            ScheduleRebuildGroups(debounce: false);
+            return;
+        }
         var existing = Groups.ToDictionary(group => group.Identity, StringComparer.OrdinalIgnoreCase);
         var groups = specs.Select(spec =>
         {
@@ -171,109 +184,14 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
             else group.UpdateItems(spec.Items);
             return group;
         }).ToArray();
-        if (Groups.Count == 0 && groups.Length > InitialVisibleGroupCount)
-        {
-            IncrementalCollection.Apply(Groups, groups.Take(InitialVisibleGroupCount).ToArray());
-            StartAppendTimer(groups, InitialVisibleGroupCount, cts);
-        }
-        else IncrementalCollection.Apply(Groups, groups);
+        IncrementalCollection.Apply(Groups, groups);
+        _rebuildPending = false;
         IsLoading = false;
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(ShowListContent));
     }
 
-    private void StartAppendTimer(ApplicationGroupViewModel[] groups, int offset, CancellationTokenSource cts)
-    {
-        _appendTimer?.Stop();
-        _appendTimer = new DispatcherTimer(DispatcherPriority.Normal)
-        {
-            Interval = TimeSpan.FromMilliseconds(AppendIntervalMilliseconds)
-        };
-        _appendTimer.Tick += (_, _) =>
-        {
-            if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts))
-            {
-                _appendTimer?.Stop();
-                return;
-            }
-
-            var end = Math.Min(offset + GroupChunkSize, groups.Length);
-            for (; offset < end; offset++)
-            {
-                Groups.Add(groups[offset]);
-            }
-
-            if (offset >= groups.Length)
-            {
-                _appendTimer?.Stop();
-            }
-        };
-        _appendTimer.Start();
-    }
-
-    private void RebuildNavigationFilterGroup()
-    {
-        if (string.IsNullOrWhiteSpace(NavigationFocusGroupIdentity))
-        {
-            ClearNavigationFilterState();
-            ScheduleRebuildGroups();
-            return;
-        }
-
-        var targetItem = _workspace.Items
-            .FirstOrDefault(item => !item.IsWindows11ContextMenu
-                && IsClassicCategory(item.Category)
-                && string.Equals(item.Id, NavigationFocusItemId, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(GetGroupIdentity(item), NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase));
-
-        if (targetItem is not null)
-        {
-            var groupItems = _workspace.Items
-                .Where(item => !item.IsWindows11ContextMenu
-                    && IsClassicCategory(item.Category)
-                    && string.Equals(GetGroupIdentity(item), NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            var group = Groups.FirstOrDefault(group => group.Identity.Equals(NavigationFocusGroupIdentity, StringComparison.OrdinalIgnoreCase))
-                ?? new ApplicationGroupViewModel(NavigationFocusGroupIdentity, groupItems, _workspace, _localization);
-            group.UpdateItems(groupItems);
-            IncrementalCollection.Apply(Groups, new[] { group });
-            IsLoading = false;
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(ShowListContent));
-            return;
-        }
-
-        FrontendDebugLog.Warning(
-            nameof(ApplicationGroupsPageViewModel),
-            "ApplicationGroupNavigationFilterTargetMissing: "
-            + $"ItemId={NavigationFocusItemId}, "
-            + $"GroupIdentity={NavigationFocusGroupIdentity}.");
-        ClearNavigationFilterState();
-        ScheduleRebuildGroups();
-    }
-
     private string GetGroupIdentity(ContextMenuItemViewModel item) => _identityService.GetIdentity(item).Identity;
-
-    private static bool MatchesItem(string identity, ContextMenuItemViewModel item, string query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return true;
-        }
-
-        return ContextMenuSearchMatcher.MatchesFields(
-            query,
-            identity,
-            item.DisplayName,
-            item.CategoryName,
-            item.StateLabel,
-            item.RegistryPath,
-            item.UserNote,
-            item.Entry.FilePath,
-            item.Entry.HandlerClsid,
-            item.Entry.CommandText);
-    }
 
     private static bool IsClassicCategory(ContextMenuMgr.Contracts.ContextMenuCategory category) => category is
         ContextMenuMgr.Contracts.ContextMenuCategory.File
@@ -422,7 +340,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
         SetSearchTextFromNavigationFilter(targetItem.DisplayName);
 
-        RebuildNavigationFilterGroup();
+        ScheduleRebuildGroups(debounce: false);
 
         FrontendDebugLog.Info(
             nameof(ApplicationGroupsPageViewModel),
@@ -472,7 +390,6 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     {
         _loadingPresentation.PropertyChanged -= OnLoadingPresentationChanged;
         _loadingPresentation.Dispose();
-        _appendTimer?.Stop();
         _rebuildCts?.Cancel();
         _rebuildCts?.Dispose();
         _rebuildCts = null;

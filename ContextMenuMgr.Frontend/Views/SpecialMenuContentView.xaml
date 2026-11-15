@@ -8,12 +8,235 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <UserControl.Resources>
+        <DataTemplate DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
+            <Border Style="{StaticResource ContextMenuItemCardStyle}">
+                <Grid>
+                    <ui:TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Opacity="0.72"
+                        Text="{Binding DisplayName}"
+                        Visibility="{Binding IsSeparator, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Grid>
+                        <Grid.Visibility>
+                            <Binding Converter="{StaticResource InverseBooleanToVisibilityConverter}" Path="IsSeparator" />
+                        </Grid.Visibility>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border
+                                    Width="30"
+                                    Height="30"
+                                    Margin="0,0,10,0"
+                                    Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                    CornerRadius="6">
+                                    <Image
+                                        Width="20"
+                                        Height="20"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Source="{Binding IconSource}" />
+                                </Border>
+                                <StackPanel Grid.Column="1">
+                                    <ui:TextBlock
+                                        FontSize="15"
+                                        FontWeight="SemiBold"
+                                        Text="{Binding DisplayName}" />
+                                    <ui:TextBlock
+                                        Margin="0,3,0,0"
+                                        FontFamily="Consolas"
+                                        FontSize="11"
+                                        Opacity="0.65"
+                                        Text="{Binding Subtitle}"
+                                        TextWrapping="Wrap" />
+                                    <ui:TextBlock
+                                        Margin="0,6,0,0"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                        Text="{Binding OpenWithReadOnlyText}"
+                                        ToolTip="{Binding RegistrationToolTip}"
+                                        Visibility="{Binding IsReadOnlyOpenWith, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <Border
+                                        Margin="0,6,0,0"
+                                        Padding="6,2"
+                                        HorizontalAlignment="Left"
+                                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                        CornerRadius="4"
+                                        ToolTip="{Binding ReadOnlyToolTip}"
+                                        Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ui:TextBlock
+                                            FontSize="11"
+                                            Opacity="0.82"
+                                            Text="{Binding ReadOnlyLabel}" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                            <ui:TextBlock
+                                Margin="0,7,0,0"
+                                FontSize="11"
+                                Opacity="0.65"
+                                Text="{Binding ProviderSummary}"
+                                TextWrapping="Wrap"
+                                Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ui:TextBlock
+                                Margin="0,3,0,0"
+                                FontFamily="Consolas"
+                                FontSize="11"
+                                Opacity="0.65"
+                                Text="{Binding CreationSummary}"
+                                TextWrapping="Wrap"
+                                Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                                Text="{Binding RegistrationNotice}"
+                                ToolTip="{Binding RegistrationToolTip}"
+                                Visibility="{Binding HasRegistrationNotice, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                                Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                Text="{Binding MonitoringText}"
+                                Visibility="{Binding HasMonitoringText, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <WrapPanel Margin="0,6,0,0">
+                                <ui:Button Margin="0,0,6,0" Content="{Binding OpenWithApprovalsText}"
+                                    Command="{Binding DataContext.OpenWithApprovalsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                    Visibility="{Binding ShowOpenWithReview, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button Content="{Binding ProtectionText}" ToolTip="{Binding ProtectionToolTip}"
+                                    Command="{Binding DataContext.ProtectOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                    Visibility="{Binding ShowProtection, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </WrapPanel>
+                            <ui:TextBlock
+                                Margin="0,8,0,0"
+                                Opacity="0.72"
+                                Text="{Binding Detail}"
+                                TextWrapping="Wrap"
+                                Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                            <controls:AsyncToggleSwitch
+                                Margin="0,0,0,8"
+                                Label="{Binding ToggleLabel}"
+                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                CanToggle="{Binding CanToggle}"
+                                IsBusy="{Binding IsBusy}"
+                                Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <ui:Button
+                                    Width="32"
+                                    Height="32"
+                                    Margin="0,0,6,0"
+                                    Padding="0"
+                                    Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Icon="{ui:SymbolIcon Symbol=Edit24}"
+                                    IsEnabled="{Binding CanEdit}"
+                                    ToolTip="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Visibility="{Binding ShowEdit, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button
+                                    Width="32"
+                                    Height="32"
+                                    Margin="0,0,6,0"
+                                    Padding="0"
+                                    Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
+                                    IsEnabled="{Binding CanMoveUp}"
+                                    Visibility="{Binding ShowMove, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button
+                                    Width="32"
+                                    Height="32"
+                                    Margin="0,0,6,0"
+                                    Padding="0"
+                                    Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
+                                    IsEnabled="{Binding CanMoveDown}"
+                                    Visibility="{Binding ShowMove, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <ui:Button
+                                    Width="32"
+                                    Height="32"
+                                    Margin="0,0,6,0"
+                                    Padding="0"
+                                    Command="{Binding DataContext.UndoDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
+                                    IsEnabled="{Binding CanUndoDelete}"
+                                    Visibility="{Binding ShowUndoDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Grid Visibility="{Binding ShowPermanentDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ui:Button
+                                        Width="32"
+                                        Height="32"
+                                        Margin="0,0,6,0"
+                                        Padding="0"
+                                        Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                        IsEnabled="{Binding CanPermanentlyDelete}" />
+                                    <ui:Flyout IsOpen="{Binding IsPermanentDeleteFlyoutOpen, Mode=TwoWay}" Placement="Top">
+                                        <StackPanel MinWidth="200">
+                                            <ui:TextBlock
+                                                FontSize="14"
+                                                Text="{Binding PermanentDeleteConfirmationText}"
+                                                TextWrapping="Wrap" />
+                                            <ui:TextBlock
+                                                Margin="0,8,0,0"
+                                                FontSize="12"
+                                                Opacity="0.65"
+                                                Text="{Binding DeletedAtText}" />
+                                            <StackPanel
+                                                Margin="0,16,0,0"
+                                                HorizontalAlignment="Right"
+                                                Orientation="Horizontal">
+                                                <ui:Button
+                                                    Margin="0,0,8,0"
+                                                    Command="{Binding ClosePermanentDeleteFlyoutCommand}"
+                                                    Content="{Binding DataContext.CancelText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                                <ui:Button
+                                                    Appearance="Danger"
+                                                    Command="{Binding DataContext.ConfirmPermanentDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </ui:Flyout>
+                                </Grid>
+                                <ui:Button
+                                    Width="32"
+                                    Height="32"
+                                    Padding="0"
+                                    Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                    IsEnabled="{Binding CanDelete}"
+                                    Visibility="{Binding ShowDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type viewModels:SpecialMenuPageViewModel}">
+            <Expander Margin="0,12,0,0"
+                IsExpanded="{Binding IsOpenWithReadOnlyExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{Binding ShowOpenWithReadOnlyGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Expander.Header>
+                    <ui:TextBlock FontSize="14" FontWeight="SemiBold"
+                        Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                        Text="{Binding OpenWithReadOnlyGroupText}" />
+                </Expander.Header>
+            </Expander>
+        </DataTemplate>
+    </UserControl.Resources>
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
         <Border Background="{DynamicResource LayerFillColorAltBrush}" Style="{StaticResource CardBorderStyle}">
             <StackPanel>
                 <ui:TextBlock
@@ -111,15 +334,15 @@
                                 Text="{Binding DocumentIconProviderLabel}" />
                             <WrapPanel>
                                 <RadioButton Margin="0,0,16,0" Tag="MicrosoftOffice"
-                                             Content="{Binding MicrosoftOfficeLabel}"
-                                             IsChecked="{Binding IsMicrosoftDocumentIconProviderSelected, Mode=OneWay}"
-                                             IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                             Checked="OnDocumentIconProviderChecked" />
+                                    Content="{Binding MicrosoftOfficeLabel}"
+                                    IsChecked="{Binding IsMicrosoftDocumentIconProviderSelected, Mode=OneWay}"
+                                    IsEnabled="{Binding CanChangeDocumentIconProvider}"
+                                    Checked="OnDocumentIconProviderChecked" />
                                 <RadioButton Tag="WpsOffice"
-                                             Content="{Binding WpsOfficeLabel}"
-                                             IsChecked="{Binding IsWpsDocumentIconProviderSelected, Mode=OneWay}"
-                                             IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                             Checked="OnDocumentIconProviderChecked" />
+                                    Content="{Binding WpsOfficeLabel}"
+                                    IsChecked="{Binding IsWpsDocumentIconProviderSelected, Mode=OneWay}"
+                                    IsEnabled="{Binding CanChangeDocumentIconProvider}"
+                                    Checked="OnDocumentIconProviderChecked" />
                             </WrapPanel>
                             <ui:TextBlock
                                 Margin="0,4,0,0"
@@ -145,163 +368,15 @@
             </StackPanel>
         </Border>
 
-        <modernScroll:ModernScrollViewer
-            Grid.Row="1"
-            HorizontalScrollBarVisibility="Disabled"
-            VerticalScrollBarVisibility="Auto">
-            <Grid>
-                <Grid Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <ItemsControl behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <ItemsControl.Resources>
-                    <DataTemplate x:Key="WinXEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
-                        <Border Margin="0,4,0,4" Style="{StaticResource ContextMenuItemCardStyle}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal">
-                                    <Border
-                                        Width="28"
-                                        Height="28"
-                                        Margin="0,0,10,0"
-                                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
-                                        CornerRadius="6">
-                                        <Image
-                                            Width="20"
-                                            Height="20"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Source="{Binding IconSource}" />
-                                    </Border>
-                                    <StackPanel>
-                                        <ui:TextBlock
-                                            FontSize="14"
-                                            FontWeight="SemiBold"
-                                            Text="{Binding DisplayName}" />
-                                        <ui:TextBlock
-                                            Margin="0,2,0,0"
-                                            FontSize="11"
-                                            Opacity="0.65"
-                                            Text="{Binding Detail}"
-                                            TextWrapping="Wrap"
-                                            Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    </StackPanel>
-                                </StackPanel>
-                                <StackPanel
-                                    Grid.Column="1"
-                                    Margin="12,0,0,0"
-                                    Orientation="Horizontal">
-                                    <controls:AsyncToggleSwitch
-                                        Margin="0,0,8,0"
-                                        Label="{Binding ToggleLabel}"
-                                        IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        CanToggle="{Binding CanToggle}"
-                                        IsBusy="{Binding IsBusy}"
-                                        Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:Button
-                                        Width="32"
-                                        Height="32"
-                                        Margin="0,0,6,0"
-                                        Padding="0"
-                                        Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"
-                                        Icon="{ui:SymbolIcon Symbol=Edit24}"
-                                        IsEnabled="{Binding CanEdit}"
-                                        ToolTip="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        Visibility="{Binding ShowEdit, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:Button
-                                        Width="32"
-                                        Height="32"
-                                        Margin="0,0,6,0"
-                                        Padding="0"
-                                        Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"
-                                        Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
-                                        IsEnabled="{Binding CanMoveUp}"
-                                        Visibility="{Binding ShowMove, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:Button
-                                        Width="32"
-                                        Height="32"
-                                        Margin="0,0,6,0"
-                                        Padding="0"
-                                        Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"
-                                        Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
-                                        IsEnabled="{Binding CanMoveDown}"
-                                        Visibility="{Binding ShowMove, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:Button
-                                        Width="32"
-                                        Height="32"
-                                        Margin="0,0,6,0"
-                                        Padding="0"
-                                        Command="{Binding DataContext.UndoDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"
-                                        Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
-                                        IsEnabled="{Binding CanUndoDelete}"
-                                        Visibility="{Binding ShowUndoDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <Grid Visibility="{Binding ShowPermanentDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <ui:Button
-                                            Width="32"
-                                            Height="32"
-                                            Margin="0,0,6,0"
-                                            Padding="0"
-                                            Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            CommandParameter="{Binding}"
-                                            Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
-                                            IsEnabled="{Binding CanPermanentlyDelete}" />
-                                        <ui:Flyout IsOpen="{Binding IsPermanentDeleteFlyoutOpen, Mode=TwoWay}" Placement="Top">
-                                            <StackPanel MinWidth="200">
-                                                <ui:TextBlock
-                                                    FontSize="14"
-                                                    Text="{Binding PermanentDeleteConfirmationText}"
-                                                    TextWrapping="Wrap" />
-                                                <ui:TextBlock
-                                                    Margin="0,8,0,0"
-                                                    FontSize="12"
-                                                    Opacity="0.65"
-                                                    Text="{Binding DeletedAtText}" />
-                                                <StackPanel
-                                                    Margin="0,16,0,0"
-                                                    HorizontalAlignment="Right"
-                                                    Orientation="Horizontal">
-                                                    <ui:Button
-                                                        Margin="0,0,8,0"
-                                                        Command="{Binding ClosePermanentDeleteFlyoutCommand}"
-                                                        Content="{Binding DataContext.CancelText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                                                    <ui:Button
-                                                        Appearance="Danger"
-                                                        Command="{Binding DataContext.ConfirmPermanentDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                        CommandParameter="{Binding}"
-                                                        Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </ui:Flyout>
-                                    </Grid>
-                                    <ui:Button
-                                        Width="32"
-                                        Height="32"
-                                        Padding="0"
-                                        Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}"
-                                        Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                        IsEnabled="{Binding CanDelete}"
-                                        Visibility="{Binding ShowDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.Resources>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type viewModels:WinXGroupNodeViewModel}">
-                        <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
-                            <Expander.Header>
-                                <Border
-                                    Margin="0,6,0,6"
-                                    Padding="10"
-                                    BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="8">
+
+        <Grid Grid.Row="1">
+            <Grid Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <modernScroll:ModernScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                    Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ItemsControl behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ItemsControl.Resources>
+                            <DataTemplate x:Key="WinXEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
+                                <Border Margin="0,4,0,4" Style="{StaticResource ContextMenuItemCardStyle}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
@@ -309,143 +384,8 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Orientation="Horizontal">
                                             <Border
-                                                Width="30"
-                                                Height="30"
-                                                Margin="0,0,10,0"
-                                                Background="{DynamicResource ControlFillColorTertiaryBrush}"
-                                                CornerRadius="6">
-                                                <ui:SymbolIcon
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Symbol="Folder24" />
-                                            </Border>
-                                            <ui:TextBlock
-                                                VerticalAlignment="Center"
-                                                FontSize="15"
-                                                FontWeight="SemiBold"
-                                                Text="{Binding Group.DisplayName}" />
-                                        </StackPanel>
-                                        <StackPanel
-                                            Grid.Column="1"
-                                            Margin="12,0,0,0"
-                                            Orientation="Horizontal">
-                                            <controls:AsyncToggleSwitch
-                                                Margin="0,0,8,0"
-                                                Label="{Binding Group.ToggleLabel}"
-                                                IsChecked="{Binding Group.IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                CanToggle="{Binding Group.CanToggle}"
-                                                IsBusy="{Binding Group.IsBusy}"
-                                                Visibility="{Binding Group.ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <ui:Button
-                                                Width="32"
-                                                Height="32"
-                                                Margin="0,0,6,0"
-                                                Padding="0"
-                                                Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding Group}"
-                                                Icon="{ui:SymbolIcon Symbol=Edit24}"
-                                                IsEnabled="{Binding Group.CanEdit}"
-                                                ToolTip="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                Visibility="{Binding Group.ShowEdit, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <ui:Button
-                                                Width="32"
-                                                Height="32"
-                                                Margin="0,0,6,0"
-                                                Padding="0"
-                                                Command="{Binding DataContext.UndoDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding Group}"
-                                                Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
-                                                IsEnabled="{Binding Group.CanUndoDelete}"
-                                                Visibility="{Binding Group.ShowUndoDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <Grid Visibility="{Binding Group.ShowPermanentDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                <ui:Button
-                                                    Width="32"
-                                                    Height="32"
-                                                    Margin="0,0,6,0"
-                                                    Padding="0"
-                                                    Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding Group}"
-                                                    Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
-                                                    IsEnabled="{Binding Group.CanPermanentlyDelete}" />
-                                                <ui:Flyout IsOpen="{Binding Group.IsPermanentDeleteFlyoutOpen, Mode=TwoWay}" Placement="Top">
-                                                    <StackPanel MinWidth="200">
-                                                        <ui:TextBlock
-                                                            FontSize="14"
-                                                            Text="{Binding Group.PermanentDeleteConfirmationText}"
-                                                            TextWrapping="Wrap" />
-                                                        <ui:TextBlock
-                                                            Margin="0,8,0,0"
-                                                            FontSize="12"
-                                                            Opacity="0.65"
-                                                            Text="{Binding Group.DeletedAtText}" />
-                                                        <StackPanel
-                                                            Margin="0,16,0,0"
-                                                            HorizontalAlignment="Right"
-                                                            Orientation="Horizontal">
-                                                            <ui:Button
-                                                                Margin="0,0,8,0"
-                                                                Command="{Binding Group.ClosePermanentDeleteFlyoutCommand}"
-                                                                Content="{Binding DataContext.CancelText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                                                            <ui:Button
-                                                                Appearance="Danger"
-                                                                Command="{Binding DataContext.ConfirmPermanentDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                CommandParameter="{Binding Group}"
-                                                                Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-                                                        </StackPanel>
-                                                    </StackPanel>
-                                                </ui:Flyout>
-                                            </Grid>
-                                            <ui:Button
-                                                Width="32"
-                                                Height="32"
-                                                Padding="0"
-                                                Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding Group}"
-                                                Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                                IsEnabled="{Binding Group.CanDelete}"
-                                                Visibility="{Binding Group.ShowDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </Expander.Header>
-                            <ItemsControl
-                                Margin="24,0,0,0"
-                                ItemTemplate="{StaticResource WinXEntryTemplate}"
-                                behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Items}" />
-                        </Expander>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <StackPanel Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                <StackPanel.Resources>
-                    <DataTemplate x:Key="SpecialMenuEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
-                        <Border Style="{StaticResource ContextMenuItemCardStyle}">
-                            <Grid>
-                                <ui:TextBlock
-                                    HorizontalAlignment="Center"
-                                    FontSize="13"
-                                    FontWeight="SemiBold"
-                                    Opacity="0.72"
-                                    Text="{Binding DisplayName}"
-                                    Visibility="{Binding IsSeparator, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <Grid>
-                                    <Grid.Visibility>
-                                        <Binding Converter="{StaticResource InverseBooleanToVisibilityConverter}" Path="IsSeparator" />
-                                    </Grid.Visibility>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border
-                                                Width="30"
-                                                Height="30"
+                                                Width="28"
+                                                Height="28"
                                                 Margin="0,0,10,0"
                                                 Background="{DynamicResource ControlFillColorTertiaryBrush}"
                                                 CornerRadius="6">
@@ -456,89 +396,31 @@
                                                     VerticalAlignment="Center"
                                                     Source="{Binding IconSource}" />
                                             </Border>
-                                            <StackPanel Grid.Column="1">
+                                            <StackPanel>
                                                 <ui:TextBlock
-                                                    FontSize="15"
+                                                    FontSize="14"
                                                     FontWeight="SemiBold"
                                                     Text="{Binding DisplayName}" />
                                                 <ui:TextBlock
-                                                    Margin="0,3,0,0"
-                                                    FontFamily="Consolas"
+                                                    Margin="0,2,0,0"
                                                     FontSize="11"
                                                     Opacity="0.65"
-                                                    Text="{Binding Subtitle}"
-                                                    TextWrapping="Wrap" />
-                                                <ui:TextBlock
-                                                    Margin="0,6,0,0"
-                                                    FontSize="12"
-                                                    Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                                                    Text="{Binding OpenWithReadOnlyText}"
-                                                    ToolTip="{Binding RegistrationToolTip}"
-                                                    Visibility="{Binding IsReadOnlyOpenWith, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <Border
-                                                    Margin="0,6,0,0"
-                                                    Padding="6,2"
-                                                    HorizontalAlignment="Left"
-                                                    Background="{DynamicResource ControlFillColorTertiaryBrush}"
-                                                    CornerRadius="4"
-                                                    ToolTip="{Binding ReadOnlyToolTip}"
-                                                    Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                    <ui:TextBlock
-                                                        FontSize="11"
-                                                        Opacity="0.82"
-                                                        Text="{Binding ReadOnlyLabel}" />
-                                                </Border>
+                                                    Text="{Binding Detail}"
+                                                    TextWrapping="Wrap"
+                                                    Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             </StackPanel>
-                                        </Grid>
-                                        <ui:TextBlock
-                                            Margin="0,7,0,0"
-                                            FontSize="11"
-                                            Opacity="0.65"
-                                            Text="{Binding ProviderSummary}"
-                                            TextWrapping="Wrap"
-                                            Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <ui:TextBlock
-                                            Margin="0,3,0,0"
-                                            FontFamily="Consolas"
-                                            FontSize="11"
-                                            Opacity="0.65"
-                                            Text="{Binding CreationSummary}"
-                                            TextWrapping="Wrap"
-                                            Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
-                                            Text="{Binding RegistrationNotice}"
-                                            ToolTip="{Binding RegistrationToolTip}"
-                                            Visibility="{Binding HasRegistrationNotice, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
-                                            Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                                            Text="{Binding MonitoringText}"
-                                            Visibility="{Binding HasMonitoringText, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <WrapPanel Margin="0,6,0,0">
-                                            <ui:Button Margin="0,0,6,0" Content="{Binding OpenWithApprovalsText}"
-                                                Command="{Binding DataContext.OpenWithApprovalsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
-                                                Visibility="{Binding ShowOpenWithReview, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <ui:Button Content="{Binding ProtectionText}" ToolTip="{Binding ProtectionToolTip}"
-                                                Command="{Binding DataContext.ProtectOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
-                                                Visibility="{Binding ShowProtection, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        </WrapPanel>
-                                        <ui:TextBlock
-                                            Margin="0,8,0,0"
-                                            Opacity="0.72"
-                                            Text="{Binding Detail}"
-                                            TextWrapping="Wrap"
-                                            Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                                        <controls:AsyncToggleSwitch
-                                            Margin="0,0,0,8"
-                                            Label="{Binding ToggleLabel}"
-                                            IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                            CanToggle="{Binding CanToggle}"
-                                            IsBusy="{Binding IsBusy}"
-                                            Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                        </StackPanel>
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            Margin="12,0,0,0"
+                                            Orientation="Horizontal">
+                                            <controls:AsyncToggleSwitch
+                                                Margin="0,0,8,0"
+                                                Label="{Binding ToggleLabel}"
+                                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                CanToggle="{Binding CanToggle}"
+                                                IsBusy="{Binding IsBusy}"
+                                                Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             <ui:Button
                                                 Width="32"
                                                 Height="32"
@@ -628,47 +510,151 @@
                                                 IsEnabled="{Binding CanDelete}"
                                                 Visibility="{Binding ShowDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         </StackPanel>
-                                    </StackPanel>
-                                </Grid>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </StackPanel.Resources>
-                <ItemsControl
-                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-                    behaviors:MenuListTransitions.IsEnabled="True"
-                    ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
-                    ItemsSource="{Binding ItemsView}" />
-                <Expander Margin="0,12,0,0"
-                          IsExpanded="{Binding IsOpenWithReadOnlyExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                          Visibility="{Binding ShowOpenWithReadOnlyGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <Expander.Header>
-                        <ui:TextBlock FontSize="14" FontWeight="SemiBold"
-                                      Foreground="{DynamicResource SystemFillColorCautionBrush}"
-                                      Text="{Binding OpenWithReadOnlyGroupText}" />
-                    </Expander.Header>
-                    <ItemsControl Margin="0,6,0,0"
-                                  behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
-                                  behaviors:MenuListTransitions.IsEnabled="True"
-                                  ItemTemplate="{StaticResource SpecialMenuEntryTemplate}"
-                                  ItemsSource="{Binding OpenWithReadOnlyItemsView}" />
-                </Expander>
-                </StackPanel>
-
-                </Grid>
-
-                <Border
-                    Padding="24,18"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Panel.ZIndex="100"
-                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12"
-                    IsHitTestVisible="False"
-                    Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel MinWidth="180" HorizontalAlignment="Center">
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.Resources>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModels:WinXGroupNodeViewModel}">
+                                <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                    <Expander.Header>
+                                        <Border
+                                            Margin="0,6,0,6"
+                                            Padding="10"
+                                            BorderBrush="{DynamicResource CardStrokeColorSecondaryBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border
+                                                        Width="30"
+                                                        Height="30"
+                                                        Margin="0,0,10,0"
+                                                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                                        CornerRadius="6">
+                                                        <ui:SymbolIcon
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            Symbol="Folder24" />
+                                                    </Border>
+                                                    <ui:TextBlock
+                                                        VerticalAlignment="Center"
+                                                        FontSize="15"
+                                                        FontWeight="SemiBold"
+                                                        Text="{Binding Group.DisplayName}" />
+                                                </StackPanel>
+                                                <StackPanel
+                                                    Grid.Column="1"
+                                                    Margin="12,0,0,0"
+                                                    Orientation="Horizontal">
+                                                    <controls:AsyncToggleSwitch
+                                                        Margin="0,0,8,0"
+                                                        Label="{Binding Group.ToggleLabel}"
+                                                        IsChecked="{Binding Group.IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                        CanToggle="{Binding Group.CanToggle}"
+                                                        IsBusy="{Binding Group.IsBusy}"
+                                                        Visibility="{Binding Group.ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <ui:Button
+                                                        Width="32"
+                                                        Height="32"
+                                                        Margin="0,0,6,0"
+                                                        Padding="0"
+                                                        Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding Group}"
+                                                        Icon="{ui:SymbolIcon Symbol=Edit24}"
+                                                        IsEnabled="{Binding Group.CanEdit}"
+                                                        ToolTip="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        Visibility="{Binding Group.ShowEdit, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <ui:Button
+                                                        Width="32"
+                                                        Height="32"
+                                                        Margin="0,0,6,0"
+                                                        Padding="0"
+                                                        Command="{Binding DataContext.UndoDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding Group}"
+                                                        Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
+                                                        IsEnabled="{Binding Group.CanUndoDelete}"
+                                                        Visibility="{Binding Group.ShowUndoDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <Grid Visibility="{Binding Group.ShowPermanentDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                        <ui:Button
+                                                            Width="32"
+                                                            Height="32"
+                                                            Margin="0,0,6,0"
+                                                            Padding="0"
+                                                            Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                            CommandParameter="{Binding Group}"
+                                                            Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                                            IsEnabled="{Binding Group.CanPermanentlyDelete}" />
+                                                        <ui:Flyout IsOpen="{Binding Group.IsPermanentDeleteFlyoutOpen, Mode=TwoWay}" Placement="Top">
+                                                            <StackPanel MinWidth="200">
+                                                                <ui:TextBlock
+                                                                    FontSize="14"
+                                                                    Text="{Binding Group.PermanentDeleteConfirmationText}"
+                                                                    TextWrapping="Wrap" />
+                                                                <ui:TextBlock
+                                                                    Margin="0,8,0,0"
+                                                                    FontSize="12"
+                                                                    Opacity="0.65"
+                                                                    Text="{Binding Group.DeletedAtText}" />
+                                                                <StackPanel
+                                                                    Margin="0,16,0,0"
+                                                                    HorizontalAlignment="Right"
+                                                                    Orientation="Horizontal">
+                                                                    <ui:Button
+                                                                        Margin="0,0,8,0"
+                                                                        Command="{Binding Group.ClosePermanentDeleteFlyoutCommand}"
+                                                                        Content="{Binding DataContext.CancelText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                                                    <ui:Button
+                                                                        Appearance="Danger"
+                                                                        Command="{Binding DataContext.ConfirmPermanentDeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                        CommandParameter="{Binding Group}"
+                                                                        Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </ui:Flyout>
+                                                    </Grid>
+                                                    <ui:Button
+                                                        Width="32"
+                                                        Height="32"
+                                                        Padding="0"
+                                                        Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding Group}"
+                                                        Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                                        IsEnabled="{Binding Group.CanDelete}"
+                                                        Visibility="{Binding Group.ShowDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </Expander.Header>
+                                    <ItemsControl
+                                        Margin="24,0,0,0"
+                                        ItemTemplate="{StaticResource WinXEntryTemplate}"
+                                        behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Items}" />
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </modernScroll:ModernScrollViewer>
+                <ListBox x:Name="NormalMenuList" Style="{StaticResource ModernVirtualizedListBoxStyle}"
+                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True" behaviors:MenuListTransitions.IsEnabled="True"
+                    Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+            </Grid>
+            <Border
+                Padding="24,18"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Panel.ZIndex="100"
+                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                IsHitTestVisible="False"
+                Visibility="{Binding ShowListPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel MinWidth="180" HorizontalAlignment="Center">
                     <ProgressBar
                         Width="120"
                         Height="4"
@@ -698,9 +684,8 @@
                             </Style>
                         </ui:TextBlock.Style>
                     </ui:TextBlock>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </modernScroll:ModernScrollViewer>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

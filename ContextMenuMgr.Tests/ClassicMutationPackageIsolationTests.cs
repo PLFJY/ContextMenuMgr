@@ -10,7 +10,7 @@ namespace ContextMenuMgr.Tests;
 public sealed class ClassicMutationPackageIsolationTests
 {
     [Fact]
-    public async Task ClassicToggleAndTargetedRead_DoNotDiscoverPackages_ButGlobalSnapshotDoes()
+    public async Task ClassicToggleReadAndAcknowledgement_PreservePhysicalSourceWithoutDiscoveringPackages()
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         var suffix = Guid.NewGuid().ToString("N");
@@ -62,6 +62,16 @@ public sealed class ClassicMutationPackageIsolationTests
             Assert.Equal(PipeErrorCodes.MenuItemRemoved, wrongSource.ErrorCode);
             Assert.Equal(new[] { itemId }, wrongSource.RemovedItemIds);
             Assert.Null(wrongSource.Item); // Do not silently switch to the HKU copy.
+
+            var wrongAcknowledgement = await catalog.AcknowledgeItemStateAsync(itemId, CancellationToken.None, context,
+                response.Item with { BackendRegistryPath = $@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\*\shell\{keyName}" });
+            Assert.False(wrongAcknowledgement.Success);
+            Assert.Equal(response.Item.BackendRegistryPath, (await store.LoadAsync(default))[itemId].BackendRegistryPath);
+            var acknowledged = await catalog.AcknowledgeItemStateAsync(itemId, CancellationToken.None, context, response.Item);
+            Assert.True(acknowledged.Success, acknowledged.Message);
+            Assert.False(acknowledged.Item!.IsEnabled);
+            Assert.Equal(ContextMenuChangeKind.None, acknowledged.Item.DetectedChangeKind);
+            Assert.Equal(0, scans);
 
             _ = await catalog.GetSnapshotAsync(CancellationToken.None, context);
             Assert.Equal(1, scans);

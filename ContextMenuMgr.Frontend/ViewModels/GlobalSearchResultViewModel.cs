@@ -1,4 +1,5 @@
 using ContextMenuMgr.Contracts;
+using CommunityToolkit.Mvvm.ComponentModel;
 using System.Windows.Media;
 using Wpf.Ui.Controls;
 
@@ -10,11 +11,13 @@ public enum GlobalSearchScope
     Windows11
 }
 
-public sealed record GlobalSearchResultViewModel
+public sealed partial class GlobalSearchResultViewModel : ObservableObject
 {
     private readonly string? _targetFilterText;
 
     public string Id { get; init; } = string.Empty;
+
+    public bool IsPlaceholder { get; init; }
 
     public string DisplayName { get; init; } = string.Empty;
 
@@ -42,7 +45,10 @@ public sealed record GlobalSearchResultViewModel
 
     public string? HandlerClsid { get; init; }
 
-    public ImageSource? IconSource { get; init; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasIconSource))]
+    [NotifyPropertyChangedFor(nameof(HasFallbackIcon))]
+    public partial ImageSource? IconSource { get; set; }
 
     public bool HasIconSource => IconSource is not null;
 

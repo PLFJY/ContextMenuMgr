@@ -25,6 +25,8 @@ public sealed record PipeRequest
     /// </summary>
     public ContextMenuEntry? Item { get; init; }
 
+    public DeletedItemsPurgeRequest? DeletedItemsPurge { get; init; }
+
     /// <summary>Trusted top-level parent identity used by shell submenu operations.</summary>
     public string? ParentItemId { get; init; }
 

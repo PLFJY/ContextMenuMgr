@@ -57,6 +57,8 @@ Portable 的 foreign-host 隔离先于使用旧状态；实际 identity 来源�
 
 “连续确认缺失”当前为两次具有交互用户上下文的持久快照，用于避开注册表枚举瞬态。上下文不完整的服务快照不得清理状态。
 
+批量永久清理在 catalog gate 内一次加载、按分类/认证来源与确认时 DeletedAtUtc 校验、一次保存选中记录的移除；恢复或重新删除的记录跳过，不扩大到确认后新增记录。只有持久提交成功才清理备份，清理失败单独报告，不恢复已提交记录，也不触碰未选择的状态和 OpenWith section。
+
 应用主动执行 Delete 时产生的 `.reg` 备份属于恢复记录，不属于活动监控 baseline。它可以暂时保留以支持 Undo Delete，但不参与新增、修改或重新出现分类。若相同注册表 key 再次真实出现，旧恢复记录和旧备份会被清理，该 key 按普通未知 `Added` 处理，不再使用 `Reappeared` 状态机。
 
 File Types 按需批量项用完整 HKLM/HKU 物理路径派生单独的批量 Id 保存删除备份，避免同逻辑 Id 的两份物理来源覆盖彼此恢复记录。该记录仍属恢复元数据，不建立普通启动 baseline；已删除项在批量清单中保留供 Undo。若已删除记录所指路径由外部重新创建，批量删除拒绝覆盖该记录和备份，待权威状态清理或人工检查；只读核对不能把“状态显示已删除但物理键又出现”报告为已确认成功。
@@ -104,7 +106,7 @@ File Types 按需批量项用完整 HKLM/HKU 物理路径派生单独的批量 I
 
 ### 一致性状态
 
-开关差异必须落入规则 2、3 或 5，因此 `GetConsistencyIssue` 不再为 `DesiredEnabled != actual` 生成 generic consistency。用户确认 `Modified` 后，`AcknowledgeItemState` 用当前实际值更新 `DesiredEnabled`、`ObservedEnabled` 和元数据。
+开关差异必须落入规则 2、3 或 5，因此 `GetConsistencyIssue` 不再为 `DesiredEnabled != actual` 生成 generic consistency。用户确认 `Modified` 后，`AcknowledgeItemState` 在原持久状态门内定向核对原物理来源，用当前实际值更新 `DesiredEnabled`、`ObservedEnabled` 和元数据，保存成功后直接返回已确认条目；普通传统项不执行全量经典/Win11 扫描，特殊合成项保留自身发现语义。旧 Id-only 调用优先使用持久物理来源；来源缺失或 SID/hive 无法核实不得切换到另一来源采纳。保存被 Portable host 校验跳过时不能报告成功。
 
 generic consistency 只保留无法自动归一化的真实注册表结构冲突，以及经典 handler 同时命中旧版全局 Blocked 等诊断。它不能用于表达普通开关变化；active/disabled 双键并存已属于自动修复流程，不能再显示这条泛化提示。
 

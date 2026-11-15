@@ -6,13 +6,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
+using ContextMenuMgr.Frontend.Views;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
 /// <summary>
 /// Represents a special menu page view model.
 /// </summary>
-public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
+public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, INavigationPresentation
 {
     private readonly IBackendClient _backendClient;
     private readonly FrontendNavigationState? _navigationState;
@@ -30,6 +31,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
     private Task? _autoRefreshTask;
     private int _refreshGeneration;
     private bool _hasLoaded;
+    private bool _isApplyingItems;
     private bool _hasSnapshot;
     private bool _disposed;
     private bool _suppressShellNewLockSync;
@@ -63,25 +65,28 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         _explorerRestartState = explorerRestartState;
         _loadingPresentation.PropertyChanged += OnLoadingPresentationChanged;
         ItemsView = new ListCollectionView(Items);
-        ((ListCollectionView)ItemsView).IsLiveFiltering = true;
-        foreach (var property in new[] { nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
-            nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) }) ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(property);
-        ItemsView.Filter = FilterItem;
-        if (kind == SpecialMenuKind.OpenWith)
+        using (ItemsView.DeferRefresh())
         {
-            ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith));
-            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
-            ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
-            ((ListCollectionView)ItemsView).IsLiveSorting = true;
-            var readOnlyItems = new ListCollectionView(Items) { IsLiveFiltering = true, IsLiveSorting = true };
-            foreach (var property in new[] { nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith),
-                nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
-                nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) })
-                readOnlyItems.LiveFilteringProperties.Add(property);
-            readOnlyItems.Filter = FilterReadOnlyOpenWithItem;
-            readOnlyItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
-            readOnlyItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
-            OpenWithReadOnlyItemsView = readOnlyItems;
+            ((ListCollectionView)ItemsView).IsLiveFiltering = true;
+            foreach (var property in new[] { nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
+                nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) }) ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(property);
+            ItemsView.Filter = FilterItem;
+            if (kind == SpecialMenuKind.OpenWith)
+            {
+                ((ListCollectionView)ItemsView).LiveFilteringProperties.Add(nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith));
+                ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+                ItemsView.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
+                ((ListCollectionView)ItemsView).IsLiveSorting = true;
+                var readOnlyItems = new ListCollectionView(Items) { IsLiveFiltering = true, IsLiveSorting = true };
+                foreach (var property in new[] { nameof(SpecialMenuItemViewModel.IsReadOnlyOpenWith),
+                    nameof(SpecialMenuItemViewModel.DisplayName), nameof(SpecialMenuItemViewModel.KeyName),
+                    nameof(SpecialMenuItemViewModel.Subtitle), nameof(SpecialMenuItemViewModel.Detail) })
+                    readOnlyItems.LiveFilteringProperties.Add(property);
+                readOnlyItems.Filter = FilterReadOnlyOpenWithItem;
+                readOnlyItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.DisplayName), ListSortDirection.Ascending));
+                readOnlyItems.SortDescriptions.Add(new SortDescription(nameof(SpecialMenuItemViewModel.Id), ListSortDirection.Ascending));
+                OpenWithReadOnlyItemsView = readOnlyItems;
+            }
         }
         SearchLabel = _localization.Translate("SearchLabel");
         AddText = _localization.Translate("Add");
@@ -113,6 +118,15 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         WinXGroups.CollectionChanged += OnWinXGroupsCollectionChanged;
         if (kind == SpecialMenuKind.OpenWith) SearchText = navigationState?.OpenWithFocusPath ?? string.Empty;
     }
+
+    public bool IsNavigationTransitioning { get; private set; }
+    public void OnNavigationStarted() => IsNavigationTransitioning = true;
+    public void OnNavigationCompleted()
+    {
+        IsNavigationTransitioning = false;
+        ObserveFireAndForget(RefreshAsync(), "NavigationRefreshAsync");
+    }
+    public void OnNavigatingAway() => IsNavigationTransitioning = true;
 
     public SpecialMenuKind Kind { get; }
 
@@ -1263,16 +1277,19 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         var dispatcher = System.Windows.Application.Current.Dispatcher;
         if (!dispatcher.CheckAccess())
         {
-            await dispatcher.InvokeAsync(() => shellNewVersion is int version && version != _shellNewStateVersion
-                ? Task.CompletedTask : ApplySnapshotCoreAsync(entries, preserveBusy)).Task.Unwrap();
+            await dispatcher.InvokeAsync(() =>
+            {
+                if (shellNewVersion is not int version || version == _shellNewStateVersion)
+                    ApplySnapshotCore(entries, preserveBusy);
+            });
             return;
         }
 
         if (shellNewVersion is int version && version != _shellNewStateVersion) return;
-        await ApplySnapshotCoreAsync(entries, preserveBusy);
+        ApplySnapshotCore(entries, preserveBusy);
     }
 
-    private async Task ApplySnapshotCoreAsync(IReadOnlyList<SpecialMenuEntry> entries, bool preserveBusy)
+    private void ApplySnapshotCore(IReadOnlyList<SpecialMenuEntry> entries, bool preserveBusy)
     {
         entries = MenuListData.Current(entries);
         _hasSnapshot = true;
@@ -1285,7 +1302,13 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         var isInitialLoad = Items.Count == 0;
         if (isInitialLoad)
         {
-            await AddInitialItemsAsync(entries);
+            _isApplyingItems = true;
+            try
+            {
+                foreach (var entry in entries)
+                    Items.Add(new SpecialMenuItemViewModel(entry, _iconPreviewService, _localization, SetEnabledAsync));
+            }
+            finally { _isApplyingItems = false; }
         }
         else
         {
@@ -1297,23 +1320,6 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
         UpdateShellNewMoveAvailability();
 
         RefreshListPlaceholderState();
-    }
-
-    private async Task AddInitialItemsAsync(IReadOnlyList<SpecialMenuEntry> entries)
-    {
-        for (var index = 0; index < entries.Count; index++)
-        {
-            Items.Add(new SpecialMenuItemViewModel(
-                entries[index],
-                _iconPreviewService,
-                _localization,
-                SetEnabledAsync));
-
-            if ((index + 1) % 32 == 0)
-            {
-                await YieldToUiAsync();
-            }
-        }
     }
 
     private static async Task YieldToUiAsync()
@@ -1818,6 +1824,7 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable
 
     private void RefreshListPlaceholderState()
     {
+        if (_isApplyingItems) return;
         OnPropertyChanged(nameof(IsListLoading));
         OnPropertyChanged(nameof(ShowListContent));
         OnPropertyChanged(nameof(IsListEmpty));

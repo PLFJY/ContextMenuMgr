@@ -215,6 +215,48 @@ public sealed class MenuListCacheService : IAsyncDisposable
         finally { _diskGate.Release(); }
     }
 
+    /// <summary>Completes a fixed purge selection and persists each affected scope once.</summary>
+    public IReadOnlyList<string> ApplyDeletedItemsPurge(IReadOnlyList<DeletedItemReference> selection,
+        DeletedItemsPurgeResult? result, bool completesMutation, int generation)
+    {
+        lock (_sync)
+        {
+            var states = _states.Values.OfType<ListState<ContextMenuEntry>>().ToArray();
+            var known = states.SelectMany(state => state.Items).GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            var purged = (result?.PurgedItems ?? []).ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+            var accepted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var selectedIds = selection.Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var affected = states.Where(state => state.Complete && state.Items.Any(item => selectedIds.Contains(item.Id))).Cast<IListState>().ToArray();
+            foreach (var selected in selection)
+            {
+                var key = (typeof(ContextMenuEntry), selected.Id);
+                if (completesMutation)
+                {
+                    if (_pending.GetValueOrDefault(key) > 1) _pending[key]--;
+                    else _pending.Remove(key);
+                }
+                if (generation != _epoch || !completesMutation && ChangedSince<ContextMenuEntry>(selected.Id, long.MaxValue)) continue;
+                known.TryGetValue(selected.Id, out var current);
+                if (purged.TryGetValue(selected.Id, out var removed) && removed.DeletedAtUtc == selected.DeletedAtUtc
+                    && (current is null || current.IsDeleted && current.DeletedAtUtc == selected.DeletedAtUtc))
+                {
+                    _changes[key] = (++_version, null);
+                    accepted.Add(selected.Id);
+                }
+                else if (completesMutation)
+                {
+                    if (current is not null) _changes[key] = (++_version, current);
+                    else _version++;
+                }
+            }
+            if (generation != _epoch) return [];
+            foreach (var state in states) state.RemoveIds(accepted);
+            _pendingWrites = SaveStatesAfterAsync(_pendingWrites, affected, _epoch);
+            return accepted.ToArray();
+        }
+    }
+
     public Task FlushAsync() { lock (_sync) return _pendingWrites; }
     public async ValueTask DisposeAsync() => await FlushAsync().ConfigureAwait(false);
 
@@ -335,6 +377,14 @@ public sealed class MenuListCacheService : IAsyncDisposable
             Items = removed || item is null
                 ? Items.Where(entry => !Id(entry).Equals(id, StringComparison.OrdinalIgnoreCase)).ToArray()
                 : Items.Select(entry => Id(entry).Equals(id, StringComparison.OrdinalIgnoreCase) ? item : entry).ToArray();
+            Revision++;
+        }
+        public void RemoveIds(IReadOnlySet<string> ids)
+        {
+            if (ids.Count == 0) return;
+            var remaining = Items.Where(item => !ids.Contains(Id(item))).ToArray();
+            if (remaining.Length == Items.Count) return;
+            Items = remaining;
             Revision++;
         }
         public bool HasPending(IEnumerable<(Type, string)> pending)

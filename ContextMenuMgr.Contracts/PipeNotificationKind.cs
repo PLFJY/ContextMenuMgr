@@ -9,5 +9,6 @@ public enum PipeNotificationKind
     ItemStateChanged,
     ServiceMessage,
     ServiceStopping,
-    OpenWithChanged
+    OpenWithChanged,
+    DeletedItemsPurged
 }

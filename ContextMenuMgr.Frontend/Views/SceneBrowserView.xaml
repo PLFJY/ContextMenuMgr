@@ -141,6 +141,9 @@
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Opacity="{Binding CardOpacity}">
+                                    <ui:TextBlock Text="{Binding AcknowledgementStatusText}" TextWrapping="Wrap"
+                                        Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                        Visibility="{Binding IsAcknowledgementUncertain, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -322,7 +325,7 @@
                                         CommandParameter="{Binding}"
                                         Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                        Visibility="{Binding IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                        Visibility="{Binding IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" IsEnabled="{Binding CanPrimaryAction}" />
                                     <ui:Button
                                         MinWidth="88"
                                         Padding="12,5"
@@ -330,7 +333,7 @@
                                         CommandParameter="{Binding}"
                                         Content="{Binding PrimaryActionLabel}"
                                         Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
-                                        Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" IsEnabled="{Binding CanPrimaryAction}" />
                                     </StackPanel>
                                     <ui:DropDownButton
                                         MinWidth="88"
@@ -352,19 +355,61 @@
                                                 <MenuItem
                                                     Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                     CommandParameter="{Binding}"
-                                                    Header="{Binding PlacementTarget.Tag.DeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                    Visibility="{Binding IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                    Header="{Binding PlacementTarget.Tag.DeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}" IsEnabled="{Binding CanPrimaryAction}">
+                                                    <MenuItem.Style>
+                                                        <Style TargetType="MenuItem">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding PlacementTarget.Tag.IsCompactView, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="True" />
+                                                                        <Condition Binding="{Binding IsDeleted}" Value="False" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </MenuItem.Style>
+                                                </MenuItem>
                                                 <MenuItem
                                                     Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                     CommandParameter="{Binding}"
-                                                    Header="{Binding PrimaryActionLabel}"
-                                                    Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    Header="{Binding PrimaryActionLabel}" IsEnabled="{Binding CanPrimaryAction}">
+                                                    <MenuItem.Style>
+                                                        <Style TargetType="MenuItem">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding PlacementTarget.Tag.IsCompactView, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="True" />
+                                                                        <Condition Binding="{Binding IsDeleted}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </MenuItem.Style>
+                                                </MenuItem>
                                                 <MenuItem
                                                     Command="{Binding PlacementTarget.Tag.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                     CommandParameter="{Binding}"
-                                                    Header="{Binding PlacementTarget.Tag.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                    Visibility="{Binding CanPermanentlyDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <Separator />
+                                                    Header="{Binding PlacementTarget.Tag.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}" IsEnabled="{Binding CanPrimaryAction}">
+                                                    <MenuItem.Style>
+                                                        <Style TargetType="MenuItem">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding PlacementTarget.Tag.IsCompactView, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="True" />
+                                                                        <Condition Binding="{Binding CanPermanentlyDelete}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </MenuItem.Style>
+                                                </MenuItem>
+                                                <Separator Visibility="{Binding PlacementTarget.Tag.IsCompactView, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <MenuItem
                                                     Command="{Binding PlacementTarget.Tag.OpenBatchManagementCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                     CommandParameter="{Binding}"
@@ -406,7 +451,7 @@
                                     </ui:DropDownButton>
                                     <Grid
                                         Margin="0,8,0,0"
-                                        Visibility="{Binding CanPermanentlyDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        Visibility="{Binding ShowPermanentDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <Grid.Style>
                                             <Style TargetType="Grid">
                                                 <Style.Triggers>
@@ -451,7 +496,7 @@
                                             Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             CommandParameter="{Binding}"
                                             Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}" />
+                                            Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}" IsEnabled="{Binding CanPrimaryAction}" />
                                     </Grid>
                                 </StackPanel>
                             </Grid>

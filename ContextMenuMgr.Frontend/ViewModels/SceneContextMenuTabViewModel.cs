@@ -32,6 +32,8 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     private string? _displayedScope;
     private bool _disposed;
     private bool _lastHideDisabledItems;
+    private CancellationTokenSource? _searchDebounce;
+    private string _appliedSearchText = string.Empty;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SceneContextMenuTabViewModel"/> class.
@@ -68,8 +70,11 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         _lastHideDisabledItems = settingsService.Current.HideDisabledItems;
 
         var itemsView = new ListCollectionView(Items);
-        itemsView.Filter = FilterItem;
-        ContextMenuListPresentation.ConfigureSort(itemsView);
+        using (itemsView.DeferRefresh())
+        {
+            itemsView.Filter = FilterItem;
+            ContextMenuListPresentation.ConfigureSort(itemsView);
+        }
         ItemsView = itemsView;
 
         _fixedScopeValue = fixedScopeValue;
@@ -259,7 +264,39 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     [ObservableProperty]
     public partial SceneOptionViewModel? SelectedOption { get; set; }
 
-    partial void OnSearchTextChanged(string value) => ItemsView.Refresh();
+    partial void OnSearchTextChanged(string value)
+    {
+        CancelPendingSearch();
+        if (string.IsNullOrWhiteSpace(value)) { RefreshSearchImmediately(); return; }
+        _searchDebounce = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+        _ = RefreshSearchAsync(value, _searchDebounce.Token);
+    }
+
+    public void CancelPendingSearch()
+    {
+        _searchDebounce?.Cancel();
+        _searchDebounce?.Dispose();
+        _searchDebounce = null;
+    }
+
+    public void RefreshSearchImmediately()
+    {
+        CancelPendingSearch();
+        _appliedSearchText = SearchText;
+        ItemsView.Refresh();
+    }
+
+    private async Task RefreshSearchAsync(string value, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(120, token);
+            if (token.IsCancellationRequested) return;
+            _appliedSearchText = value;
+            ItemsView.Refresh();
+        }
+        catch (OperationCanceledException) { }
+    }
 
     partial void OnSelectedOptionChanged(SceneOptionViewModel? value)
     {
@@ -563,7 +600,7 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
         void Apply()
         {
             if (_disposed) return;
-            foreach (var item in Items.Where(item => e.ItemIds.Contains(item.Id, StringComparer.OrdinalIgnoreCase)).ToArray())
+            foreach (var item in Items.Where(item => e.Matches(item.Entry)).ToArray())
             { Items.Remove(item); item.Dispose(); }
         }
         if (dispatcher is not null && !dispatcher.CheckAccess()) _ = dispatcher.BeginInvoke((Action)Apply); else Apply();
@@ -617,12 +654,12 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(SearchText))
+        if (string.IsNullOrWhiteSpace(_appliedSearchText))
         {
             return true;
         }
 
-        var search = SearchText.Trim();
+        var search = _appliedSearchText.Trim();
         return Contains(item.DisplayName, search)
                || Contains(item.Subtitle, search)
                || Contains(item.RegistryPath, search)
@@ -632,15 +669,24 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
 
     private async Task<bool> AcknowledgeItemStateAsync(ContextMenuItemViewModel item)
     {
+        var original = item.Entry;
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _backendClient.AcknowledgeItemStateAsync(item.Id, cts.Token);
-            await RefreshAsync();
-            return true;
+            var result = await AcknowledgeOperationResolver.ExecuteAsync(_backendClient, original);
+            if (!ReferenceEquals(item.Entry, original)) return true;
+            if (result.Outcome == AcknowledgementOutcome.Uncertain)
+            {
+                item.MarkAcknowledgementUncertain();
+                return false;
+            }
+            if (result.Item is { } updated) item.Update(updated);
+            else if (result.Removed) { Items.Remove(item); item.Dispose(); }
+            return result.Outcome == AcknowledgementOutcome.Applied;
         }
-        catch
+        catch (Exception ex)
         {
+            FrontendDebugLog.Warning(nameof(SceneContextMenuTabViewModel), $"Acknowledge failed: {ex.Message}");
+            await FrontendMessageBox.ShowErrorAsync(_localization.Format("ItemUpdateFailedStatus", item.DisplayName, ex.Message), Title);
             return false;
         }
     }
@@ -707,6 +753,7 @@ public partial class SceneContextMenuTabViewModel : ObservableObject, IDisposabl
     /// </summary>
     public void Dispose()
     {
+        CancelPendingSearch();
         if (_disposed)
         {
             return;

@@ -1647,4 +1647,15 @@
   <data name="OpenWithMonitorIsolationFailed" xml:space="preserve"><value>隔离未成功，该注册不会进入待审核。请检查注册和后端日志；写入结果不确定时只进行核对。</value></data>
   <data name="OpenWithStopProtectionBeforeAllow" xml:space="preserve"><value>持久保护仍有独立授权。请先检查并停止该保护，再放行此隔离注册。</value></data>
   <data name="OpenWithReviewRequired" xml:space="preserve"><value>该注册正在等待审核，请先到待审批处理，再启用或授权持久保护。</value></data>
+  <data name="AcknowledgementUncertain" xml:space="preserve"><value>无法确认是否已保存此次确认，请刷新以核对结果。</value></data>
+  <data name="PurgeDeletedItems" xml:space="preserve"><value>清空已删除项</value></data>
+  <data name="PurgeDeletedItemsTooltip" xml:space="preserve"><value>永久清理本分类全部已删除菜单项及恢复备份。</value></data>
+  <data name="ConfirmPurgeDeletedItems" xml:space="preserve"><value>永久清理</value></data>
+  <data name="PurgeDeletedItemsPrompt" xml:space="preserve"><value>将永久清理“{0}”中的 {1} 个已删除菜单项，并移除恢复备份。此操作无法撤销。</value></data>
+  <data name="PurgeDeletedItemsResult" xml:space="preserve"><value>已清理 {0} 项，跳过 {1} 项；其中 {2} 项的备份清理失败。</value></data>
+  <data name="PurgeDeletedItemsUncertain" xml:space="preserve"><value>无法完整确认清理结果，请刷新核对；备份清理结果尚未确认。</value></data>
+  <data name="PurgeDeletedItemsFailed" xml:space="preserve"><value>清理失败。请确认后台服务已更新并重试。</value></data>
+  <data name="ScrollToTop" xml:space="preserve"><value>回到顶部</value></data>
+  <data name="ScrollToBottom" xml:space="preserve"><value>前往底部</value></data>
+  <data name="PurgeDeletedItemsBusy" xml:space="preserve"><value>另一个删除或恢复操作仍在进行，请完成后重试。</value></data>
 </root>

@@ -42,8 +42,6 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         {
             _suppressSync = false;
         }
-
-        RequestIconLoad();
     }
 
     public SpecialMenuEntry Entry { get; private set; }
@@ -171,7 +169,10 @@ public partial class SpecialMenuItemViewModel : ObservableObject
 
     public bool IsSeparator => Entry.Metadata.GetValueOrDefault("EntryType") == "Separator";
 
-    public ImageSource? IconSource => _iconSource;
+    public ImageSource? IconSource
+    {
+        get { RequestIconLoad(); return _iconSource; }
+    }
 
     public string DeletedAtText => _localization.Format("DeletedAt", Entry.Metadata.TryGetValue("DeletedAt", out var deletedAt) ? deletedAt : string.Empty);
 
@@ -283,7 +284,14 @@ public partial class SpecialMenuItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowMove));
         OnPropertyChanged(nameof(ShowToggle));
         OnPropertyChanged(nameof(IsSeparator));
-        RequestIconLoad();
+        var iconKey = $"{Entry.IconPath}\u001f{Entry.IconIndex}\u001f{Entry.TargetPath ?? Entry.Path}";
+        if (_iconRequestKey is not null && !string.Equals(_iconRequestKey, iconKey, StringComparison.Ordinal))
+        {
+            _iconRequestKey = null;
+            ++_iconLoadGeneration;
+            _iconSource = null;
+            OnPropertyChanged(nameof(IconSource));
+        }
         OnPropertyChanged(nameof(DeletedAtText));
         OnPropertyChanged(nameof(CardOpacity));
     }

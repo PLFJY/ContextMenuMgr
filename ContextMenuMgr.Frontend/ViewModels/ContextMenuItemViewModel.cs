@@ -30,7 +30,13 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private bool _suppressAttributeSync;
     private string _detectedChangeSignature = string.Empty;
     private string _consistencyIssueSignature = string.Empty;
+    private ContextMenuEntry? _dismissedDetectedEntry;
     private bool _disposed;
+    private readonly CancellationTokenSource _lifetimeCts = new();
+    private ImageSource? _iconSource;
+    private string? _iconIdentity;
+    private bool _iconRequested;
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuItemViewModel"/> class.
@@ -152,7 +158,39 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     private bool IsWpsShellNewInjection
         => Entry.Id.StartsWith("special:wps-shellnew-injection:", StringComparison.OrdinalIgnoreCase);
 
-    public ImageSource? IconSource => _iconPreviewService.GetIcon(Entry.IconPath, Entry.IconIndex, Entry.FilePath);
+    public ImageSource? IconSource
+    {
+        get
+        {
+            var identity = $"{Entry.IconPath}|{Entry.IconIndex}|{Entry.FilePath}";
+            if (_iconIdentity != identity)
+            {
+                _iconIdentity = identity;
+                _iconRequested = false;
+                _iconSource = null;
+            }
+            if (!_iconRequested && !_disposed)
+            {
+                _iconRequested = true;
+                _ = LoadIconAsync(Entry, identity);
+            }
+            return _iconSource;
+        }
+    }
+
+    private async Task LoadIconAsync(ContextMenuEntry entry, string identity)
+    {
+        try
+        {
+            var icon = await _iconPreviewService.GetIconAsync(entry.IconPath, entry.IconIndex, entry.FilePath, _lifetimeCts.Token);
+            if (_disposed || _iconIdentity != identity) return;
+            _iconSource = icon;
+            OnPropertyChanged(nameof(IconSource));
+            OnPropertyChanged(nameof(HasIcon));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { FrontendDebugLog.Warning(nameof(ContextMenuItemViewModel), $"Icon load skipped: {ex.Message}"); }
+    }
 
     public bool HasIcon => IconSource is not null;
 
@@ -269,6 +307,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanDeepAnalyzeMenuItem))]
     [NotifyPropertyChangedFor(nameof(CanOpenFileTypeBatchManagement))]
     [NotifyPropertyChangedFor(nameof(CanDeleteInFileTypeBatch))]
+    [NotifyPropertyChangedFor(nameof(ShowPermanentDelete))]
     public partial bool IsDeleted { get; private set; }
 
     /// <summary>
@@ -285,6 +324,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    [NotifyPropertyChangedFor(nameof(ShowPermanentDelete))]
     public partial bool HasBackup { get; private set; }
 
     /// <summary>
@@ -466,9 +506,36 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(CanManageSubMenuItems))]
     public partial bool IsSubMenuLoading { get; private set; }
 
-    public bool CanPrimaryAction => IsBackendAvailable && !IsPinToStartSynthetic && (IsDeleted || IsPresentInRegistry);
+    public bool CanPrimaryAction => IsBackendAvailable && !IsDeleteBusy && !IsDeleteOutcomeUncertain && !IsPinToStartSynthetic && (IsDeleted || IsPresentInRegistry);
 
-    public bool CanPermanentlyDelete => IsBackendAvailable && IsDeleted && HasBackup;
+    public bool ShowPermanentDelete => IsDeleted && HasBackup;
+
+    public bool CanPermanentlyDelete => IsBackendAvailable && !IsDeleteBusy && !IsDeleteOutcomeUncertain && IsDeleted && HasBackup;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanPrimaryAction))]
+    [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    public partial bool IsDeleteBusy { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanPrimaryAction))]
+    [NotifyPropertyChangedFor(nameof(CanPermanentlyDelete))]
+    public partial bool IsDeleteOutcomeUncertain { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDismissDetectedChange))]
+    [NotifyPropertyChangedFor(nameof(CanDismissConsistencyIssue))]
+    [NotifyPropertyChangedFor(nameof(CanDismissAttention))]
+    public partial bool IsAcknowledgementBusy { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDismissDetectedChange))]
+    [NotifyPropertyChangedFor(nameof(CanDismissConsistencyIssue))]
+    [NotifyPropertyChangedFor(nameof(CanDismissAttention))]
+    public partial bool IsAcknowledgementUncertain { get; private set; }
+
+    public string AcknowledgementStatusText => _localization.Translate("AcknowledgementUncertain");
+    public void MarkAcknowledgementUncertain() => IsAcknowledgementUncertain = true;
 
     public string PrimaryActionLabel => IsDeleted
         ? _localization.Translate("UndoDelete")
@@ -480,13 +547,13 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             ? _localization.Translate("LegacyGlobalShellExtensionBlockWarning")
             : _localization.Translate("ConsistencyIssueGeneric");
 
-    public bool CanDismissConsistencyIssue => HasConsistencyIssue;
+    public bool CanDismissConsistencyIssue => HasConsistencyIssue && !IsAcknowledgementBusy && !IsAcknowledgementUncertain;
 
     public bool HasDetectedChange => DetectedChangeKind != ContextMenuChangeKind.None;
 
-    public bool CanDismissDetectedChange => HasDetectedChange;
+    public bool CanDismissDetectedChange => HasDetectedChange && !IsAcknowledgementBusy && !IsAcknowledgementUncertain;
 
-    public bool CanDismissAttention => HasDetectedChange || HasConsistencyIssue;
+    public bool CanDismissAttention => (HasDetectedChange || HasConsistencyIssue) && !IsAcknowledgementBusy && !IsAcknowledgementUncertain;
 
     public string DetectedChangeBadgeText => _localization.Translate(DetectedChangeKind switch
     {
@@ -624,9 +691,16 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     /// </summary>
     public void Update(ContextMenuEntry entry)
     {
-        if (!IsToggleOutcomeUncertain && IsEnabled == entry.IsEnabled && MenuListData.Equivalent(Entry, entry)) return;
+        if (!IsDeleteOutcomeUncertain && !IsAcknowledgementUncertain && !IsToggleOutcomeUncertain && IsEnabled == entry.IsEnabled && MenuListData.Equivalent(Entry, entry)) return;
         _authoritativeVersion++;
+        if (IsAcknowledgementUncertain)
+        {
+            IsDetectedChangeDismissed = false;
+            IsConsistencyIssueDismissed = false;
+        }
         IsToggleOutcomeUncertain = false;
+        IsAcknowledgementUncertain = false;
+        IsDeleteOutcomeUncertain = false;
         Entry = entry;
         ApplyEntry(entry);
         OnPropertyChanged(nameof(DisplayName));
@@ -696,7 +770,9 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
             DeletedAtUtc = entry.DeletedAtUtc;
             IsPresentInRegistry = entry.IsPresentInRegistry;
             var newDetectedChangeSignature = $"{entry.DetectedChangeKind}|{entry.DetectedChangeDetails}";
-            if (!string.Equals(_detectedChangeSignature, newDetectedChangeSignature, StringComparison.Ordinal))
+            if (!string.Equals(_detectedChangeSignature, newDetectedChangeSignature, StringComparison.Ordinal)
+                || IsDetectedChangeDismissed && _dismissedDetectedEntry is { } dismissed
+                    && !MenuListData.Equivalent(dismissed, entry))
             {
                 IsDetectedChangeDismissed = false;
             }
@@ -1071,12 +1147,14 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DismissDetectedChangeText));
         OnPropertyChanged(nameof(DismissConsistencyIssueText));
         OnPropertyChanged(nameof(DismissAttentionText));
+        OnPropertyChanged(nameof(AcknowledgementStatusText));
     }
 
     partial void OnIsDetectedChangeDismissedChanged(bool value)
     {
         if (value)
         {
+            _dismissedDetectedEntry = Entry;
             DetectedChangeKind = ContextMenuChangeKind.None;
             DetectedChangeDetails = null;
         }
@@ -1096,52 +1174,44 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task DismissDetectedChangeAsync()
-    {
-        if (!await TryAcknowledgeItemStateAsync())
-        {
-            return;
-        }
-
-        // Acknowledge only reconciles the persisted desired/observed state. It
-        // does not clear registry-conflict style consistency issues (e.g. both
-        // active and disabled registrations exist, or the handler is on the
-        // legacy global block list), because the registry itself is unchanged.
-        // Always dismiss locally so the user can actually ignore the banner;
-        // ApplyEntry keeps the dismissal while the issue signature is unchanged.
-        IsDetectedChangeDismissed = true;
-        IsConsistencyIssueDismissed = true;
-    }
+    private Task DismissDetectedChangeAsync() => DismissAttentionAsync();
 
     [RelayCommand]
-    private async Task DismissConsistencyIssueAsync()
+    private Task DismissConsistencyIssueAsync() => DismissAttentionAsync();
+
+    private async Task DismissAttentionAsync()
     {
-        if (!await TryAcknowledgeItemStateAsync())
-        {
-            return;
-        }
+        if (_acknowledgeItemStateAsync is null || IsAcknowledgementBusy || IsAcknowledgementUncertain) return;
+        var version = _authoritativeVersion;
+        var detectedSignature = _detectedChangeSignature;
+        var consistencySignature = _consistencyIssueSignature;
+        IsAcknowledgementBusy = true;
         IsDetectedChangeDismissed = true;
         IsConsistencyIssueDismissed = true;
-    }
-
-    private async Task<bool> TryAcknowledgeItemStateAsync()
-    {
-        if (_acknowledgeItemStateAsync is null)
-        {
-            return false;
-        }
-
         try
         {
-            return await _acknowledgeItemStateAsync(this);
+            // Yield the optimistic presentation before any synchronous work in a callback.
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            var success = await _acknowledgeItemStateAsync(this);
+            if (!success && !IsAcknowledgementUncertain
+                && detectedSignature == _detectedChangeSignature && consistencySignature == _consistencyIssueSignature)
+            {
+                IsDetectedChangeDismissed = false;
+                IsConsistencyIssueDismissed = false;
+                ApplyEntry(Entry);
+            }
         }
         catch (Exception ex)
         {
-            FrontendDebugLog.Warning(
-                nameof(ContextMenuItemViewModel),
-                $"AcknowledgeItemState failed for {Id}: {ex.Message}");
-            return false;
+            FrontendDebugLog.Warning(nameof(ContextMenuItemViewModel), $"AcknowledgeItemState failed for {Id}: {ex.Message}");
+            if (version == _authoritativeVersion && !IsAcknowledgementUncertain)
+            {
+                IsDetectedChangeDismissed = false;
+                IsConsistencyIssueDismissed = false;
+                ApplyEntry(Entry);
+            }
         }
+        finally { IsAcknowledgementBusy = false; }
     }
 
     /// <summary>
@@ -1155,6 +1225,8 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        _lifetimeCts.Cancel();
+        _lifetimeCts.Dispose();
         _localization.LanguageChanged -= OnLanguageChanged;
     }
 

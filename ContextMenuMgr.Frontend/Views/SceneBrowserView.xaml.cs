@@ -11,5 +11,7 @@ public partial class SceneBrowserView : System.Windows.Controls.UserControl
     public SceneBrowserView()
     {
         InitializeComponent();
+        Loaded += (_, _) => (DataContext as ViewModels.SceneContextMenuTabViewModel)?.RefreshSearchImmediately();
+        Unloaded += (_, _) => (DataContext as ViewModels.SceneContextMenuTabViewModel)?.CancelPendingSearch();
     }
 }

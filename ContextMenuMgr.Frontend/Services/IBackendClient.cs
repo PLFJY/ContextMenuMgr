@@ -49,7 +49,7 @@ public interface IBackendClient : IAsyncDisposable
         string? userSid,
         CancellationToken cancellationToken);
 
-    Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken);
+    Task<ContextMenuEntry?> AcknowledgeItemStateAsync(string itemId, CancellationToken cancellationToken, ContextMenuEntry? item = null);
 
     Task<ContextMenuEntry?> SetEnabledAsync(
         string itemId,
@@ -91,6 +91,8 @@ public interface IBackendClient : IAsyncDisposable
     Task<ContextMenuEntry?> UndoDeleteAsync(string itemId, CancellationToken cancellationToken);
 
     Task PurgeDeletedItemAsync(string itemId, CancellationToken cancellationToken);
+
+    Task<DeletedItemsPurgeResult> PurgeDeletedItemsAsync(DeletedItemsPurgeRequest request, CancellationToken cancellationToken);
 
     Task ResetStateDatabaseAsync(CancellationToken cancellationToken);
 

@@ -68,5 +68,6 @@ public enum PipeCommand
     GetOpenWithPendingReviews,
     DecideOpenWithReview,
     DeleteFileTypeBatchItem,
-    GetFileTypeBatchItemState
+    GetFileTypeBatchItemState,
+    PurgeDeletedItems
 }

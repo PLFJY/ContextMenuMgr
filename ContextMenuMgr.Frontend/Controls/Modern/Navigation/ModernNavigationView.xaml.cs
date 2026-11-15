@@ -44,7 +44,7 @@ public partial class ModernNavigationView : UserControl, INavigationView
     public static readonly DependencyProperty BreadcrumbBarProperty = Register(nameof(BreadcrumbBar), typeof(BreadcrumbBar));
     public static readonly DependencyProperty ItemTemplateProperty = Register(nameof(ItemTemplate), typeof(ControlTemplate));
     public static readonly DependencyProperty TransitionDurationProperty = Register(
-        nameof(TransitionDuration), typeof(int), 240, OnTransitionDurationChanged);
+        nameof(TransitionDuration), typeof(int), 450, OnTransitionDurationChanged);
     public static readonly DependencyProperty TransitionProperty = Register(
         nameof(Transition), typeof(Transition), Transition.FadeInWithSlide, OnTransitionChanged);
     public static readonly DependencyProperty FrameMarginProperty = Register(nameof(FrameMargin), typeof(Thickness), default(Thickness));
@@ -261,7 +261,10 @@ public partial class ModernNavigationView : UserControl, INavigationView
             return false;
         }
 
+        var creationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         var page = PART_Frame.CreatePage(pageType, dataContext);
+        ContextMenuMgr.Frontend.Services.FrontendDebugLog.Info(nameof(ModernNavigationView),
+            $"NavigationPageCreated: Page={pageType.Name}, ElapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(creationStarted).TotalMilliseconds:F1}.");
 
         var navigatingArgs = new NavigatingCancelEventArgs(System.Windows.Controls.Button.ClickEvent, this) { Page = page };
         Navigating?.Invoke(null!, navigatingArgs);

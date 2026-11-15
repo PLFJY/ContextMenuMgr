@@ -1333,33 +1333,66 @@ public sealed class ContextMenuRegistryCatalog
     public async Task<PipeResponse> AcknowledgeItemStateAsync(
         string itemId,
         CancellationToken cancellationToken,
-        BackendUserContext? userContext = null)
+        BackendUserContext? userContext = null,
+        ContextMenuEntry? original = null)
         => await RunPersistentStateOperationAsync(
-            () => AcknowledgeItemStateCoreAsync(itemId, cancellationToken, userContext),
+            () => AcknowledgeItemStateCoreAsync(itemId, cancellationToken, userContext, original),
             cancellationToken);
 
     private async Task<PipeResponse> AcknowledgeItemStateCoreAsync(
-        string itemId,
-        CancellationToken cancellationToken,
-        BackendUserContext? userContext)
+        string itemId, CancellationToken cancellationToken, BackendUserContext? userContext,
+        ContextMenuEntry? original)
     {
         if (userContext is null)
-        {
             return CreateFailure("Cannot acknowledge a menu change without the frontend user context.");
-        }
+        using var frontendHive = Registry.Users.OpenSubKey(userContext.Sid, writable: false);
+        if (frontendHive is null) return CreateFailure("The frontend user's registry hive is not loaded.");
+        if (original is not null && !string.Equals(original.Id, itemId, StringComparison.OrdinalIgnoreCase))
+            return CreateFailure("The requested item identity does not match its source.");
 
         var states = await _stateStore.LoadAsync(cancellationToken);
-        var actualEntry = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
-            .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+        states.TryGetValue(itemId, out var previousState);
+        // Published ID-only clients still use persisted physical provenance when available.
+        if (original is null && previousState is not null) original = previousState.ToDeletedEntry() with
+        {
+            IsDeleted = previousState.IsDeleted,
+            IsPresentInRegistry = !previousState.IsDeleted
+        };
+        if (previousState is { IsDeleted: true })
+        {
+            if (!string.Equals(original?.BackendRegistryPath, previousState.BackendRegistryPath, StringComparison.OrdinalIgnoreCase)
+                || !IsAuthenticatedClassesPath(previousState.BackendRegistryPath, userContext))
+                return CreateFailure("The recovery record does not belong to the authenticated source.");
+            previousState.IsPendingApproval = false;
+            previousState.SuppressNextDetection = false;
+            previousState.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await _stateStore.SaveAsync(states, cancellationToken);
+            return _stateStore.IsCurrentHostIdentityVerified
+                ? new PipeResponse { Success = true, Item = previousState.ToDeletedEntry(), Message = "Deleted state acknowledged." }
+                : CreateFailure("The state database could not be committed for the current host.");
+        }
+        ContextMenuEntry? actualEntry;
+        if (original is { IsWindows11ContextMenu: false }
+            && !itemId.StartsWith("special:", StringComparison.OrdinalIgnoreCase))
+        {
+            var read = await GetContextMenuItemStateAsync(itemId, original, cancellationToken, userContext);
+            if (!read.Success) return read;
+            actualEntry = read.Item;
+        }
+        else if (original is null && !itemId.StartsWith("special:", StringComparison.OrdinalIgnoreCase))
+        {
+            actualEntry = await TryFindEntryByIdAsync(itemId, cancellationToken, userContext);
+        }
+        else
+        {
+            // Synthetic and Win11 findings retain their own discovery semantics.
+            actualEntry = (await GetReadOnlySnapshotAsync(cancellationToken, userContext))
+                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
+        }
 
         if (actualEntry is not null)
         {
-            states.TryGetValue(itemId, out var previousState);
-            if (previousState is not null && !string.IsNullOrWhiteSpace(previousState.BackupFilePath))
-            {
-                _backupService.DeleteBackupFile(previousState.BackupFilePath);
-            }
-
+            var backupPath = previousState?.BackupFilePath;
             var state = GetOrCreateState(states, actualEntry);
             state.IsDeleted = false;
             state.IsPendingApproval = false;
@@ -1371,52 +1404,30 @@ public sealed class ContextMenuRegistryCatalog
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
             PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
-
-            var refreshed = (await GetSnapshotAsync(cancellationToken, userContext))
-                .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase))
-                ?? actualEntry;
-
+            if (!_stateStore.IsCurrentHostIdentityVerified)
+                return CreateFailure("The state database could not be committed for the current host.");
+            if (!string.IsNullOrWhiteSpace(backupPath))
+            {
+                try { _backupService.DeleteBackupFile(backupPath); }
+                catch (Exception ex) { _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"AcknowledgedBackupCleanupFailed: ItemId={itemId}, Exception={ex}"); }
+            }
             return new PipeResponse
             {
                 Success = true,
-                Message = $"Synchronized {refreshed.DisplayName} with the current registry state.",
-                Item = refreshed
+                Message = $"Synchronized {actualEntry.DisplayName} with the current registry state.",
+                Item = actualEntry with { IsDeleted = false, IsPendingApproval = false, HasBackup = false,
+                    DeletedAtUtc = null, DetectedChangeKind = ContextMenuChangeKind.None, DetectedChangeDetails = null }
             };
         }
 
-        if (!states.TryGetValue(itemId, out var persistedState))
-        {
-            return new PipeResponse
-            {
-                Success = true,
-                Message = $"Item '{itemId}' is already synchronized."
-            };
-        }
-
-        if (!persistedState.IsDeleted)
+        if (previousState is not null)
         {
             states.Remove(itemId);
-            PruneTransientStates(states);
             await _stateStore.SaveAsync(states, cancellationToken);
-
-            return new PipeResponse
-            {
-                Success = true,
-                Message = $"Removed stale state for {persistedState.DisplayName}."
-            };
+            if (!_stateStore.IsCurrentHostIdentityVerified)
+                return CreateFailure("The state database could not be committed for the current host.");
         }
-
-        persistedState.IsPendingApproval = false;
-        persistedState.SuppressNextDetection = false;
-        persistedState.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        await _stateStore.SaveAsync(states, cancellationToken);
-
-        return new PipeResponse
-        {
-            Success = true,
-            Message = $"Acknowledged the current deleted state for {persistedState.DisplayName}.",
-            Item = persistedState.ToDeletedEntry()
-        };
+        return new PipeResponse { Success = true, Message = "Item state acknowledged." };
     }
 
     /// <summary>
@@ -3074,6 +3085,84 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure(ex.Message, state.ToDeletedEntry());
         }
     }
+
+    public Task<PipeResponse> PurgeDeletedItemsAsync(DeletedItemsPurgeRequest request,
+        CancellationToken cancellationToken, BackendUserContext? userContext)
+        => RunPersistentStateOperationAsync(async () =>
+        {
+            if (userContext is null) return CreateFailure("The authenticated user is unavailable.");
+            using var hive = Registry.Users.OpenSubKey(userContext.Sid, writable: false);
+            if (hive is null) return CreateFailure("The frontend user's registry hive is not loaded.");
+            if (!Enum.IsDefined(request.Category) || request.Items is null || request.Items.Count > 4096
+                || request.Items.Any(item => item is null || string.IsNullOrWhiteSpace(item.Id))
+                || request.Items.Select(item => item.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != request.Items.Count)
+                return CreateFailure("The deleted item selection is invalid.");
+
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            var selected = new List<PersistedContextMenuState>();
+            var skipped = new List<string>();
+            foreach (var expected in request.Items)
+            {
+                if (!states.TryGetValue(expected.Id, out var state) || !state.IsDeleted
+                    || state.DeletedAtUtc != expected.DeletedAtUtc || state.IsWindows11ContextMenu
+                    || GetFileTypeBatchMarkerIndex(state.Id) >= 0
+                    || !MonitoredStableRootPaths.Contains(state.SourceRootPath)
+                    || !(state.Category == request.Category || request.Category == ContextMenuCategory.DesktopBackground
+                        && state.Category == ContextMenuCategory.DirectoryBackground
+                        && state.SourceRootPath.StartsWith(@"Directory\Background\", StringComparison.OrdinalIgnoreCase)))
+                {
+                    skipped.Add(expected.Id);
+                    continue;
+                }
+                if (!IsAuthenticatedClassesPath(state.BackendRegistryPath, userContext))
+                    return CreateFailure("A selected recovery record does not belong to the authenticated source.");
+                if (!string.IsNullOrWhiteSpace(state.BackupFilePath) && !_backupService.IsCurrentHostBackupPath(state.BackupFilePath))
+                    return CreateFailure("A selected backup is outside the current host's backup directory.");
+                selected.Add(state);
+            }
+            foreach (var state in selected) states.Remove(state.Id);
+            if (selected.Count > 0)
+            {
+                await _stateStore.SaveAsync(states, cancellationToken);
+                if (!_stateStore.IsCurrentHostIdentityVerified)
+                    return CreateFailure("The state database could not be committed for the current host.");
+            }
+            // No cancellation after the durable commit: finish cleanup and report its outcome.
+            var cleanupFailed = new List<string>();
+            foreach (var state in selected)
+            {
+                try
+                {
+                    _backupService.DeleteBackupFile(state.BackupFilePath);
+                    if (!string.IsNullOrWhiteSpace(state.BackupFilePath))
+                    {
+                        try
+                        {
+                            _ = File.GetAttributes(state.BackupFilePath);
+                            throw new IOException("The purged backup still exists.");
+                        }
+                        catch (FileNotFoundException) { }
+                        catch (DirectoryNotFoundException) { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    cleanupFailed.Add(state.Id);
+                    _logger.LogFireAndForget(RuntimeLogLevel.Warning, $"PurgedBackupCleanupFailed: ItemId={state.Id}, Exception={ex}");
+                }
+            }
+            return new PipeResponse { Success = true, Message = "Deleted item selection processed.",
+                DeletedItemsPurge = new DeletedItemsPurgeResult
+                {
+                    PurgedItems = selected.Select(state => new DeletedItemReference(state.Id, state.DeletedAtUtc)).ToArray(),
+                    SkippedItemIds = skipped,
+                    BackupCleanupFailedItemIds = cleanupFailed
+                } };
+        }, cancellationToken);
+
+    private static bool IsAuthenticatedClassesPath(string path, BackendUserContext context) =>
+        path.StartsWith(@"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith($@"HKEY_USERS\{context.Sid}\Software\Classes\", StringComparison.OrdinalIgnoreCase);
 
     public async Task<PipeResponse> ResetStateDatabaseAsync(CancellationToken cancellationToken)
         => await RunPersistentStateOperationAsync(async () =>

@@ -12,7 +12,8 @@ internal static class IncrementalCollection
             if (!retained.Contains(current[index])) current.RemoveAt(index);
         for (var index = 0; index < target.Count; index++)
         {
-            if (index < current.Count && ReferenceEquals(current[index], target[index])) continue;
+            if (index == current.Count) { current.Add(target[index]); continue; }
+            if (ReferenceEquals(current[index], target[index])) continue;
             var oldIndex = current.IndexOf(target[index]);
             if (oldIndex < 0) current.Insert(index, target[index]);
             else current.Move(oldIndex, index);
