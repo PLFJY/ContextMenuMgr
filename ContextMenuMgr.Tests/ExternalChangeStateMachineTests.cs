@@ -191,47 +191,62 @@ public sealed class ExternalChangeStateMachineTests
 
         // The enabled-state drift is observed as an external modification, but
         // it is not duplicated as a generic consistency warning.
-        Assert.Equal(ItemMonitorAction.MetadataModifiedHighlight, action);
+        Assert.Equal(ItemMonitorAction.EnabledStateModifiedHighlight, action);
 
         Assert.Null(ContextMenuChangeClassifier.GetConsistencyIssue(entry, state));
     }
 
     /// <summary>
-    /// Scenario 10: When a known item (state exists, not deleted, not pending
-    /// approval, no enabled-state drift) changes only metadata (e.g. display
-    /// name, command text, icon), the classifier must return
-    /// MetadataModifiedHighlight. No automatic rollback, no quarantine.
+    /// Content updates are absorbed without highlights for enabled and disabled
+    /// items, both at startup and during monitoring. A switch change remains
+    /// visible even when it accompanies an application upgrade.
     /// </summary>
-    [Fact]
-    public void KnownMetadataOnlyChange_ModifiedHighlight_NoQuarantine()
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public void KnownContentUpdate_OnlySwitchChangesAreHighlighted(bool enabled, bool startup)
     {
-        var entry = BuildPresentEntry(
-            isEnabled: true,
-            displayName: "Renamed Verb",
-            commandText: "\"C:\\App\\app-v2.exe\" \"%1\"");
-
-        var state = BuildState(
-            isDeleted: false,
-            desiredEnabled: null,
-            observedEnabled: true,
-            displayName: "Original Verb",
-            commandText: "\"C:\\App\\app.exe\" \"%1\"");
+        var original = BuildPresentEntry(isEnabled: enabled);
+        var state = PersistedContextMenuState.FromEntry(original);
+        var entry = original with
+        {
+            DisplayName = "Updated menu",
+            EditableText = "Updated menu text",
+            CommandText = "\"C:\\App\\2.0\\app.exe\" \"%1\"",
+            HandlerClsid = "{22222222-2222-2222-2222-222222222222}",
+            IconPath = @"C:\App\2.0\app.exe",
+            IconIndex = 1,
+            FilePath = @"C:\App\2.0\app.exe",
+            Notes = "Updated description",
+            OnlyWithShift = true,
+            OnlyInExplorer = true,
+            NoWorkingDirectory = true,
+            NeverDefault = true,
+            ShowAsDisabledIfHidden = true
+        };
 
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
-            entry, state, hasBaseline: true, isBaselineEstablishment: false);
+            entry, state, hasBaseline: true, isBaselineEstablishment: startup);
 
-        Assert.Equal(ItemMonitorAction.MetadataModifiedHighlight, action);
+        Assert.Equal(ItemMonitorAction.None, action);
 
         var changeKind = ContextMenuChangeClassifier.GetDetectedChangeKind(entry, state, hasBaseline: true);
-        Assert.Equal(ContextMenuChangeKind.Modified, changeKind);
+        Assert.Equal(ContextMenuChangeKind.None, changeKind);
 
         var details = ContextMenuChangeClassifier.GetDetectedChangeDetails(entry, state, changeKind);
-        Assert.NotNull(details);
-        Assert.Contains("display name", details!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("command", details!, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(details);
 
         // No enabled-state drift, so no consistency issue from that.
         Assert.False(ContextMenuChangeClassifier.HasExternalEnabledStateChange(entry, state));
+
+        var switched = entry with { IsEnabled = !enabled };
+        var switchKind = ContextMenuChangeClassifier.GetDetectedChangeKind(switched, state, hasBaseline: true);
+        Assert.Equal(ContextMenuChangeKind.Modified, switchKind);
+        Assert.Equal(
+            !enabled && !startup ? ItemMonitorAction.ReconcileDisabledState : ItemMonitorAction.EnabledStateModifiedHighlight,
+            ContextMenuChangeClassifier.ClassifyItemMonitorAction(switched, state, hasBaseline: true, isBaselineEstablishment: startup));
     }
 
     /// <summary>
@@ -283,19 +298,6 @@ public sealed class ExternalChangeStateMachineTests
     }
 
     /// <summary>
-    /// Verifies that HasObservedChange detects a CLSID change, which is
-    /// important for ShellExtension identity continuity.
-    /// </summary>
-    [Fact]
-    public void HasObservedChange_DetectsClsidChange()
-    {
-        var entry = BuildPresentEntry(handlerClsid: "{NEW-CLSID-1234}");
-        var state = BuildState(handlerClsid: "{OLD-CLSID-5678}");
-
-        Assert.True(ContextMenuChangeClassifier.HasObservedChange(entry, state));
-    }
-
-    /// <summary>
     /// Verifies that an entry matching its persisted state exactly (same
     /// enabled state, same metadata, DesiredEnabled=null) produces no
     /// observed change and no action.
@@ -309,7 +311,6 @@ public sealed class ExternalChangeStateMachineTests
             desiredEnabled: null,
             observedEnabled: true);
 
-        Assert.False(ContextMenuChangeClassifier.HasObservedChange(entry, state));
         Assert.False(ContextMenuChangeClassifier.HasExternalEnabledStateChange(entry, state));
 
         var action = ContextMenuChangeClassifier.ClassifyItemMonitorAction(
@@ -329,7 +330,7 @@ public sealed class ExternalChangeStateMachineTests
     [InlineData(true, false, false, true, false, ItemMonitorAction.QuarantineAdded)]
     [InlineData(true, false, false, true, true, ItemMonitorAction.OfflineAddedHighlight)]
     [InlineData(false, true, false, true, false, ItemMonitorAction.ReconcileDisabledState)]
-    [InlineData(false, true, false, true, true, ItemMonitorAction.MetadataModifiedHighlight)]
+    [InlineData(false, true, false, true, true, ItemMonitorAction.EnabledStateModifiedHighlight)]
     public void ClassificationMatrix_FullCoverage(
         bool stateIsDeleted,
         bool stateDesiredDisabled,

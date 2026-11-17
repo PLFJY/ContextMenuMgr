@@ -1525,8 +1525,6 @@
   <data name="ClearApplicationGroupFilter" xml:space="preserve"><value>清除篩選</value></data>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} 個項目</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>全部停用</value></data>
-  <data name="ApplicationGroupDisabling" xml:space="preserve"><value>正在停用…</value></data>
-  <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>全部啟用</value></data>
   <data name="Back" xml:space="preserve"><value>返回</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>正在載入…</value></data>
   <data name="ManageSubMenuItems" xml:space="preserve"><value>管理子選單</value></data>
@@ -1658,4 +1656,7 @@
   <data name="ScrollToTop" xml:space="preserve"><value>回到頂端</value></data>
   <data name="ScrollToBottom" xml:space="preserve"><value>前往底端</value></data>
   <data name="PurgeDeletedItemsBusy" xml:space="preserve"><value>另一個刪除或還原操作仍在進行，請完成後重試。</value></data>
+  <data name="ApplicationGroupDisableSelected" xml:space="preserve"><value>停用</value></data>
+  <data name="ApplicationGroupSelectAll" xml:space="preserve"><value>選取此應用程式目前篩選下的所有選單項目</value></data>
+  <data name="ApplicationGroupRestore" xml:space="preserve"><value>復原刪除</value></data>
 </root>

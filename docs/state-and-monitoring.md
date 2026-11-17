@@ -8,7 +8,7 @@
 - [ContextMenuRegistryMonitor](../ContextMenuMgr.Backend/Services/ContextMenuRegistryMonitor.cs)：常规轮询、稳定内存 baseline、session 重建；另独立调度 OpenWith Applications 轮询，完整扫描耗时不能阻塞其稳定观测。
 - [ContextMenuStateStore](../ContextMenuMgr.Backend/Services/ContextMenuStateStore.cs)：store gate、schema parser、原子替换、隔离与恢复。
 - [PersistedContextMenuState](../ContextMenuMgr.Backend/Services/PersistedContextMenuState.cs)：desired/observed、pending、删除备份、visibility provenance、子菜单引用、Win11 恢复日志。
-- [ContextMenuChangeClassifier](../ContextMenuMgr.Backend/Services/ContextMenuChangeClassifier.cs)：身份及外部变化比较；恢复元数据不参与 Added/Modified 判断。
+- [ContextMenuChangeClassifier](../ContextMenuMgr.Backend/Services/ContextMenuChangeClassifier.cs)：身份与开关状态变化比较；菜单内容及恢复元数据不参与 Modified 判断。
 
 当前 envelope 为 `schemaVersion=3`，包含 `hostIdentity`、`states` 和独立 `openWith`。OpenWith 的 per-SID reviews/generations/reviewVersions、可见性操作 journal 与缺失身份均属于该独立 section；中央待审批读取它们，不向 states 添加伪经典项，也不由通知反向生成审核。旧 schema-3 缺新增集合时保留已发布 reviews/rules，空集合兼容加载；读回失败不清空审核。仍读取 schema 2 与 legacy raw dictionary，不由迁移凭空生成授权规则；未来 schema 拒绝读取，不能当损坏清空。普通 Save 在 store gate 中重新读取并保留最新 OpenWith section；OpenWith callback 同 gate 读取/合并最新常规 states 后保存。catalog gate 与 store gate 各有职责，不能以单次 Load/Save 自身有锁推断整段 read/merge/write 安全。
 
@@ -46,16 +46,22 @@ Portable 的 foreign-host 隔离先于使用旧状态；实际 identity 来源�
 
 下表是拦截、状态库和 UI 提示的行为矩阵；自动写入适用于具备安全自动禁用能力的项。只读 PropertySheetHandlers、Windows 受保护命令、共享/发现不完整的 Win11 CLSID 等不会因此获得 mutation 权限，其限制见对应主文档。后续改动不得引入与此表冲突的 Reappeared 或泛化 consistency 分支。
 
+“运行期间”指后台服务的监控已运行并建立稳定内存基准；“停止后重启”指监控停止期间发生变化，之后重新建立启动基准。关闭前端窗口但保留后台运行仍属于运行期间，窗口是否可见不作为判定条件。关闭策略见[生命周期](runtime-lifecycle.md#前端与服务关闭)。拦截由轮询发现后执行，不保证外部写入发生时立即阻止。
+
 | 编号 | 场景 | 后端行为 | 前端状态 |
 | --- | --- | --- | --- |
 | 1 | 软件运行期间出现未知菜单项 | 下一轮监控发现后禁用并写入状态库，进入待审核；隔离失败时保留为未知项并在后续轮询重试 | `Added` + `IsPendingApproval=true`（成功隔离后） |
 | 2 | 软件运行期间，已知项从开变关 | 不自动重新打开，保留旧 baseline 供用户确认 | `Modified`，不再叠加“状态不一致” |
-| 3 | 软件运行期间，相邻稳定快照观察到已知项从关变开 | 静默重新关闭，继续保留 `DesiredEnabled=false` | 纠偏后无待审核、无外部修改、无 generic consistency |
+| 3 | 软件运行期间，用户已关闭的已知项（`DesiredEnabled=false`）在相邻稳定快照中从关变开 | 静默重新关闭，继续保留 `DesiredEnabled=false` | 纠偏成功后无待审核、无外部修改、无 generic consistency |
 | 4 | 软件停止后出现未知菜单项，重启时发现 | 不隔离、不自动禁用，等待用户确认当前变化 | `Added`，不进入待审核 |
 | 5 | 软件停止后已知项开关改变，重启时发现 | 无论开变关还是关变开都保留当前注册表状态，等待用户确认 | `Modified`，不待审核 |
 | 6 | 实际注册表项已删除 | 完整快照连续确认缺失后，从活动 baseline 移除 | 不显示 Removed、不参与以后比对 |
 
 “连续确认缺失”当前为两次具有交互用户上下文的持久快照，用于避开注册表枚举瞬态。上下文不完整的服务快照不得清理状态。
+
+**设计约束：** 已知稳定 Id 的“外部修改”（`Modified`）只比较实际开关状态与保存的 `DesiredEnabled`。名称、菜单文字、命令、CLSID、图标、程序路径、说明、分类和显示属性等菜单内容不在外部修改检测范围内，也不作为已知项静默关闭的触发条件。开关状态未偏离保存意图时，完整持久快照自动更新这些内容，无需用户确认。`DesiredEnabled=null` 不凭旧 `ObservedEnabled` 推断外部修改。
+
+未知 Id 的 Added 与运行时新增隔离继续按上表处理。物理写入中的代际指纹、原值及恢复归属校验仍用于避免覆盖外部数据或恢复旧注册项，不用于生成“外部修改”标记；具体约束见[注册表模型](registry-model.md)。OpenWith 与 WPS/Office 的独立审核不套用本节的内容采纳规则。
 
 批量永久清理在 catalog gate 内一次加载、按分类/认证来源与确认时 DeletedAtUtc 校验、一次保存选中记录的移除；恢复或重新删除的记录跳过，不扩大到确认后新增记录。只有持久提交成功才清理备份，清理失败单独报告，不恢复已提交记录，也不触碰未选择的状态和 OpenWith section。
 
@@ -88,7 +94,7 @@ File Types 按需批量项用完整 HKLM/HKU 物理路径派生单独的批量 I
 -> 与 monitor 上一个稳定内存快照比较
 -> 仅对本轮确认的“上一轮关、本轮开”执行 DesiredEnabled=false reconciliation
 -> 如有写入，只重新枚举一次
--> 比较稳定 Id 和元数据
+-> 比较稳定 Id 和保存的开关状态，吸收无开关差异项的最新元数据
 -> 未知 Added：隔离并待审核
 -> 已知 Modified：只高亮
 -> 连续缺失：移除活动 baseline
@@ -100,7 +106,9 @@ File Types 按需批量项用完整 HKLM/HKU 物理路径派生单独的批量 I
 
 ### 启动/离线比对
 
-监控启动时首先取得原始实际快照并建立内存 `knownItems`，不得先执行 disabled-state reconciliation。已有 baseline 下的未知项保留 `Added` 标记，但启动阶段不会触发 `ItemDetected`，因此不会隔离或进入待审核。元数据和开关状态无论往哪个方向变化都按 `Modified` 显示。只有后续两个相邻稳定运行时快照观察到关变开，才进入规则 3 的静默纠偏。
+监控启动时首先取得原始实际快照并建立内存 `knownItems`，不得先执行 disabled-state reconciliation。已有 baseline 下的未知项保留 `Added` 标记，但启动阶段不会触发 `ItemDetected`，因此不会隔离或进入待审核。开关状态无论往哪个方向变化都按 `Modified` 显示；仅元数据变化不显示标记并自动更新保存内容。只有后续两个相邻稳定运行时快照观察到关变开，才进入规则 3 的静默纠偏。
+
+用户已关闭的项若在启动首轮已经开启，保持开启并提示“外部修改”；只要它持续开启，后续轮询也不延迟关闭。必须先观察到关闭、之后再观察到开启，且保存的关闭意图仍有效，才满足新的运行时纠偏条件。
 
 交互式 session 登录、解锁或连接时，monitor 仍会重建内存 baseline。若可见项数量明显低于持久活动状态数量，则延后重建，避免用户 hive 尚未加载时制造运行时新增通知。
 
@@ -120,7 +128,7 @@ generic consistency 只保留无法自动归一化的真实注册表结构冲突
 - reconciliation 写入失败时保留 `DesiredEnabled=false`，记录结构化日志并在后续快照重试；不得伪造 `ObservedEnabled=false`，也不得转成待审核。
 - 已禁用 ShellVerb 的同一稳定 Id 若被第三方重新创建为可见项，且命令等物理代际指纹改变，静默重新禁用时丢弃旧代际恢复数据、捕获新代际的原值并验证写入；旧代际恢复数据仍不得用于启用新注册项。连续两次完整快照确认删除并移出 baseline 后重新出现的项仍按未知 `Added` 处理。
 - ContextMenuMgr 自己的写入必须从 post-write 快照更新 baseline，不能被下一轮识别为外部变化。
-- 普通开关在物理写入和逻辑验证成功后，必须用同一次写后快照的条目更新开关状态与全部可比对元数据（包括 handler 移动后的路径），并将返回前端的本次操作结果清除 `DetectedChangeKind`；写前条目及其 `Modified` 标记不能作为软件自身写入的结果。
+- 普通开关在物理写入和逻辑验证成功后，必须用同一次写后快照的条目更新开关状态与当前元数据（包括 handler 移动后的路径），并将返回前端的本次操作结果清除 `DetectedChangeKind`；写前条目及其 `Modified` 标记不能作为软件自身写入的结果。
 - `SuppressNextDetection` 只能抑制一次由应用自身恢复/创建导致的检测，建立 monitor baseline 时必须消费。
 - WPS/Office 是否已有 baseline 只看 WPS marker 或旧版 WPS state，不能被常规菜单 state 影响。
 

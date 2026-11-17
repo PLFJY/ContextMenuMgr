@@ -57,7 +57,7 @@ File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/Tab
 
 ## 滚动、输入与渲染
 
-共享外层为 `ModernFrame.ContentScrollHost` 的 [ModernScrollViewer](../ContextMenuMgr.Frontend/Controls/Modern/Scrolling/ModernScrollViewer.cs)。OtherRules/FileTypes 声明 `ModernScroll.Ownership=Self`、内部 ModernScrollViewer 自管；传统分类页同样声明 Self，由一个有界、Recycling/Pixel 虚拟化 ListBox 承担整页滚动；视图层 CompositeCollection 只组合页头和既有 ItemsView，页头/空状态随列表滚动，不复制业务集合。按应用页将页头、组头及既有行 VM 平铺到一个自管虚拟化列表，单个应用包含大量条目也不会实现所有子行。SpecialMenuPageView 声明 Self，普通项与已展开的 OpenWith 只读项共用有界虚拟化 ListBox，WinX 树单独使用原有有界滚动容器，避免 Frame/页面两层滚动互相提供无限高度；普通页头保留原顶部区域。其它页沿用 Frame，不另包无约束宿主。导航仅通过各宿主的明确协议设置位置。
+共享外层为 `ModernFrame.ContentScrollHost` 的 [ModernScrollViewer](../ContextMenuMgr.Frontend/Controls/Modern/Scrolling/ModernScrollViewer.cs)。OtherRules/FileTypes 声明 `ModernScroll.Ownership=Self`、内部 ModernScrollViewer 自管；传统分类页同样声明 Self，由一个有界、Recycling/Pixel 虚拟化 ListBox 承担整页滚动；视图层 CompositeCollection 只组合页头和既有 ItemsView，页头/空状态随列表滚动，不复制业务集合。按应用页使用 Auto/* 两行 Grid：标题、说明、搜索框及导航筛选提示固定在顶部，不属于滚动容器；下方仅将组头及既有行 VM 平铺到一个有界的自管虚拟化列表，单个应用包含大量条目也不会实现所有子行。加载与空状态作为下方列表区域的独立覆盖层，不加入列表行。SpecialMenuPageView 声明 Self，普通项与已展开的 OpenWith 只读项共用有界虚拟化 ListBox，WinX 树单独使用原有有界滚动容器，避免 Frame/页面两层滚动互相提供无限高度；普通页头保留原顶部区域。其它页沿用 Frame，不另包无约束宿主。导航仅通过各宿主的明确协议设置位置。
 
 | 输入/条件 | 当前策略 |
 | --- | --- |
@@ -75,6 +75,12 @@ File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/Tab
 刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ListBox/WinX ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
 
 Application Groups 的查询字段在 UI 线程捕获为不可变输入，身份解析、匹配和分组全部放到后台，约 120 ms 防抖；导航精确筛选同样走后台投影，仍展示目标组全部子项。分组与行在 UI 线程差量复用，实际模板由视口虚拟化，不再使用“40 组首批／每 60 ms 追加 12 组”的非虚拟化呈现。离页取消旧投影并保留脏标记，动画完成才消费；未变化的返回页复用既有分组。单项开关不全量重建组，当前搜索受状态文字影响才重算。Win11 Logo 后台加载并按路径缓存，重建约 120 ms 防抖，不能在每个卡片构造时同步读盘。
+
+按应用管理的每个应用分组独立提供逐项复选框及头部三态全选框。勾选保存在共享行 VM 的独立 `IsApplicationGroupChecked` 呈现属性，不依赖 ListBox 选择；全选只改变本组当前筛选可见行，部分勾选时显示减号，再点选中全部可见行。普通筛选同时保留分组的全部成员供批量操作使用，隐藏的勾选项保留并计入头部已选数量；刷新、语言切换和虚拟化复用不清空勾选。
+
+分组存在任意勾选时，头部右侧显示与所选状态对应的批量操作：未删除项提供“删除／禁用”，已删除项提供“撤销删除／永久删除”；混合勾选时两组均显示，分别按当前可操作项启用。操作区位于组标题下方右对齐的 WrapPanel，按钮保留间距并可换行，不挤占应用名称。不再提供原先自动切换“全部禁用／全部启用”的分组按钮。批次开始固定勾选清单，逐项重读勾选意图、当前应用归属和可操作状态，新项不扩入当前批次；“禁用”只处理当前开启项，“删除”只处理开始时未删除且执行时仍未删除的项，“撤销删除”只处理同一次删除的恢复记录，绝不隐式互换删除与恢复。复用 workspace 的普通开关及可恢复删除入口，仍由前端通过认证 Pipe 请求服务操作原物理来源，原有保护提示、备份、失败与不确定结果规则不变。批量期间本页勾选和行操作禁用，分组头显示进度并阻止跨组重复提交；确认达到目标状态后取消该项勾选，失败、跳过或结果不确定时保留勾选。删除与恢复契约见[注册表模型](registry-model.md)。
+
+每项右侧也提供独立删除入口；已删除项提供撤销删除与永久删除，原有属性、文字/命令编辑、文件/注册表定位等能力仍在“更多”中。条目状态透明度只应用于左侧内容，不应用于整张卡片；右侧撤销删除、永久删除等操作保持正常亮度，只有真实 Busy 或不可操作状态才禁用。单项和批量永久删除均先确认目标应用、数量及不可恢复说明，并固定 Id、分类与 DeletedAtUtc；确认后再次核实勾选、归属和删除时间，按分类调用既有 PurgeDeletedItems，每请求最多 4096 项。确认后恢复或重新删除的记录跳过，成功响应只移除相同删除时间的条目，超时按 workspace 的不确定结果流程核对，不用 Id-only 单项清理替代带代际校验的请求。
 
 ## 搜索、筛选与集合归属
 
@@ -95,6 +101,8 @@ OpenWithReviewQueueService 在 UI Dispatcher 上串行查询与决策，单飞�
 中央检查按钮导航普通 OpenWith 并按精确物理路径筛选；普通页的审核导航将该物理路径交给 FrontendNavigationState，中央刷新后选择对应行。普通 OpenWith 注册变更不重复显示顶部横幅，监控不可用等诊断仍保留。Win32 气泡只有图标身份，统一走无单项目标的待审批激活，不能依据旧代表 DTO 猜焦点。气泡、SID 与持久规则详见 [OpenWith](openwith.md#监控审核与显式持久保护)。
 
 workspace `ItemDetected` 可加入新常规项；generic `ItemStateChanged` 仅更新已有稳定 Id，不能引入 File Types/scene-only 项。经典分类与 Scene 共用 ContextMenuListViewMode；Win11 固定详细视图不读写它。HideDisabledItems 只隐藏未删除禁用项，deleted 必须可见；排序按 attention/deleted/name，不按 enabled，以免开关跳位。模式切换不扫后端。简洁模式的管理应用、删除/撤销、永久删除动作位于“更多”；详细模式对应行按钮保留而弹出菜单隐藏重复项，模式绑定通过 PlacementTarget.Tag 桥接。简洁模式的永久删除 Flyout 保留已加载的零尺寸锚点，不能把锚点 Collapsed。
+
+传统分类与应用分组的详细视图保留带标签的命令行；说明去除首尾空白后若与命令完全相同，隐藏重复说明，独立说明与用户备注仍显示。该去重只用于同时展示命令行的详细模板，不改变后端 Notes 或 Scene/审批页的说明。传统分类详细视图的“管理该应用的菜单”与“深入分析”并列在标题 WrapPanel，按钮垂直居中，左侧 10 DIP、上下各 4 DIP 间距，窄窗口可换行；原右侧操作列不再放管理应用按钮，简洁模式仍从“更多”进入。
 
 OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合视图把 `IsReadOnlyOpenWith` 项放入“只读注册项”折叠分组；分组默认关闭、显示当前搜索结果数量，用户展开后仍显示原物理项和只读原因。这里的“只读”不表示 Windows ACL 保护。搜索分别筛选可管理项与只读项，只读项是唯一匹配时保留分组入口而不显示空列表占位。刷新、通知和行更新继续使用原有身份与差量集合，不改变注册表权限或后端扫描范围。
 
@@ -124,7 +132,7 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 ## 异步操作与结果
 
-`DelayedLoadingPresentation` 在真实 loading 超过 140 ms 才显示，显示后至少约 250 ms；新状态/Dispose 取消旧回调。快加载不人为延长 IsLoading；Busy 不等于整页加载。Application Groups 本地筛选不激活全页加载，首次加载提示保留在虚拟列表页头中，隐藏 empty。
+`DelayedLoadingPresentation` 在真实 loading 超过 140 ms 才显示，显示后至少约 250 ms；新状态/Dispose 取消旧回调。快加载不人为延长 IsLoading；Busy 不等于整页加载。Application Groups 本地筛选不激活全页加载，首次加载提示位于下方列表区域的覆盖层并隐藏 empty，顶部搜索区域保持固定。
 
 `AsyncToggleSwitch` 在固定槽显示开/关或 ProgressRing，单项 Busy 同步置位，`ToggleBusyPresentation.WaitForFirstFrameAsync` 最多 100 ms/两个渲染事件后再写入；隐藏窗口有超时。写入期间禁重复操作，不因 Busy 折叠本来存在的按钮。普通开关仅 HideDisabled 开启时在完成后刷新过滤，避免全表 Reset 阻挡首帧。
 
@@ -147,6 +155,8 @@ ViewModel Dispose/页面卸载取消刷新、debounce、加载回调与动画，
 ## 验证与维护
 
 构建只能验证 XAML/类型，WheelScrollPolicyTests 等只保护算法。Windows 真机须测浅/深/系统主题切换、窄窗口、中文/英文 Windows 与应用交叉语言、已有 Regedit 的真实选中键、Popup/AutoSuggest 选择与 Enter、导航快速打断/重复点击、筛选/返回、busy 首帧、迟到响应/刷新竞态和关闭清理。
+
+`ApplicationGroupBatchTests` 保护筛选勾选范围、批次固定成员与逐项状态/归属核对，模拟后端响应只证明前端请求边界，不证明注册表删除或禁用成功。应用分组的全选三态、按钮显隐、窄窗口换行与真实删除备份/刷新仍需 Windows 界面验收。
 
 滚动分别用普通鼠标密集完整刻度、小 delta 触摸板、触屏；测停止/反向、内外边界、触摸文本选择/轻点按钮、ComboBox/Popup 独占、大列表虚拟化、wheel lines/page/0、关闭动画和切页/关闭停止。当前尚不能证明所有驱动 delta/timing、触摸 tap 阈值与 nested boundary feedback；合成事件不替代硬件。
 

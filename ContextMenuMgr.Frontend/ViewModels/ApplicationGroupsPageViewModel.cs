@@ -8,6 +8,8 @@ using ContextMenuMgr.Frontend.Views;
 
 namespace ContextMenuMgr.Frontend.ViewModels;
 
+internal enum ApplicationGroupOperation { Disable, Delete, Restore }
+
 public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposable, INavigationPresentation
 {
     private const int RebuildDebounceMilliseconds = 120;
@@ -58,6 +60,120 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
     public string NavigationFilterBannerText => _localization.Translate("ApplicationGroupFilterActive");
     public string ClearFilterText => _localization.Translate("ClearApplicationGroupFilter");
     public string LoadingText => _localization.Translate("LoadingItemsText");
+    public string DeleteText => _localization.Translate("Delete");
+    public string RestoreText => _localization.Translate("ApplicationGroupRestore");
+    public string PermanentDeleteText => _localization.Translate("PermanentDelete");
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBulkIdle))]
+    public partial bool IsBulkBusy { get; private set; }
+
+    public bool IsBulkIdle => !IsBulkBusy;
+
+    private string? _bulkGroupIdentity;
+
+    internal bool IsGroupExecuting(string identity) => IsBulkBusy
+        && string.Equals(_bulkGroupIdentity, identity, StringComparison.OrdinalIgnoreCase);
+
+    partial void OnIsBulkBusyChanged(bool value)
+    {
+        foreach (var group in Groups) group.RefreshSelectionState();
+        DeleteOrUndoItemCommand.NotifyCanExecuteChanged();
+        PermanentlyDeleteItemCommand.NotifyCanExecuteChanged();
+    }
+
+    internal Task ApplyGroupSelectionAsync(ApplicationGroupViewModel group, ApplicationGroupOperation operation)
+        => ApplySelectionAsync(group.Identity, group.AllItems.Where(static item => item.IsApplicationGroupChecked).ToArray(), operation, requireChecked: true);
+
+    private bool CanDeleteOrUndoItem(ContextMenuItemViewModel? item) => IsBulkIdle && item is not null
+        && (item.IsDeleted ? ApplicationGroupViewModel.CanRestoreItem(item) : ApplicationGroupViewModel.CanDeleteItem(item));
+
+    private bool CanPermanentlyDeleteItem(ContextMenuItemViewModel? item) => IsBulkIdle && item is not null
+        && ApplicationGroupViewModel.CanPurgeItem(item);
+
+    [RelayCommand(CanExecute = nameof(CanDeleteOrUndoItem))]
+    private Task DeleteOrUndoItemAsync(ContextMenuItemViewModel? item) => item is null ? Task.CompletedTask
+        : ApplySelectionAsync(GetGroupIdentity(item), [item], item.IsDeleted ? ApplicationGroupOperation.Restore : ApplicationGroupOperation.Delete, requireChecked: false);
+
+    [RelayCommand(CanExecute = nameof(CanPermanentlyDeleteItem))]
+    private Task PermanentlyDeleteItemAsync(ContextMenuItemViewModel? item) => item is null ? Task.CompletedTask
+        : PurgeSelectionAsync(GetGroupIdentity(item), [item], requireChecked: false);
+
+    internal Task PurgeGroupSelectionAsync(ApplicationGroupViewModel group)
+        => PurgeSelectionAsync(group.Identity, group.AllItems.Where(static item => item.IsApplicationGroupChecked).ToArray(), requireChecked: true);
+
+    private async Task PurgeSelectionAsync(string identity, IReadOnlyList<ContextMenuItemViewModel> items, bool requireChecked)
+    {
+        if (IsBulkBusy) return;
+        var selected = items.Where(ApplicationGroupViewModel.CanPurgeItem)
+            .Select(item => (Item: item, Category: item.Category, Reference: new ContextMenuMgr.Contracts.DeletedItemReference(item.Id, item.DeletedAtUtc))).ToArray();
+        if (selected.Length == 0) return;
+        _bulkGroupIdentity = identity;
+        IsBulkBusy = true;
+        try
+        {
+            if (!await FrontendMessageBox.ShowConfirmAsync(_localization.Format("PurgeDeletedItemsPrompt", identity, selected.Length),
+                PermanentDeleteText, PermanentDeleteText, _localization.Translate("DialogCancel"))) return;
+            foreach (var category in selected.GroupBy(item => item.Category))
+            {
+                var references = category.Where(row => _workspace.Items.Contains(row.Item)
+                    && (!requireChecked || row.Item.IsApplicationGroupChecked)
+                    && ApplicationGroupViewModel.CanPurgeItem(row.Item)
+                    && row.Item.DeletedAtUtc == row.Reference.DeletedAtUtc
+                    && string.Equals(GetGroupIdentity(row.Item), identity, StringComparison.OrdinalIgnoreCase))
+                    .Select(row => row.Reference).ToArray();
+                foreach (var chunk in references.Chunk(4096))
+                    await _workspace.PurgeDeletedItemsAsync(new() { Category = category.Key, Items = chunk });
+            }
+        }
+        finally
+        {
+            IsBulkBusy = false;
+            _bulkGroupIdentity = null;
+        }
+    }
+
+    private async Task ApplySelectionAsync(string identity, IReadOnlyList<ContextMenuItemViewModel> items,
+        ApplicationGroupOperation operation, bool requireChecked)
+    {
+        if (IsBulkBusy) return;
+        var selected = items.Select(item => (Item: item, WasDeleted: item.IsDeleted, DeletedAtUtc: item.DeletedAtUtc)).ToArray();
+        _bulkGroupIdentity = identity;
+        IsBulkBusy = true;
+        try
+        {
+            await ToggleBusyPresentation.WaitForFirstFrameAsync();
+            foreach (var row in selected)
+            {
+                var item = row.Item;
+                if (requireChecked && !item.IsApplicationGroupChecked || !_workspace.Items.Contains(item)
+                    || !string.Equals(GetGroupIdentity(item), identity, StringComparison.OrdinalIgnoreCase)) continue;
+                if (operation == ApplicationGroupOperation.Delete)
+                {
+                    if (row.WasDeleted || !ApplicationGroupViewModel.CanDeleteItem(item)) continue;
+                    await _workspace.DeleteOrUndoAsync(item);
+                    if (item.IsDeleted && !item.IsDeleteOutcomeUncertain) item.IsApplicationGroupChecked = false;
+                }
+                else if (operation == ApplicationGroupOperation.Restore)
+                {
+                    if (!row.WasDeleted || !ApplicationGroupViewModel.CanRestoreItem(item) || item.DeletedAtUtc != row.DeletedAtUtc) continue;
+                    await _workspace.DeleteOrUndoAsync(item);
+                    if (!item.IsDeleted && !item.IsDeleteOutcomeUncertain) item.IsApplicationGroupChecked = false;
+                }
+                else
+                {
+                    if (!ApplicationGroupViewModel.CanDisableItem(item)) continue;
+                    await _workspace.SetEnabledAsync(item, false);
+                    if (!item.IsEnabled && !item.IsToggleOutcomeUncertain) item.IsApplicationGroupChecked = false;
+                }
+            }
+        }
+        finally
+        {
+            IsBulkBusy = false;
+            _bulkGroupIdentity = null;
+        }
+    }
 
     [ObservableProperty]
     public partial string SearchText { get; set; } = string.Empty;
@@ -163,12 +279,15 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
                 item.StateLabel, item.RegistryPath, item.UserNote, item.Entry.FilePath, item.Entry.HandlerClsid, item.Entry.CommandText })).ToArray();
         var specs = await Task.Run(() => candidates
             .Select(candidate => (candidate.Item, Identity: _identityService.GetIdentity(candidate.Entry).Identity, candidate.Fields))
-            .Where(candidate => focusedIdentity is not null
-                ? string.Equals(candidate.Identity, focusedIdentity, StringComparison.OrdinalIgnoreCase)
-                : string.IsNullOrWhiteSpace(query) || ContextMenuSearchMatcher.MatchesFields(query, [candidate.Identity, .. candidate.Fields]))
             .GroupBy(candidate => candidate.Identity, StringComparer.OrdinalIgnoreCase)
+            .Where(group => focusedIdentity is null || string.Equals(group.Key, focusedIdentity, StringComparison.OrdinalIgnoreCase))
             .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
-            .Select(group => (Identity: group.Key, Items: group.Select(candidate => candidate.Item).ToArray())).ToArray(), cts.Token);
+            .Select(group => (Identity: group.Key,
+                AllItems: group.Select(candidate => candidate.Item).ToArray(),
+                Items: group.Where(candidate => focusedIdentity is not null || string.IsNullOrWhiteSpace(query)
+                    || ContextMenuSearchMatcher.MatchesFields(query, [candidate.Identity, .. candidate.Fields]))
+                    .Select(candidate => candidate.Item).ToArray()))
+            .Where(group => group.Items.Length > 0).ToArray(), cts.Token);
         if (cts.IsCancellationRequested || !ReferenceEquals(_rebuildCts, cts)) return;
         if (focusedIdentity is not null && !specs.SelectMany(spec => spec.Items).Any(item => item.Id.Equals(focusedItemId, StringComparison.OrdinalIgnoreCase)))
         {
@@ -180,8 +299,8 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         var groups = specs.Select(spec =>
         {
             if (!existing.TryGetValue(spec.Identity, out var group))
-                group = new ApplicationGroupViewModel(spec.Identity, spec.Items, _workspace, _localization);
-            else group.UpdateItems(spec.Items);
+                group = new ApplicationGroupViewModel(spec.Identity, spec.Items, spec.AllItems, this, _localization);
+            else group.UpdateItems(spec.Items, spec.AllItems);
             return group;
         }).ToArray();
         IncrementalCollection.Apply(Groups, groups);
@@ -228,6 +347,19 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (sender is ContextMenuItemViewModel selectedItem
+            && e.PropertyName is nameof(ContextMenuItemViewModel.IsApplicationGroupChecked)
+                or nameof(ContextMenuItemViewModel.CanPrimaryAction) or nameof(ContextMenuItemViewModel.CanToggle)
+                or nameof(ContextMenuItemViewModel.IsAttributesBusy) or nameof(ContextMenuItemViewModel.IsAcknowledgementBusy)
+                or nameof(ContextMenuItemViewModel.IsAcknowledgementUncertain) or nameof(ContextMenuItemViewModel.IsToggleOutcomeUncertain)
+                or nameof(ContextMenuItemViewModel.HasBackup) or nameof(ContextMenuItemViewModel.IsDeleted)
+                or nameof(ContextMenuItemViewModel.DeletedAtUtc))
+        {
+            foreach (var group in Groups.Where(group => group.AllItems.Contains(selectedItem))) group.RefreshSelectionState();
+            DeleteOrUndoItemCommand.NotifyCanExecuteChanged();
+            PermanentlyDeleteItemCommand.NotifyCanExecuteChanged();
+            return;
+        }
         if (sender is ContextMenuItemViewModel toggleItem
             && e.PropertyName is (nameof(ContextMenuItemViewModel.IsEnabled)
                 or nameof(ContextMenuItemViewModel.IsToggleBusy)))
@@ -241,7 +373,7 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
             foreach (var group in Groups.Where(group => group.Items.Contains(toggleItem)))
             {
-                group.RefreshToggleActions();
+                group.RefreshSelectionState();
             }
 
             // State labels can participate in the local search. Defer that
@@ -278,6 +410,10 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
         OnPropertyChanged(nameof(NavigationFilterBannerText));
         OnPropertyChanged(nameof(ClearFilterText));
         OnPropertyChanged(nameof(LoadingText));
+        OnPropertyChanged(nameof(DeleteText));
+        OnPropertyChanged(nameof(RestoreText));
+        OnPropertyChanged(nameof(PermanentDeleteText));
+        foreach (var group in Groups) group.RefreshSelectionState();
         ScheduleRebuildGroups();
     }
 
@@ -405,75 +541,116 @@ public partial class ApplicationGroupsPageViewModel : ObservableObject, IDisposa
 
 public partial class ApplicationGroupViewModel : ObservableObject
 {
-    private readonly ContextMenuWorkspaceService _workspace;
+    private readonly ApplicationGroupsPageViewModel _owner;
     private readonly LocalizationService _localization;
+    private bool _updatingSelection;
 
     public ApplicationGroupViewModel(
         string identity,
         IReadOnlyList<ContextMenuItemViewModel> items,
-        ContextMenuWorkspaceService workspace,
+        IReadOnlyList<ContextMenuItemViewModel> allItems,
+        ApplicationGroupsPageViewModel owner,
         LocalizationService localization)
     {
         Identity = identity;
         Items = new ObservableCollection<ContextMenuItemViewModel>(items);
-        _workspace = workspace;
+        AllItems = allItems;
+        _owner = owner;
         _localization = localization;
     }
 
     public string Identity { get; }
     public ObservableCollection<ContextMenuItemViewModel> Items { get; }
-    public void UpdateItems(IReadOnlyList<ContextMenuItemViewModel> items)
+    public IReadOnlyList<ContextMenuItemViewModel> AllItems { get; private set; }
+    public void UpdateItems(IReadOnlyList<ContextMenuItemViewModel> items, IReadOnlyList<ContextMenuItemViewModel> allItems)
     {
-        if (Items.SequenceEqual(items)) return;
-        IncrementalCollection.Apply(Items, items);
+        AllItems = allItems;
+        if (!Items.SequenceEqual(items)) IncrementalCollection.Apply(Items, items);
         OnPropertyChanged(nameof(CountText));
-        RefreshToggleActions();
+        RefreshSelectionState();
     }
     public string CountText => _localization.Format("ApplicationGroupCountFormat", Items.Count);
-    public string DisableAllText => _localization.Translate(
-        IsDisabling ? "ApplicationGroupDisabling"
-        : ShowEnableAll ? "ApplicationGroupEnableAll"
-        : "ApplicationGroupDisableAll");
-    public bool CanDisableAll => !IsDisabling && Items.Any(static item => item.IsEnabled && item.CanToggle);
-    public bool CanEnableAll => !IsDisabling && Items.Any(static item => !item.IsEnabled && item.CanToggle);
-    public bool ShowEnableAll => CanEnableAll && !CanDisableAll;
-    public bool CanToggleAll => CanDisableAll || CanEnableAll;
-
-    public void RefreshToggleActions()
+    public string DeleteText => _localization.Translate("Delete");
+    public string DisableText => _localization.Translate("ApplicationGroupDisableSelected");
+    public string RestoreText => _localization.Translate("ApplicationGroupRestore");
+    public string PermanentDeleteText => _localization.Translate("PermanentDelete");
+    public string SelectAllText => _localization.Translate("ApplicationGroupSelectAll");
+    public int SelectedCount => AllItems.Count(static item => item.IsApplicationGroupChecked);
+    public bool HasSelection => SelectedCount > 0;
+    public bool HasLiveSelection => AllItems.Any(static item => item.IsApplicationGroupChecked && !item.IsDeleted);
+    public bool HasDeletedSelection => AllItems.Any(static item => item.IsApplicationGroupChecked && item.IsDeleted);
+    public string SelectedCountText => HasSelection ? _localization.Format("SelectedItemsCount", SelectedCount) : string.Empty;
+    public bool IsExecuting => _owner.IsGroupExecuting(Identity);
+    public bool? IsAllVisibleChecked
     {
-        OnPropertyChanged(nameof(CanDisableAll));
-        OnPropertyChanged(nameof(CanEnableAll));
-        OnPropertyChanged(nameof(ShowEnableAll));
-        OnPropertyChanged(nameof(CanToggleAll));
-        OnPropertyChanged(nameof(DisableAllText));
-        DisableAllCommand.NotifyCanExecuteChanged();
+        get
+        {
+            var selected = Items.Count(static item => item.IsApplicationGroupChecked);
+            return selected == 0 ? false : selected == Items.Count ? true : null;
+        }
+    }
+    private bool CanToggleSelection => _owner.IsBulkIdle && Items.Count > 0;
+    private bool CanDeleteSelected => _owner.IsBulkIdle && AllItems.Any(static item => item.IsApplicationGroupChecked && CanDeleteItem(item));
+    private bool CanDisableSelected => _owner.IsBulkIdle && AllItems.Any(static item => item.IsApplicationGroupChecked && CanDisableItem(item));
+    private bool CanRestoreSelected => _owner.IsBulkIdle && AllItems.Any(static item => item.IsApplicationGroupChecked && CanRestoreItem(item));
+    private bool CanPurgeSelected => _owner.IsBulkIdle && AllItems.Any(static item => item.IsApplicationGroupChecked && CanPurgeItem(item));
+
+    private static bool IsItemReady(ContextMenuItemViewModel item) => !item.IsDeleteBusy && !item.IsDeleteOutcomeUncertain
+        && !item.IsToggleBusy && !item.IsToggleOutcomeUncertain && !item.IsAttributesBusy
+        && !item.IsAcknowledgementBusy && !item.IsAcknowledgementUncertain;
+    internal static bool CanDeleteItem(ContextMenuItemViewModel item) => IsItemReady(item) && item.CanDelete && item.CanPrimaryAction;
+    internal static bool CanDisableItem(ContextMenuItemViewModel item) => IsItemReady(item) && item.IsEnabled && item.CanToggle;
+    internal static bool CanRestoreItem(ContextMenuItemViewModel item) => IsItemReady(item) && item.IsDeleted && item.CanPrimaryAction && item.HasBackup;
+    internal static bool CanPurgeItem(ContextMenuItemViewModel item) => IsItemReady(item) && item.IsDeleted && item.CanPrimaryAction;
+
+    public void RefreshSelectionState()
+    {
+        if (_updatingSelection) return;
+        OnPropertyChanged(nameof(CountText));
+        OnPropertyChanged(nameof(DeleteText));
+        OnPropertyChanged(nameof(DisableText));
+        OnPropertyChanged(nameof(RestoreText));
+        OnPropertyChanged(nameof(PermanentDeleteText));
+        OnPropertyChanged(nameof(SelectAllText));
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(HasLiveSelection));
+        OnPropertyChanged(nameof(HasDeletedSelection));
+        OnPropertyChanged(nameof(SelectedCountText));
+        OnPropertyChanged(nameof(IsAllVisibleChecked));
+        OnPropertyChanged(nameof(IsExecuting));
+        ToggleSelectionCommand.NotifyCanExecuteChanged();
+        DeleteSelectedCommand.NotifyCanExecuteChanged();
+        DisableSelectedCommand.NotifyCanExecuteChanged();
+        RestoreSelectedCommand.NotifyCanExecuteChanged();
+        PermanentlyDeleteSelectedCommand.NotifyCanExecuteChanged();
     }
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisableAllText))]
-    [NotifyPropertyChangedFor(nameof(CanDisableAll))]
-    [NotifyPropertyChangedFor(nameof(CanEnableAll))]
-    [NotifyPropertyChangedFor(nameof(ShowEnableAll))]
-    [NotifyPropertyChangedFor(nameof(CanToggleAll))]
-    public partial bool IsDisabling { get; private set; }
-
-    [RelayCommand(CanExecute = nameof(CanToggleAll))]
-    private async Task DisableAllAsync()
+    [RelayCommand(CanExecute = nameof(CanToggleSelection))]
+    private void ToggleSelection()
     {
-        var enable = !CanDisableAll;
-        IsDisabling = true;
-        DisableAllCommand.NotifyCanExecuteChanged();
+        var check = IsAllVisibleChecked != true;
+        _updatingSelection = true;
         try
         {
-            foreach (var item in Items.Where(item => item.CanToggle && item.IsEnabled != enable).ToArray())
-            {
-                await _workspace.SetEnabledAsync(item, enable);
-            }
+            foreach (var item in Items) item.IsApplicationGroupChecked = check;
         }
         finally
         {
-            IsDisabling = false;
-            DisableAllCommand.NotifyCanExecuteChanged();
+            _updatingSelection = false;
+            RefreshSelectionState();
         }
     }
+
+    [RelayCommand(CanExecute = nameof(CanDeleteSelected))]
+    private Task DeleteSelectedAsync() => _owner.ApplyGroupSelectionAsync(this, ApplicationGroupOperation.Delete);
+
+    [RelayCommand(CanExecute = nameof(CanDisableSelected))]
+    private Task DisableSelectedAsync() => _owner.ApplyGroupSelectionAsync(this, ApplicationGroupOperation.Disable);
+
+    [RelayCommand(CanExecute = nameof(CanRestoreSelected))]
+    private Task RestoreSelectedAsync() => _owner.ApplyGroupSelectionAsync(this, ApplicationGroupOperation.Restore);
+
+    [RelayCommand(CanExecute = nameof(CanPurgeSelected))]
+    private Task PermanentlyDeleteSelectedAsync() => _owner.PurgeGroupSelectionAsync(this);
 }

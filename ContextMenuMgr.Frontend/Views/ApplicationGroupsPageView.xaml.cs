@@ -60,7 +60,7 @@ public partial class ApplicationGroupsPageView : Page
         { removed.Items.CollectionChanged -= OnGroupItemsChanged; _subscribedGroups.Remove(removed); }
         foreach (var added in groups.Except(_subscribedGroups))
         { added.Items.CollectionChanged += OnGroupItemsChanged; _subscribedGroups.Add(added); }
-        var rows = new List<object> { _viewModel };
+        var rows = new List<object>();
         foreach (var group in _viewModel.Groups)
         {
             rows.Add(group);

@@ -220,12 +220,32 @@
                                             Text="{Binding DetectedChangeBadgeText}" />
                                     </Border>
                                     <ui:Button
-                                        Margin="10,0,0,0"
+                                        Margin="10,4,0,4"
+                                        VerticalAlignment="Center"
                                         Appearance="Secondary"
                                         Command="{Binding DeepAnalyzeMenuItemCommand}"
                                         Content="{Binding DeepAnalyzeMenuItemText}"
                                         ToolTip="{Binding DeepAnalyzeMenuItemTooltip}"
                                         Visibility="{Binding CanDeepAnalyzeMenuItem, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <ui:Button
+                                        MinWidth="88"
+                                        Margin="10,4,0,4"
+                                        VerticalAlignment="Center"
+                                        Padding="12,5"
+                                        Appearance="Secondary"
+                                        Click="OpenApplicationGroup_Click"
+                                        Content="{Binding ManageApplicationMenusText}"
+                                        Icon="{ui:SymbolIcon Symbol=AppsListDetail24}">
+                                        <ui:Button.Style>
+                                            <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding DataContext.IsCompactView, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ui:Button.Style>
+                                    </ui:Button>
                                 </WrapPanel>
 
                                 <ui:TextBlock
@@ -296,7 +316,7 @@
                                 Opacity="0.78"
                                 Text="{Binding Notes}"
                                 TextWrapping="Wrap"
-                                Visibility="{Binding ShowNotes, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                Visibility="{Binding ShowDetailedNotes, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
                         <ui:TextBlock
                             Margin="0,6,0,0"
@@ -347,24 +367,6 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <ui:Button
-                            MinWidth="88"
-                            Margin="0,0,0,8"
-                            Padding="12,5"
-                            Appearance="Secondary"
-                            Click="OpenApplicationGroup_Click"
-                            Content="{Binding ManageApplicationMenusText}"
-                            Icon="{ui:SymbolIcon Symbol=AppsListDetail24}">
-                            <ui:Button.Style>
-                                <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding DataContext.IsCompactView, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </ui:Button.Style>
-                        </ui:Button>
                         <StackPanel Margin="0,15,0,8" Orientation="Horizontal">
                             <ui:Button Width="36" Height="36" Margin="0,0,8,0" Appearance="Secondary" Command="{Binding ManageSubMenuItemsCommand}" ToolTip="{Binding ManageSubMenuItemsToolTip}" Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" Icon="{ui:SymbolIcon Symbol=Apps24}" />
                             <controls:AsyncToggleSwitch VerticalAlignment="Center" Label="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" CanToggle="{Binding CanToggle}" IsBusy="{Binding IsToggleBusy}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />

@@ -30,10 +30,10 @@ public enum ItemMonitorAction
     OfflineAddedHighlight,
 
     /// <summary>
-    /// A known item changed metadata only. Keep the Modified highlight; do not
+    /// A known item changed enabled state. Keep the Modified highlight; do not
     /// quarantine, roll back, or notify.
     /// </summary>
-    MetadataModifiedHighlight
+    EnabledStateModifiedHighlight
 }
 
 /// <summary>
@@ -65,7 +65,7 @@ internal static class ContextMenuChangeClassifier
             return hasBaseline ? ContextMenuChangeKind.Added : ContextMenuChangeKind.None;
         }
 
-        return HasObservedChange(entry, state)
+        return HasExternalEnabledStateChange(entry, state)
             ? ContextMenuChangeKind.Modified
             : ContextMenuChangeKind.None;
     }
@@ -82,7 +82,8 @@ internal static class ContextMenuChangeClassifier
         {
             ContextMenuChangeKind.Added => "This item is new compared with the last saved context menu snapshot.",
             ContextMenuChangeKind.Reappeared => "This item was previously deleted through the app, but it has reappeared in the registry.",
-            ContextMenuChangeKind.Modified when state is not null => BuildModifiedDetails(entry, state),
+            ContextMenuChangeKind.Modified when state is not null && HasExternalEnabledStateChange(entry, state)
+                => "This item changed outside the app. Updated fields: enabled state.",
             _ => null
         };
     }
@@ -133,33 +134,6 @@ internal static class ContextMenuChangeClassifier
                && !state.IsPendingApproval;
     }
 
-    /// <summary>
-    /// Returns true when the entry has any observed metadata or enabled-state change
-    /// relative to the persisted state.
-    /// </summary>
-    public static bool HasObservedChange(ContextMenuEntry entry, PersistedContextMenuState state)
-    {
-        return HasExternalEnabledStateChange(entry, state)
-               || state.Category != entry.Category
-               || !string.Equals(state.DisplayName, entry.DisplayName, StringComparison.Ordinal)
-               || !string.Equals(state.EditableText, entry.EditableText, StringComparison.Ordinal)
-               || !string.Equals(state.CommandText, entry.CommandText, StringComparison.Ordinal)
-               || !string.Equals(state.HandlerClsid, entry.HandlerClsid, StringComparison.OrdinalIgnoreCase)
-               || !string.Equals(state.IconPath, entry.IconPath, StringComparison.OrdinalIgnoreCase)
-               || state.IconIndex != entry.IconIndex
-               || !string.Equals(state.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase)
-               || state.IsWindows11ContextMenu != entry.IsWindows11ContextMenu
-               || state.Windows11SourceKind != entry.Windows11SourceKind
-               || state.IsProtectedSystemItem != entry.IsProtectedSystemItem
-               || state.OnlyWithShift != entry.OnlyWithShift
-               || state.OnlyInExplorer != entry.OnlyInExplorer
-               || state.NoWorkingDirectory != entry.NoWorkingDirectory
-               || state.NeverDefault != entry.NeverDefault
-               || state.ShowAsDisabledIfHidden != entry.ShowAsDisabledIfHidden
-               || !string.Equals(state.Notes, entry.Notes, StringComparison.Ordinal)
-               || !string.Equals(state.SourceRootPath, entry.SourceRootPath, StringComparison.OrdinalIgnoreCase);
-    }
-
     public static bool HasExternalEnabledStateChange(ContextMenuEntry entry, PersistedContextMenuState state)
     {
         if (state.DesiredEnabled is { } desiredEnabled)
@@ -183,7 +157,7 @@ internal static class ContextMenuChangeClassifier
     /// - state.IsDeleted -> treat as unknown Added; deleted state is recovery-only
     /// - state is null + hasBaseline -> QuarantineAdded (runtime) / OfflineAddedHighlight (startup)
     /// - state is null + !hasBaseline -> None (first run, adopt as baseline)
-    /// - HasObservedChange -> MetadataModifiedHighlight
+    /// - HasExternalEnabledStateChange -> EnabledStateModifiedHighlight
     /// - otherwise -> None
     /// </summary>
     /// <param name="entry">The actual registry entry as observed in the current snapshot.</param>
@@ -238,93 +212,13 @@ internal static class ContextMenuChangeClassifier
                 : ItemMonitorAction.QuarantineAdded;
         }
 
-        // Known item with metadata-only change (including desired=true/actual=false
+        // Known item with an enabled-state change (including desired=true/actual=false
         // or failed reconciliation drift). Highlight only, no quarantine.
-        if (HasObservedChange(entry, state))
+        if (HasExternalEnabledStateChange(entry, state))
         {
-            return ItemMonitorAction.MetadataModifiedHighlight;
+            return ItemMonitorAction.EnabledStateModifiedHighlight;
         }
 
         return ItemMonitorAction.None;
-    }
-
-    private static string BuildModifiedDetails(ContextMenuEntry entry, PersistedContextMenuState state)
-    {
-        var changedParts = new List<string>();
-        if (HasExternalEnabledStateChange(entry, state))
-        {
-            changedParts.Add("enabled state");
-        }
-
-        if (!string.Equals(state.DisplayName, entry.DisplayName, StringComparison.Ordinal))
-        {
-            changedParts.Add("display name");
-        }
-
-        if (!string.Equals(state.EditableText, entry.EditableText, StringComparison.Ordinal))
-        {
-            changedParts.Add("menu text");
-        }
-
-        if (!string.Equals(state.CommandText, entry.CommandText, StringComparison.Ordinal))
-        {
-            changedParts.Add("command");
-        }
-
-        if (!string.Equals(state.HandlerClsid, entry.HandlerClsid, StringComparison.OrdinalIgnoreCase))
-        {
-            changedParts.Add("handler GUID");
-        }
-
-        if (!string.Equals(state.IconPath, entry.IconPath, StringComparison.OrdinalIgnoreCase)
-            || state.IconIndex != entry.IconIndex)
-        {
-            changedParts.Add("icon");
-        }
-
-        if (!string.Equals(state.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase))
-        {
-            changedParts.Add("module path");
-        }
-
-        if (state.OnlyWithShift != entry.OnlyWithShift)
-        {
-            changedParts.Add("extended visibility");
-        }
-
-        if (state.OnlyInExplorer != entry.OnlyInExplorer)
-        {
-            changedParts.Add("explorer-only flag");
-        }
-
-        if (state.NoWorkingDirectory != entry.NoWorkingDirectory)
-        {
-            changedParts.Add("working directory flag");
-        }
-
-        if (state.NeverDefault != entry.NeverDefault)
-        {
-            changedParts.Add("default action flag");
-        }
-
-        if (state.ShowAsDisabledIfHidden != entry.ShowAsDisabledIfHidden)
-        {
-            changedParts.Add("show-disabled-when-hidden flag");
-        }
-
-        if (!string.Equals(state.Notes, entry.Notes, StringComparison.Ordinal))
-        {
-            changedParts.Add("details");
-        }
-
-        if (!string.Equals(state.SourceRootPath, entry.SourceRootPath, StringComparison.OrdinalIgnoreCase)
-            || state.Category != entry.Category)
-        {
-            changedParts.Add("category");
-        }
-
-        return changedParts.Count == 0
-            ? "This item changed outside the app."
-            : $"This item changed outside the app. Updated fields: {string.Join(", ", changedParts)}.";
     }
 }

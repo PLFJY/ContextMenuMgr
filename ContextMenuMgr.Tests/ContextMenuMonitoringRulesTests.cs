@@ -133,7 +133,7 @@ public sealed class ContextMenuMonitoringRulesTests
         var actual = BuildEntry(enabled: false);
 
         Assert.Equal(
-            ItemMonitorAction.MetadataModifiedHighlight,
+            ItemMonitorAction.EnabledStateModifiedHighlight,
             ContextMenuChangeClassifier.ClassifyItemMonitorAction(
                 actual,
                 state,
@@ -148,7 +148,7 @@ public sealed class ContextMenuMonitoringRulesTests
         var actual = BuildEntry(enabled: true);
 
         Assert.Equal(
-            ItemMonitorAction.MetadataModifiedHighlight,
+            ItemMonitorAction.EnabledStateModifiedHighlight,
             ContextMenuChangeClassifier.ClassifyItemMonitorAction(
                 actual,
                 state,

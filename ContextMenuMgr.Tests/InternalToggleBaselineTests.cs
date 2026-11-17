@@ -385,6 +385,31 @@ public sealed class InternalToggleBaselineTests
                 entry => entry.KeyName == name);
             var baseline = await catalog.GetSnapshotAsync(CancellationToken.None, context);
             var item = Assert.Single(baseline, entry => entry.KeyName == name);
+            if (!shellExtension)
+            {
+                // A versioned application path changes without changing the
+                // switch. Refresh must absorb it without acknowledgement.
+                using (var key = Registry.CurrentUser.OpenSubKey(relativePath, writable: true)!)
+                using (var command = key.OpenSubKey("command", writable: true)!)
+                {
+                    key.SetValue(null, "Updated application menu");
+                    key.SetValue("Icon", @"C:\App\2.0\app.exe,0");
+                    command.SetValue(null, "\"C:\\App\\2.0\\app.exe\" \"%1\"");
+                }
+
+                var refreshed = Assert.Single(await catalog.GetSnapshotAsync(CancellationToken.None, context),
+                    entry => entry.Id == item.Id);
+                Assert.Equal(ContextMenuChangeKind.None, refreshed.DetectedChangeKind);
+                Assert.Null(refreshed.DetectedChangeDetails);
+                var persisted = (await stateStore.LoadAsync(CancellationToken.None))[item.Id];
+                Assert.Equal("Updated application menu", persisted.DisplayName);
+                Assert.Equal("\"C:\\App\\2.0\\app.exe\" \"%1\"", persisted.CommandText);
+                Assert.Equal(@"C:\App\2.0\app.exe", persisted.IconPath);
+                Assert.Equal(refreshed.FilePath, persisted.FilePath);
+                Assert.Equal(refreshed.Notes, persisted.Notes);
+                Assert.True(persisted.DesiredEnabled);
+            }
+
             foreach (var enabled in new[] { false, true })
             {
                 var response = await catalog.ApplyDesiredStateAsync(item.Id, enabled, CancellationToken.None, context);

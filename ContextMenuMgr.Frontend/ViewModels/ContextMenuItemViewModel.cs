@@ -150,6 +150,12 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
 
     public bool ShowNotes => !string.IsNullOrWhiteSpace(Entry.Notes);
 
+    public bool ShowDetailedNotes => ShowNotes
+        && !(ShowInlineCommandText && string.Equals(Notes.Trim(), Entry.CommandText!.Trim(), StringComparison.Ordinal));
+
+    [ObservableProperty]
+    public partial bool IsApplicationGroupChecked { get; set; }
+
     public string? NotesToolTip => !string.IsNullOrWhiteSpace(Entry.DetectedChangeDetails)
         && !string.Equals(Entry.DetectedChangeDetails, Notes, StringComparison.Ordinal)
             ? Entry.DetectedChangeDetails
@@ -710,6 +716,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(FileTypeRegistrationSource));
         OnPropertyChanged(nameof(Notes));
         OnPropertyChanged(nameof(ShowNotes));
+        OnPropertyChanged(nameof(ShowDetailedNotes));
         OnPropertyChanged(nameof(NotesToolTip));
         OnPropertyChanged(nameof(IconSource));
         OnPropertyChanged(nameof(HasIcon));
@@ -1104,6 +1111,7 @@ public partial class ContextMenuItemViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(Notes));
         OnPropertyChanged(nameof(ShowNotes));
+        OnPropertyChanged(nameof(ShowDetailedNotes));
         OnPropertyChanged(nameof(NotesToolTip));
         OnPropertyChanged(nameof(KeyName));
         OnPropertyChanged(nameof(CategoryName));

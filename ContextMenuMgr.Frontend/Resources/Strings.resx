@@ -1525,8 +1525,6 @@ Continue anyway? (Not recommended)</value>
   <data name="ClearApplicationGroupFilter" xml:space="preserve"><value>Clear filter</value></data>
   <data name="ApplicationGroupCountFormat" xml:space="preserve"><value>{0} entries</value></data>
   <data name="ApplicationGroupDisableAll" xml:space="preserve"><value>Disable all</value></data>
-  <data name="ApplicationGroupDisabling" xml:space="preserve"><value>Disabling…</value></data>
-  <data name="ApplicationGroupEnableAll" xml:space="preserve"><value>Enable all</value></data>
   <data name="Back" xml:space="preserve"><value>Back</value></data>
   <data name="LoadingStatus" xml:space="preserve"><value>Loading…</value></data>
   <data name="ManageSubMenuItems" xml:space="preserve"><value>Manage submenu items</value></data>
@@ -1658,4 +1656,7 @@ Continue anyway? (Not recommended)</value>
   <data name="ScrollToTop" xml:space="preserve"><value>Back to top</value></data>
   <data name="ScrollToBottom" xml:space="preserve"><value>Go to bottom</value></data>
   <data name="PurgeDeletedItemsBusy" xml:space="preserve"><value>Another delete or restore operation is still running. Try again when it finishes.</value></data>
+  <data name="ApplicationGroupDisableSelected" xml:space="preserve"><value>Disable</value></data>
+  <data name="ApplicationGroupSelectAll" xml:space="preserve"><value>Select all visible menu items in this application</value></data>
+  <data name="ApplicationGroupRestore" xml:space="preserve"><value>Restore</value></data>
 </root>
