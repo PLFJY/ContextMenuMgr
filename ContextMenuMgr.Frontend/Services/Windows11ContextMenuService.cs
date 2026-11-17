@@ -1,7 +1,10 @@
 using System.IO;
+using System.Collections.Concurrent;
+using System.Xml.Linq;
 using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using ContextMenuMgr.Contracts;
+using Windows.Management.Deployment;
 
 namespace ContextMenuMgr.Frontend.Services;
 
@@ -10,6 +13,7 @@ namespace ContextMenuMgr.Frontend.Services;
 /// </summary>
 public sealed class Windows11ContextMenuService : IDisposable
 {
+    private static readonly ConcurrentDictionary<string, Lazy<Task<ImageSource?>>> Logos = new(StringComparer.OrdinalIgnoreCase);
     private readonly IBackendClient _backendClient;
     private readonly LocalizationService _localization;
     private readonly object _refreshSync = new();
@@ -100,8 +104,9 @@ public sealed class Windows11ContextMenuService : IDisposable
             {
                 if (hasVerifiedResult)
                 {
+                    var definitions = await CreateDefinitionsAsync(verified, cancellationToken);
                     CurrentItems = CurrentItems.Where(item => !returnedIds.Contains(item.Id))
-                        .Concat(verified.Select(CreateDefinition)).ToArray();
+                        .Concat(definitions).ToArray();
                     _uncertainItems.Remove(id);
                     _failedItems.Remove(id);
                 }
@@ -164,7 +169,7 @@ public sealed class Windows11ContextMenuService : IDisposable
             .WaitAsync(BackendRequestBudgets.Windows11Snapshot, cancellationToken);
         entries = MenuListData.Current(entries);
         IsSnapshotComplete = MenuListData.AllowsRemoval(entries);
-        var fresh = entries.Select(CreateDefinition).ToArray();
+        var fresh = await CreateDefinitionsAsync(entries, cancellationToken);
         CurrentItems = MenuListData.AllowsRemoval(entries) ? fresh
             : fresh.Concat(CurrentItems.Where(old => !fresh.Any(item => item.Id.Equals(old.Id, StringComparison.OrdinalIgnoreCase)))).ToArray();
         HasSnapshot = true;
@@ -181,7 +186,9 @@ public sealed class Windows11ContextMenuService : IDisposable
         var cached = await _backendClient.ReadCachedListAsync<ContextMenuEntry>(new PipeRequest {
             Command = PipeCommand.GetWin11ContextMenuSnapshot }, cancellationToken);
         if (cached is null || HasSnapshot) return;
-        CurrentItems = cached.Select(CreateDefinition).ToArray();
+        var definitions = await CreateDefinitionsAsync(cached, cancellationToken);
+        if (HasSnapshot) return;
+        CurrentItems = definitions;
         HasSnapshot = true;
         OnItemsChanged();
     }
@@ -205,28 +212,92 @@ public sealed class Windows11ContextMenuService : IDisposable
     /// <summary>
     /// Loads logo.
     /// </summary>
-    public static async Task<ImageSource?> LoadLogo(Windows11PackageInfo package, CancellationToken cancellationToken)
+    public static async Task<ImageSource?> LoadLogo(Windows11ContextMenuItemDefinition definition, CancellationToken cancellationToken)
+    {
+        if (definition.SourceKind != Windows11ContextMenuSourceKind.PackagedCom) return null;
+        var package = definition.Package;
+        var pending = Logos.GetOrAdd(package.FullName, _ => new Lazy<Task<ImageSource?>>(
+            () => Task.Run(() => ReadLogoAsync(package))));
+        var image = await pending.Value.WaitAsync(cancellationToken);
+        // Do not permanently cache missing resources; a later refresh can retry.
+        if (image is null) Logos.TryRemove(new KeyValuePair<string, Lazy<Task<ImageSource?>>>(package.FullName, pending));
+        return image;
+    }
+
+    private static async Task<ImageSource?> ReadLogoAsync(Windows11PackageInfo package)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(package.LogoPath) || !File.Exists(package.LogoPath))
-            {
-                return null;
-            }
-
-            using var fs = new FileStream(package.LogoPath, FileMode.Open, FileAccess.Read);
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.StreamSource = fs;
-            bitmap.EndInit();
-            bitmap.Freeze();
-            return bitmap;
+            var installed = new PackageManager().FindPackageForUser(string.Empty, package.FullName);
+            if (installed is null) return null;
+            var apps = await installed.GetAppListEntriesAsync();
+            // The UI controls the whole package. Prefer its named application,
+            // then a stable representative when the package exposes several apps.
+            var app = apps.OrderByDescending(entry => string.Equals(entry.DisplayInfo.DisplayName,
+                    package.DisplayName, StringComparison.CurrentCultureIgnoreCase))
+                .ThenBy(entry => entry.AppUserModelId, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+            var icon = TryReadAppIcon(installed, app?.AppUserModelId);
+            if (icon is not null) return icon;
+            if (app is null) return null;
+            using var logo = await app.DisplayInfo.GetLogo(new Windows.Foundation.Size(48, 48)).OpenReadAsync();
+            using var fs = logo.AsStreamForRead();
+            return DecodeLogo(fs);
         }
-        catch
+        catch (Exception ex)
         {
+            FrontendDebugLog.Warning(nameof(Windows11ContextMenuService),
+                $"Package icon unavailable: Package={package.FullName}, HResult=0x{ex.HResult:X8}.");
             return null;
         }
+    }
+
+    private static ImageSource? TryReadAppIcon(Windows.ApplicationModel.Package package, string? appUserModelId)
+    {
+        try
+        {
+            var root = Path.GetFullPath(package.InstalledLocation.Path) + Path.DirectorySeparatorChar;
+            var manifest = XDocument.Load(Path.Combine(root, "AppxManifest.xml"));
+            var appId = appUserModelId?.Split('!').Last();
+            var app = manifest.Root?.Elements().FirstOrDefault(element => element.Name.LocalName == "Applications")?
+                .Elements().Where(element => element.Name.LocalName == "Application")
+                .OrderBy(element => (string?)element.Attribute("Id"), StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault(element => appId is null || (string?)element.Attribute("Id") == appId);
+            var logo = app?.Elements().FirstOrDefault(element => element.Name.LocalName == "VisualElements")?
+                .Attributes().FirstOrDefault(attribute => attribute.Name.LocalName == "Square44x44Logo")?.Value;
+            if (string.IsNullOrWhiteSpace(logo)) return null;
+            var path = Path.GetFullPath(Path.Combine(root, logo));
+            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
+            var stem = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path));
+            var extension = Path.GetExtension(path);
+            // Use app-list assets without tile padding when the package supplies
+            // them; let Windows resolve other resource layouts through GetLogo.
+            foreach (var size in new[] { 48, 64, 96, 256, 32, 24, 20, 16 })
+            foreach (var form in new[] { "_altform-unplated", "" })
+            {
+                var candidate = $"{stem}.targetsize-{size}{form}{extension}";
+                if (!File.Exists(candidate)) continue;
+                using var stream = File.OpenRead(candidate);
+                return DecodeLogo(stream);
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Warning(nameof(Windows11ContextMenuService),
+                $"Package app-list icon unavailable: Package={package.Id.FullName}, HResult=0x{ex.HResult:X8}.");
+            return null;
+        }
+    }
+
+    private static ImageSource DecodeLogo(Stream stream)
+    {
+        var bitmap = new BitmapImage();
+        bitmap.BeginInit();
+        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.StreamSource = stream;
+        bitmap.EndInit();
+        bitmap.Freeze();
+        return bitmap;
     }
 
     public void Dispose()
@@ -330,6 +401,46 @@ public sealed class Windows11ContextMenuService : IDisposable
         };
     }
 
+    private static Task<Windows11ContextMenuItemDefinition[]> CreateDefinitionsAsync(
+        IReadOnlyList<ContextMenuEntry> entries, CancellationToken cancellationToken)
+        => Task.Run(() =>
+        {
+            // Localized package resources can be unavailable to LocalSystem. Read
+            // display-only metadata as the frontend user, never as another SID.
+            var definitions = entries.Select(CreateDefinition).ToArray();
+            PackageManager? manager = null;
+            foreach (var group in definitions
+                         .Where(item => item.SourceKind == Windows11ContextMenuSourceKind.PackagedCom)
+                         .GroupBy(item => item.Package.FullName, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    manager ??= new PackageManager();
+                    var package = manager.FindPackageForUser(string.Empty, group.Key);
+                    if (package is null) continue;
+                    var displayName = package.DisplayName;
+                    if (string.IsNullOrWhiteSpace(displayName)
+                        || displayName.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(displayName, package.Id.Name, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(displayName, group.Key, StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var definition in group)
+                    {
+                        var index = Array.IndexOf(definitions, definition);
+                        definitions[index] = definition with { Package = definition.Package with { DisplayName = displayName } };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A presentation failure must not hide declarations or alter
+                    // discovery completeness / authoritative switch state.
+                    FrontendDebugLog.Warning(nameof(Windows11ContextMenuService),
+                        $"Package display name unavailable: Package={group.Key}, HResult=0x{ex.HResult:X8}.");
+                }
+            }
+            return definitions;
+        }, cancellationToken);
+
     private static string ToContextType(ContextMenuCategory category) => category switch
     {
         ContextMenuCategory.DirectoryBackground => @"Directory\Background",
@@ -370,7 +481,6 @@ public sealed record Windows11PackageInfo(
     string DisplayName,
     string InstallPath)
 {
-    public string LogoPath { get; init; } = string.Empty;
     public string PublisherDisplayName { get; init; } = string.Empty;
     public string FamilyName { get; init; } = DisplayName;
 }

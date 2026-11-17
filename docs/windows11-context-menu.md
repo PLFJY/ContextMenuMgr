@@ -17,6 +17,10 @@
 
 包身份、安装路径与 manifest 是发现依据；`Package.DisplayName` / `PublisherDisplayName` 只是展示信息。服务读取这两个本地化字段失败时，分别回退到包名称与空发布者，继续读取 manifest，不跳过整个包、不标记发现不完整。日志 `PackagedContextMenuDisplayMetadataFallback` 汇总具体失败字段、HRESULT 和 `DiscoveryUnaffected=True`；包枚举、身份或 manifest 读取/解析失败仍记录 `PackagesSkipped` / `ManifestSkipped`，标记不完整并保留前端未能确认的旧条目，不能据此推断卸载。
 
+Win11 页面与全局搜索的应用名称由前端补读：在后台线程按后端已发现的 package full name 调用 `PackageManager.FindPackageForUser(string.Empty, fullName)`，只访问当前前端用户已安装的对应包，每批同包仅查询一次。有效的本地化 `Package.DisplayName` 覆盖前端投影中的应用显示名；空值、未解析的 `ms-resource:`、等于包身份的名称或读取异常保留后端原显示名。缓存恢复、刷新和 mutation 返回均使用同一投影；即使条目 DTO 未变，本地化名称变化也通知现有行更新。该补读不新增菜单、不写回后端或持久状态、不改变发现完整性、身份和开关控制域，也不加载第三方 COM；名称仍无法取得时才保留原有包名回退，失败写前端日志。这里展示应用名称，不追求 Explorer 实际菜单文字。
+
+应用图标同样由前端只读取得：后台获取当前用户对应包的 `GetAppListEntriesAsync`，优先选择名称与包显示名一致的应用，否则按 AppUserModelId 排序取稳定代表。按选定 Application Id 读取 manifest 的 `Square44x44Logo`，优先选择包安装目录内的应用列表 `targetsize` 资源（48/64/96/256/32/24/20/16，先 unplated 再普通），避免磁贴留白；不存在专用资源时由 `AppDisplayInfo.GetLogo(48×48)` 解析系统资源。没有可枚举应用时可按 manifest 中首个 Application Id 尝试静态图标；路径必须留在包安装目录内，不改权限、不执行应用或加载第三方扩展。图片完整解码并 Freeze 后回到 UI，Win11 页面与全局搜索共用按 package full name 缓存的异步任务；版本变化更换缓存键，失败不永久缓存，刷新可重试，单个搜索取消不取消共享加载。缺图保持默认图标，系统 CommandStore 沿用原图标语义；卸载的行及过期图标任务不再通知界面。不再保留未赋值的 LogoPath 或按路径重复缓存的旧实现。
+
 Packaged Id 为 `win11|{clsid}|{category}|{packageFamily}`；不同 family 同 CLSID/category 不覆盖，同 family 共存 full names 保存在引用元数据。RegistryPath 是逻辑 PackagedCom/Package/.../Class，BackendRegistryPath 是用户 Blocked 共享键，**不能按单菜单 key 删除**。普通 Delete/审核 Remove 拒绝；package 卸载由 Windows 管理。
 
 System 项为 `win11-system|{commandKey}`，真实 HKLM CommandStore 路径；必须有 MUIVerb/ExplorerCommandHandler/command 等命令元数据，不将任意 Windows.* 加入页面。显示名用 ShellMetadataResolver。

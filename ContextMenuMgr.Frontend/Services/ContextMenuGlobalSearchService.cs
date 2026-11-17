@@ -84,8 +84,11 @@ public sealed class ContextMenuGlobalSearchService : IDisposable
         try
         {
             var entry = candidate.Entry ?? candidate.Windows11Definitions?.FirstOrDefault()?.Entry;
-            var icon = await _iconPreviewService.GetIconAsync(entry?.IconPath, entry?.IconIndex ?? 0,
-                entry?.FilePath ?? candidate.Result.FilePath, _lifetime.Token);
+            var definition = candidate.Windows11Definitions?.FirstOrDefault();
+            var icon = definition?.SourceKind == Windows11ContextMenuSourceKind.PackagedCom
+                ? await Windows11ContextMenuService.LoadLogo(definition, _lifetime.Token)
+                : await _iconPreviewService.GetIconAsync(entry?.IconPath, entry?.IconIndex ?? 0,
+                    entry?.FilePath ?? candidate.Result.FilePath, _lifetime.Token);
             if (!_disposed) candidate.Result.IconSource = icon;
         }
         catch (OperationCanceledException) { }

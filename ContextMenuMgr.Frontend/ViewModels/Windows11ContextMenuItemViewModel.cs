@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -11,7 +9,6 @@ namespace ContextMenuMgr.Frontend.ViewModels;
 /// <summary>One application row; the backend commits its menus as one operation.</summary>
 public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisposable
 {
-    private static readonly ConcurrentDictionary<string, ImageSource?> LogoCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Windows11ContextMenuService _service;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService? _settingsService;
@@ -19,6 +16,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     private Windows11ContextMenuItemDefinition _primaryDefinition;
     private Task<ImageSource?> _logoTask;
     private bool _suppressSync;
+    private bool _disposed;
 
     public Windows11ContextMenuItemViewModel(
         IReadOnlyList<Windows11ContextMenuItemDefinition> definitions,
@@ -30,12 +28,8 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         _service = service;
         _localization = localization;
         _settingsService = settingsService;
-        _logoTask = LoadLogoAsync(_primaryDefinition.Package);
-        _ = _logoTask.ContinueWith(_ =>
-        {
-            OnPropertyChanged(nameof(LogoSource));
-            OnPropertyChanged(nameof(HasLogo));
-        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext());
+        _logoTask = Windows11ContextMenuService.LoadLogo(_primaryDefinition, CancellationToken.None);
+        _ = RefreshLogoAsync(_logoTask);
         RefreshState(definitions.All(definition => definition.IsEnabled));
         IsBusy = service.IsOperationPending(Id);
         IsStateUncertain = service.IsStateUncertain(Id);
@@ -141,21 +135,21 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     {
         var previousEntries = Definitions.Select(item => item.Entry).ToArray();
         var updatedEntries = definitions.Select(item => item.Entry).ToArray();
-        var changed = !previousEntries.SequenceEqual(updatedEntries) && !MenuListData.Equivalent(previousEntries, updatedEntries);
+        var changed = _primaryDefinition.Package != definitions[0].Package
+            || !previousEntries.SequenceEqual(updatedEntries) && !MenuListData.Equivalent(previousEntries, updatedEntries);
         if (changed)
         {
-            var oldLogo = _primaryDefinition.Package.LogoPath;
             Definitions = definitions;
             _primaryDefinition = definitions[0];
-            if (!string.Equals(oldLogo, _primaryDefinition.Package.LogoPath, StringComparison.OrdinalIgnoreCase))
-            {
-                _logoTask = LoadLogoAsync(_primaryDefinition.Package);
-                _ = RefreshLogoAsync(_logoTask);
-            }
             foreach (var name in new[] { nameof(DisplayName), nameof(PublisherName), nameof(PublisherText), nameof(PackageFamilyName),
                 nameof(PackageIdentityText), nameof(ComServerPath), nameof(FileLocationText), nameof(HasPublisher), nameof(HasFileLocation),
                 nameof(IsPartiallyEnabled), nameof(IsProtected), nameof(IsMachineBlocked), nameof(ContextTypesText),
                 nameof(ShowToggle), nameof(ShowMixedActions), nameof(ShowMixedBusy), nameof(CanToggle) }) OnPropertyChanged(name);
+        }
+        if (changed || _logoTask.IsCompleted && LogoSource is null)
+        {
+            _logoTask = Windows11ContextMenuService.LoadLogo(_primaryDefinition, CancellationToken.None);
+            _ = RefreshLogoAsync(_logoTask);
         }
         IsStateUncertain = _service.IsStateUncertain(Id);
         HasOperationError = _service.HasOperationError(Id);
@@ -167,7 +161,7 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
     private async Task RefreshLogoAsync(Task<ImageSource?> task)
     {
         await task;
-        if (!ReferenceEquals(task, _logoTask)) return;
+        if (_disposed || !ReferenceEquals(task, _logoTask)) return;
         OnPropertyChanged(nameof(LogoSource)); OnPropertyChanged(nameof(HasLogo));
     }
 
@@ -273,15 +267,9 @@ public partial class Windows11ContextMenuItemViewModel : ObservableObject, IDisp
         });
     }
 
-    private static Task<ImageSource?> LoadLogoAsync(Windows11PackageInfo package)
+    public void Dispose()
     {
-        var path = package.LogoPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return Task.FromResult<ImageSource?>(null);
-        if (LogoCache.TryGetValue(path, out var cached)) return Task.FromResult(cached);
-        return Task.Run(() => Windows11ContextMenuService.LoadLogo(package, CancellationToken.None))
-            .ContinueWith(task => LogoCache[path] = task.Result, CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        _disposed = true;
+        _localization.LanguageChanged -= _languageChangedHandler;
     }
-
-    public void Dispose() => _localization.LanguageChanged -= _languageChangedHandler;
 }
