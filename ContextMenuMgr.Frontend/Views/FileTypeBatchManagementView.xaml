@@ -57,7 +57,10 @@
                         Opacity="0.72"
                         Text="{Binding CountText}" />
                     <ui:TextBlock Margin="0,4,0,0" Text="{Binding ProgressText}" />
-                    <ui:TextBlock Margin="0,4,0,0" Text="{Binding ResultText}" TextWrapping="Wrap" />
+                    <ui:TextBlock
+                        Margin="0,4,0,0"
+                        Text="{Binding ResultText}"
+                        TextWrapping="Wrap" />
                     <ui:TextBlock
                         Margin="0,10,0,0"
                         FontSize="12"
@@ -116,33 +119,51 @@
                         Command="{Binding UndoAllCommand}"
                         Content="{Binding UndoAllText}"
                         Icon="{ui:SymbolIcon Symbol=ArrowUndo24}" />
-                    <ui:Button Margin="8,0,0,8" Padding="12,5"
-                        Command="{Binding CancelBatchCommand}" Content="{Binding CancelText}" />
+                    <ui:Button
+                        Margin="8,0,0,8"
+                        Padding="12,5"
+                        Command="{Binding CancelBatchCommand}"
+                        Content="{Binding CancelText}" />
                 </WrapPanel>
             </Grid>
         </Border>
 
-        <modernScroll:ModernScrollViewer Grid.Row="1"
-            HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <modernScroll:ModernScrollViewer
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <ItemsControl ItemsSource="{Binding ActionGroups}" IsEnabled="{Binding CanEditBatchRows}">
+                <ItemsControl IsEnabled="{Binding CanEditBatchRows}" ItemsSource="{Binding ActionGroups}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModels:FileTypeBatchActionGroup}">
-                            <Expander Margin="0,8,0,0" Padding="8"
+                            <Expander
+                                Margin="0,8,0,0"
+                                Padding="8"
                                 Background="{DynamicResource LayerFillColorDefaultBrush}">
                                 <Expander.Header>
                                     <StackPanel Orientation="Horizontal">
-                                        <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center"
+                                        <CheckBox
+                                            VerticalAlignment="Center"
+                                            IsChecked="{Binding IsSelected}"
                                             ToolTip="{Binding Evidence}" />
-                                        <ui:TextBlock Margin="8,0,0,0" FontSize="15" FontWeight="SemiBold"
+                                        <ui:TextBlock
+                                            Margin="8,0,0,0"
+                                            FontSize="15"
+                                            FontWeight="SemiBold"
                                             Text="{Binding Name}" />
-                                        <ui:TextBlock Margin="8,0,0,0" Opacity="0.7"
+                                        <ui:TextBlock
+                                            Margin="8,0,0,0"
+                                            Opacity="0.7"
                                             Text="{Binding Count, StringFormat='({0})'}" />
-                                        <ui:TextBlock Margin="12,0,0,0" Opacity="0.7"
+                                        <ui:TextBlock
+                                            Margin="12,0,0,0"
+                                            Opacity="0.7"
                                             Text="{Binding Evidence}" />
                                     </StackPanel>
                                 </Expander.Header>
-                                <ListBox ItemsSource="{Binding Registrations}" MaxHeight="360"
+                                <ListBox
+                                    MaxHeight="360"
+                                    ItemsSource="{Binding Registrations}"
                                     ScrollViewer.CanContentScroll="True"
                                     VirtualizingStackPanel.IsVirtualizing="True"
                                     VirtualizingStackPanel.VirtualizationMode="Recycling">
@@ -154,31 +175,40 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <CheckBox IsChecked="{Binding IsIncluded}" VerticalAlignment="Center"
-                                                    Margin="0,0,10,0" />
+                                                <CheckBox
+                                                    Margin="0,0,10,0"
+                                                    VerticalAlignment="Center"
+                                                    IsChecked="{Binding IsIncluded}" />
                                                 <StackPanel Grid.Column="1">
-                                                    <ui:TextBlock Text="{Binding Item.FileTypeRegistrationSource}"
-                                                        FontWeight="SemiBold" />
-                                                    <ui:TextBlock Text="{Binding Item.Entry.BackendRegistryPath}"
-                                                        FontFamily="Consolas" FontSize="11"
+                                                    <ui:TextBlock FontWeight="SemiBold" Text="{Binding Item.FileTypeRegistrationSource}" />
+                                                    <ui:TextBlock
+                                                        FontFamily="Consolas"
+                                                        FontSize="11"
+                                                        Text="{Binding Item.Entry.BackendRegistryPath}"
                                                         TextWrapping="Wrap" />
-                                                    <ui:TextBlock Text="{Binding Item.StateLabel}"
-                                                        Opacity="0.7" />
-                                                    <ui:TextBlock Text="{Binding Evidence}"
-                                                        Opacity="0.7" FontSize="11" />
+                                                    <ui:TextBlock Opacity="0.7" Text="{Binding Item.StateLabel}" />
+                                                    <ui:TextBlock
+                                                        FontSize="11"
+                                                        Opacity="0.7"
+                                                        Text="{Binding Evidence}" />
                                                 </StackPanel>
-                                                <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                                    Margin="12,0,0,0">
-                                                    <ui:ToggleSwitch IsChecked="{Binding Item.IsEnabled, Mode=TwoWay}"
+                                                <StackPanel
+                                                    Grid.Column="2"
+                                                    Margin="12,0,0,0"
+                                                    Orientation="Horizontal">
+                                                    <ui:ToggleSwitch
+                                                        IsChecked="{Binding Item.IsEnabled, Mode=TwoWay}"
                                                         IsEnabled="{Binding Item.CanToggle}"
                                                         Visibility="{Binding Item.ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                    <ui:Button Margin="8,0,0,0"
+                                                    <ui:Button
+                                                        Margin="8,0,0,0"
                                                         Command="{Binding DataContext.DeleteItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         CommandParameter="{Binding Item}"
                                                         Content="{Binding Item.PrimaryActionLabel}"
                                                         IsEnabled="{Binding Item.CanDeleteInFileTypeBatch}"
                                                         Visibility="{Binding Item.IsDeleted, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                                                    <ui:Button Margin="8,0,0,0"
+                                                    <ui:Button
+                                                        Margin="8,0,0,0"
                                                         Command="{Binding DataContext.DeleteItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         CommandParameter="{Binding Item}"
                                                         Content="{Binding Item.PrimaryActionLabel}"
@@ -192,7 +222,9 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <ui:TextBlock Margin="24" HorizontalAlignment="Center"
+                <ui:TextBlock
+                    Margin="24"
+                    HorizontalAlignment="Center"
                     Text="{Binding EmptyText}"
                     Visibility="{Binding ShowPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>

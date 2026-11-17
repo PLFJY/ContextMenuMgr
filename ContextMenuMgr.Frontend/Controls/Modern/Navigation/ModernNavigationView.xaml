@@ -172,7 +172,7 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
+                <ListBox
                     x:Name="PART_MenuList"
                     Grid.Row="0"
                     Background="Transparent"
@@ -180,7 +180,8 @@
                     ItemTemplate="{StaticResource ModernNavigationEntryTemplate}"
                     ItemsSource="{Binding MenuEntries, ElementName=Root}"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                    ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    ScrollViewer.VerticalScrollBarVisibility="Auto"
+                    Style="{StaticResource ModernScrollableListBoxStyle}">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Focusable" Value="False" />
@@ -201,7 +202,7 @@
 
                 <ContentPresenter Grid.Row="1" Content="{Binding PaneFooter, ElementName=Root}" />
 
-                <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
+                <ListBox
                     Grid.Row="2"
                     Margin="0,4"
                     Background="Transparent"
@@ -210,7 +211,8 @@
                     ItemTemplate="{StaticResource ModernNavigationEntryTemplate}"
                     ItemsSource="{Binding FooterMenuEntries, ElementName=Root}"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                    ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                    Style="{StaticResource ModernScrollableListBoxStyle}">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Focusable" Value="False" />
@@ -233,7 +235,10 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0" Margin="{Binding FrameMargin, ElementName=Root}" Visibility="{Binding HeaderVisibility, ElementName=Root}">
+            <Grid
+                Grid.Row="0"
+                Margin="{Binding FrameMargin, ElementName=Root}"
+                Visibility="{Binding HeaderVisibility, ElementName=Root}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -246,13 +251,16 @@
                     IsEnabled="{Binding IsBackEnabled, ElementName=Root}">
                     <ui:SymbolIcon Symbol="ArrowLeft24" />
                 </Button>
-                <ContentPresenter Grid.Column="1" VerticalAlignment="Center" Content="{Binding Header, ElementName=Root}" />
+                <ContentPresenter
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Content="{Binding Header, ElementName=Root}" />
             </Grid>
             <frame:ModernFrame
                 x:Name="PART_Frame"
                 Grid.Row="1"
-                ContentScrollHostMode="Auto"
-                Margin="{Binding FrameMargin, ElementName=Root}" />
+                Margin="{Binding FrameMargin, ElementName=Root}"
+                ContentScrollHostMode="Auto" />
             <ContentPresenter
                 Grid.RowSpan="2"
                 Panel.ZIndex="10"

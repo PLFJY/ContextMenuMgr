@@ -10,73 +10,51 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ui:ThemesDictionary Theme="Light"/>
-                <ui:ControlsDictionary/>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
                 <ResourceDictionary Source="Controls/Modern/Scrolling/ModernScrollingStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <SolidColorBrush
-                x:Key="AccentButtonForeground"
-                Color="{DynamicResource TextOnAccentFillColorPrimary}"/>
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="{DynamicResource TextOnAccentFillColorPrimary}" />
 
-            <SolidColorBrush
-                x:Key="AccentButtonForegroundPointerOver"
-                Color="{DynamicResource TextOnAccentFillColorPrimary}"/>
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="{DynamicResource TextOnAccentFillColorPrimary}" />
 
-            <SolidColorBrush
-                x:Key="AccentButtonForegroundPressed"
-                Color="{DynamicResource TextOnAccentFillColorPrimary}"/>
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="{DynamicResource TextOnAccentFillColorPrimary}" />
 
             <markup:XmlLanguage x:Key="CurrentLanguage">en-US</markup:XmlLanguage>
-            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-            <converters:NullOrEmptyToVisibilityConverter x:Key="NullOrEmptyToVisibilityConverter"/>
-            <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <converters:NullOrEmptyToVisibilityConverter x:Key="NullOrEmptyToVisibilityConverter" />
+            <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
 
             <Style TargetType="Window">
-                <Setter Property="Language"
-                        Value="{DynamicResource CurrentLanguage}"/>
+                <Setter Property="Language" Value="{DynamicResource CurrentLanguage}" />
             </Style>
 
             <Style TargetType="Page">
-                <Setter Property="Language"
-                        Value="{DynamicResource CurrentLanguage}"/>
+                <Setter Property="Language" Value="{DynamicResource CurrentLanguage}" />
             </Style>
 
-            <Style BasedOn="{StaticResource {x:Type Label}}"
-                   TargetType="Label">
-                <Setter Property="Language"
-                        Value="{DynamicResource CurrentLanguage}"/>
+            <Style BasedOn="{StaticResource {x:Type Label}}" TargetType="Label">
+                <Setter Property="Language" Value="{DynamicResource CurrentLanguage}" />
             </Style>
 
-            <Style BasedOn="{StaticResource {x:Type TextBlock}}"
-                   TargetType="TextBlock">
-                <Setter Property="Language"
-                        Value="{DynamicResource CurrentLanguage}"/>
+            <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="TextBlock">
+                <Setter Property="Language" Value="{DynamicResource CurrentLanguage}" />
                 <Style.Triggers>
-                    <Trigger Property="IsEnabled"
-                             Value="False">
-                        <Setter Property="Foreground"
-                                Value="{DynamicResource TextFillColorDisabledBrush}"/>
-                        <Setter Property="Opacity"
-                                Value="0.6"/>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                        <Setter Property="Opacity" Value="0.6" />
                     </Trigger>
                 </Style.Triggers>
             </Style>
 
-            <Style x:Key="CardBorderStyle"
-                   TargetType="Border">
-                <Setter Property="CornerRadius"
-                        Value="8"/>
-                <Setter Property="Padding"
-                        Value="16"/>
-                <Setter Property="Margin"
-                        Value="0,0,0,12"/>
-                <Setter Property="Background"
-                        Value="{DynamicResource CardBackgroundFillColorDefaultBrush}"/>
-                <Setter Property="BorderBrush"
-                        Value="{DynamicResource CardStrokeColorDefaultBrush}"/>
-                <Setter Property="BorderThickness"
-                        Value="1"/>
+            <Style x:Key="CardBorderStyle" TargetType="Border">
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="16" />
+                <Setter Property="Margin" Value="0,0,0,12" />
+                <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
             </Style>
 
             <Style x:Key="ContextMenuItemCardStyle" TargetType="Border">
@@ -101,7 +79,10 @@
                 </Style.Triggers>
             </Style>
 
-            <Style x:Key="ContextMenuEnabledBadgeTextStyle" BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+            <Style
+                x:Key="ContextMenuEnabledBadgeTextStyle"
+                BasedOn="{StaticResource {x:Type TextBlock}}"
+                TargetType="ui:TextBlock">
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="FontSize" Value="11" />
                 <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
@@ -112,72 +93,49 @@
                 </Style.Triggers>
             </Style>
 
-            <Style x:Key="ChromeTitleBarButton"
-                   BasedOn="{StaticResource {x:Type ui:Button}}"
-                   TargetType="{x:Type ui:Button}">
-                <Setter Property="Width"
-                        Value="46"/>
-                <Setter Property="Height"
-                        Value="44"/>
-                <Setter Property="Padding"
-                        Value="0"/>
-                <Setter Property="Focusable"
-                        Value="False"/>
-                <Setter Property="Background"
-                        Value="{x:Null}"/>
-                <Setter Property="BorderThickness"
-                        Value="0"/>
-                <Setter Property="CornerRadius"
-                        Value="0"/>
-                <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome"
-                        Value="True"/>
+            <Style
+                x:Key="ChromeTitleBarButton"
+                BasedOn="{StaticResource {x:Type ui:Button}}"
+                TargetType="{x:Type ui:Button}">
+                <Setter Property="Width" Value="46" />
+                <Setter Property="Height" Value="44" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Background" Value="{x:Null}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="0" />
+                <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
             </Style>
 
-            <Style x:Key="ScrollableListBoxItemStyle"
-                   TargetType="ListBoxItem">
-                <Setter Property="Padding"
-                        Value="0"/>
-                <Setter Property="Margin"
-                        Value="0"/>
-                <Setter Property="Background"
-                        Value="Transparent"/>
-                <Setter Property="BorderThickness"
-                        Value="0"/>
-                <Setter Property="HorizontalContentAlignment"
-                        Value="Stretch"/>
-                <Setter Property="VerticalContentAlignment"
-                        Value="Stretch"/>
-                <Setter Property="Focusable"
-                        Value="False"/>
+            <Style x:Key="ScrollableListBoxItemStyle" TargetType="ListBoxItem">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                <Setter Property="Focusable" Value="False" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListBoxItem">
-                            <ContentPresenter/>
+                            <ContentPresenter />
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
             </Style>
 
-            <Style x:Key="DisplayOnlyListViewItemStyle"
-                   TargetType="ListViewItem">
-                <Setter Property="Padding"
-                        Value="0"/>
-                <Setter Property="Margin"
-                        Value="0"/>
-                <Setter Property="Background"
-                        Value="Transparent"/>
-                <Setter Property="BorderThickness"
-                        Value="0"/>
-                <Setter Property="HorizontalContentAlignment"
-                        Value="Stretch"/>
-                <Setter Property="VerticalContentAlignment"
-                        Value="Stretch"/>
-                <Setter Property="FocusVisualStyle"
-                        Value="{x:Null}"/>
+            <Style x:Key="DisplayOnlyListViewItemStyle" TargetType="ListViewItem">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListViewItem">
-                            <ContentPresenter/>
+                            <ContentPresenter />
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>

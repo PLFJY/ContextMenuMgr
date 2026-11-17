@@ -4,17 +4,15 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:behaviors="clr-namespace:ContextMenuMgr.Frontend.Behaviors"
     xmlns:controls="clr-namespace:ContextMenuMgr.Frontend.Controls"
+    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:viewModels="clr-namespace:ContextMenuMgr.Frontend.ViewModels"
-    xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     modernScroll:ModernScroll.Ownership="Self"
     Foreground="{DynamicResource TextFillColorPrimaryBrush}">
     <Page.Resources>
         <DataTemplate DataType="{x:Type viewModels:CategoryPageViewModel}">
             <StackPanel>
-                <Border
-                    Background="{DynamicResource LayerFillColorAltBrush}"
-                    Style="{StaticResource CardBorderStyle}">
+                <Border Background="{DynamicResource LayerFillColorAltBrush}" Style="{StaticResource CardBorderStyle}">
                     <StackPanel>
                         <ui:TextBlock
                             FontSize="24"
@@ -73,20 +71,37 @@
                                     Content="{Binding AddMenuItemText}"
                                     Icon="{ui:SymbolIcon Symbol=Add24}" />
                                 <Grid Margin="8,0,0,0">
-                                    <ui:Button Padding="14,6" Command="{Binding OpenPurgeDeletedItemsFlyoutCommand}"
-                                        Content="{Binding PurgeDeletedItemsText}" ToolTip="{Binding PurgeDeletedItemsTooltip}"
-                                        IsEnabled="{Binding CanPurgeDeletedItems}" Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}" />
+                                    <ui:Button
+                                        Padding="14,6"
+                                        Command="{Binding OpenPurgeDeletedItemsFlyoutCommand}"
+                                        Content="{Binding PurgeDeletedItemsText}"
+                                        Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                        IsEnabled="{Binding CanPurgeDeletedItems}"
+                                        ToolTip="{Binding PurgeDeletedItemsTooltip}" />
                                     <ui:Flyout IsOpen="{Binding IsPurgeDeletedItemsFlyoutOpen, Mode=TwoWay}" Placement="Bottom">
                                         <StackPanel Width="320">
                                             <ui:TextBlock Text="{Binding PurgeDeletedItemsConfirmationText}" TextWrapping="Wrap" />
-                                            <StackPanel Margin="0,12,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <ui:Button Margin="0,0,8,0" Command="{Binding ClosePurgeDeletedItemsFlyoutCommand}" Content="{Binding CancelText}" />
-                                                <ui:Button Appearance="Danger" Command="{Binding ConfirmPurgeDeletedItemsCommand}" Content="{Binding ConfirmPurgeDeletedItemsText}" />
+                                            <StackPanel
+                                                Margin="0,12,0,0"
+                                                HorizontalAlignment="Right"
+                                                Orientation="Horizontal">
+                                                <ui:Button
+                                                    Margin="0,0,8,0"
+                                                    Command="{Binding ClosePurgeDeletedItemsFlyoutCommand}"
+                                                    Content="{Binding CancelText}" />
+                                                <ui:Button
+                                                    Appearance="Danger"
+                                                    Command="{Binding ConfirmPurgeDeletedItemsCommand}"
+                                                    Content="{Binding ConfirmPurgeDeletedItemsText}" />
                                             </StackPanel>
                                         </StackPanel>
                                     </ui:Flyout>
                                 </Grid>
-                                <ui:ProgressRing Margin="8,0,0,0" Width="20" Height="20" IsIndeterminate="True"
+                                <ui:ProgressRing
+                                    Width="20"
+                                    Height="20"
+                                    Margin="8,0,0,0"
+                                    IsIndeterminate="True"
                                     Visibility="{Binding IsPurgingDeletedItems, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             </WrapPanel>
                         </StackPanel>
@@ -155,8 +170,10 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Opacity="{Binding CardOpacity}">
-                        <ui:TextBlock Text="{Binding AcknowledgementStatusText}" TextWrapping="Wrap"
+                        <ui:TextBlock
                             Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                            Text="{Binding AcknowledgementStatusText}"
+                            TextWrapping="Wrap"
                             Visibility="{Binding IsAcknowledgementUncertain, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -230,8 +247,8 @@
                                     <ui:Button
                                         MinWidth="88"
                                         Margin="10,4,0,4"
-                                        VerticalAlignment="Center"
                                         Padding="12,5"
+                                        VerticalAlignment="Center"
                                         Appearance="Secondary"
                                         Click="OpenApplicationGroup_Click"
                                         Content="{Binding ManageApplicationMenusText}"
@@ -368,8 +385,22 @@
                             </Style>
                         </StackPanel.Style>
                         <StackPanel Margin="0,15,0,8" Orientation="Horizontal">
-                            <ui:Button Width="36" Height="36" Margin="0,0,8,0" Appearance="Secondary" Command="{Binding ManageSubMenuItemsCommand}" ToolTip="{Binding ManageSubMenuItemsToolTip}" Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" Icon="{ui:SymbolIcon Symbol=Apps24}" />
-                            <controls:AsyncToggleSwitch VerticalAlignment="Center" Label="{Binding ToggleLabel}" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" CanToggle="{Binding CanToggle}" IsBusy="{Binding IsToggleBusy}" Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ui:Button
+                                Width="36"
+                                Height="36"
+                                Margin="0,0,8,0"
+                                Appearance="Secondary"
+                                Command="{Binding ManageSubMenuItemsCommand}"
+                                Icon="{ui:SymbolIcon Symbol=Apps24}"
+                                ToolTip="{Binding ManageSubMenuItemsToolTip}"
+                                Visibility="{Binding CanManageSubMenuItems, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <controls:AsyncToggleSwitch
+                                VerticalAlignment="Center"
+                                CanToggle="{Binding CanToggle}"
+                                IsBusy="{Binding IsToggleBusy}"
+                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                Label="{Binding ToggleLabel}"
+                                Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
                         <StackPanel Visibility="{Binding DataContext.IsDetailedView, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ui:Button
@@ -379,7 +410,8 @@
                                 CommandParameter="{Binding}"
                                 Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType=Page}}"
                                 Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                Visibility="{Binding CanDelete, Converter={StaticResource BooleanToVisibilityConverter}}" IsEnabled="{Binding CanPrimaryAction}" />
+                                IsEnabled="{Binding CanPrimaryAction}"
+                                Visibility="{Binding CanDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <ui:Button
                                 MinWidth="88"
                                 Padding="12,5"
@@ -387,7 +419,8 @@
                                 CommandParameter="{Binding}"
                                 Content="{Binding PrimaryActionLabel}"
                                 Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
-                                Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" IsEnabled="{Binding CanPrimaryAction}" />
+                                IsEnabled="{Binding CanPrimaryAction}"
+                                Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
 
                         <ui:DropDownButton
@@ -401,7 +434,10 @@
                             Visibility="{Binding HasActionFlyout, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ui:DropDownButton.Flyout>
                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" Tag="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-                                    <MenuItem Click="OpenApplicationGroup_Click" Header="{Binding ManageApplicationMenusText}" IsEnabled="{Binding CanPrimaryAction}">
+                                    <MenuItem
+                                        Click="OpenApplicationGroup_Click"
+                                        Header="{Binding ManageApplicationMenusText}"
+                                        IsEnabled="{Binding CanPrimaryAction}">
                                         <MenuItem.Style>
                                             <Style TargetType="MenuItem">
                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -419,7 +455,8 @@
                                     <MenuItem
                                         Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                         CommandParameter="{Binding}"
-                                        Header="{Binding PlacementTarget.Tag.DeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}" IsEnabled="{Binding CanPrimaryAction}">
+                                        Header="{Binding PlacementTarget.Tag.DeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                        IsEnabled="{Binding CanPrimaryAction}">
                                         <MenuItem.Style>
                                             <Style TargetType="MenuItem">
                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -438,7 +475,8 @@
                                     <MenuItem
                                         Command="{Binding PlacementTarget.Tag.DeleteOrUndoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                         CommandParameter="{Binding}"
-                                        Header="{Binding PrimaryActionLabel}" IsEnabled="{Binding CanPrimaryAction}">
+                                        Header="{Binding PrimaryActionLabel}"
+                                        IsEnabled="{Binding CanPrimaryAction}">
                                         <MenuItem.Style>
                                             <Style TargetType="MenuItem">
                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -457,7 +495,8 @@
                                     <MenuItem
                                         Command="{Binding PlacementTarget.Tag.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                         CommandParameter="{Binding}"
-                                        Header="{Binding PlacementTarget.Tag.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}" IsEnabled="{Binding CanPrimaryAction}">
+                                        Header="{Binding PlacementTarget.Tag.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                        IsEnabled="{Binding CanPrimaryAction}">
                                         <MenuItem.Style>
                                             <Style TargetType="MenuItem">
                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -613,7 +652,8 @@
                                 Command="{Binding DataContext.OpenPermanentDeleteFlyoutCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                 CommandParameter="{Binding}"
                                 Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=Page}}"
-                                Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}" IsEnabled="{Binding CanPrimaryAction}" />
+                                Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                IsEnabled="{Binding CanPrimaryAction}" />
                         </Grid>
                     </StackPanel>
                 </Grid>
@@ -621,24 +661,46 @@
         </DataTemplate>
     </Page.Resources>
     <Grid>
-        <ListBox x:Name="MenuList"
-            Style="{StaticResource ModernVirtualizedListBoxStyle}"
-            behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+        <ListBox
+            x:Name="MenuList"
             behaviors:MenuListTransitions.IsEnabled="True"
-            Background="Transparent" BorderThickness="0"
+            behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+            Background="Transparent"
+            BorderThickness="0"
             ItemContainerStyle="{StaticResource ScrollableListBoxItemStyle}"
-            ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-            ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
-            VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
+            ScrollViewer.CanContentScroll="True"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+            ScrollViewer.VerticalScrollBarVisibility="Auto"
+            Style="{StaticResource ModernVirtualizedListBoxStyle}"
+            VirtualizingPanel.IsVirtualizing="True"
+            VirtualizingPanel.ScrollUnit="Pixel"
+            VirtualizingPanel.VirtualizationMode="Recycling">
         </ListBox>
         <Canvas Panel.ZIndex="10">
             <StackPanel Canvas.Right="18" Canvas.Bottom="18">
-                <ui:Button x:Name="ScrollTopButton" Width="40" Height="40" Margin="0,0,0,8" Padding="8"
-                    Visibility="Collapsed" Appearance="Primary" Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
-                    ToolTip="{Binding ScrollToTopText}" AutomationProperties.Name="{Binding ScrollToTopText}" Click="ScrollTop_Click" />
-                <ui:Button x:Name="ScrollBottomButton" Width="40" Height="40" Padding="8"
-                    Visibility="Collapsed" Appearance="Primary" Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
-                    ToolTip="{Binding ScrollToBottomText}" AutomationProperties.Name="{Binding ScrollToBottomText}" Click="ScrollBottom_Click" />
+                <ui:Button
+                    x:Name="ScrollTopButton"
+                    Width="40"
+                    Height="40"
+                    Margin="0,0,0,8"
+                    Padding="8"
+                    Appearance="Primary"
+                    AutomationProperties.Name="{Binding ScrollToTopText}"
+                    Click="ScrollTop_Click"
+                    Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
+                    ToolTip="{Binding ScrollToTopText}"
+                    Visibility="Collapsed" />
+                <ui:Button
+                    x:Name="ScrollBottomButton"
+                    Width="40"
+                    Height="40"
+                    Padding="8"
+                    Appearance="Primary"
+                    AutomationProperties.Name="{Binding ScrollToBottomText}"
+                    Click="ScrollBottom_Click"
+                    Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
+                    ToolTip="{Binding ScrollToBottomText}"
+                    Visibility="Collapsed" />
             </StackPanel>
         </Canvas>
     </Grid>

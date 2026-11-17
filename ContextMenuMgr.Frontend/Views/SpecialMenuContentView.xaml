@@ -95,22 +95,34 @@
                                 Text="{Binding CreationSummary}"
                                 TextWrapping="Wrap"
                                 Visibility="{Binding IsReadOnlyPackagedShellNew, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                            <ui:TextBlock
+                                Margin="0,6,0,0"
+                                FontSize="12"
                                 Text="{Binding RegistrationNotice}"
+                                TextWrapping="Wrap"
                                 ToolTip="{Binding RegistrationToolTip}"
                                 Visibility="{Binding HasRegistrationNotice, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <ui:TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                            <ui:TextBlock
+                                Margin="0,6,0,0"
+                                FontSize="12"
                                 Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                 Text="{Binding MonitoringText}"
+                                TextWrapping="Wrap"
                                 Visibility="{Binding HasMonitoringText, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <WrapPanel Margin="0,6,0,0">
-                                <ui:Button Margin="0,0,6,0" Content="{Binding OpenWithApprovalsText}"
+                                <ui:Button
+                                    Margin="0,0,6,0"
                                     Command="{Binding DataContext.OpenWithApprovalsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                    CommandParameter="{Binding}"
+                                    Content="{Binding OpenWithApprovalsText}"
+                                    IsEnabled="{Binding CanReviewOpenWith}"
                                     Visibility="{Binding ShowOpenWithReview, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <ui:Button Content="{Binding ProtectionText}" ToolTip="{Binding ProtectionToolTip}"
+                                <ui:Button
                                     Command="{Binding DataContext.ProtectOpenWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                    CommandParameter="{Binding}" IsEnabled="{Binding CanReviewOpenWith}"
+                                    CommandParameter="{Binding}"
+                                    Content="{Binding ProtectionText}"
+                                    IsEnabled="{Binding CanReviewOpenWith}"
+                                    ToolTip="{Binding ProtectionToolTip}"
                                     Visibility="{Binding ShowProtection, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             </WrapPanel>
                             <ui:TextBlock
@@ -123,10 +135,10 @@
                         <StackPanel Grid.Column="1" Margin="12,0,0,0">
                             <controls:AsyncToggleSwitch
                                 Margin="0,0,0,8"
-                                Label="{Binding ToggleLabel}"
-                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                 CanToggle="{Binding CanToggle}"
                                 IsBusy="{Binding IsBusy}"
+                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                Label="{Binding ToggleLabel}"
                                 Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                                 <ui:Button
@@ -224,11 +236,14 @@
             </Border>
         </DataTemplate>
         <DataTemplate DataType="{x:Type viewModels:SpecialMenuPageViewModel}">
-            <Expander Margin="0,12,0,0"
+            <Expander
+                Margin="0,12,0,0"
                 IsExpanded="{Binding IsOpenWithReadOnlyExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 Visibility="{Binding ShowOpenWithReadOnlyGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Expander.Header>
-                    <ui:TextBlock FontSize="14" FontWeight="SemiBold"
+                    <ui:TextBlock
+                        FontSize="14"
+                        FontWeight="SemiBold"
                         Foreground="{DynamicResource SystemFillColorCautionBrush}"
                         Text="{Binding OpenWithReadOnlyGroupText}" />
                 </Expander.Header>
@@ -236,7 +251,10 @@
         </DataTemplate>
     </UserControl.Resources>
     <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Border Background="{DynamicResource LayerFillColorAltBrush}" Style="{StaticResource CardBorderStyle}">
             <StackPanel>
                 <ui:TextBlock
@@ -258,9 +276,7 @@
                     ToolTip="{Binding WinXCompatibilityNoticeToolTip}"
                     Visibility="{Binding ShowWinXCompatibilityNotice, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon
-                            Margin="0,0,8,0"
-                            Symbol="Info24" />
+                        <ui:SymbolIcon Margin="0,0,8,0" Symbol="Info24" />
                         <ui:TextBlock
                             VerticalAlignment="Center"
                             Opacity="0.82"
@@ -269,11 +285,14 @@
                     </StackPanel>
                 </Border>
                 <StackPanel Margin="0,12,0,0">
-                    <WrapPanel Margin="0,0,0,14" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                    <WrapPanel
+                        Margin="0,0,0,14"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom">
                         <ui:ToggleSwitch
                             Margin="8,0,0,0"
-                            IsEnabled="{Binding CanToggleShellNewOrderLock}"
                             IsChecked="{Binding IsShellNewOrderLocked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            IsEnabled="{Binding CanToggleShellNewOrderLock}"
                             ToolTip="{Binding LockNewMenuDescription}"
                             Visibility="{Binding ShowShellNewOrderLock, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <ui:ToggleSwitch.Content>
@@ -333,16 +352,19 @@
                                 Opacity="0.72"
                                 Text="{Binding DocumentIconProviderLabel}" />
                             <WrapPanel>
-                                <RadioButton Margin="0,0,16,0" Tag="MicrosoftOffice"
+                                <RadioButton
+                                    Margin="0,0,16,0"
+                                    Checked="OnDocumentIconProviderChecked"
                                     Content="{Binding MicrosoftOfficeLabel}"
                                     IsChecked="{Binding IsMicrosoftDocumentIconProviderSelected, Mode=OneWay}"
                                     IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                    Checked="OnDocumentIconProviderChecked" />
-                                <RadioButton Tag="WpsOffice"
+                                    Tag="MicrosoftOffice" />
+                                <RadioButton
+                                    Checked="OnDocumentIconProviderChecked"
                                     Content="{Binding WpsOfficeLabel}"
                                     IsChecked="{Binding IsWpsDocumentIconProviderSelected, Mode=OneWay}"
                                     IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                    Checked="OnDocumentIconProviderChecked" />
+                                    Tag="WpsOffice" />
                             </WrapPanel>
                             <ui:TextBlock
                                 Margin="0,4,0,0"
@@ -371,9 +393,14 @@
 
         <Grid Grid.Row="1">
             <Grid Visibility="{Binding ShowListContent, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <modernScroll:ModernScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                <modernScroll:ModernScrollViewer
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
                     Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <ItemsControl behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding WinXGroups}" Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ItemsControl
+                        behaviors:MenuListTransitions.IsEnabled="True"
+                        ItemsSource="{Binding WinXGroups}"
+                        Visibility="{Binding ShowWinXTree, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <ItemsControl.Resources>
                             <DataTemplate x:Key="WinXEntryTemplate" DataType="{x:Type viewModels:SpecialMenuItemViewModel}">
                                 <Border Margin="0,4,0,4" Style="{StaticResource ContextMenuItemCardStyle}">
@@ -416,10 +443,10 @@
                                             Orientation="Horizontal">
                                             <controls:AsyncToggleSwitch
                                                 Margin="0,0,8,0"
-                                                Label="{Binding ToggleLabel}"
-                                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                 CanToggle="{Binding CanToggle}"
                                                 IsBusy="{Binding IsBusy}"
+                                                IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                Label="{Binding ToggleLabel}"
                                                 Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             <ui:Button
                                                 Width="32"
@@ -553,10 +580,10 @@
                                                     Orientation="Horizontal">
                                                     <controls:AsyncToggleSwitch
                                                         Margin="0,0,8,0"
-                                                        Label="{Binding Group.ToggleLabel}"
-                                                        IsChecked="{Binding Group.IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                         CanToggle="{Binding Group.CanToggle}"
                                                         IsBusy="{Binding Group.IsBusy}"
+                                                        IsChecked="{Binding Group.IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                        Label="{Binding Group.ToggleLabel}"
                                                         Visibility="{Binding Group.ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                     <ui:Button
                                                         Width="32"
@@ -632,15 +659,19 @@
                                     </Expander.Header>
                                     <ItemsControl
                                         Margin="24,0,0,0"
+                                        behaviors:MenuListTransitions.IsEnabled="True"
                                         ItemTemplate="{StaticResource WinXEntryTemplate}"
-                                        behaviors:MenuListTransitions.IsEnabled="True" ItemsSource="{Binding Items}" />
+                                        ItemsSource="{Binding Items}" />
                                 </Expander>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </modernScroll:ModernScrollViewer>
-                <ListBox x:Name="NormalMenuList" Style="{StaticResource ModernVirtualizedListBoxStyle}"
-                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True" behaviors:MenuListTransitions.IsEnabled="True"
+                <ListBox
+                    x:Name="NormalMenuList"
+                    behaviors:MenuListTransitions.IsEnabled="True"
+                    behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
+                    Style="{StaticResource ModernVirtualizedListBoxStyle}"
                     Visibility="{Binding ShowWinXTree, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
             </Grid>
             <Border

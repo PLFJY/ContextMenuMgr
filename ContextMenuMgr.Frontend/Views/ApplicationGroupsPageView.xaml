@@ -32,32 +32,60 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Visibility="{Binding HasSelection, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <ui:TextBlock Margin="0,4,10,4" VerticalAlignment="Center" Opacity="0.72" Text="{Binding SelectedCountText}" />
-                        <ui:Button Margin="0,4,8,4" Padding="12,5" Appearance="Secondary"
-                            Command="{Binding DeleteSelectedCommand}" Content="{Binding DeleteText}" Icon="{ui:SymbolIcon Symbol=Delete24}"
+                        <ui:TextBlock
+                            Margin="0,4,10,4"
+                            VerticalAlignment="Center"
+                            Opacity="0.72"
+                            Text="{Binding SelectedCountText}" />
+                        <ui:Button
+                            Margin="0,4,8,4"
+                            Padding="12,5"
+                            Appearance="Secondary"
+                            Command="{Binding DeleteSelectedCommand}"
+                            Content="{Binding DeleteText}"
+                            Icon="{ui:SymbolIcon Symbol=Delete24}"
                             Visibility="{Binding HasLiveSelection, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ui:Button Margin="0,4,0,4" Padding="12,5" Appearance="Secondary"
-                            Command="{Binding DisableSelectedCommand}" Content="{Binding DisableText}"
+                        <ui:Button
+                            Margin="0,4,0,4"
+                            Padding="12,5"
+                            Appearance="Secondary"
+                            Command="{Binding DisableSelectedCommand}"
+                            Content="{Binding DisableText}"
                             Visibility="{Binding HasLiveSelection, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ui:Button Margin="8,4,0,4" Padding="12,5" Appearance="Secondary"
-                            Command="{Binding RestoreSelectedCommand}" Content="{Binding RestoreText}" Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
+                        <ui:Button
+                            Margin="8,4,0,4"
+                            Padding="12,5"
+                            Appearance="Secondary"
+                            Command="{Binding RestoreSelectedCommand}"
+                            Content="{Binding RestoreText}"
+                            Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
                             Visibility="{Binding HasDeletedSelection, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ui:Button Margin="8,4,0,4" Padding="12,5" Appearance="Secondary"
-                            Command="{Binding PermanentlyDeleteSelectedCommand}" Content="{Binding PermanentDeleteText}" Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                        <ui:Button
+                            Margin="8,4,0,4"
+                            Padding="12,5"
+                            Appearance="Secondary"
+                            Command="{Binding PermanentlyDeleteSelectedCommand}"
+                            Content="{Binding PermanentDeleteText}"
+                            Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
                             Visibility="{Binding HasDeletedSelection, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ui:ProgressRing Width="18" Height="18" Margin="10,4,0,4" VerticalAlignment="Center"
-                            IsIndeterminate="True" Visibility="{Binding IsExecuting, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ui:ProgressRing
+                            Width="18"
+                            Height="18"
+                            Margin="10,4,0,4"
+                            VerticalAlignment="Center"
+                            IsIndeterminate="True"
+                            Visibility="{Binding IsExecuting, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </WrapPanel>
                     <CheckBox
                         Grid.RowSpan="2"
                         Margin="2,4,12,0"
                         VerticalAlignment="Top"
                         AutomationProperties.Name="{Binding SelectAllText}"
-                        ToolTip="{Binding SelectAllText}"
-                        IsThreeState="True"
-                        IsChecked="{Binding IsAllVisibleChecked, Mode=OneWay}"
                         Command="{Binding ToggleSelectionCommand}"
-                        IsEnabled="{Binding DataContext.IsBulkIdle, RelativeSource={RelativeSource AncestorType=Page}}" />
+                        IsChecked="{Binding IsAllVisibleChecked, Mode=OneWay}"
+                        IsEnabled="{Binding DataContext.IsBulkIdle, RelativeSource={RelativeSource AncestorType=Page}}"
+                        IsThreeState="True"
+                        ToolTip="{Binding SelectAllText}" />
                     <StackPanel Grid.Column="1">
                         <ui:TextBlock
                             FontSize="16"
@@ -191,25 +219,35 @@
                                     Visibility="{Binding ShowToggle, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             </StackPanel>
                             <ui:Button
-                                MinWidth="88" Margin="0,0,0,8" Padding="12,5"
+                                MinWidth="88"
+                                Margin="0,0,0,8"
+                                Padding="12,5"
                                 Command="{Binding DataContext.DeleteOrUndoItemCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                 CommandParameter="{Binding}"
                                 Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType=Page}}"
-                                Icon="{ui:SymbolIcon Symbol=Delete24}" IsEnabled="{Binding CanPrimaryAction}"
+                                Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                IsEnabled="{Binding CanPrimaryAction}"
                                 Visibility="{Binding CanDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <ui:Button
-                                MinWidth="88" Margin="0,0,0,8" Padding="12,5"
+                                MinWidth="88"
+                                Margin="0,0,0,8"
+                                Padding="12,5"
                                 Command="{Binding DataContext.DeleteOrUndoItemCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                 CommandParameter="{Binding}"
                                 Content="{Binding DataContext.RestoreText, RelativeSource={RelativeSource AncestorType=Page}}"
-                                Icon="{ui:SymbolIcon Symbol=ArrowUndo24}" IsEnabled="{Binding CanPrimaryAction}"
+                                Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
+                                IsEnabled="{Binding CanPrimaryAction}"
                                 Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <ui:Button
-                                MinWidth="88" Margin="0,0,0,8" Padding="12,5" Appearance="Secondary"
+                                MinWidth="88"
+                                Margin="0,0,0,8"
+                                Padding="12,5"
+                                Appearance="Secondary"
                                 Command="{Binding DataContext.PermanentlyDeleteItemCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                 CommandParameter="{Binding}"
                                 Content="{Binding DataContext.PermanentDeleteText, RelativeSource={RelativeSource AncestorType=Page}}"
-                                Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}" IsEnabled="{Binding CanPrimaryAction}"
+                                Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                IsEnabled="{Binding CanPrimaryAction}"
                                 Visibility="{Binding IsDeleted, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <ui:DropDownButton
                                 MinWidth="88"

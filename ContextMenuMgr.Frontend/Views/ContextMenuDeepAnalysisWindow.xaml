@@ -24,8 +24,8 @@
                         Height="16"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Source="{Binding IconImage}"
                         SnapsToDevicePixels="True"
+                        Source="{Binding IconImage}"
                         Visibility="{Binding IconImage, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
                     <TextBlock
                         Grid.Column="1"
@@ -55,9 +55,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar
-            Grid.Row="0"
-            Title="{Binding Title}" />
+        <ui:TitleBar Title="{Binding Title}" Grid.Row="0" />
 
         <modernScroll:ModernScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="18,18,18,76">

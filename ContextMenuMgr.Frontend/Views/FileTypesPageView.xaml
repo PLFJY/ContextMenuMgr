@@ -5,8 +5,8 @@
     xmlns:modernScroll="clr-namespace:ContextMenuMgr.Frontend.Controls.Modern.Scrolling"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:views="clr-namespace:ContextMenuMgr.Frontend.Views"
-    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-    modernScroll:ModernScroll.Ownership="Self">
+    modernScroll:ModernScroll.Ownership="Self"
+    Foreground="{DynamicResource TextFillColorPrimaryBrush}">
     <Grid>
         <TabControl
             x:Name="MainTabControl"

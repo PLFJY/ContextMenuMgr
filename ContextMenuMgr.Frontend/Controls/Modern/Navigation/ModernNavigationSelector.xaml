@@ -103,7 +103,7 @@
                     TextElement.Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <ListBox Style="{StaticResource ModernScrollableListBoxStyle}"
+            <ListBox
                 x:Name="PART_ListBox"
                 Grid.Row="1"
                 Padding="0,0,0,6"
@@ -112,10 +112,11 @@
                 ItemContainerStyle="{StaticResource ModernNavigationSelectorItemStyle}"
                 ItemTemplate="{Binding ItemTemplate, ElementName=Root}"
                 ItemsSource="{Binding ItemsSource, ElementName=Root}"
+                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                ScrollViewer.VerticalScrollBarVisibility="Auto"
                 SelectedItem="{Binding SelectedItem, ElementName=Root, Mode=TwoWay}"
                 SelectionChanged="OnSelectionChanged"
-                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                Style="{StaticResource ModernScrollableListBoxStyle}" />
         </Grid>
     </Border>
 </UserControl>

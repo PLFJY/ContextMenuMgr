@@ -26,372 +26,390 @@
     <ui:FluentWindow.Resources>
         <DataTemplate x:Key="GlobalSearchResultTemplate" DataType="{x:Type viewModels:GlobalSearchResultViewModel}">
             <Grid>
-            <Grid Margin="0,2" VerticalAlignment="Center" Visibility="{Binding IsPlaceholder, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <Border
-                    Grid.Column="0"
-                    Width="30"
-                    Height="30"
-                    Margin="0,0,10,0"
+                <Grid
+                    Margin="0,2"
                     VerticalAlignment="Center"
-                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                    CornerRadius="6">
-                    <Grid>
-                        <Image
-                            Width="20"
-                            Height="20"
-                            Source="{Binding IconSource}"
-                            Visibility="{Binding HasIconSource, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Visibility="{Binding IsPlaceholder, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                        <ui:SymbolIcon
-                            Width="18"
-                            Height="18"
-                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                            Symbol="{Binding FallbackIconSymbol}"
-                            Visibility="{Binding HasFallbackIcon, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    </Grid>
-                </Border>
+                    <Border
+                        Grid.Column="0"
+                        Width="30"
+                        Height="30"
+                        Margin="0,0,10,0"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                        CornerRadius="6">
+                        <Grid>
+                            <Image
+                                Width="20"
+                                Height="20"
+                                Source="{Binding IconSource}"
+                                Visibility="{Binding HasIconSource, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                <StackPanel Grid.Column="1" Margin="0,0,10,0">
-                    <WrapPanel VerticalAlignment="Center">
-                        <ui:TextBlock
-                            MaxWidth="170"
-                            VerticalAlignment="Center"
-                            FontSize="13"
-                            FontWeight="SemiBold"
-                            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                            Text="{Binding DisplayName}"
-                            TextTrimming="CharacterEllipsis" />
-                        <Border
-                            Margin="8,0,0,0"
-                            Padding="7,2"
-                            CornerRadius="4">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                            <Setter Property="Background" Value="{DynamicResource SystemFillColorNeutralBackgroundBrush}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
+                            <ui:SymbolIcon
+                                Width="18"
+                                Height="18"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                Symbol="{Binding FallbackIconSymbol}"
+                                Visibility="{Binding HasFallbackIcon, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                        <WrapPanel VerticalAlignment="Center">
                             <ui:TextBlock
-                                FontSize="11"
-                                Text="{Binding StateLabel}">
-                                <ui:TextBlock.Style>
-                                    <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
-                                        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                                MaxWidth="170"
+                                VerticalAlignment="Center"
+                                FontSize="13"
+                                FontWeight="SemiBold"
+                                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                Text="{Binding DisplayName}"
+                                TextTrimming="CharacterEllipsis" />
+                            <Border
+                                Margin="8,0,0,0"
+                                Padding="7,2"
+                                CornerRadius="4">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <Setter Property="Background" Value="{DynamicResource SystemFillColorNeutralBackgroundBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </ui:TextBlock.Style>
-                            </ui:TextBlock>
-                        </Border>
-                        <Border
-                            Margin="6,0,0,0"
-                            Padding="7,2"
-                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                            CornerRadius="4">
-                            <ui:TextBlock
-                                FontSize="11"
-                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                Text="{Binding ScopeLabel}" />
-                        </Border>
-                    </WrapPanel>
+                                </Border.Style>
+                                <ui:TextBlock FontSize="11" Text="{Binding StateLabel}">
+                                    <ui:TextBlock.Style>
+                                        <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="ui:TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ui:TextBlock.Style>
+                                </ui:TextBlock>
+                            </Border>
+                            <Border
+                                Margin="6,0,0,0"
+                                Padding="7,2"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                CornerRadius="4">
+                                <ui:TextBlock
+                                    FontSize="11"
+                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding ScopeLabel}" />
+                            </Border>
+                        </WrapPanel>
+
+                        <ui:TextBlock
+                            MaxWidth="300"
+                            Margin="0,3,0,0"
+                            FontFamily="Consolas"
+                            FontSize="10.5"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                            Opacity="0.62"
+                            Text="{Binding SecondaryText}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
 
                     <ui:TextBlock
-                        MaxWidth="300"
-                        Margin="0,3,0,0"
-                        FontFamily="Consolas"
-                        FontSize="10.5"
+                        Grid.Column="2"
+                        MinWidth="44"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        FontWeight="SemiBold"
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Opacity="0.62"
-                        Text="{Binding SecondaryText}"
-                        TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-
+                        Opacity="0.72"
+                        Text="{Binding JumpText}" />
+                </Grid>
                 <ui:TextBlock
-                    Grid.Column="2"
-                    MinWidth="44"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    FontSize="12"
-                    FontWeight="SemiBold"
-                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                    Opacity="0.72"
-                    Text="{Binding JumpText}" />
-            </Grid>
-                <ui:TextBlock Margin="12" Text="{Binding DisplayName}" Visibility="{Binding IsPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Margin="12"
+                    Text="{Binding DisplayName}"
+                    Visibility="{Binding IsPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </Grid>
         </DataTemplate>
     </ui:FluentWindow.Resources>
 
     <AdornerDecorator>
-    <Grid Background="Transparent">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        <Grid Background="Transparent">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-        <Grid
-            x:Name="TitleBarRoot"
-            Grid.Row="0"
-            Height="44"
-            Background="Transparent">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+            <Grid
+                x:Name="TitleBarRoot"
+                Grid.Row="0"
+                Height="44"
+                Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-            <Image
-                x:Name="WindowIcon"
-                Grid.Column="0"
-                Width="24"
-                Height="24"
-                Margin="12,0,10,0"
-                VerticalAlignment="Center"
-                shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                Source="/Assets/AppIcon.ico" />
-
-            <TextBlock
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                FontSize="13"
-                FontWeight="SemiBold"
-                Text="{Binding WindowTitle}"
-                TextTrimming="CharacterEllipsis" />
-
-            <ui:AutoSuggestBox
-                x:Name="GlobalSearchBox"
-                Grid.Column="2"
-                Width="420"
-                MaxWidth="520"
-                Margin="0,10,0,0"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                ClearButtonEnabled="True"
-                Icon="{ui:SymbolIcon Symbol=Search24}"
-                ItemTemplate="{StaticResource GlobalSearchResultTemplate}"
-                ItemsSource="{Binding GlobalSearchResults}"
-                MaxSuggestionListHeight="420"
-                PlaceholderText="{Binding GlobalSearchPlaceholder}"
-                GotKeyboardFocus="GlobalSearchBox_GotKeyboardFocus"
-                PreviewKeyDown="GlobalSearchBox_PreviewKeyDown"
-                QuerySubmitted="GlobalSearchBox_QuerySubmitted"
-                SuggestionChosen="GlobalSearchBox_SuggestionChosen"
-                Text="{Binding GlobalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                TextChanged="GlobalSearchBox_TextChanged"
-                UpdateTextOnSelect="False" />
-
-            <StackPanel
-                x:Name="HeaderActions"
-                Grid.Column="3"
-                Margin="0,10,8,0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal">
-                <ui:Button
-                    Height="32"
-                    MinWidth="108"
-                    Margin="0,0,8,0"
-                    Padding="14,6"
+                <Image
+                    x:Name="WindowIcon"
+                    Grid.Column="0"
+                    Width="24"
+                    Height="24"
+                    Margin="12,0,10,0"
+                    VerticalAlignment="Center"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Appearance="Primary"
-                    Command="{Binding RestartExplorerCommand}"
-                    Content="{Binding RestartExplorerText}"
-                    Icon="{ui:SymbolIcon Symbol=ArrowCounterclockwise24}"
-                    Visibility="{Binding NeedsExplorerRestart, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <ui:Button
-                    Height="32"
-                    MinWidth="108"
-                    Margin="0,0,8,0"
-                    Padding="14,6"
+                    Source="/Assets/AppIcon.ico" />
+
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Text="{Binding WindowTitle}"
+                    TextTrimming="CharacterEllipsis" />
+
+                <ui:AutoSuggestBox
+                    x:Name="GlobalSearchBox"
+                    Grid.Column="2"
+                    Width="420"
+                    MaxWidth="520"
+                    Margin="0,10,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Appearance="Primary"
-                    Command="{Binding RefreshIconCacheCommand}"
-                    Content="{Binding RefreshIconCacheText}"
-                    Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
-                    Visibility="{Binding NeedsIconCacheRefresh, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <ui:Button
-                    Height="32"
-                    MinWidth="92"
-                    Padding="14,6"
-                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    Appearance="Secondary"
-                    Command="{Binding RefreshCommand}"
-                    AutomationProperties.Name="{Binding RefreshText}">
-                    <StackPanel Orientation="Horizontal">
-                        <Grid Width="16" Height="16" Margin="0,0,8,0">
-                            <ui:SymbolIcon Symbol="ArrowClockwise24" FontSize="16"
-                                Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                            <ui:ProgressRing Width="16" Height="16" IsIndeterminate="True"
-                                Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        </Grid>
-                        <TextBlock Text="{Binding RefreshText}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </ui:Button>
-            </StackPanel>
+                    ClearButtonEnabled="True"
+                    GotKeyboardFocus="GlobalSearchBox_GotKeyboardFocus"
+                    Icon="{ui:SymbolIcon Symbol=Search24}"
+                    ItemTemplate="{StaticResource GlobalSearchResultTemplate}"
+                    ItemsSource="{Binding GlobalSearchResults}"
+                    MaxSuggestionListHeight="420"
+                    PlaceholderText="{Binding GlobalSearchPlaceholder}"
+                    PreviewKeyDown="GlobalSearchBox_PreviewKeyDown"
+                    QuerySubmitted="GlobalSearchBox_QuerySubmitted"
+                    SuggestionChosen="GlobalSearchBox_SuggestionChosen"
+                    Text="{Binding GlobalSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextChanged="GlobalSearchBox_TextChanged"
+                    UpdateTextOnSelect="False" />
 
-            <StackPanel Grid.Column="4" Orientation="Horizontal">
-                <ui:Button
-                    Click="MinimizeButton_Click"
-                    Icon="{ui:SymbolIcon Symbol=Subtract24}"
-                    Style="{StaticResource ChromeTitleBarButton}" />
-                <ui:Button
-                    x:Name="MaximizeButton"
-                    Click="MaximizeButton_Click"
-                    Icon="{ui:SymbolIcon Symbol=Maximize24}"
-                    Style="{StaticResource ChromeTitleBarButton}" />
-                <ui:Button
-                    Click="CloseButton_Click"
-                    Icon="{ui:SymbolIcon Symbol=Dismiss24}"
-                    MouseOverBackground="#C42B1C"
-                    Style="{StaticResource ChromeTitleBarButton}" />
-            </StackPanel>
+                <StackPanel
+                    x:Name="HeaderActions"
+                    Grid.Column="3"
+                    Margin="0,10,8,0"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal">
+                    <ui:Button
+                        Height="32"
+                        MinWidth="108"
+                        Margin="0,0,8,0"
+                        Padding="14,6"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                        Appearance="Primary"
+                        Command="{Binding RestartExplorerCommand}"
+                        Content="{Binding RestartExplorerText}"
+                        Icon="{ui:SymbolIcon Symbol=ArrowCounterclockwise24}"
+                        Visibility="{Binding NeedsExplorerRestart, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ui:Button
+                        Height="32"
+                        MinWidth="108"
+                        Margin="0,0,8,0"
+                        Padding="14,6"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                        Appearance="Primary"
+                        Command="{Binding RefreshIconCacheCommand}"
+                        Content="{Binding RefreshIconCacheText}"
+                        Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                        Visibility="{Binding NeedsIconCacheRefresh, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ui:Button
+                        Height="32"
+                        MinWidth="92"
+                        Padding="14,6"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                        Appearance="Secondary"
+                        AutomationProperties.Name="{Binding RefreshText}"
+                        Command="{Binding RefreshCommand}">
+                        <StackPanel Orientation="Horizontal">
+                            <Grid
+                                Width="16"
+                                Height="16"
+                                Margin="0,0,8,0">
+                                <ui:SymbolIcon
+                                    FontSize="16"
+                                    Symbol="ArrowClockwise24"
+                                    Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                <ui:ProgressRing
+                                    Width="16"
+                                    Height="16"
+                                    IsIndeterminate="True"
+                                    Visibility="{Binding ListActivity.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </Grid>
+                            <TextBlock VerticalAlignment="Center" Text="{Binding RefreshText}" />
+                        </StackPanel>
+                    </ui:Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                    <ui:Button
+                        Click="MinimizeButton_Click"
+                        Icon="{ui:SymbolIcon Symbol=Subtract24}"
+                        Style="{StaticResource ChromeTitleBarButton}" />
+                    <ui:Button
+                        x:Name="MaximizeButton"
+                        Click="MaximizeButton_Click"
+                        Icon="{ui:SymbolIcon Symbol=Maximize24}"
+                        Style="{StaticResource ChromeTitleBarButton}" />
+                    <ui:Button
+                        Click="CloseButton_Click"
+                        Icon="{ui:SymbolIcon Symbol=Dismiss24}"
+                        MouseOverBackground="#C42B1C"
+                        Style="{StaticResource ChromeTitleBarButton}" />
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="12,0,12,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Column="0"
+                    Margin="10,0,0,0"
+                    HorizontalAlignment="Left"
+                    FontSize="19"
+                    Text="{Binding ServiceAttentionText}"
+                    Visibility="{Binding ServiceAttentionText, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
+            </Grid>
+
+            <Grid Grid.Row="3" Margin="5,0,5,5">
+                <modernNavigation:ModernNavigationView
+                    x:Name="RootNavigation"
+                    IsBackButtonVisible="Collapsed"
+                    IsPaneOpen="True"
+                    IsPaneToggleVisible="False"
+                    OpenPaneLength="257"
+                    PaneDisplayMode="Left">
+                    <modernNavigation:ModernNavigationView.MenuItems>
+                        <ui:NavigationViewItem
+                            Content="{Binding LegacyContextMenuItemsName}"
+                            Icon="{ui:SymbolIcon Symbol=Window24}"
+                            IsExpanded="True"
+                            TargetPageType="{x:Type pages:FileContextMenuPage}">
+                            <ui:NavigationViewItem.MenuItems>
+                                <ui:NavigationViewItem
+                                    Content="{Binding FileCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=Document24}"
+                                    TargetPageType="{x:Type pages:FileContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding AllObjectsCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=SquareMultiple24}"
+                                    TargetPageType="{x:Type pages:AllObjectsContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding FolderCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=Folder24}"
+                                    TargetPageType="{x:Type pages:FolderContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding DirectoryCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
+                                    TargetPageType="{x:Type pages:DirectoryContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding BackgroundCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=WindowConsole20}"
+                                    TargetPageType="{x:Type pages:BackgroundContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding DesktopCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=Desktop24}"
+                                    TargetPageType="{x:Type pages:DesktopContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding DriveCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=AppsAddIn24}"
+                                    TargetPageType="{x:Type pages:DriveContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding LibraryCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
+                                    TargetPageType="{x:Type pages:LibraryContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding ComputerCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=Desktop24}"
+                                    TargetPageType="{x:Type pages:ComputerContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding RecycleBinCategoryName}"
+                                    Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                    TargetPageType="{x:Type pages:RecycleBinContextMenuPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding ApplicationGroupsPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=AppsListDetail24}"
+                                    TargetPageType="{x:Type pages:ApplicationGroupsPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding FileTypesPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=DocumentText24}"
+                                    TargetPageType="{x:Type pages:FileTypesPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding MenuAnalysisTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=Search24}"
+                                    TargetPageType="{x:Type pages:FileTypeMenuAnalysisPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding ShellNewPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=DocumentAdd24}"
+                                    TargetPageType="{x:Type pages:ShellNewPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding SendToPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=Send24}"
+                                    TargetPageType="{x:Type pages:SendToPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding WinXPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=WindowDevTools24}"
+                                    TargetPageType="{x:Type pages:WinXPage}" />
+                                <ui:NavigationViewItem
+                                    Content="{Binding OpenWithPageTitle}"
+                                    Icon="{ui:SymbolIcon Symbol=Open24}"
+                                    TargetPageType="{x:Type pages:OpenWithPage}" />
+                            </ui:NavigationViewItem.MenuItems>
+                        </ui:NavigationViewItem>
+                        <ui:NavigationViewItem
+                            Content="{Binding Windows11PageTitle}"
+                            Icon="{ui:SymbolIcon Symbol=AppsList24}"
+                            TargetPageType="{x:Type pages:Windows11ContextMenuPage}"
+                            Visibility="{Binding IsWindows11ContextMenuSupported, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ui:NavigationViewItem
+                            Content="{Binding OtherRulesPageTitle}"
+                            Icon="{ui:SymbolIcon Symbol=Settings24}"
+                            TargetPageType="{x:Type pages:OtherRulesPage}" />
+                        <ui:NavigationViewItem
+                            Content="{Binding ApprovalsTitle}"
+                            Icon="{ui:SymbolIcon Symbol=ChatWarning24}"
+                            InfoBadge="{Binding ApprovalsBadge}"
+                            TargetPageType="{x:Type pages:ApprovalsPage}" />
+                    </modernNavigation:ModernNavigationView.MenuItems>
+
+                    <modernNavigation:ModernNavigationView.FooterMenuItems>
+                        <ui:NavigationViewItem
+                            Content="{Binding SettingsTitle}"
+                            Icon="{ui:SymbolIcon Symbol=Settings24}"
+                            TargetPageType="{x:Type pages:SettingsPage}" />
+                    </modernNavigation:ModernNavigationView.FooterMenuItems>
+                </modernNavigation:ModernNavigationView>
+
+            </Grid>
+            <ui:InfoBar
+                x:Name="RootInfoBar"
+                Grid.Row="2"
+                Margin="12,0,12,6"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Center"
+                Panel.ZIndex="100"
+                IsClosable="True"
+                IsOpen="False"
+                Severity="Informational" />
         </Grid>
-
-        <Grid Grid.Row="1" Margin="12,0,12,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <TextBlock
-                Grid.Column="0"
-                Margin="10,0,0,0"
-                HorizontalAlignment="Left"
-                FontSize="19"
-                Text="{Binding ServiceAttentionText}"
-                Visibility="{Binding ServiceAttentionText, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
-        </Grid>
-
-        <Grid Grid.Row="3" Margin="5,0,5,5">
-            <modernNavigation:ModernNavigationView
-                x:Name="RootNavigation"
-                IsBackButtonVisible="Collapsed"
-                IsPaneOpen="True"
-                IsPaneToggleVisible="False"
-                OpenPaneLength="257"
-                PaneDisplayMode="Left">
-                <modernNavigation:ModernNavigationView.MenuItems>
-                    <ui:NavigationViewItem
-                        Content="{Binding LegacyContextMenuItemsName}"
-                        Icon="{ui:SymbolIcon Symbol=Window24}"
-                        IsExpanded="True"
-                        TargetPageType="{x:Type pages:FileContextMenuPage}">
-                        <ui:NavigationViewItem.MenuItems>
-                            <ui:NavigationViewItem
-                                Content="{Binding FileCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=Document24}"
-                                TargetPageType="{x:Type pages:FileContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding AllObjectsCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=SquareMultiple24}"
-                                TargetPageType="{x:Type pages:AllObjectsContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding FolderCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=Folder24}"
-                                TargetPageType="{x:Type pages:FolderContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding DirectoryCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
-                                TargetPageType="{x:Type pages:DirectoryContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding BackgroundCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=WindowConsole20}"
-                                TargetPageType="{x:Type pages:BackgroundContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding DesktopCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=Desktop24}"
-                                TargetPageType="{x:Type pages:DesktopContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding DriveCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=AppsAddIn24}"
-                                TargetPageType="{x:Type pages:DriveContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding LibraryCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=TextNumberListLtr24}"
-                                TargetPageType="{x:Type pages:LibraryContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding ComputerCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=Desktop24}"
-                                TargetPageType="{x:Type pages:ComputerContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding RecycleBinCategoryName}"
-                                Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                TargetPageType="{x:Type pages:RecycleBinContextMenuPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding ApplicationGroupsPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=AppsListDetail24}"
-                                TargetPageType="{x:Type pages:ApplicationGroupsPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding FileTypesPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=DocumentText24}"
-                                TargetPageType="{x:Type pages:FileTypesPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding MenuAnalysisTitle}"
-                                Icon="{ui:SymbolIcon Symbol=Search24}"
-                                TargetPageType="{x:Type pages:FileTypeMenuAnalysisPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding ShellNewPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=DocumentAdd24}"
-                                TargetPageType="{x:Type pages:ShellNewPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding SendToPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=Send24}"
-                                TargetPageType="{x:Type pages:SendToPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding WinXPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=WindowDevTools24}"
-                                TargetPageType="{x:Type pages:WinXPage}" />
-                            <ui:NavigationViewItem
-                                Content="{Binding OpenWithPageTitle}"
-                                Icon="{ui:SymbolIcon Symbol=Open24}"
-                                TargetPageType="{x:Type pages:OpenWithPage}" />
-                        </ui:NavigationViewItem.MenuItems>
-                    </ui:NavigationViewItem>
-                    <ui:NavigationViewItem
-                        Content="{Binding Windows11PageTitle}"
-                        Icon="{ui:SymbolIcon Symbol=AppsList24}"
-                        TargetPageType="{x:Type pages:Windows11ContextMenuPage}"
-                        Visibility="{Binding IsWindows11ContextMenuSupported, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <ui:NavigationViewItem
-                        Content="{Binding OtherRulesPageTitle}"
-                        Icon="{ui:SymbolIcon Symbol=Settings24}"
-                        TargetPageType="{x:Type pages:OtherRulesPage}" />
-                    <ui:NavigationViewItem
-                        Content="{Binding ApprovalsTitle}"
-                        Icon="{ui:SymbolIcon Symbol=ChatWarning24}"
-                        InfoBadge="{Binding ApprovalsBadge}"
-                        TargetPageType="{x:Type pages:ApprovalsPage}" />
-                </modernNavigation:ModernNavigationView.MenuItems>
-
-                <modernNavigation:ModernNavigationView.FooterMenuItems>
-                    <ui:NavigationViewItem
-                        Content="{Binding SettingsTitle}"
-                        Icon="{ui:SymbolIcon Symbol=Settings24}"
-                        TargetPageType="{x:Type pages:SettingsPage}" />
-                </modernNavigation:ModernNavigationView.FooterMenuItems>
-            </modernNavigation:ModernNavigationView>
-
-        </Grid>
-        <ui:InfoBar x:Name="RootInfoBar" Grid.Row="2" Panel.ZIndex="100"
-                    HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                    Margin="12,0,12,6" IsOpen="False" IsClosable="True"
-                    Severity="Informational" />
-    </Grid>
     </AdornerDecorator>
 </ui:FluentWindow>
