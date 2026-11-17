@@ -834,7 +834,7 @@
     <value>分析进程输出格式异常，无法读取解析结果。</value>
   </data>
   <data name="DeepAnalyzeDisclaimer" xml:space="preserve">
-    <value>菜单文字和图标均为运行时探测结果。部分 Shell Extension 使用自绘菜单或回调图标，可能无法显示文字或图标，这是正常情况。</value>
+    <value>以下仅为初步探测结果，可能无法显示右键菜单中实际的文字和图标。没有显示任何菜单项通常也是正常情况，一般无需报告为软件问题。</value>
   </data>
   <data name="DeepAnalyzeTimeoutText" xml:space="preserve">
     <value>分析超时。该 Shell Extension 可能响应较慢或无响应。</value>

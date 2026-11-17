@@ -29,6 +29,8 @@ TitleBar 布局是 Icon、Title、GlobalSearchBox、HeaderActions、WindowButton
 
 `LocalizationService` 支持 System/zh-CN/en-US/zh-TW，更新 culture 和 CurrentLanguage。长期用户文本同步 `Strings.resx`、`Strings.zh-CN.resx`、`Strings.zh-TW.resx`，托盘资源也独立维护，切语言通知 TrayHost reload。回收站 Pin to Start 等系统名称使用 `TranslateSystem` 的用户 Windows UI 语言，不能用服务语言替代。
 
+深入分析结果窗口的“详细信息”（文件路径、注册表路径、CLSID）位于探测结果之后、“诊断信息”上方，默认折叠，点击后展开。结果说明位于“已解析菜单项”标题上方，使用动态 `SystemFillColorCautionBrush` 警告色；失败时同样展示，三语均以普通用户可理解的文字说明结果可能不完整、空结果通常无需报错。关闭按钮由独立 Canvas 浮层固定在窗口内容区右下角，不参与其余内容测量和滚动；滚动内容保留底部留白，保证末尾操作可滚到按钮上方。探测隔离与失败语义见[深入分析](deep-analysis-probehost.md)。
+
 ## Portable 生命周期设置
 
 SettingsPage 的 `RemovePortableServiceOnExit` 仅在 RuntimePackageManifest 判定 Portable 时显示，三语资源包含退出后台后移除注册、下次可能再次 UAC 的提示。默认 true，旧 JSON 缺字段继承 true，显式 false 保留；KeepBackgroundAfterClose 和 AutoStartOnLogin 仍默认 false。Installer 隐藏并忽略自动移除，即使用户手改 JSON。
@@ -68,7 +70,7 @@ File Types 批量管理仍是内部隐藏 UserControl，不新增导航 Page/Tab
 
 `ModernListScroll`、WheelScrollController/Policy 共用上述策略；沿 source ancestor 找模板 viewer，不每次扫描整树/缓存过期模板。opt-in 列表保持 CanContentScroll=True、Pixel ScrollUnit 与虚拟化，不全局改成 False。所有应用显式创建的滚动容器（含独立窗口/表单/Debug）复用 ModernScrollViewer，控件内部 TextBox/ComboBox/TreeView 模板保留原生交互。完成/卸载移除 Rendering handler，用单调 Stopwatch 计时。
 
-传统分类页在视口右下角固定“回到顶部／前往底部”按钮，顶部仅向下、中间同时显示、底部仅向上，无滚动范围时隐藏，使用 1 DIP 容差。按钮位于预留侧栏，不遮挡行操作；列表不预留按钮高度的底部 Padding，滚动视口延伸到页面底边；复用 ScrollAnimationHelper 的 300 ms 缓出动画，向底部期间跟随虚拟化修正后的 ScrollableHeight。滚轮、触摸、滚动键与卸载取消旧动画；系统禁用动画时遵从系统设置。
+传统分类页在视口右下角固定“回到顶部／前往底部”按钮，顶部仅向下、中间同时显示、底部仅向上，无滚动范围时隐藏，使用 1 DIP 容差。按钮沿用深入分析窗口关闭按钮的 Primary 外观，保留箭头图标和无障碍名称，由独立 Canvas 浮层呈现在内容上方，距右边和底边各 18 DIP，不参与内容布局；列表取消原先 64 DIP 的右侧留白，不预留按钮高度的底部 Padding，滚动视口延伸到页面底边。浮层空白区域不拦截列表输入；复用 ScrollAnimationHelper 的 300 ms 缓出动画，向底部期间跟随虚拟化修正后的 ScrollableHeight。滚轮、触摸、滚动键与卸载取消旧动画；系统禁用动画时遵从系统设置。
 
 刷新时 `SuppressBringIntoViewBehavior` 在 Category/Win11 ListBox 和 SpecialMenu ListBox/WinX ItemsControl 阻止 RequestBringIntoView 冒泡到外层，避免 Reset/焦点恢复把页头滚走；不靠修改后端状态解决滚动。内部列表先接收路由，不能由此假定所有键盘/辅助功能行为已验证。
 

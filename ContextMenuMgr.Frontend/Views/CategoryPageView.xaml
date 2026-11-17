@@ -619,7 +619,7 @@
         </DataTemplate>
     </Page.Resources>
     <Grid>
-        <ListBox x:Name="MenuList" Margin="0,0,64,0"
+        <ListBox x:Name="MenuList"
             Style="{StaticResource ModernVirtualizedListBoxStyle}"
             behaviors:SuppressBringIntoViewBehavior.IsEnabled="True"
             behaviors:MenuListTransitions.IsEnabled="True"
@@ -629,13 +629,15 @@
             ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True"
             VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
         </ListBox>
-        <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,16">
-            <ui:Button x:Name="ScrollTopButton" Width="40" Height="40" Margin="0,0,0,8"
-                Visibility="Collapsed" Appearance="Secondary" Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
-                ToolTip="{Binding ScrollToTopText}" AutomationProperties.Name="{Binding ScrollToTopText}" Click="ScrollTop_Click" />
-            <ui:Button x:Name="ScrollBottomButton" Width="40" Height="40"
-                Visibility="Collapsed" Appearance="Secondary" Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
-                ToolTip="{Binding ScrollToBottomText}" AutomationProperties.Name="{Binding ScrollToBottomText}" Click="ScrollBottom_Click" />
-        </StackPanel>
+        <Canvas Panel.ZIndex="10">
+            <StackPanel Canvas.Right="18" Canvas.Bottom="18">
+                <ui:Button x:Name="ScrollTopButton" Width="40" Height="40" Margin="0,0,0,8" Padding="8"
+                    Visibility="Collapsed" Appearance="Primary" Icon="{ui:SymbolIcon Symbol=ArrowUp24}"
+                    ToolTip="{Binding ScrollToTopText}" AutomationProperties.Name="{Binding ScrollToTopText}" Click="ScrollTop_Click" />
+                <ui:Button x:Name="ScrollBottomButton" Width="40" Height="40" Padding="8"
+                    Visibility="Collapsed" Appearance="Primary" Icon="{ui:SymbolIcon Symbol=ArrowDown24}"
+                    ToolTip="{Binding ScrollToBottomText}" AutomationProperties.Name="{Binding ScrollToBottomText}" Click="ScrollBottom_Click" />
+            </StackPanel>
+        </Canvas>
     </Grid>
 </Page>

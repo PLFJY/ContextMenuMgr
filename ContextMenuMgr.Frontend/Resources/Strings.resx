@@ -834,7 +834,7 @@ Continue anyway? (Not recommended)</value>
     <value>The analysis process returned output in an unexpected format, so the result could not be read.</value>
   </data>
   <data name="DeepAnalyzeDisclaimer" xml:space="preserve">
-    <value>Menu text and icons are runtime probe results. Some Shell Extensions use owner-drawn menus or callback icons, so text or icons may be unavailable. This is normal.</value>
+    <value>These are preliminary results and may not show the text and icons that actually appear in the right-click menu. It is usually normal for no menu items to appear, so there is generally no need to report this as a software issue.</value>
   </data>
   <data name="DeepAnalyzeTimeoutText" xml:space="preserve">
     <value>The analysis timed out. The shell extension may be slow or unresponsive.</value>

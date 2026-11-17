@@ -834,7 +834,7 @@
     <value>分析行程輸出格式異常，無法讀取解析結果。</value>
   </data>
   <data name="DeepAnalyzeDisclaimer" xml:space="preserve">
-    <value>選單文字和圖示均為執行階段探測結果。部分 Shell Extension 使用自繪選單或回呼圖示，可能無法顯示文字或圖示，這是正常情況。</value>
+    <value>以下僅為初步探測結果，可能無法顯示右鍵選單中實際的文字和圖示。沒有顯示任何選單項目通常也是正常情況，一般無需回報為軟體問題。</value>
   </data>
   <data name="DeepAnalyzeTimeoutText" xml:space="preserve">
     <value>分析逾時。此 Shell Extension 可能回應較慢或無回應。</value>
