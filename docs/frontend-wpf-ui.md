@@ -27,6 +27,14 @@ Popup/Flyout/AutoSuggestBox 建议项脱离普通视觉树。DataTemplate 以 it
 
 TitleBar 布局是 Icon、Title、GlobalSearchBox、HeaderActions、WindowButtons，避免 ColumnSpan 互相覆盖；可交互控件设 `WindowChrome.IsHitTestVisibleInChrome=True`。`MainWindowPlacementService` 保存 normal RestoreBounds/Maximized，不保存 Minimized；恢复校验 virtual screen，防断开显示器后窗口不可见。
 
+主窗口仅由固定高度标题栏与剩余主内容两行组成。服务状态提示与 RootInfoBar 位于标题栏附带的 Canvas 浮层中，以标题栏实际高度为顶部锚点，横幅自身不计入主内容测量；出现、关闭或文字换行均不调整导航区域的起点和可用高度。浮层卡片使用随主题变化的 `SolidBackgroundFillColorBaseBrush` 实色背景、圆角、细边框和轻阴影，左右留 12 DIP、顶部及卡片间留 8 DIP；只在卡片区域遮盖并接收输入，空白区域仍可操作下方页面。标题栏拖动和窗口按钮不被横幅覆盖，InfoBar 的关闭、链接及服务消息来源沿用原实现；很长横幅会覆盖更多顶部内容，窄窗口、多行提示、主题切换与实际点击仍需 Windows 界面验收。
+
+[BannerPresenter](../ContextMenuMgr.Frontend/Controls/Modern/Notifications/BannerPresenter.cs) 负责浮层内的顶部揭示/收起：采用微软 [Timing and easing](https://learn.microsoft.com/windows/apps/design/motion/timing-and-easing) 的控制时长与曲线，入场 250 ms、cubic-bezier(0,0,0,1)，退场 167 ms、cubic-bezier(1,0,1,1)；向下滑入并揭示、向上滑出并裁切，透明度分别在入场前 83 ms、退场后 83 ms 线性变化。揭示高度只影响浮层内部卡片排列，不改变主页面布局。退场立即停止接收输入，完成后才 Collapsed；中途反向从当前揭示比例和透明度继续，旧完成回调不能隐藏新提示。系统关闭 ClientAreaAnimation 时立即应用最终状态；卸载移除系统设置订阅和动画，重新加载按最新 IsOpen 呈现。
+
+RootInfoBar 的 IsOpen 仍由 InfoBarService/关闭按钮控制，但其自身 Visibility 固定 Visible，将最终折叠交给 BannerPresenter，避免 WPF-UI 模板立即折叠而跳过退场。服务缺失、不可用、安装中的 ServiceAttentionText 共用同一动效；安装进度环绑定真实 IsServiceBootstrapInProgress，不启动第二套安装任务。服务消息变为空时，文本绑定保留退出前的最后一条非空文字，退出完成后由外层隐藏。这里只更改呈现，不改变 UAC、SCM、Pipe 就绪或安装成功条件；详见[生命周期](runtime-lifecycle.md)。
+
+服务横幅单独设置 `MinimumDisplayDuration=2 秒`，非空 `DisplayText` 变化重新计时；尚未展开时额外计入 250 ms 入场时长，确保快速安装完成后文字仍有至少 2 秒的阅读时间。收起请求通过 UI DispatcherTimer 延后，等待期间保留最后一条文字，达到保底时间后沿用退场动画；新提示取消旧收起等待，卸载停止计时。关闭系统动画时仍保留阅读时间。该延迟只影响呈现，不保持虚假的安装中状态、不延迟真实服务就绪或页面操作；RootInfoBar 默认无保底等待，关闭按钮仍即时响应。
+
 `LocalizationService` 支持 System/zh-CN/en-US/zh-TW，更新 culture 和 CurrentLanguage。长期用户文本同步 `Strings.resx`、`Strings.zh-CN.resx`、`Strings.zh-TW.resx`，托盘资源也独立维护，切语言通知 TrayHost reload。回收站 Pin to Start 等系统名称使用 `TranslateSystem` 的用户 Windows UI 语言，不能用服务语言替代。
 
 深入分析结果窗口的“详细信息”（文件路径、注册表路径、CLSID）位于探测结果之后、“诊断信息”上方，默认折叠，点击后展开。结果说明位于“已解析菜单项”标题上方，使用动态 `SystemFillColorCautionBrush` 警告色；失败时同样展示，三语均以普通用户可理解的文字说明结果可能不完整、空结果通常无需报错。关闭按钮由独立 Canvas 浮层固定在窗口内容区右下角，不参与其余内容测量和滚动；滚动内容保留底部留白，保证末尾操作可滚到按钮上方。探测隔离与失败语义见[深入分析](deep-analysis-probehost.md)。
@@ -128,7 +136,7 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 `MenuListTransitions` 仅动画已实现且在 viewport 内的容器：进入约 180 ms，退出以不可交互的 adorner 影像约 140 ms 淡出，保留行平滑移位。首屏批量呈现不逐项动画；遵从系统动画设置，虚拟化复用清理 transform，重现同 Id 取消旧退出影像，Unload 解除集合/LayoutUpdated 和动画回调。
 
-后端确认目标缺失才返回 `MENU_ITEM_REMOVED`，客户端广播 `ItemsRemoved`，各关联列表及缓存同步清除，退出动画只负责视觉。扫描发现条目消失时静默清理；用户操作命中已删除目标时通过 `MenuListFeedbackService` 显示 WPF-UI MessageBox。IPC 客户端不依赖 Localization/Settings，避免设置 ACL 修复依赖回环；启动构建 DI provider 时验证服务图。更新通知仍使用标题栏下方横幅式 WPF-UI InfoBar，并保留链接功能；详细错误只写日志。
+后端确认目标缺失才返回 `MENU_ITEM_REMOVED`，客户端广播 `ItemsRemoved`，各关联列表及缓存同步清除，退出动画只负责视觉。扫描发现条目消失时静默清理；用户操作命中已删除目标时通过 `MenuListFeedbackService` 显示 WPF-UI MessageBox。IPC 客户端不依赖 Localization/Settings，避免设置 ACL 修复依赖回环；启动构建 DI provider 时验证服务图。更新通知使用标题栏下方的悬浮 WPF-UI InfoBar，不挤压主内容并保留链接功能；详细错误只写日志。
 
 ## 异步操作与结果
 

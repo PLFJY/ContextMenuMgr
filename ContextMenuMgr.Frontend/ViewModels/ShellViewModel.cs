@@ -85,6 +85,8 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     public bool HasServiceAttention => !string.IsNullOrWhiteSpace(ServiceAttentionText);
 
+    public bool IsServiceBootstrapInProgress => _workspace.IsServiceBootstrapInProgress;
+
     /// <summary>
     /// Gets a value indicating whether the approvals queue has at least one item.
     /// Shares the same source count as the navigation badge.
@@ -382,6 +384,8 @@ public partial class ShellViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(ServiceAttentionText));
             OnPropertyChanged(nameof(HasServiceAttention));
         }
+        if (e.PropertyName == nameof(ContextMenuWorkspaceService.IsServiceBootstrapInProgress))
+            OnPropertyChanged(nameof(IsServiceBootstrapInProgress));
     }
 
     private void OnExplorerRestartStatePropertyChanged(object? sender, PropertyChangedEventArgs e)
