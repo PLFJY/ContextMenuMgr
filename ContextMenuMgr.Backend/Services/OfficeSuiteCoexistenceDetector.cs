@@ -65,8 +65,8 @@ public sealed class OfficeSuiteCoexistenceDetector
         Excel(".xlsm", "Excel.SheetMacroEnabled.12"),
         Excel(".xlsb", "Excel.SheetBinaryMacroEnabled.12"),
         Excel(".xlt", "Excel.Template.8"),
-        Excel(".xltx", "Excel.Template.12"),
-        Excel(".xltm", "Excel.TemplateMacroEnabled.12"),
+        Excel(".xltx", "Excel.Template"),
+        Excel(".xltm", "Excel.TemplateMacroEnabled"),
         PowerPoint(".ppt", "PowerPoint.Show.8"),
         PowerPoint(".pptx", "PowerPoint.Show.12"),
         PowerPoint(".pptm", "PowerPoint.ShowMacroEnabled.12"),
@@ -77,10 +77,10 @@ public sealed class OfficeSuiteCoexistenceDetector
         PowerPoint(".ppsx", "PowerPoint.SlideShow.12"),
         PowerPoint(".ppsm", "PowerPoint.SlideShowMacroEnabled.12"),
         Word(".rtf", "Word.RTF.8"),
-        new() { Extension = ".pdf", Group = ProtectedDocumentGroup.Pdf, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = false },
+        new() { Extension = ".pdf", Group = ProtectedDocumentGroup.Pdf, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = false },
         Image(".jpg"), Image(".jpeg"), Image(".png"), Image(".bmp"), Image(".gif"), Image(".webp"), Image(".tif"), Image(".tiff"),
-        new() { Extension = ".epub", Group = ProtectedDocumentGroup.Ebook, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = false },
-        new() { Extension = ".mobi", Group = ProtectedDocumentGroup.Ebook, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = false }
+        new() { Extension = ".epub", Group = ProtectedDocumentGroup.Ebook, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = false },
+        new() { Extension = ".mobi", Group = ProtectedDocumentGroup.Ebook, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = false }
     ];
 
     public OfficeSuiteCoexistenceStatus Detect(BackendUserContext? context)
@@ -109,7 +109,7 @@ public sealed class OfficeSuiteCoexistenceDetector
                 CurrentProgId = context is null ? null : ReadUserExtensionDefault(context, item.Extension),
                 CurrentOwner = context is null ? null : ClassifyOwner(ReadUserExtensionDefault(context, item.Extension))
             }).ToArray(),
-            CurrentDocumentIconProvider = active && context is not null ? DetectCurrentIconProvider(context) : null
+            IsDocumentIconRepairEnabled = false
         };
     }
 
@@ -125,53 +125,6 @@ public sealed class OfficeSuiteCoexistenceDetector
         results.AddRange(DetectIconHijacks(context));
         results.AddRange(DetectShellNewInjections(context));
         return results;
-    }
-
-    public PipeResponse SetDocumentIconProvider(BackendUserContext context, DocumentIconProvider provider)
-    {
-        var status = Detect(context);
-        if (!status.IsCoexistenceActive)
-        {
-            return new PipeResponse
-            {
-                Success = false,
-                Message = "WPS/Microsoft Office co-existence is not active."
-            };
-        }
-
-        using var userClasses = OpenUserClasses(context, writable: true)
-            ?? throw new InvalidOperationException("Unable to open the frontend user's Software\\Classes key.");
-
-        var changed = 0;
-        foreach (var spec in Catalog.Where(static item => item.SupportsIconProviderToggle))
-        {
-            foreach (var progId in spec.MicrosoftProgIds)
-            {
-                var targetIcon = provider == DocumentIconProvider.MicrosoftOffice
-                    ? ReadDefaultIcon(Registry.LocalMachine, $@"{MachineClassesPath}\{progId}\DefaultIcon")
-                    : FindWpsIconForSpec(context, spec);
-
-                if (string.IsNullOrWhiteSpace(targetIcon))
-                {
-                    continue;
-                }
-
-                using var iconKey = userClasses.CreateSubKey($@"{progId}\DefaultIcon", writable: true);
-                iconKey?.SetValue(null, targetIcon, RegistryValueKind.String);
-                changed++;
-
-                _logger?.LogFireAndForget(
-                    $"WpsDocumentIconProviderChanged: Sid={context.Sid}, Provider={provider}, ProgId={progId}, CurrentValue={targetIcon}, ExpectedOrReferenceValue={targetIcon}, SpecialCode={IconHijackCode}.");
-            }
-        }
-
-        ShellChangeNotifier.NotifyAssociationsChanged();
-        return new PipeResponse
-        {
-            Success = true,
-            Message = $"Document icon provider changed to {provider}. Updated {changed} user-level DefaultIcon values.",
-            OfficeSuiteCoexistence = Detect(context)
-        };
     }
 
     private IEnumerable<ContextMenuEntry> DetectAssociationHijacks(BackendUserContext context)
@@ -376,48 +329,6 @@ public sealed class OfficeSuiteCoexistenceDetector
             Notes = notes ?? details
         };
 
-    private static DocumentIconProvider DetectCurrentIconProvider(BackendUserContext context)
-    {
-        var wps = 0;
-        var microsoft = 0;
-        foreach (var progId in Catalog.SelectMany(static spec => spec.MicrosoftProgIds).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var icon = ReadDefaultIcon(Registry.Users, $@"{context.Sid}\{UserClassesPath}\{progId}\DefaultIcon")
-                       ?? ReadDefaultIcon(Registry.LocalMachine, $@"{MachineClassesPath}\{progId}\DefaultIcon");
-            if (IsWpsPath(icon))
-            {
-                wps++;
-            }
-            else if (IsMicrosoftOfficePath(icon))
-            {
-                microsoft++;
-            }
-        }
-
-        return wps > microsoft ? DocumentIconProvider.WpsOffice : DocumentIconProvider.MicrosoftOffice;
-    }
-
-    private static string? FindWpsIconForSpec(BackendUserContext context, ProtectedDocumentAssociation spec)
-    {
-        var extensionProgId = ReadUserExtensionDefault(context, spec.Extension);
-        if (IsWpsProgId(extensionProgId))
-        {
-            var icon = ReadDefaultIcon(Registry.Users, $@"{context.Sid}\{UserClassesPath}\{extensionProgId}\DefaultIcon")
-                       ?? ReadDefaultIcon(Registry.LocalMachine, $@"{MachineClassesPath}\{extensionProgId}\DefaultIcon");
-            if (IsWpsPath(icon))
-            {
-                return icon;
-            }
-        }
-
-        return Catalog
-            .Where(item => item.Group == spec.Group)
-            .Select(item => ReadUserExtensionDefault(context, item.Extension))
-            .Where(IsWpsProgId)
-            .Select(progId => ReadDefaultIcon(Registry.Users, $@"{context.Sid}\{UserClassesPath}\{progId}\DefaultIcon"))
-            .FirstOrDefault(IsWpsPath);
-    }
-
     private void AddIconCandidateIfWps(BackendUserContext? context, string progId, ISet<string> candidates)
     {
         if (context is not null)
@@ -498,10 +409,10 @@ public sealed class OfficeSuiteCoexistenceDetector
         => !string.IsNullOrWhiteSpace(progId)
            && WpsPrefixes.Any(prefix => progId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsWpsPath(string? value)
+    internal static bool IsWpsPath(string? value)
         => ContainsAny(value, WpsMarkers) || IsWpsProgId(value);
 
-    private static bool IsMicrosoftOfficePath(string? value)
+    internal static bool IsMicrosoftOfficePath(string? value)
         => ContainsAny(value, MicrosoftMarkers);
 
     private static bool ContainsAny(string? value, IEnumerable<string> markers)
@@ -524,14 +435,14 @@ public sealed class OfficeSuiteCoexistenceDetector
     }
 
     private static ProtectedDocumentAssociation Word(string extension, params string[] progIds)
-        => new() { Extension = extension, Group = ProtectedDocumentGroup.Word, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = progIds.Length > 0 };
+        => new() { Extension = extension, Group = ProtectedDocumentGroup.Word, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = progIds.Length > 0 };
 
     private static ProtectedDocumentAssociation Excel(string extension, params string[] progIds)
-        => new() { Extension = extension, Group = ProtectedDocumentGroup.Excel, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = progIds.Length > 0 };
+        => new() { Extension = extension, Group = ProtectedDocumentGroup.Excel, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = progIds.Length > 0 };
 
     private static ProtectedDocumentAssociation PowerPoint(string extension, params string[] progIds)
-        => new() { Extension = extension, Group = ProtectedDocumentGroup.PowerPoint, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = progIds.Length > 0 };
+        => new() { Extension = extension, Group = ProtectedDocumentGroup.PowerPoint, MicrosoftProgIds = progIds, WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = progIds.Length > 0 };
 
     private static ProtectedDocumentAssociation Image(string extension)
-        => new() { Extension = extension, Group = ProtectedDocumentGroup.Image, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconProviderToggle = false };
+        => new() { Extension = extension, Group = ProtectedDocumentGroup.Image, MicrosoftProgIds = [], WpsProgIdPrefixes = WpsPrefixes, SupportsIconRepair = false };
 }

@@ -1382,14 +1382,23 @@
   <data name="DefaultDropEffect" xml:space="preserve">
     <value>預設拖放效果</value>
   </data>
-  <data name="DocumentIconProvider" xml:space="preserve">
-    <value>文件圖示來源</value>
+  <data name="DocumentIconRepair" xml:space="preserve">
+    <value>修復 WPS 文件圖示覆寫</value>
   </data>
-  <data name="DocumentIconProviderDescription" xml:space="preserve">
-    <value>僅切換文件圖示，不修改預設開啟方式。</value>
+  <data name="DocumentIconRepairDescription" xml:space="preserve">
+    <value>還原 Office 本身的圖示，讓文件圖示隨預設開啟方式變化。關閉後還原啟用前的圖示設定，不修改預設開啟方式。</value>
   </data>
-  <data name="DocumentIconProviderChangedHint" xml:space="preserve">
-    <value>要讓對應檔案類型成功切換圖示，請將該檔案類型的預設開啟方式設定為目前選擇的 Office 應用程式。如果修改後仍然沒有生效，可以嘗試點擊上方的清空圖示快取按鈕。</value>
+  <data name="DocumentIconRepairChangedHint" xml:space="preserve">
+    <value>如果圖示尚未更新，可使用上方的「清理圖示快取」。</value>
+  </data>
+  <data name="DocumentIconRepairNotApplied" xml:space="preserve">
+    <value>圖示設定已變更或修復尚未完成，已保留後續變更。</value>
+  </data>
+  <data name="DocumentIconRepairUncertain" xml:space="preserve">
+    <value>暫時無法確認圖示設定，請重新整理後再試。</value>
+  </data>
+  <data name="DocumentIconRepairServiceUpdateRequired" xml:space="preserve">
+    <value>請更新或修復背景服務後使用此開關。</value>
   </data>
   <data name="SystemLevelItems" xml:space="preserve">
     <value>系統層級項目</value>
@@ -1659,4 +1668,37 @@
   <data name="ApplicationGroupDisableSelected" xml:space="preserve"><value>停用</value></data>
   <data name="ApplicationGroupSelectAll" xml:space="preserve"><value>選取此應用程式目前篩選下的所有選單項目</value></data>
   <data name="ApplicationGroupRestore" xml:space="preserve"><value>復原刪除</value></data>
+  <data name="DocumentIconRepairSourceUnavailable" xml:space="preserve">
+    <value>找不到可用的 Microsoft Office 原始圖示。請確認 Office 已正確安裝後再試。</value>
+  </data>
+  <data name="DocumentIconRepairConflict" xml:space="preserve">
+    <value>其他應用程式修改了文件圖示，已保留其後續變更。請檢查目前設定後再試。</value>
+  </data>
+  <data name="DocumentIconRepairRecoveryInvalid" xml:space="preserve">
+    <value>無法可靠讀取原始圖示備份。為保護現有設定，已停止操作。</value>
+  </data>
+  <data name="DocumentIconRepairUnavailable" xml:space="preserve">
+    <value>必須同時安裝 Microsoft Office 和 WPS Office 才能啟用此項修復。</value>
+  </data>
+  <data name="DocumentIconRepairAccessDenied" xml:space="preserve">
+    <value>沒有權限存取圖示設定或修復備份。請確認背景服務正常執行後再試。</value>
+  </data>
+  <data name="DocumentIconRepairFailed" xml:space="preserve">
+    <value>暫時無法修復或還原文件圖示。請重新整理後再試，詳細原因已記錄至日誌。</value>
+  </data>
+  <data name="DocumentIconRepairMustRestore" xml:space="preserve">
+    <value>請先關閉文件圖示修復，還原原來的圖示設定，再重設狀態資料庫。</value>
+  </data>
+  <data name="DocumentIconRepairAction" xml:space="preserve">
+    <value>修復</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsPrompt" xml:space="preserve">
+    <value>找不到可用的 Microsoft Office 原始圖示。按一下「修復」會開啟 Windows 預設應用程式設定，請將對應文件的開啟方式設為 Word、Excel 或 PowerPoint。Windows 需要您在系統介面確認。返回此視窗後會重新偵測圖示狀態；如果仍找不到圖示來源，請修復 Office 安裝。</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsFailed" xml:space="preserve">
+    <value>無法開啟 Windows 預設應用程式設定。請前往「設定 → 應用程式 → 預設應用程式」，將對應文件的開啟方式設為 Microsoft Office。</value>
+  </data>
+  <data name="DocumentIconRepairNoBackupHint" xml:space="preserve">
+    <value>沒有啟用前的圖示備份。關閉此開關時會保留現有圖示，並記住關閉狀態。</value>
+  </data>
 </root>

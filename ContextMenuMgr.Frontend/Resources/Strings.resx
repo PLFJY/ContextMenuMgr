@@ -1382,14 +1382,23 @@ Continue anyway? (Not recommended)</value>
   <data name="DefaultDropEffect" xml:space="preserve">
     <value>Default drop effect</value>
   </data>
-  <data name="DocumentIconProvider" xml:space="preserve">
-    <value>Document icon provider</value>
+  <data name="DocumentIconRepair" xml:space="preserve">
+    <value>Repair WPS document icon overrides</value>
   </data>
-  <data name="DocumentIconProviderDescription" xml:space="preserve">
-    <value>Switches document icons only. Default apps are not changed.</value>
+  <data name="DocumentIconRepairDescription" xml:space="preserve">
+    <value>Restores Office icons so document icons follow the default app. Turning this off restores the previous icon settings. Default apps are not changed.</value>
   </data>
-  <data name="DocumentIconProviderChangedHint" xml:space="preserve">
-    <value>To make the icon change take effect for a file type, set that file type's default app to the selected Office suite. If it still does not take effect, try the Clear icon cache button above.</value>
+  <data name="DocumentIconRepairChangedHint" xml:space="preserve">
+    <value>If icons have not refreshed, use Clear icon cache above.</value>
+  </data>
+  <data name="DocumentIconRepairNotApplied" xml:space="preserve">
+    <value>The icon settings changed or repair was interrupted. Newer settings have been preserved.</value>
+  </data>
+  <data name="DocumentIconRepairUncertain" xml:space="preserve">
+    <value>Unable to confirm the icon settings. Refresh before trying again.</value>
+  </data>
+  <data name="DocumentIconRepairServiceUpdateRequired" xml:space="preserve">
+    <value>Update or repair the background service to use this switch.</value>
   </data>
   <data name="SystemLevelItems" xml:space="preserve">
     <value>System-level items</value>
@@ -1659,4 +1668,37 @@ Continue anyway? (Not recommended)</value>
   <data name="ApplicationGroupDisableSelected" xml:space="preserve"><value>Disable</value></data>
   <data name="ApplicationGroupSelectAll" xml:space="preserve"><value>Select all visible menu items in this application</value></data>
   <data name="ApplicationGroupRestore" xml:space="preserve"><value>Restore</value></data>
+  <data name="DocumentIconRepairSourceUnavailable" xml:space="preserve">
+    <value>No usable original Microsoft Office icon was found. Confirm that Office is installed correctly, then try again.</value>
+  </data>
+  <data name="DocumentIconRepairConflict" xml:space="preserve">
+    <value>Another application changed the document icons. Its newer settings were preserved. Check the current settings before trying again.</value>
+  </data>
+  <data name="DocumentIconRepairRecoveryInvalid" xml:space="preserve">
+    <value>The original icon backup could not be read reliably. The operation was stopped to protect your current settings.</value>
+  </data>
+  <data name="DocumentIconRepairUnavailable" xml:space="preserve">
+    <value>Microsoft Office and WPS Office must both be installed to enable this repair.</value>
+  </data>
+  <data name="DocumentIconRepairAccessDenied" xml:space="preserve">
+    <value>Access to the icon settings or repair backup was denied. Check that the background service is running correctly, then try again.</value>
+  </data>
+  <data name="DocumentIconRepairFailed" xml:space="preserve">
+    <value>The document icons could not be repaired or restored. Refresh and try again. Details have been recorded in the log.</value>
+  </data>
+  <data name="DocumentIconRepairMustRestore" xml:space="preserve">
+    <value>Turn off document icon repair and restore the previous icon settings before resetting the state database.</value>
+  </data>
+  <data name="DocumentIconRepairAction" xml:space="preserve">
+    <value>Repair</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsPrompt" xml:space="preserve">
+    <value>No usable original Microsoft Office icon was found. Repair opens Windows Default apps, where you can choose Word, Excel, and PowerPoint for the corresponding documents. Windows requires you to confirm these choices. Return here afterward to check the icon state again. If the icon source is still unavailable, repair your Office installation.</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsFailed" xml:space="preserve">
+    <value>Windows Default apps could not be opened. Open Settings &gt; Apps &gt; Default apps and choose Microsoft Office for the corresponding documents.</value>
+  </data>
+  <data name="DocumentIconRepairNoBackupHint" xml:space="preserve">
+    <value>No original icon backup is available. Turning this switch off preserves the current icons and remembers your choice.</value>
+  </data>
 </root>

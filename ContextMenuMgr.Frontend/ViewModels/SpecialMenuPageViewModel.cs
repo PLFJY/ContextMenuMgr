@@ -38,8 +38,28 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
     private int _shellNewStateVersion;
     private bool _shellNewDiscoveryValid;
     private bool _suppressDropEffectSync;
-    private bool _suppressDocumentIconProviderSync;
-    private bool _hasDocumentIconProviderChanged;
+    private bool _suppressDocumentIconRepairSync;
+    private bool _documentIconRepairSupported;
+    private bool _canRestoreDocumentIcons;
+    private bool _awaitingOfficeDefaultApps;
+    private int _documentIconRepairVersion;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangeDocumentIconRepair))]
+    [NotifyPropertyChangedFor(nameof(DocumentIconRepairStatusText))]
+    public partial bool IsDocumentIconRepairStateUncertain { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DocumentIconRepairStatusText))]
+    public partial bool HasDocumentIconRepairIssue { get; private set; }
+
+    public string DocumentIconRepairStatusText => _localization.Translate(IsDocumentIconRepairStateUncertain
+        ? "DocumentIconRepairUncertain" : !_documentIconRepairSupported ? "DocumentIconRepairServiceUpdateRequired"
+        : HasDocumentIconRepairIssue ? "DocumentIconRepairNotApplied" : "");
+
+    public string DocumentIconRepairRestoreHint => _documentIconRepairSupported && !IsDocumentIconRepairBusy
+        && IsDocumentIconRepairEnabled && !_canRestoreDocumentIcons
+        ? _localization.Translate("DocumentIconRepairNoBackupHint") : string.Empty;
 
     public SpecialMenuPageViewModel(
         SpecialMenuKind kind,
@@ -102,9 +122,10 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
         PermanentDeleteText = _localization.Translate("PermanentDelete");
         CancelText = _localization.Translate("DialogCancel");
         DropEffectLabel = _localization.Translate("DefaultDropEffect");
-        DocumentIconProviderLabel = _localization.Translate("DocumentIconProvider");
-        DocumentIconProviderDescription = _localization.Translate("DocumentIconProviderDescription");
-        DocumentIconProviderChangedHint = _localization.Translate("DocumentIconProviderChangedHint");
+        DocumentIconRepairLabel = _localization.Translate("DocumentIconRepair");
+        DocumentIconRepairDescription = _localization.Translate("DocumentIconRepairDescription");
+        DocumentIconRepairChangedHint = _localization.Translate("DocumentIconRepairChangedHint");
+        OnPropertyChanged(nameof(DocumentIconRepairStatusText));
         DropEffectOptions =
         [
             DefaultDropEffect.Default,
@@ -200,36 +221,31 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
     public partial DefaultDropEffect SelectedDropEffect { get; set; }
 
     [ObservableProperty]
-    public partial string DocumentIconProviderLabel { get; set; }
+    public partial string DocumentIconRepairLabel { get; set; }
 
     [ObservableProperty]
-    public partial string DocumentIconProviderDescription { get; set; }
+    public partial string DocumentIconRepairDescription { get; set; }
 
     [ObservableProperty]
-    public partial string DocumentIconProviderChangedHint { get; set; }
-
-    public string MicrosoftOfficeLabel => "Microsoft Office";
-
-    public string WpsOfficeLabel => "WPS Office";
+    public partial string DocumentIconRepairChangedHint { get; set; }
 
     [ObservableProperty]
-    public partial DocumentIconProvider SelectedDocumentIconProvider { get; set; }
+    public partial bool IsDocumentIconRepairEnabled { get; set; }
 
     [ObservableProperty]
-    public partial bool IsDocumentIconProviderBusy { get; private set; }
+    public partial bool IsDocumentIconRepairBusy { get; private set; }
 
-    public bool IsMicrosoftDocumentIconProviderSelected => SelectedDocumentIconProvider == DocumentIconProvider.MicrosoftOffice;
+    public bool CanChangeDocumentIconRepair => ShowDocumentIconRepair && _documentIconRepairSupported
+        && !IsDocumentIconRepairBusy && !IsDocumentIconRepairStateUncertain;
 
-    public bool IsWpsDocumentIconProviderSelected => SelectedDocumentIconProvider == DocumentIconProvider.WpsOffice;
-
-    public bool CanChangeDocumentIconProvider => ShowDocumentIconProvider && !IsDocumentIconProviderBusy;
-
-    partial void OnIsDocumentIconProviderBusyChanged(bool value) => OnPropertyChanged(nameof(CanChangeDocumentIconProvider));
+    partial void OnIsDocumentIconRepairBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanChangeDocumentIconRepair));
+        OnPropertyChanged(nameof(DocumentIconRepairRestoreHint));
+    }
 
     [ObservableProperty]
-    public partial bool ShowDocumentIconProvider { get; set; }
-
-    public bool ShowDocumentIconProviderChangedHint => ShowDocumentIconProvider && _hasDocumentIconProviderChanged;
+    public partial bool ShowDocumentIconRepair { get; set; }
 
     [ObservableProperty]
     public partial bool? IsShellNewOrderLocked { get; set; }
@@ -335,23 +351,27 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
         ObserveFireAndForget(SetDefaultDropEffectAsync(oldValue, newValue), "SetDefaultDropEffectAsync");
     }
 
-    partial void OnSelectedDocumentIconProviderChanged(DocumentIconProvider oldValue, DocumentIconProvider newValue)
+    partial void OnIsDocumentIconRepairEnabledChanged(bool oldValue, bool newValue)
     {
-        OnPropertyChanged(nameof(IsMicrosoftDocumentIconProviderSelected));
-        OnPropertyChanged(nameof(IsWpsDocumentIconProviderSelected));
-        if (_suppressDocumentIconProviderSync || oldValue == newValue || !ShowDocumentIconProvider || IsDocumentIconProviderBusy)
+
+        if (_suppressDocumentIconRepairSync || oldValue == newValue) return;
+        if (!ShowDocumentIconRepair || !_documentIconRepairSupported || IsDocumentIconRepairBusy
+            || IsDocumentIconRepairStateUncertain)
         {
+            _suppressDocumentIconRepairSync = true;
+            try { IsDocumentIconRepairEnabled = oldValue; }
+            finally { _suppressDocumentIconRepairSync = false; }
             return;
         }
 
-        IsDocumentIconProviderBusy = true;
-        ObserveFireAndForget(SetDocumentIconProviderAsync(oldValue, newValue), "SetDocumentIconProviderAsync");
+        IsDocumentIconRepairBusy = true;
+        _documentIconRepairVersion++;
+        ObserveFireAndForget(SetDocumentIconRepairAsync(newValue), "SetDocumentIconRepairAsync");
     }
 
-    partial void OnShowDocumentIconProviderChanged(bool value)
+    partial void OnShowDocumentIconRepairChanged(bool value)
     {
-        OnPropertyChanged(nameof(ShowDocumentIconProviderChangedHint));
-        OnPropertyChanged(nameof(CanChangeDocumentIconProvider));
+        OnPropertyChanged(nameof(CanChangeDocumentIconRepair));
     }
 
     [RelayCommand]
@@ -1517,11 +1537,12 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
         PermanentDeleteText = _localization.Translate("PermanentDelete");
         CancelText = _localization.Translate("DialogCancel");
         DropEffectLabel = _localization.Translate("DefaultDropEffect");
-        DocumentIconProviderLabel = _localization.Translate("DocumentIconProvider");
-        DocumentIconProviderDescription = _localization.Translate("DocumentIconProviderDescription");
-        DocumentIconProviderChangedHint = _localization.Translate("DocumentIconProviderChangedHint");
-        OnPropertyChanged(nameof(MicrosoftOfficeLabel));
-        OnPropertyChanged(nameof(WpsOfficeLabel));
+        DocumentIconRepairLabel = _localization.Translate("DocumentIconRepair");
+        DocumentIconRepairDescription = _localization.Translate("DocumentIconRepairDescription");
+        DocumentIconRepairChangedHint = _localization.Translate("DocumentIconRepairChangedHint");
+        OnPropertyChanged(nameof(DocumentIconRepairStatusText));
+        OnPropertyChanged(nameof(DocumentIconRepairRestoreHint));
+
         foreach (var item in Items)
         {
             item.RefreshLocalization();
@@ -1662,88 +1683,108 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
         }
     }
 
+    private void ApplyDocumentIconRepairStatus(OfficeSuiteCoexistenceStatus status)
+    {
+        _documentIconRepairSupported = status.IsDocumentIconRepairEnabled.HasValue && status.CanRestoreDocumentIcons.HasValue;
+        _canRestoreDocumentIcons = status.CanRestoreDocumentIcons == true;
+        ShowDocumentIconRepair = status.IsCoexistenceActive || status.IsDocumentIconRepairEnabled == true;
+        IsDocumentIconRepairStateUncertain = false;
+        HasDocumentIconRepairIssue = status.IsDocumentIconRepairEnabled == true && !status.IsDocumentIconRepairApplied;
+        _suppressDocumentIconRepairSync = true;
+        try { IsDocumentIconRepairEnabled = status.IsDocumentIconRepairEnabled == true; }
+        finally { _suppressDocumentIconRepairSync = false; }
+        OnPropertyChanged(nameof(IsDocumentIconRepairEnabled));
+        OnPropertyChanged(nameof(CanChangeDocumentIconRepair));
+        OnPropertyChanged(nameof(DocumentIconRepairStatusText));
+        OnPropertyChanged(nameof(DocumentIconRepairRestoreHint));
+    }
+
     private async Task RefreshOfficeCoexistenceStatusAsync(CancellationToken cancellationToken)
     {
-        if (Kind != SpecialMenuKind.ShellNew)
-        {
-            ShowDocumentIconProvider = false;
-            return;
-        }
-
+        if (Kind != SpecialMenuKind.ShellNew) { ShowDocumentIconRepair = false; return; }
+        var version = _documentIconRepairVersion;
         try
         {
             var status = await _backendClient.GetOfficeSuiteCoexistenceStatusAsync(cancellationToken);
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
             {
-                ShowDocumentIconProvider = status?.IsCoexistenceActive == true;
-                if (status?.CurrentDocumentIconProvider is not { } provider)
-                {
-                    return;
-                }
-
-                _suppressDocumentIconProviderSync = true;
-                try
-                {
-                    SelectedDocumentIconProvider = provider;
-                    // The detected value can equal the enum's default, in which
-                    // case the setter does not notify the one-way radio bindings.
-                    OnPropertyChanged(nameof(IsMicrosoftDocumentIconProviderSelected));
-                    OnPropertyChanged(nameof(IsWpsDocumentIconProviderSelected));
-                }
-                finally
-                {
-                    _suppressDocumentIconProviderSync = false;
-                }
+                if (_disposed || version != _documentIconRepairVersion || IsDocumentIconRepairBusy) return;
+                if (status is not null) ApplyDocumentIconRepairStatus(status);
             });
         }
         catch (Exception ex)
         {
-            FrontendDebugLog.Warning(
-                "SpecialMenuPageViewModel",
-                $"RefreshOfficeCoexistenceStatusAsync failed. Kind={Kind}, Message={ex.Message}");
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => ShowDocumentIconProvider = false);
+            FrontendDebugLog.Warning(nameof(SpecialMenuPageViewModel), $"Office status query failed: {ex.Message}");
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                if (!_disposed && version == _documentIconRepairVersion && ShowDocumentIconRepair)
+                    IsDocumentIconRepairStateUncertain = true;
+            });
         }
     }
 
-    private async Task SetDocumentIconProviderAsync(DocumentIconProvider oldValue, DocumentIconProvider newValue)
+    private async Task SetDocumentIconRepairAsync(bool newValue)
     {
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var status = await _backendClient.SetDocumentIconProviderAsync(newValue, cts.Token);
-            _suppressDocumentIconProviderSync = true;
-            try
-            {
-                SelectedDocumentIconProvider = status?.CurrentDocumentIconProvider ?? newValue;
-            }
-            finally
-            {
-                _suppressDocumentIconProviderSync = false;
-            }
-
-            await RefreshAsync();
-            _hasDocumentIconProviderChanged = true;
+            var status = await _backendClient.SetDocumentIconRepairAsync(newValue, cts.Token);
+            if (status?.IsDocumentIconRepairEnabled != newValue
+                || newValue && !status.IsDocumentIconRepairApplied)
+                throw new System.IO.IOException("The document icon repair response did not confirm the requested state.");
+            if (_disposed) return;
+            ApplyDocumentIconRepairStatus(status);
             _explorerRestartState.MarkIconCacheRefreshRequired();
-            OnPropertyChanged(nameof(ShowDocumentIconProviderChangedHint));
         }
         catch (Exception ex)
         {
-            _suppressDocumentIconProviderSync = true;
+            if (_disposed) return;
+            FrontendDebugLog.Warning(nameof(SpecialMenuPageViewModel), $"Document icon repair failed: {ex}");
+            // A lost response does not prove that no registry write happened.
+            // Query authoritative state once; never repeat the mutation.
+            IsDocumentIconRepairStateUncertain = true;
             try
             {
-                SelectedDocumentIconProvider = oldValue;
+                using var query = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var status = await _backendClient.GetOfficeSuiteCoexistenceStatusAsync(query.Token);
+                if (!_disposed && status is not null) ApplyDocumentIconRepairStatus(status);
             }
-            finally
+            catch (Exception queryError)
             {
-                _suppressDocumentIconProviderSync = false;
+                FrontendDebugLog.Warning(nameof(SpecialMenuPageViewModel), $"Document icon repair read-back failed: {queryError.Message}");
             }
+            if (!_disposed && ex is BackendRequestException { ErrorCode: PipeErrorCodes.DocumentIconRepairSourceUnavailable })
+            {
+                var repair = await FrontendMessageBox.ShowConfirmAsync(
+                    _localization.Translate("DocumentIconRepairDefaultAppsPrompt"), Title,
+                    _localization.Translate("DocumentIconRepairAction"), _localization.Translate("DialogCancel"));
+                if (repair && !_disposed)
+                {
+                    try
+                    {
+                        // Windows requires confirmation in its own default-app UI.
+                        // Opening Settings is not evidence that defaults changed.
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:defaultapps")
+                            { UseShellExecute = true });
+                        _awaitingOfficeDefaultApps = true;
+                    }
+                    catch (Exception launchError)
+                    {
+                        FrontendDebugLog.Warning(nameof(SpecialMenuPageViewModel), $"Office default-app settings failed: {launchError}");
+                        await FrontendMessageBox.ShowErrorAsync(_localization.Translate("DocumentIconRepairDefaultAppsFailed"), Title);
+                    }
+                }
+            }
+            else if (!_disposed) await FrontendMessageBox.ShowErrorAsync(DocumentIconRepairFeedback.GetMessage(ex, _localization), Title);
+        }
+        finally { IsDocumentIconRepairBusy = false; }
+    }
 
-            await FrontendMessageBox.ShowErrorAsync(ex.Message, Title);
-        }
-        finally
-        {
-            IsDocumentIconProviderBusy = false;
-        }
+    public async Task RefreshDocumentIconRepairOnActivationAsync()
+    {
+        if (_disposed || !_awaitingOfficeDefaultApps || IsDocumentIconRepairBusy) return;
+        _awaitingOfficeDefaultApps = false;
+        await RefreshOfficeCoexistenceStatusAsync(_disposeCts.Token);
     }
 
     private void UpdatePageStateFromSnapshot(IEnumerable<SpecialMenuEntry> snapshot)

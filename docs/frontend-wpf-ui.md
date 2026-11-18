@@ -146,6 +146,14 @@ client 在后台按稳定 Id 比较 DTO（含嵌套元数据）并复用等价�
 
 待审批的常规/Win11/WPS 分组在允许或拒绝提交期间保留原位的禁用按钮，并在旁边显示 ProgressRing；分组 Busy 覆盖全部逐项决策，防止重复提交。OpenWith 行沿用自身的 Busy 按钮与进度提示。
 
+ShellNew 的文档图标来源单选已替换为 AsyncToggleSwitch“修复 WPS 文档图标覆盖”，显示真实修复/撤销请求的 Busy，提交期间禁止重复操作。初次加载及刷新回填实际图标状态与后端撤销能力，不启动写入；刷新代次不得覆盖后续点击，已释放页面不消费迟到结果。成功须明确开关 Enabled 是否与目标一致，开启还须物理 Applied；超时、异常或缺失结果只定向查询一次，不重发写入、不盲目回退旧值，仍无法确认则显示警示并禁用直到刷新。恢复记录存在但物理结果不符时显示修复未完成/设置变化提示。旧服务缺新状态或撤销能力字段时禁用并显示更新服务提示，三语同步。原值恢复与用户范围见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
+
+修复标题位于开关左侧，同一行垂直居中，使用常规 14 DIP 字号、主文字色和完整不透明度，保留 12 DIP 间距。修复/撤销说明及清理图标缓存提示仅放在开关 Tooltip，按 PlacementTarget.DataContext 绑定并限制宽度换行，不再占用下方常驻布局；异常/能力未知提示仍按实际状态显示。
+
+实际图标已正常但尚无用户选择时显示开启，仍允许关闭；没有历史备份时 Tooltip 说明关闭会保留现有图标并保存关闭偏好，有备份则还原开启前设置。启动/刷新尊重用户明确的关闭选择，物理图标正常不等于需要重新打开开关。Office 图标来源不可用的错误弹窗使用三语“修复／取消”，修复打开当前用户的 Windows 默认应用设置，并说明系统确认要求。返回窗口激活后定向刷新图标状态；激活订阅随视图卸载解除，不重发 mutation，也不宣称已自动更改默认应用。
+
+文档图标修复的弹窗错误由 DocumentIconRepairFeedback 根据 BackendRequestException.ErrorCode 使用当前应用语言生成，覆盖原始 Office 图标不可用、第三方冲突、恢复记录异常、共存条件、权限、状态库重置前需撤销和未知失败；超时/断连使用本地化的不确定提示。后端英文消息及异常堆栈只写日志，不能直接作为该开关的普通用户弹窗；缺少错误码的旧响应和未知异常同样使用三语通用失败说明，不依赖匹配英文句子。设置页的修复记录重置拦截复用同一错误映射，Pipe client 仍不依赖 LocalizationService。
+
 classic SetEnabled 的 request→独立物理状态核对、20/10 秒预算和迟到广播见 [IPC](process-and-privilege-flows.md#请求迟到通知与不确定结果)。ProgressRing 覆盖核对阶段。权威 requested state 成功、旧 state 回退；无法确认保留当前乐观值并锁操作，直到 fresh update。item version 防旧失败覆盖新结果。Win11 核对应用全部目标，OpenWith 页串行门/IsStateUncertain 和 ShellNew 三态分别在各主文档定义，不重发写入猜结果。
 
 `DismissDetectedChangeAsync` / `DismissConsistencyIssueAsync` 点击后立即本地隐藏，先让 UI 呈现再后台确认，单项在途或结果未知时禁止重复确认。明确失败恢复同一次变化的提示并显示错误；超时/传输中断仅定向读回，不重发写入。仍无法核实时显示“无法确认是否已保存”，直到新权威更新解除；旧请求的失败/成功不能覆盖新版本或新物理内容。结构冲突的同一 issue signature 保持本地忽略；新的检测元数据（即使描述同为“命令改变”）重新提示。Workspace 和 Scene 都直接合并确认返回的条目，Scene 不再为确认触发整页扫描。

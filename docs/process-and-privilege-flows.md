@@ -49,6 +49,10 @@ OpenWith 监控消息带可空 OpenWithPendingCount；只有明确大于零才�
 
 Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
 
+SetDocumentIconRepair 追加于 PipeCommand 末尾，使用独立的可空布尔 DocumentIconRepairEnabled；只接受 Pipe 认证的交互用户上下文，读写其已加载 HKU Software/Classes，不使用服务 HKCU。状态读取与修复/撤销均进入 catalog 持久 gate，状态响应 IsDocumentIconRepairEnabled 或可空 CanRestoreDocumentIcons 缺失表示旧服务能力未知，不能默认为可操作的关闭。旧 SetDocumentIconProvider 编号/字段保留以避免协议错位，但服务明确拒绝该旧切换语义；新客户端不降级写旧命令。原值保存、物理读回及恢复范围见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
+
+图标修复/状态请求的已知业务异常使用 DOCUMENT_ICON_REPAIR_* 错误码：SOURCE_UNAVAILABLE、CONFLICT、RECOVERY_INVALID、UNAVAILABLE、ACCESS_DENIED、FAILED；重置状态库被恢复记录拦截时返回 DOCUMENT_ICON_REPAIR_MUST_RESTORE。后端 Message 保留诊断用途，前端按错误码本地化，不把英文文本作为协议身份；缺码/未知错误使用本地化兜底，不能假定为成功或重发 mutation。
+
 `AcknowledgeItemState` 使用既有可选 Item 携带原物理来源，客户端仍支持不带 Item 的调用；服务优先从持久来源安全解析。普通传统确认复用认证 HKLM/HKU 原来源核对，不全量扫描。前端 20 秒等待后另用 10 秒只读核对，传输断开同样不证明未提交，不能重发确认猜结果。
 
 `PurgeDeletedItems` 追加在 PipeCommand 末尾，请求 DeletedItemsPurge 包含分类及固定 Id/DeletedAtUtc 清单（最多 4096、拒绝重复身份），响应返回带删除时间的 PurgedItems、SkippedItemIds 和 BackupCleanupFailedItemIds。服务一次状态提交后清理备份；返回字段缺失或旧服务不支持时明确提示更新，不拆成单项兼容写循环。DeletedItemsPurged 通知先于直响应发布并限定认证 SID，客户端按删除时间及缓存代次处理，不能让迟到清理删除已恢复/重新删除的行。超时只刷新核对记录，不能凭快照缺失声称备份已清理。

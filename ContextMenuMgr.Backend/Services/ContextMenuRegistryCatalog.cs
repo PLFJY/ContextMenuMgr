@@ -3167,6 +3167,12 @@ public sealed class ContextMenuRegistryCatalog
     public async Task<PipeResponse> ResetStateDatabaseAsync(CancellationToken cancellationToken)
         => await RunPersistentStateOperationAsync(async () =>
         {
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            if (states.Values.Any(state => state.DocumentIconRepair is { } repair
+                && (repair.Backups is null || repair.Backups.Count > 0)))
+                return new PipeResponse { Success = false,
+                    ErrorCode = PipeErrorCodes.DocumentIconRepairMustRestore,
+                    Message = "Turn off document icon repair before resetting the state database, so its original icon settings can be restored." };
             await _stateStore.ResetAsync(cancellationToken);
             _backupService.ClearCurrentHostBackups();
 
@@ -3431,37 +3437,125 @@ public sealed class ContextMenuRegistryCatalog
         };
     }
 
-    public OfficeSuiteCoexistenceStatus GetOfficeSuiteCoexistenceStatus(BackendUserContext? userContext)
-        => _officeCoexistenceDetector.Detect(userContext);
+    private static string DocumentIconRepairStateId(string sid) => "internal:document-icon-repair|" + sid;
 
-    public async Task<PipeResponse> SetDocumentIconProviderAsync(
+    public Task<OfficeSuiteCoexistenceStatus> GetOfficeSuiteCoexistenceStatusAsync(
+        BackendUserContext? userContext, CancellationToken cancellationToken)
+        => RunPersistentStateOperationAsync(async () =>
+        {
+            var status = _officeCoexistenceDetector.Detect(userContext);
+            if (userContext is null) return status with { IsDocumentIconRepairEnabled = null };
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            var record = states.GetValueOrDefault(DocumentIconRepairStateId(userContext.Sid));
+            if (record is not null && record.DocumentIconRepair is null)
+                throw new InvalidDataException("The document icon recovery record is incomplete.");
+            var repair = record?.DocumentIconRepair;
+            if (repair is not null && (repair.Backups is null || !repair.Enabled && repair.Backups.Count > 0))
+                throw new InvalidDataException("The document icon recovery record is inconsistent.");
+            if (repair is not null && !string.Equals(repair.UserSid, userContext.Sid, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The document icon recovery record belongs to another user.");
+            using var user = Registry.Users.OpenSubKey($@"{userContext.Sid}\Software\Classes")
+                ?? throw new IOException("The frontend user's registry is unavailable.");
+            using var machine = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Classes")!;
+            var applied = false;
+            try { applied = DocumentIconRepairMutation.IsHealthy(user, machine); }
+            catch (Exception ex) { _logger.LogFireAndForget($"WpsDocumentIconRepairReadBackFailed: Sid={userContext.Sid}, Error={ex.Message}."); }
+            return status with { IsDocumentIconRepairEnabled = repair?.Enabled ?? applied,
+                IsDocumentIconRepairApplied = applied, CanRestoreDocumentIcons = repair is { Enabled: true } && repair.Backups.Count > 0 };
+        }, cancellationToken);
+
+    public async Task<PipeResponse> SetDocumentIconRepairAsync(
         BackendUserContext userContext,
-        DocumentIconProvider provider,
+        bool enable,
         CancellationToken cancellationToken)
     {
         return await RunPersistentStateOperationAsync(async () =>
         {
-            var response = _officeCoexistenceDetector.SetDocumentIconProvider(userContext, provider);
-            if (!response.Success)
+            var states = await _stateStore.LoadAsync(cancellationToken);
+            var id = DocumentIconRepairStateId(userContext.Sid);
+            var previous = states.GetValueOrDefault(id);
+            var repair = previous?.DocumentIconRepair;
+            if (previous is not null && repair is null)
+                throw new InvalidDataException("The document icon recovery record is incomplete.");
+            if (repair is not null && (repair.Backups is null || !repair.Enabled && repair.Backups.Count > 0))
+                throw new InvalidDataException("The document icon recovery record is inconsistent.");
+            if (repair is not null && !string.Equals(repair.UserSid, userContext.Sid, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The document icon recovery record belongs to another user.");
+            if (!enable && (repair is null || !repair.Enabled))
             {
-                return response;
+                using var currentUser = Registry.Users.OpenSubKey($@"{userContext.Sid}\Software\Classes")
+                    ?? throw new IOException("The frontend user's registry is unavailable.");
+                using var currentMachine = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Classes")!;
+                var healthy = DocumentIconRepairMutation.IsHealthy(currentUser, currentMachine);
+                states[id] = new PersistedContextMenuState { Id = id, SourceRootPath = "internal:document-icon-repair",
+                    DocumentIconRepair = new() { UserSid = userContext.Sid, Enabled = false } };
+                await _stateStore.SaveAsync(states, cancellationToken);
+                return new PipeResponse { Success = true, Message = "Document icon repair disabled; current icons were preserved.",
+                    OfficeSuiteCoexistence = _officeCoexistenceDetector.Detect(userContext) with
+                    { IsDocumentIconRepairEnabled = false, IsDocumentIconRepairApplied = healthy,
+                        CanRestoreDocumentIcons = false } };
             }
-
-            await RecordUserSelectedDocumentIconProviderCoreAsync(userContext, cancellationToken);
-            return response;
+            if (enable && repair?.Enabled != true && !_officeCoexistenceDetector.Detect(userContext).IsCoexistenceActive)
+                throw new DocumentIconRepairException(PipeErrorCodes.DocumentIconRepairUnavailable,
+                    "WPS/Microsoft Office co-existence is not active.");
+            using var user = Registry.Users.OpenSubKey($@"{userContext.Sid}\Software\Classes", writable: true)
+                ?? throw new IOException("The frontend user's registry is unavailable.");
+            using var machine = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Classes")!;
+            if (repair?.Enabled != true)
+                repair = new PersistedDocumentIconRepair { UserSid = userContext.Sid,
+                    Backups = DocumentIconRepairMutation.Capture(user, machine) };
+            var mutation = new DocumentIconRepairMutation(user, machine, repair.Backups, enable);
+            // Persist originals before the first physical change. An interrupted
+            // enable retains its recovery record; Disable can safely finish undo.
+            if (enable && previous?.DocumentIconRepair?.Enabled != true)
+            {
+                states[id] = new PersistedContextMenuState { Id = id, SourceRootPath = "internal:document-icon-repair",
+                    DocumentIconRepair = repair };
+                await _stateStore.SaveAsync(states, cancellationToken);
+            }
+            try
+            {
+                mutation.Apply(user);
+                if (enable && !DocumentIconRepairMutation.IsApplied(user, machine, repair.Backups))
+                    throw new IOException("The document icon repair could not be confirmed.");
+                if (!enable)
+                {
+                    states[id] = new PersistedContextMenuState { Id = id, SourceRootPath = "internal:document-icon-repair",
+                        DocumentIconRepair = new() { UserSid = userContext.Sid, Enabled = false } };
+                    await _stateStore.SaveAsync(states, CancellationToken.None);
+                }
+            }
+            catch
+            {
+                var rolledBack = mutation.TryRollback(_logger);
+                if (rolledBack && previous is null) states.Remove(id);
+                else states[id] = previous ?? new PersistedContextMenuState { Id = id,
+                    SourceRootPath = "internal:document-icon-repair", DocumentIconRepair = repair };
+                try { await _stateStore.SaveAsync(states, CancellationToken.None); }
+                catch (Exception ex) { _logger.LogFireAndForget($"WpsDocumentIconRecoverySaveFailed: Sid={userContext.Sid}, Error={ex.Message}."); }
+                throw;
+            }
+            await RecordUserDocumentIconRepairCoreAsync(userContext, cancellationToken);
+            ShellChangeNotifier.NotifyAssociationsChanged();
+            await _logger.LogAsync($"WpsDocumentIconRepairChanged: Sid={userContext.Sid}, Enabled={enable}, Originals={repair.Backups.Count}, PhysicalVerified=True.", CancellationToken.None);
+            var applied = DocumentIconRepairMutation.IsHealthy(user, machine);
+            return new PipeResponse { Success = true, Message = enable ? "Document icon overrides repaired." : "Original document icon settings restored.",
+                OfficeSuiteCoexistence = _officeCoexistenceDetector.Detect(userContext) with
+                { IsDocumentIconRepairEnabled = enable, IsDocumentIconRepairApplied = applied,
+                    CanRestoreDocumentIcons = enable && repair.Backups.Count > 0 } };
         }, cancellationToken);
     }
 
-    internal Task RecordUserSelectedDocumentIconProviderAsync(BackendUserContext userContext, CancellationToken cancellationToken)
+    internal Task RecordUserDocumentIconRepairAsync(BackendUserContext userContext, CancellationToken cancellationToken)
         => RunPersistentStateOperationAsync(
             async () =>
             {
-                await RecordUserSelectedDocumentIconProviderCoreAsync(userContext, cancellationToken);
+                await RecordUserDocumentIconRepairCoreAsync(userContext, cancellationToken);
                 return true;
             },
             cancellationToken);
 
-    private async Task RecordUserSelectedDocumentIconProviderCoreAsync(BackendUserContext userContext, CancellationToken cancellationToken)
+    private async Task RecordUserDocumentIconRepairCoreAsync(BackendUserContext userContext, CancellationToken cancellationToken)
     {
         var item = new ContextMenuEntry
         {
@@ -3478,7 +3572,7 @@ public sealed class ContextMenuRegistryCatalog
 
         await AcknowledgeWpsOfficeSyntheticStateAsync(item.Id, item, cancellationToken);
         await _logger.LogAsync(
-            $"WpsDocumentIconProviderUserSelectionAcknowledged: Sid={userContext.Sid}, ItemId={item.Id}. The document icon provider was changed through the frontend, so its WPS icon finding will not enter pending approval.",
+            $"WpsDocumentIconRepairAcknowledged: Sid={userContext.Sid}, ItemId={item.Id}. The document icon repair was explicitly changed through the frontend, so its WPS icon finding will not enter pending approval.",
             cancellationToken);
     }
 
@@ -3976,6 +4070,7 @@ public sealed class ContextMenuRegistryCatalog
 
     private static bool ShouldPruneTransientState(PersistedContextMenuState state)
     {
+        if (state.DocumentIconRepair is not null) return false;
         // Keep the long-lived monitoring baseline for the real monitored roots,
         // but drop neutral leftovers from scene pages or previous buggy versions
         // so they do not pollute future startup comparisons.

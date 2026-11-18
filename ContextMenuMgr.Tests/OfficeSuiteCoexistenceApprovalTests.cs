@@ -9,7 +9,7 @@ namespace ContextMenuMgr.Tests;
 public sealed class OfficeSuiteCoexistenceApprovalTests
 {
     [Fact]
-    public async Task UserSelectedDocumentIconProvider_AcknowledgesOnlyTheIconSyntheticFinding()
+    public async Task DocumentIconRepair_AcknowledgesOnlyTheIconSyntheticFinding()
     {
         var directory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -41,7 +41,7 @@ public sealed class OfficeSuiteCoexistenceApprovalTests
                 new BackendProtectionSettingsStore(Path.Combine(directory, "settings.json"), logger));
             var userContext = new BackendUserContext("S-1-5-21-111-222-333-444", "test", directory, directory, directory, SessionId: 1);
 
-            await catalog.RecordUserSelectedDocumentIconProviderAsync(userContext, CancellationToken.None);
+            await catalog.RecordUserDocumentIconRepairAsync(userContext, CancellationToken.None);
 
             var saved = await stateStore.LoadAsync(CancellationToken.None);
             Assert.False(saved[ContextMenuRegistryCatalog.WpsOfficeDocumentIconSyntheticId].IsPendingApproval);

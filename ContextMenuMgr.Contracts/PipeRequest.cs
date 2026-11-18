@@ -197,4 +197,6 @@ public sealed record PipeRequest
 
     public DocumentIconProvider? DocumentIconProvider { get; init; }
 
+    public bool? DocumentIconRepairEnabled { get; init; }
+
 }

@@ -14,6 +14,7 @@ public partial class SpecialMenuContentView : UserControl
     private SpecialMenuPageViewModel? _viewModel;
     private readonly CollectionContainer _readOnlyRows = new();
     private bool _subscribed;
+    private System.Windows.Window? _owner;
     /// <summary>
     /// Initializes a new instance of the <see cref="SpecialMenuContentView"/> class.
     /// </summary>
@@ -45,13 +46,31 @@ public partial class SpecialMenuContentView : UserControl
     {
         if (_subscribed || _viewModel is null) return;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _owner = System.Windows.Window.GetWindow(this);
+        if (_owner is not null) _owner.Activated += OnOwnerActivated;
         _subscribed = true;
     }
 
     private void Unsubscribe()
     {
         if (_subscribed && _viewModel is not null) _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        if (_owner is not null) _owner.Activated -= OnOwnerActivated;
+        _owner = null;
         _subscribed = false;
+    }
+
+    private async void OnOwnerActivated(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_viewModel is not null) await _viewModel.RefreshDocumentIconRepairOnActivationAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            ContextMenuMgr.Frontend.Services.FrontendDebugLog.Warning(nameof(SpecialMenuContentView),
+                $"Document icon state refresh after activation failed: {ex}");
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -78,20 +97,6 @@ public partial class SpecialMenuContentView : UserControl
         catch (OperationCanceledException)
         {
         }
-    }
-
-    private void OnDocumentIconProviderChecked(object sender, System.Windows.RoutedEventArgs e)
-    {
-        if (DataContext is not SpecialMenuPageViewModel viewModel
-            || sender is not RadioButton { IsChecked: true } radio
-            || viewModel.IsDocumentIconProviderBusy
-            || !viewModel.ShowDocumentIconProvider
-            || !Enum.TryParse<DocumentIconProvider>(radio.Tag as string, out var provider))
-        {
-            return;
-        }
-
-        viewModel.SelectedDocumentIconProvider = provider;
     }
 
 }

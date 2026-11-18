@@ -185,8 +185,8 @@ public interface IBackendClient : IAsyncDisposable
 
     Task<IReadOnlyList<ContextMenuEntry>> GetWpsOfficePendingApprovalsAsync(CancellationToken cancellationToken);
 
-    Task<OfficeSuiteCoexistenceStatus?> SetDocumentIconProviderAsync(
-        DocumentIconProvider provider,
+    Task<OfficeSuiteCoexistenceStatus?> SetDocumentIconRepairAsync(
+        bool enable,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ShellSubMenuItem>> GetShellSubMenuItemsAsync(string parentItemId, CancellationToken cancellationToken);

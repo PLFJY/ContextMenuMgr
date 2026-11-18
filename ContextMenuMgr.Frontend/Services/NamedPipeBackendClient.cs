@@ -988,15 +988,15 @@ public sealed class NamedPipeBackendClient : IBackendClient
         return response.Items;
     }
 
-    public async Task<OfficeSuiteCoexistenceStatus?> SetDocumentIconProviderAsync(
-        DocumentIconProvider provider,
+    public async Task<OfficeSuiteCoexistenceStatus?> SetDocumentIconRepairAsync(
+        bool enable,
         CancellationToken cancellationToken)
     {
         var response = await SendRequestAsync(
             new PipeRequest
             {
-                Command = PipeCommand.SetDocumentIconProvider,
-                DocumentIconProvider = provider
+                Command = PipeCommand.SetDocumentIconRepair,
+                DocumentIconRepairEnabled = enable
             },
             cancellationToken);
         return response.OfficeSuiteCoexistence;

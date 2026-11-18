@@ -1,5 +1,7 @@
 namespace ContextMenuMgr.Contracts;
 
+// Retained only to decode the released SetDocumentIconProvider wire field.
+// That command is rejected; callers must use reversible SetDocumentIconRepair.
 public enum DocumentIconProvider
 {
     MicrosoftOffice = 0,
@@ -26,7 +28,7 @@ public sealed record ProtectedDocumentAssociation
 
     public IReadOnlyList<string> WpsProgIdPrefixes { get; init; } = [];
 
-    public bool SupportsIconProviderToggle { get; init; }
+    public bool SupportsIconRepair { get; init; }
 
     public string? CurrentOwner { get; init; }
 
@@ -47,5 +49,9 @@ public sealed record OfficeSuiteCoexistenceStatus
 
     public IReadOnlyList<ProtectedDocumentAssociation> ProtectedAssociations { get; init; } = [];
 
-    public DocumentIconProvider? CurrentDocumentIconProvider { get; init; }
+    public bool? IsDocumentIconRepairEnabled { get; init; }
+
+    public bool IsDocumentIconRepairApplied { get; init; }
+
+    public bool? CanRestoreDocumentIcons { get; init; }
 }

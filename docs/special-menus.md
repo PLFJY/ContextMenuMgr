@@ -93,14 +93,24 @@ COM，不调用 `IShellLink.Resolve`，也不使用 `WScript.Shell`。SendTo 当
 
 WPS / Microsoft Office 共存保护不会在 ShellNew 或 OpenWith 普通页面追加 File Association / Icon 项。两套 Office 同时存在时，后端只通过待审核专用管道读取当前用户 `HKEY_USERS\<SID>\Software\Classes` 和 ShellNew order key，检测 WPS 注入的 `.pdfwpsshellnew`、`.pptxwpsaicreateshellnew` 等 ShellNew command 项，以及 WPS 对文档关联和图标的用户级覆盖。检测结果是 `special:wps-*` 合成待审核项，不通过 ShellNew ACL lock 修复，也不会自动删除 WPS key。首次运行或重置后，当前已存在的 WPS 合成项会作为已确认 baseline 保存，不进入待审核或外部变化；同时写入 `internal:baseline:wps-office:v1`，即使当前检测结果为零项也要标记扫描已经完成。建立 WPS baseline 后首次出现的新合成项才进入待审核，常规菜单 baseline 不能影响这一判断。
 
-[OfficeSuiteCoexistenceDetector](../ContextMenuMgr.Backend/Services/OfficeSuiteCoexistenceDetector.cs) 与 catalog 专用 WPS Pipe 路径负责检测、持久状态与审核；不是 Applications 注册监控。`GetOfficeSuiteCoexistenceStatus` 提供状态及受保护扩展名，`GetWpsOfficePendingApprovals` 提供审核项；`SetDocumentIconProvider` 仅写前端 HKU Office ProgID `DefaultIcon`，成功后确认本次合成项并通知 Shell。
+[OfficeSuiteCoexistenceDetector](../ContextMenuMgr.Backend/Services/OfficeSuiteCoexistenceDetector.cs) 与 catalog 专用 WPS Pipe 路径负责检测、持久状态与审核；不是 Applications 注册监控。GetOfficeSuiteCoexistenceStatus 提供共存/修复状态及受保护扩展名，GetWpsOfficePendingApprovals 提供审核项。
 
-仅 ShellNew 页面显示 Microsoft Office/WPS 图标来源选择，OpenWith 不展示默认应用 owner 或切换器。处置不写 UserChoice/Hash，不自动删 WPS key；有效默认关联变化与显示图标是不同机制。baseline/离线规则只在[状态与监控](state-and-monitoring.md)维护。
+仅 ShellNew 页面提供“修复 WPS 文档图标覆盖”开关，替代原来的 Microsoft Office/WPS 图标来源单选。开启时，[DocumentIconRepairMutation](../ContextMenuMgr.Backend/Services/DocumentIconRepairMutation.cs) 只捕获当前用户 Office ProgID 的 WPS DefaultIcon 覆盖，并在机器注册中确认仍有有效 Office 图标来源；先持久保存原始值及类型，再删除该用户覆盖值，让合并 Classes 自然继承机器 Office 图标。WPS 自身 ProgID、扩展名默认关联、UserChoice/Hash、机器注册与其它用户均不修改。因此选择 Office 默认打开时使用 Office 图标，选择 WPS 时仍使用 WPS 自己的图标；不再把 WPS 图标复制到 Office 名下，也不固定一份机器图标路径到用户注册。已有正确图标或其它自定义图标保持原样，无覆盖可修复时可开启且保存空恢复清单。
+
+关闭时恢复该次开启前捕获的精确数据和类型；没有原始覆盖就不凭空创建 WPS 覆盖。恢复先核对全部目标：当前值必须仍是修复后的缺失值，或已经等于备份原值；发现其它新值、Office 注册已消失/改变到无法确认、SID 或目标不符时拒绝覆盖并保留恢复记录。所有目标限定在 Catalog 的 Office ProgID/DefaultIcon 白名单，按来源 RegistryView 重新开句柄读回。写入、恢复或最终状态保存失败时逆序条件回滚，保留第三方后续修改；失败写 WpsDocumentIconRollbackFailed，不盲重试。不删除 DefaultIcon 键中的其它值，恢复可能重建已消失的空键，不保证撤销空键本身。
+
+启动/刷新同时读取真实 Office 图标与持久撤销记录：尚无用户选择时，已无 WPS 覆盖且存在可用 Office 图标就显示已修复；用户明确选择后以持久 Enabled 表示开关，Applied 另按实际图标核对。CanRestoreDocumentIcons 独立说明是否具备该用户开启前的原值；没有备份的已正常状态也允许关闭，关闭只保存 Enabled=false 偏好并保留现有图标，Tooltip 说明不会凭空写回旧 WPS 值；重启优先保留主动关闭选择，不用物理正常状态重新打开。有记录的关闭仍精确恢复原值；成功响应通过明确的 Enabled 目标确认操作完成；关闭后保留不含备份的偏好记录，不要求原本正常的图标变坏。再次开启对当前状态重新捕获备份和修复。Excel 的 .xltx/.xltm 使用实际的 Excel.Template/Excel.TemplateMacroEnabled，不把孤立的 Excel.Template.12/Excel.TemplateMacroEnabled.12 覆盖误认成现有文档的修复目标。开启时执行一次修复，不新增持续写回的保护策略；后续 WPS 再次覆盖或修复中断时保留恢复证据，状态只读核对并提示，不能把读取状态变成自动修改。原值保存、退出重启及中断后的恢复语义见[状态库](state-and-monitoring.md)。关闭后恢复 WPS 原覆盖属于用户明确意图，catalog 只确认本次图标合成项，不清其它关联或 ShellNew 审核。通知 Shell 和显示清理图标缓存入口不代表 Explorer 已完成刷新，真实效果须人工验收。
+
+SetDocumentIconRepair 是追加的新 Pipe 命令，布尔目标与认证 SID 由既有用户上下文路由处理，不提升前端、不加载第三方扩展。旧 SetDocumentIconProvider 的枚举位置和请求字段仅用于解析已发布协议；维护决定是拒绝旧切换请求并要求更新前端，不继续保留会伪造 WPS 覆盖的旧实现。旧服务未提供修复状态或撤销能力字段时，前端禁用开关并显示更新/修复服务提示，不回退发送旧命令。
+
+Office 原始图标来源不可用时，弹窗提供三语“修复／取消”。修复由前端在当前用户 Session 启动 ms-settings:defaultapps，提示用户为相应文档选择 Word/Excel/PowerPoint；Windows 要求在系统 UI 中确认默认应用，本程序不写 UserChoice/Hash，不通过提升、驱动、系统策略或模拟点击替用户设置默认应用。返回主窗口激活时只重新读取图标状态，不把设置进程启动、窗口激活或用户取消当成默认应用已改变，不自动重发失败的图标 mutation；图标来源仍缺失时需检查 Office 安装。系统支持边界见微软 [Windows app defaults platform](https://learn.microsoft.com/windows/apps/develop/windows-integration/default-apps-platform) 与 [Launch Windows Settings](https://learn.microsoft.com/windows/apps/develop/launch/launch-settings)。
 
 ## 失败、验证与维护
 
 SendTo/WinX 必须来自 `BackendUserContext` 的 profile/AppData，不能由服务环境变量猜前端目录；SID 不等于桌面 Session。文件系统操作也有部分失败，日志或 `.lnk` 生成不等于 Explorer 接受。
 
 Windows 手验分别检查 SendTo hidden/soft-delete/恢复及动态磁盘只读；WinX 各 group 创建、移动、target/arguments 更改后 hash、显示名/图标修改、恢复单 group 的 backup/回滚和真实 Win+X。新版 Windows 可能额外筛选已 hash 快捷方式，实际可见性仍需验证。对 WPS/Office 共存与单独安装分别测首次/reset、后续注入、图标切换、审核/重启与两 SID 隔离。
+
+DocumentIconRepairMutationTests 使用隔离注册表及真实状态库覆盖删除覆盖后继承、跨实例精确撤销、关联/套件/用户边界、第三方冲突与条件回滚、部分中断及禁止重置丢失恢复记录；OfficeSuiteCoexistenceApprovalTests 保护只确认图标合成项。它们不能替代真实 Pipe 身份、WPS/Office 安装、前端开关和 Explorer 缓存验收。
 
 变更 `SpecialMenuKind`、文件恢复策略、hash 或 WPS 检测/处置时更新本文及相关模型文档；不要在其它指南再复制 ShellNew/OpenWith 实现。

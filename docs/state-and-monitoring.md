@@ -14,6 +14,10 @@
 
 ShellVerb provenance、Win11 `Windows11BlockBackups`、Pin to Start provenance、删除备份和禁用的 SubCommands 引用属于恢复/归属信息；不能作为外部变化身份。各自兼容条件由对应子系统说明。
 
+文档图标修复使用独立的 `internal:document-icon-repair|<SID>` 恢复记录，SourceRootPath 为 `internal:document-icon-repair`，新增 `DocumentIconRepair` 字段包含归属 SID、Enabled 选择及按 Office ProgID 保存的原始默认值/类型；历史记录缺 Enabled 时按 true 读取，保留旧恢复语义。它不参与普通菜单 baseline、Added/Modified 或缺失清理，普通 Load/Merge/Save 与 OpenWith 合并必须保留它；缺修复记录的历史 schema-3 表示尚无显式选择，按物理图标推断显示，不从中伪造旧原值。开启前必须先经 catalog 持久 gate 原子保存备份，保存失败不写注册表；关闭确认物理恢复后才清空备份，并保留 Enabled=false 的空偏好记录；没有原始备份的关闭只保存偏好，不改图标。再次开启从当前物理状态重新捕获原值，不能复用上次关闭后的旧快照。记录先于物理修改保存，进程中断可能留下已修复、部分修复或未修复状态，存在记录不等于 Applied；没有记录也不等于未修复。启动/刷新直接核对物理图标，尚无明确选择时实际已正常即显示已修复；有明确 Enabled 选择则优先使用用户意图，不能以图标正常覆盖主动关闭状态。CanRestoreDocumentIcons 单独表示有无精确撤销依据；无历史原值时不凭空生成旧 WPS 图标，关闭只持久保存偏好。只读状态检查不自动重放。关闭操作允许目标已是备份原值，因而可撤销部分中断；出现其它新值则保留并拒绝覆盖。最终保存失败会条件回滚并保留/重存原恢复记录，保存/回滚仍失败时报告失败并保留不确定性，不能仅凭响应认定状态一致。
+
+任一用户仍有待撤销图标备份或备份完整性无法确认时，显式 ResetStateDatabase 拒绝清空，要求先关闭修复恢复原设置，避免丢失撤销依据；不含备份的单纯开关偏好可随显式重置清除。状态损坏/备份恢复不保证找回最近原值，无法取得原始恢复记录时不能宣称可撤销；历史服务不理解此新增字段，降级前应先关闭修复。物理作用域与 UI/协议兼容见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
+
 ## 原子保存与损坏恢复
 
 同目录唯一 `.tmp-<guid>` → write-through flush/close → 生产 parser 验证 → `File.Replace` current，保留已验证旧 current 为 `.bak`。无 current 时安装新文件；临时文件不是权威 generation，旧于 24 小时的遗留文件 best-effort 清理。

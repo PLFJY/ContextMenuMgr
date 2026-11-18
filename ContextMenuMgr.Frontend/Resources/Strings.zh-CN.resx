@@ -1382,14 +1382,23 @@
   <data name="DefaultDropEffect" xml:space="preserve">
     <value>默认拖放效果</value>
   </data>
-  <data name="DocumentIconProvider" xml:space="preserve">
-    <value>文档图标来源</value>
+  <data name="DocumentIconRepair" xml:space="preserve">
+    <value>修复 WPS 文档图标覆盖</value>
   </data>
-  <data name="DocumentIconProviderDescription" xml:space="preserve">
-    <value>仅切换文档图标，不修改默认打开方式。</value>
+  <data name="DocumentIconRepairDescription" xml:space="preserve">
+    <value>恢复 Office 自己的图标，让文档图标随默认打开方式变化。关闭后恢复开启前的图标设置，不修改默认打开方式。</value>
   </data>
-  <data name="DocumentIconProviderChangedHint" xml:space="preserve">
-    <value>要让对应文件类型成功切换图标，请将该文件类型的默认打开方式设置为当前选择的 Office 应用。如果修改后仍然没有生效，可以尝试点击上方的清空图标缓存按钮。</value>
+  <data name="DocumentIconRepairChangedHint" xml:space="preserve">
+    <value>如果图标尚未刷新，可使用上方的“清理图标缓存”。</value>
+  </data>
+  <data name="DocumentIconRepairNotApplied" xml:space="preserve">
+    <value>图标设置已变化或修复未完成，已保留后续更改。</value>
+  </data>
+  <data name="DocumentIconRepairUncertain" xml:space="preserve">
+    <value>暂时无法确认图标设置，请刷新后再试。</value>
+  </data>
+  <data name="DocumentIconRepairServiceUpdateRequired" xml:space="preserve">
+    <value>请更新或修复后台服务后使用此开关。</value>
   </data>
   <data name="SystemLevelItems" xml:space="preserve">
     <value>系统级项目</value>
@@ -1659,4 +1668,37 @@
   <data name="ApplicationGroupDisableSelected" xml:space="preserve"><value>禁用</value></data>
   <data name="ApplicationGroupSelectAll" xml:space="preserve"><value>选择此应用当前筛选下的全部菜单项</value></data>
   <data name="ApplicationGroupRestore" xml:space="preserve"><value>撤销删除</value></data>
+  <data name="DocumentIconRepairSourceUnavailable" xml:space="preserve">
+    <value>未找到可用的 Microsoft Office 原始图标。请确认 Office 已正确安装后重试。</value>
+  </data>
+  <data name="DocumentIconRepairConflict" xml:space="preserve">
+    <value>其他应用修改了文档图标，已保留其后续更改。请检查当前设置后再试。</value>
+  </data>
+  <data name="DocumentIconRepairRecoveryInvalid" xml:space="preserve">
+    <value>无法可靠读取原始图标备份。为保护现有设置，已停止操作。</value>
+  </data>
+  <data name="DocumentIconRepairUnavailable" xml:space="preserve">
+    <value>需要同时安装 Microsoft Office 和 WPS Office 才能开启此项修复。</value>
+  </data>
+  <data name="DocumentIconRepairAccessDenied" xml:space="preserve">
+    <value>没有权限访问图标设置或修复备份。请确认后台服务正常运行后重试。</value>
+  </data>
+  <data name="DocumentIconRepairFailed" xml:space="preserve">
+    <value>暂时无法修复或还原文档图标。请刷新后重试，详细原因已记录到日志。</value>
+  </data>
+  <data name="DocumentIconRepairMustRestore" xml:space="preserve">
+    <value>请先关闭文档图标修复，恢复原来的图标设置，再重置状态库。</value>
+  </data>
+  <data name="DocumentIconRepairAction" xml:space="preserve">
+    <value>修复</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsPrompt" xml:space="preserve">
+    <value>未找到可用的 Microsoft Office 原始图标。点击“修复”将打开 Windows 默认应用设置，请将相应文档的打开方式设为 Word、Excel 或 PowerPoint。Windows 需要你在系统界面确认。返回本窗口后会重新检测图标状态；如果仍找不到图标来源，请修复 Office 安装。</value>
+  </data>
+  <data name="DocumentIconRepairDefaultAppsFailed" xml:space="preserve">
+    <value>无法打开 Windows 默认应用设置。请前往“设置 → 应用 → 默认应用”，将相应文档的打开方式设为 Microsoft Office。</value>
+  </data>
+  <data name="DocumentIconRepairNoBackupHint" xml:space="preserve">
+    <value>没有开启前的图标备份。关闭此开关时会保留现有图标，并记住关闭状态。</value>
+  </data>
 </root>

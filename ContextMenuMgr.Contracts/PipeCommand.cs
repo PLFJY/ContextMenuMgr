@@ -69,5 +69,6 @@ public enum PipeCommand
     DecideOpenWithReview,
     DeleteFileTypeBatchItem,
     GetFileTypeBatchItemState,
-    PurgeDeletedItems
+    PurgeDeletedItems,
+    SetDocumentIconRepair
 }

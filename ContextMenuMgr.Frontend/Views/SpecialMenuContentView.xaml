@@ -345,40 +345,56 @@
                                 ItemsSource="{Binding DropEffectOptions}"
                                 SelectedItem="{Binding SelectedDropEffect, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
-                        <StackPanel Margin="0,10,0,0" Visibility="{Binding ShowDocumentIconProvider, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <ui:TextBlock
-                                Margin="0,0,0,6"
-                                FontSize="12"
-                                Opacity="0.72"
-                                Text="{Binding DocumentIconProviderLabel}" />
-                            <WrapPanel>
-                                <RadioButton
-                                    Margin="0,0,16,0"
-                                    Checked="OnDocumentIconProviderChecked"
-                                    Content="{Binding MicrosoftOfficeLabel}"
-                                    IsChecked="{Binding IsMicrosoftDocumentIconProviderSelected, Mode=OneWay}"
-                                    IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                    Tag="MicrosoftOffice" />
-                                <RadioButton
-                                    Checked="OnDocumentIconProviderChecked"
-                                    Content="{Binding WpsOfficeLabel}"
-                                    IsChecked="{Binding IsWpsDocumentIconProviderSelected, Mode=OneWay}"
-                                    IsEnabled="{Binding CanChangeDocumentIconProvider}"
-                                    Tag="WpsOffice" />
-                            </WrapPanel>
-                            <ui:TextBlock
+                        <StackPanel Margin="0,10,0,0" Visibility="{Binding ShowDocumentIconRepair, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Margin="0,0,12,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="14"
+                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                    Text="{Binding DocumentIconRepairLabel}" />
+                                <controls:AsyncToggleSwitch
+                                    Grid.Column="1"
+                                    AutomationProperties.Name="{Binding DocumentIconRepairLabel}"
+                                    CanToggle="{Binding CanChangeDocumentIconRepair}"
+                                    IsBusy="{Binding IsDocumentIconRepairBusy}"
+                                    IsChecked="{Binding IsDocumentIconRepairEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    ToolTipService.ShowOnDisabled="True">
+                                    <controls:AsyncToggleSwitch.ToolTip>
+                                        <ToolTip
+                                            MaxWidth="360"
+                                            DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <StackPanel>
+                                                <TextBlock
+                                                    MaxWidth="336"
+                                                    Text="{Binding DocumentIconRepairDescription}"
+                                                    TextWrapping="Wrap" />
+                                                <TextBlock
+                                                    MaxWidth="336"
+                                                    Margin="0,8,0,0"
+                                                    Text="{Binding DocumentIconRepairChangedHint}"
+                                                    TextWrapping="Wrap" />
+                                                <TextBlock
+                                                    MaxWidth="336"
+                                                    Margin="0,8,0,0"
+                                                    Text="{Binding DocumentIconRepairRestoreHint}"
+                                                    TextWrapping="Wrap"
+                                                    Visibility="{Binding DocumentIconRepairRestoreHint, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
+                                            </StackPanel>
+                                        </ToolTip>
+                                    </controls:AsyncToggleSwitch.ToolTip>
+                                </controls:AsyncToggleSwitch>
+                            </Grid>
+                            <TextBlock
                                 Margin="0,4,0,0"
-                                FontSize="11"
-                                Opacity="0.65"
-                                Text="{Binding DocumentIconProviderDescription}"
-                                TextWrapping="Wrap" />
-                            <ui:TextBlock
-                                Margin="0,4,0,0"
-                                FontSize="11"
-                                Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
-                                Text="{Binding DocumentIconProviderChangedHint}"
+                                Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                Text="{Binding DocumentIconRepairStatusText}"
                                 TextWrapping="Wrap"
-                                Visibility="{Binding ShowDocumentIconProviderChangedHint, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                Visibility="{Binding DocumentIconRepairStatusText, Converter={StaticResource NullOrEmptyToVisibilityConverter}}" />
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>

@@ -24,4 +24,11 @@ public static class PipeErrorCodes
     public const string RegistryMutationRollbackConflict = "REGISTRY_MUTATION_ROLLBACK_CONFLICT";
     public const string FileTypeActivationVerbProtected = "FILE_TYPE_ACTIVATION_VERB_PROTECTED";
     public const string ShellVerbVisibilityProvenanceMissing = "SHELL_VERB_VISIBILITY_PROVENANCE_MISSING";
+    public const string DocumentIconRepairSourceUnavailable = "DOCUMENT_ICON_REPAIR_SOURCE_UNAVAILABLE";
+    public const string DocumentIconRepairConflict = "DOCUMENT_ICON_REPAIR_CONFLICT";
+    public const string DocumentIconRepairRecoveryInvalid = "DOCUMENT_ICON_REPAIR_RECOVERY_INVALID";
+    public const string DocumentIconRepairUnavailable = "DOCUMENT_ICON_REPAIR_UNAVAILABLE";
+    public const string DocumentIconRepairAccessDenied = "DOCUMENT_ICON_REPAIR_ACCESS_DENIED";
+    public const string DocumentIconRepairFailed = "DOCUMENT_ICON_REPAIR_FAILED";
+    public const string DocumentIconRepairMustRestore = "DOCUMENT_ICON_REPAIR_MUST_RESTORE";
 }

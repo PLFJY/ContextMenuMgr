@@ -222,6 +222,8 @@ public sealed class PersistedContextMenuState
     /// </summary>
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
+    public PersistedDocumentIconRepair? DocumentIconRepair { get; set; }
+
     /// <summary>
     /// Gets or sets the number of consecutive settled snapshots where this item was missing.
     /// </summary>
@@ -317,6 +319,19 @@ public sealed class PersistedContextMenuState
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
     }
+}
+
+public sealed class PersistedDocumentIconRepair
+{
+    public string UserSid { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public List<PersistedDocumentIconBackup> Backups { get; set; } = [];
+}
+
+public sealed class PersistedDocumentIconBackup
+{
+    public string ProgId { get; set; } = string.Empty;
+    public PersistedRegistryValueSnapshot Original { get; set; } = new();
 }
 
 public sealed class PersistedShellVerbVisibilityProvenance

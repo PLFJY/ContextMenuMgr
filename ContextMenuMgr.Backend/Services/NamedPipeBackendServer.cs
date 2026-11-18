@@ -237,6 +237,12 @@ public sealed class NamedPipeBackendServer
                     response = new PipeResponse
                     {
                         Success = false,
+                        ErrorCode = ex is DocumentIconRepairException repairError ? repairError.ErrorCode
+                            : envelope.Request.Command is PipeCommand.SetDocumentIconRepair or PipeCommand.GetOfficeSuiteCoexistenceStatus
+                                ? ex is InvalidDataException ? PipeErrorCodes.DocumentIconRepairRecoveryInvalid
+                                    : ex is UnauthorizedAccessException or System.Security.SecurityException ? PipeErrorCodes.DocumentIconRepairAccessDenied
+                                    : PipeErrorCodes.DocumentIconRepairFailed
+                                : null,
                         Message = ex.Message
                     };
                 }
@@ -611,8 +617,8 @@ public sealed class NamedPipeBackendServer
                 {
                     Success = true,
                     Message = "Office suite co-existence status loaded.",
-                    OfficeSuiteCoexistence = _catalog.GetOfficeSuiteCoexistenceStatus(
-                        await ResolveFrontendUserContextAsync(stream, cancellationToken))
+                    OfficeSuiteCoexistence = await _catalog.GetOfficeSuiteCoexistenceStatusAsync(
+                        await ResolveFrontendUserContextAsync(stream, cancellationToken), cancellationToken)
                 },
             PipeCommand.GetWpsOfficePendingApprovals
                 => new PipeResponse
@@ -623,8 +629,10 @@ public sealed class NamedPipeBackendServer
                         cancellationToken,
                         await ResolveFrontendUserContextAsync(stream, cancellationToken))
                 },
-            PipeCommand.SetDocumentIconProvider when request.DocumentIconProvider is not null
-                => await HandleSetDocumentIconProviderAsync(request.DocumentIconProvider.Value, stream, cancellationToken),
+            PipeCommand.SetDocumentIconRepair when request.DocumentIconRepairEnabled is not null
+                => await HandleSetDocumentIconRepairAsync(request.DocumentIconRepairEnabled.Value, stream, cancellationToken),
+            PipeCommand.SetDocumentIconProvider
+                => new PipeResponse { Success = false, Message = "Update the frontend to use reversible document icon repair." },
             _ => new PipeResponse
             {
                 Success = false,
@@ -647,8 +655,8 @@ public sealed class NamedPipeBackendServer
             request.Item);
     }
 
-    private async Task<PipeResponse> HandleSetDocumentIconProviderAsync(
-        DocumentIconProvider provider,
+    private async Task<PipeResponse> HandleSetDocumentIconRepairAsync(
+        bool enable,
         NamedPipeServerStream stream,
         CancellationToken cancellationToken)
     {
@@ -658,11 +666,12 @@ public sealed class NamedPipeBackendServer
             return new PipeResponse
             {
                 Success = false,
+                ErrorCode = PipeErrorCodes.DocumentIconRepairFailed,
                 Message = "Cannot change document icons: frontend user context is not available."
             };
         }
 
-        return await _catalog.SetDocumentIconProviderAsync(userContext, provider, cancellationToken);
+        return await _catalog.SetDocumentIconRepairAsync(userContext, enable, cancellationToken);
     }
 
     private async Task<PipeResponse> HandleSetEnhanceMenuItemEnabledAsync(

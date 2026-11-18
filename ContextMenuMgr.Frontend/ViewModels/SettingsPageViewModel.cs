@@ -661,6 +661,12 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
                 _localization.Translate("MaintenanceResetStateSucceeded"),
                 _localization.Translate("DebugToolsTitle"));
         }
+        catch (BackendRequestException ex) when (ex.ErrorCode == PipeErrorCodes.DocumentIconRepairMustRestore)
+        {
+            FrontendDebugLog.Warning(nameof(SettingsPageViewModel), $"State reset refused: {ex}");
+            await FrontendMessageBox.ShowErrorAsync(DocumentIconRepairFeedback.GetMessage(ex, _localization),
+                _localization.Translate("DebugToolsTitle"));
+        }
         catch (Exception ex)
         {
             await FrontendMessageBox.ShowErrorAsync(
