@@ -3,177 +3,84 @@ using Microsoft.Win32;
 
 namespace ContextMenuMgr.Backend.Services;
 
-/// <summary>
-/// Manages the per-user Windows 11 classic context menu compatibility registry tweak.
-/// </summary>
-public sealed class Win11ClassicContextMenuService
+/// <summary>Authenticated per-user Windows 11 classic context menu configuration.</summary>
+public sealed class Win11ClassicContextMenuService(FileLogger logger)
 {
-    private const string TweakClsid = "{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
-    private const string TweakKeyPath = $@"Software\Classes\CLSID\{TweakClsid}";
-    private const string InprocServer32KeyPath = $@"{TweakKeyPath}\InprocServer32";
-    private const string MissingUserContextMessage = "User context is required for Windows 11 context menu configuration.";
-    private const string UnsupportedOsMessage = "This setting only applies to Windows 11.";
+    private const string ClsidPath = @"Software\Classes\CLSID";
+    private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    private readonly FileLogger _logger;
+    public Task<PipeResponse> GetDisabledAsync(Guid? operationId, BackendUserContext? userContext,
+        CancellationToken cancellationToken) => ExecuteAsync(null, operationId, userContext, cancellationToken);
 
-    public Win11ClassicContextMenuService(FileLogger logger)
+    public Task<PipeResponse> SetDisabledAsync(bool disabled, Guid? operationId, BackendUserContext? userContext,
+        CancellationToken cancellationToken) => ExecuteAsync(disabled, operationId, userContext, cancellationToken);
+
+    private async Task<PipeResponse> ExecuteAsync(bool? disabled, Guid? operationId,
+        BackendUserContext? context, CancellationToken cancellationToken)
     {
-        _logger = logger;
-    }
-
-    public async Task<PipeResponse> GetDisabledAsync(
-        Guid? operationId,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
-    {
+        var entered = false;
+        Win11ClassicContextMenuMutation? mutation = null;
         try
         {
-            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+            if (!OperatingSystem.IsWindows() || !SupportsOverrides(Environment.OSVersion.Version))
+                return new() { Success = disabled != true, ClientOperationId = operationId,
+                    Message = "This setting only applies to Windows 11.", Win11ModernContextMenuDisabled = false,
+                    Win11ClassicContextMenuChanged = false };
+            if (context is null) throw new InvalidOperationException("Authenticated interactive user context is required.");
+            await Gate.WaitAsync(cancellationToken);
+            entered = true;
+            using var root = OpenRoot(context, disabled is not null);
+            var changed = false;
+            string status;
+            try
             {
-                await _logger.LogAsync("Win11ClassicContextMenuGet: Result=UnsupportedOs.", cancellationToken);
-                return new PipeResponse
+                if (disabled is not null)
                 {
-                    Success = true,
-                    Message = UnsupportedOsMessage,
-                    ClientOperationId = operationId,
-                    Win11ModernContextMenuDisabled = false
-                };
+                    mutation = new(root, ClsidPath, disabled.Value);
+                    changed = mutation.Apply(cancellationToken);
+                }
+                // Reopen the authenticated hive and all targets after mutation.
+                using var fresh = OpenRoot(context);
+                status = Win11ClassicContextMenuMutation.ReadStatus(fresh, ClsidPath);
+                if (disabled is not null && (!mutation!.Verify()
+                    || (status == "Complete") != disabled.Value || status == "Conflict"))
+                    throw new InvalidOperationException("Compatibility registry state changed during verification.");
             }
-
-            if (userContext is null)
+            catch
             {
-                await _logger.LogAsync(RuntimeLogLevel.Warning, "Win11ClassicContextMenuGet: Sid=<null>, Result=Failed, Reason=MissingUserContext.", cancellationToken);
-                return Failure(MissingUserContextMessage, operationId);
+                if (mutation is not null)
+                {
+                    var rollback = mutation.TryRollback();
+                    await logger.LogAsync(RuntimeLogLevel.Warning,
+                        $"Win11ClassicContextMenuRollback: Sid={context.Sid}, Succeeded={rollback.Succeeded}, Conflict={rollback.Conflict}, Error={rollback.Error}", CancellationToken.None);
+                    if (!rollback.Succeeded)
+                        throw new InvalidOperationException($"Compatibility operation failed; rollback could not be fully verified: {rollback.Error}. Refresh before retrying.");
+                }
+                throw;
             }
-
-            using var userRoot = OpenUserRegistryRoot(userContext, writable: false);
-            using var inprocKey = userRoot.OpenSubKey(InprocServer32KeyPath, writable: false);
-            var disabled = inprocKey is not null;
-            var rawDefault = inprocKey?.GetValue(string.Empty, null);
-
-            // This tweak is commonly represented by the presence of InprocServer32
-            // with either an empty default value or no material default value.
-            await _logger.LogAsync(
-                $"Win11ClassicContextMenuGet: Sid={userContext.Sid}, Path={DiagnosticLogFormatter.FormatUserHivePath(userContext, InprocServer32KeyPath)}, Exists={inprocKey is not null}, DefaultValue={DiagnosticLogFormatter.FormatRegistryValueData(rawDefault)}, Result={disabled}.",
-                cancellationToken);
-
-            return new PipeResponse
-            {
-                Success = true,
-                Message = disabled
-                    ? "Windows 11 modern context menu is disabled."
-                    : "Windows 11 modern context menu is enabled.",
-                ClientOperationId = operationId,
-                Win11ModernContextMenuDisabled = disabled
-            };
+            await logger.LogAsync($"Win11ClassicContextMenu: Sid={context.Sid}, Status={status}, Changed={changed}.", CancellationToken.None);
+            return new() { Success = true, ClientOperationId = operationId,
+                Win11ModernContextMenuDisabled = status == "Complete", Win11ClassicContextMenuStatus = status,
+                Win11ClassicContextMenuChanged = changed,
+                Message = $"Windows 11 compatibility override state: {status}." };
         }
         catch (Exception ex)
         {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to read Windows 11 context menu setting: {ex}", cancellationToken);
-            return Failure(ex.Message, operationId);
+            await logger.LogAsync(RuntimeLogLevel.Error, $"Win11ClassicContextMenu: Sid={context?.Sid}, Failed={ex}", CancellationToken.None);
+            return new() { Success = false, ClientOperationId = operationId, Message = ex.Message };
         }
+        finally { if (entered) Gate.Release(); }
     }
 
-    public async Task<PipeResponse> SetDisabledAsync(
-        bool disabled,
-        Guid? operationId,
-        BackendUserContext? userContext,
-        CancellationToken cancellationToken)
+    // Both overrides on every supported Windows 11 version; rollout is not
+    // inferred from the marketing release or a cumulative-update build number.
+    internal static bool SupportsOverrides(Version version) => version >= new Version(10, 0, 22000);
+
+    private static RegistryKey OpenRoot(BackendUserContext context, bool writable = false)
     {
-        try
-        {
-            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
-            {
-                await _logger.LogAsync($"Win11ClassicContextMenuSet: Disabled={disabled}, Result=UnsupportedOs.", cancellationToken);
-                return disabled
-                    ? Failure(UnsupportedOsMessage, operationId)
-                    : new PipeResponse
-                    {
-                        Success = true,
-                        Message = UnsupportedOsMessage,
-                        ClientOperationId = operationId,
-                        Win11ModernContextMenuDisabled = false
-                    };
-            }
-
-            if (userContext is null)
-            {
-                await _logger.LogAsync(RuntimeLogLevel.Warning, $"Win11ClassicContextMenuSet: Sid=<null>, Disabled={disabled}, Result=Failed, Reason=MissingUserContext.", cancellationToken);
-                return Failure(MissingUserContextMessage, operationId);
-            }
-
-            using var userRoot = OpenUserRegistryRoot(userContext, writable: true);
-            if (disabled)
-            {
-                using var inprocKey = userRoot.CreateSubKey(InprocServer32KeyPath, writable: true)
-                    ?? throw new InvalidOperationException("Unable to create the Windows 11 context menu registry key.");
-                inprocKey.SetValue(string.Empty, string.Empty, RegistryValueKind.String);
-                await _logger.LogAsync(
-                    DiagnosticLogFormatter.BuildRegistryOperationLog(
-                        "Win11ClassicContextMenuSetDefaultValue",
-                        DiagnosticLogFormatter.FormatUserHivePath(userContext, InprocServer32KeyPath),
-                        string.Empty,
-                        RegistryValueKind.String,
-                        string.Empty,
-                        writable: true,
-                        result: $"Success, Sid={userContext.Sid}"),
-                    cancellationToken);
-            }
-            else
-            {
-                using var clsidRoot = userRoot.OpenSubKey(@"Software\Classes\CLSID", writable: true);
-                clsidRoot?.DeleteSubKeyTree(TweakClsid, throwOnMissingSubKey: false);
-                await _logger.LogAsync(
-                    DiagnosticLogFormatter.BuildRegistryOperationLog(
-                        "Win11ClassicContextMenuDeleteKey",
-                        DiagnosticLogFormatter.FormatUserHivePath(userContext, TweakKeyPath),
-                        null,
-                        null,
-                        null,
-                        writable: true,
-                        result: $"Success, Sid={userContext.Sid}"),
-                    cancellationToken);
-            }
-
-            return new PipeResponse
-            {
-                Success = true,
-                Message = "Windows 11 context menu setting saved. Restart File Explorer or sign out and back in for it to take effect.",
-                ClientOperationId = operationId,
-                Win11ModernContextMenuDisabled = disabled
-            };
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Warning, $"Permission denied updating Windows 11 context menu setting: {ex}", cancellationToken);
-            return Failure(
-                "Cannot write to the current user's registry hive. Please ensure the backend service is running with adequate privileges.",
-                operationId);
-        }
-        catch (Exception ex)
-        {
-            await _logger.LogAsync(RuntimeLogLevel.Error, $"Failed to update Windows 11 context menu setting: {ex}", cancellationToken);
-            return Failure(ex.Message, operationId);
-        }
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users,
+            Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
+        return users.OpenSubKey(context.Sid, writable)
+            ?? throw new InvalidOperationException($"The registry hive for user {context.Sid} is not loaded.");
     }
-
-    private RegistryKey OpenUserRegistryRoot(BackendUserContext userContext, bool writable)
-    {
-        if (string.IsNullOrWhiteSpace(userContext.Sid))
-        {
-            throw new InvalidOperationException("The frontend user SID is not available.");
-        }
-
-        var root = Registry.Users.OpenSubKey(userContext.Sid, writable)
-            ?? throw new InvalidOperationException($"The registry hive for user {userContext.Sid} is not loaded.");
-        _logger.LogFireAndForget($"OpenUserRegistryRoot: Sid={userContext.Sid}, Writable={writable}, Result=Success.");
-        return root;
-    }
-
-    private static PipeResponse Failure(string message, Guid? operationId) => new()
-    {
-        Success = false,
-        Message = message,
-        ClientOperationId = operationId
-    };
 }

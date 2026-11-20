@@ -169,7 +169,7 @@
                     Margin="0,16,0,0"
                     Content="{Binding Win11ModernContextMenuDisabledLabel}"
                     IsChecked="{Binding Win11ModernContextMenuDisabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    IsEnabled="{Binding IsWin11ModernContextMenuSupported}" />
+                    IsEnabled="{Binding IsWin11ContextMenuSettingEnabled}" />
                 <ui:TextBlock
                     Margin="0,8,0,0"
                     Opacity="0.72"

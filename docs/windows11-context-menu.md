@@ -63,7 +63,22 @@ SystemCommandStore 使用 ShellVerbVisibility 读写，不进入上述 Blocked a
 
 OtherRules/GuidBlock 是机器 CLSID 全局规则。不要将 Windows.Share/SendToMyPhone 的 ExplorerCommandHandler GUID 加入 GUID Lock 来绕过保护；系统 handler 共享/链路可能使现代菜单不可用或回落 classic，需具体 Explorer 证据，不能保证安全。
 
-[Win11ClassicContextMenuService](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuService.cs) 是另一个设置：在前端 HKU `Software/Classes/CLSID/{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}/InprocServer32` 写空默认值启用经典菜单；恢复默认删除该 CLSID。不写服务 HKCU/HKLM、不复用 BlocksService。前端成功后 MarkRequired，用户点击顶部 Explorer restart 或重新登录；不自动重启，也不宣称所有将来 Windows build 继续支持该 tweak。
+[Win11ClassicContextMenuService](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuService.cs) 是独立的全局经典菜单设置，不复用 Blocked/Packaged COM 控制域。正常请求走认证 Pipe，在 native registry view 的 `HKEY_USERS/<认证 SID>/Software/Classes/CLSID` 下管理以下两个 `InprocServer32` 默认值：
+
+- `{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}`
+- `{51668040-5e31-4023-bbe3-149163bd80f1}`
+
+**兼容策略/设计约束：** Windows >=10.0.22000 统一使用双 CLSID，两者均须实际存在空默认 `REG_SZ` 才是 Complete。功能推送不由 24H2/25H2/26H2 名称或单一 build 阈值推断；旧 Windows 11 也配置两个目标，旧单 CLSID 安装报告 Incomplete，用户再次开启补齐，不在读取时自动修改。Windows 10 保持读取 false、开启失败、恢复关闭成功的既有行为。此策略管理已知兼容覆盖，不保证任何 build 的 Explorer 必然接受；参考 [双 CLSID 实现](https://github.com/TongenShen/win11-classic-context-menu) 与 [KB5127936](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/10/kb5127936-windows-11-25h2-26h2-update)。
+
+[Win11ClassicContextMenuMutation](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuMutation.cs) 在一次逻辑操作中预读两个目标，保存默认值的存在性/类型/内容及原键是否存在，并预检现有目标写权限。空键缺默认值可补齐；非空或非 `REG_SZ` 默认值属于 Conflict，开启和恢复均在首次写入前拒绝，不接管 COM server。保留命名值和其它子键；恢复只删空默认值，并仅清理仍为空的 InprocServer32/CLSID，绝不 DeleteSubKeyTree。重复开启不重写完整覆盖，重复恢复无操作。
+
+查询/写入共用服务 gate，查询不会读到本服务提交的中间态。写前重新核对原值，写后通过新 handle 读回全部目标并重开认证用户 hive，成功响应描述实际状态。失败反向复用 `RegistryValueMutationTransaction` 的条件回滚，仅当前值仍等于本次写入值时恢复原值；本次新建的空目标键可清理，第三方命名值/子键保持不变。回滚失败、hive unload、权限失败和外部冲突记录 SID/结果并返回失败。开始修改前响应取消，修改开始后取消/断连不打断提交或补偿；不承诺硬杀/断电恢复。注册表没有跨进程 value compare-and-swap，写前/回滚前/空键删除前检查仍存在外部写入竞争窗口，不宣称跨进程原子事务或自动重试不确定写入。
+
+原 Pipe commands 与 `Win11ModernContextMenuDisabled` 布尔字段保留，增加可选 `Win11ClassicContextMenuStatus`（Complete/Absent/Incomplete/Conflict）与 `Win11ClassicContextMenuChanged`，旧客户端可忽略新增字段；新客户端保存时要求后端返回目标布尔值及 Changed，旧服务未报告 Changed 则提示更新服务并定向刷新，不猜测成功或重启需求。Absent 指两个 InprocServer32 都不存在；缺默认值、仅一个完整或混合配置为 Incomplete；错误类型/非空值为 Conflict。只有 Complete 映射 true，读取异常返回失败且不填布尔值。恢复后有无关内容的键可以保留，布尔 false 表示完整双覆盖不存在，不等于已观察 Explorer 现代菜单。
+
+前端以注册表为真值，本地设置仅镜像。加载、保存、重置共用前端 gate，提交立即禁用该开关以阻止重复点击；失败/超时只定向查询一次，不重发写入，仍无法确认则禁用到后续权威加载。软件设置重置先调用同一恢复逻辑，失败传播并停止本地默认值重置。仅后端验证成功且 Changed 时 MarkRequired；用户点击顶部 Explorer restart 或重新登录，不自动重启。前端协调规则见[前端异步操作](frontend-wpf-ui.md#异步操作与结果)。
+
+**Windows 集成待验收：** 临时 registry 测试核验值/类型、旧单键迁移、权限失败补偿和外部冲突；不同真实加载 SID、profile unload、服务 Pipe 丢响应、真实 WPF 输入/重置，以及旧 Windows 11 和受影响 build 上的“开启→用户重启 Explorer→经典菜单→关闭→用户重启 Explorer→现代菜单”仍须独立实机核验。
 
 Win11 **应用开关**本身不标记/执行 Explorer restart，关闭并重新打开菜单观察效果；这描述当前 UI 契约，不是保证 Windows 无缓存或每个 build 都即时表现正确。
 

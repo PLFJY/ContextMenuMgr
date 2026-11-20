@@ -84,6 +84,11 @@ public sealed record PipeResponse
     /// </summary>
     public bool? Win11ModernContextMenuDisabled { get; init; }
 
+    /// <summary>Complete, Absent, Incomplete or Conflict; null on older backends.</summary>
+    public string? Win11ClassicContextMenuStatus { get; init; }
+
+    public bool? Win11ClassicContextMenuChanged { get; init; }
+
     public bool? ShellNewOrderLocked { get; init; }
 
     public OfficeSuiteCoexistenceStatus? OfficeSuiteCoexistence { get; init; }

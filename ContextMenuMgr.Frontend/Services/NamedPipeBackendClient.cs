@@ -903,18 +903,23 @@ public sealed class NamedPipeBackendClient : IBackendClient
             },
             cancellationToken);
 
-        return response.Win11ModernContextMenuDisabled ?? false;
+        return response.Win11ModernContextMenuDisabled
+            ?? throw new InvalidOperationException("The backend did not report the context menu state.");
     }
 
-    public async Task SetWin11ModernContextMenuDisabledAsync(bool disabled, CancellationToken cancellationToken)
+    public async Task<bool> SetWin11ModernContextMenuDisabledAsync(bool disabled, CancellationToken cancellationToken)
     {
-        await SendRequestAsync(
+        var response = await SendRequestAsync(
             new PipeRequest
             {
                 Command = PipeCommand.SetWin11ModernContextMenuDisabled,
                 Enable = disabled
             },
             cancellationToken);
+        if (response.Win11ModernContextMenuDisabled != disabled)
+            throw new InvalidOperationException("The backend did not verify the requested context menu state.");
+        return response.Win11ClassicContextMenuChanged
+            ?? throw new InvalidOperationException("The backend did not verify the context menu change. Update the backend service and refresh.");
     }
 
     /// <summary>

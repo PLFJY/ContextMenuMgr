@@ -47,7 +47,7 @@ GetOpenWithPendingReviews 与 DecideOpenWithReview 追加于既有枚举末尾�
 
 OpenWith 监控消息带可空 OpenWithPendingCount；只有明确大于零才属于待审核气泡，diagnostic/null 及 purely informational 结果不作为审批。计数不是前端 badge 数据源，代表 SpecialItem 不是完整列表；广播、前端及 TrayHost 都按认证当前 SID 过滤，缺 SID 的 OpenWith 广播拒绝。
 
-Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
+Win11 应用命令的旧服务拒绝与旧 Id/状态兼容见[Win11](windows11-context-menu.md)；全局经典菜单 Get/Set 保留原命令及布尔字段，增加可选 `Win11ClassicContextMenuStatus`（Complete/Absent/Incomplete/Conflict）和 `Win11ClassicContextMenuChanged`，仅完整双覆盖返回 disabled=true，读取异常不推断布尔值。两目标及查询在专用 gate 内串行，修改开始后取消不打断验证/补偿，详见 [Win11 全局经典菜单](windows11-context-menu.md#systemcommandstore-与全局经典菜单)。OpenWith ExpectedEditStamp 缺失拒绝编辑，ShellNew nullable lock Unknown 不能默认为 false，各归子系统主文档。
 
 SetDocumentIconRepair 追加于 PipeCommand 末尾，使用独立的可空布尔 DocumentIconRepairEnabled；只接受 Pipe 认证的交互用户上下文，读写其已加载 HKU Software/Classes，不使用服务 HKCU。状态读取与修复/撤销均进入 catalog 持久 gate，状态响应 IsDocumentIconRepairEnabled 或可空 CanRestoreDocumentIcons 缺失表示旧服务能力未知，不能默认为可操作的关闭。旧 SetDocumentIconProvider 编号/字段保留以避免协议错位，但服务明确拒绝该旧切换语义；新客户端不降级写旧命令。原值保存、物理读回及恢复范围见[SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
 

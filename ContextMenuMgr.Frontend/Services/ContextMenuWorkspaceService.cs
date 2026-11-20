@@ -1038,10 +1038,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         return await _backendClient.GetWin11ModernContextMenuDisabledAsync(cts.Token);
     }
 
-    public async Task SetWin11ModernContextMenuDisabledAsync(bool disabled)
+    public async Task<bool> SetWin11ModernContextMenuDisabledAsync(bool disabled)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await _backendClient.SetWin11ModernContextMenuDisabledAsync(disabled, cts.Token);
+        return await _backendClient.SetWin11ModernContextMenuDisabledAsync(disabled, cts.Token);
     }
 
     /// <summary>

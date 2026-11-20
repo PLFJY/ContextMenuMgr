@@ -164,7 +164,7 @@ SpecialMenu 普通列表首屏在完整导航动画结束后发出请求，集�
 
 `ContextMenuItemActionsService` 在前端 Session 打开真实 BackendRegistryPath，只有缺物理路径才 HKCR fallback。Regedit LastKey 为完整 hive，不拼应用语言的计算机根名称；同 Session 已有 Regedit 则 -m 新窗口，不杀用户旧窗口。启动成功只证明请求，实际定位需看选中键。
 
-InfoBarService 的控件、位置与清理契约见上文；详细错误码/堆栈/路径写日志，不向普通用户暴露堆栈。只有需求/规则明确要求 Explorer restart 的设置，成功后通过单例 ExplorerRestartStateService.MarkRequired 联动顶部按钮，由用户执行并 Clear。Win11 应用开关不标 restart；全局经典菜单 tweak 有独立语义。重置软件设置须先完整禁用 Registry Write Protection，失败保留 authoritative toggle 并停止 reset。
+InfoBarService 的控件、位置与清理契约见上文；详细错误码/堆栈/路径写日志，不向普通用户暴露堆栈。只有需求/规则明确要求 Explorer restart 的设置，成功后通过单例 ExplorerRestartStateService.MarkRequired 联动顶部按钮，由用户执行并 Clear。Win11 应用开关不标 restart；全局经典菜单 tweak 由后端双 CLSID 物理读回确认，提交期间禁止重复操作，失败只查询一次，仍无法确认时禁用直到权威刷新。仅已验证 Changed 标记重启，设置重置必须先完成恢复，失败不得报告重置成功，详见 [Win11 全局经典菜单](windows11-context-menu.md#systemcommandstore-与全局经典菜单)。重置软件设置须先完整禁用 Registry Write Protection，失败保留 authoritative toggle 并停止 reset。
 
 ViewModel Dispose/页面卸载取消刷新、debounce、加载回调与动画，解除 LanguageChanged/SettingsChanged/workspace/filter 等订阅；不能靠窗口关闭推断静态事件无泄漏。控制 Pipe/DI/单实例退出见[生命周期](runtime-lifecycle.md)。
 
