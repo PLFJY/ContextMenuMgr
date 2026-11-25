@@ -6,7 +6,7 @@
     <span>Context Menu Manager Plus</span>
   </h1>
   <p align="center">
-    <span align="center">Context Menu Manager Plus 是一个强大的实用程序，它可帮助您管理 Windows 上的右键菜单，并避免第三方向你的右键菜单里塞屎。</span>
+    <span align="center">Context Menu Manager Plus 是一个强大的实用程序，它可帮助您管理 Windows 上的右键菜单，并避免第三方向你的右键菜单里塞各种垃圾。</span>
   </p>
 
   <a href="https://trendshift.io/repositories/78311?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-78311" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/78311/daily?language=C%23" alt="PLFJY%2FContextMenuMgr | Trendshift" width="250" height="55"/></a>
