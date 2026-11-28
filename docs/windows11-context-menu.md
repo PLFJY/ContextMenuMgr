@@ -1,6 +1,6 @@
 # Windows 11 应用菜单与控制域
 
-本文负责 Win11 来源、声明身份、应用/CLSID mutation、blocked 恢复和特有 UI。入口：[Windows11ContextMenuCatalog](../ContextMenuMgr.Backend/Services/Windows11ContextMenuCatalog.cs)、[Windows11BlocksService](../ContextMenuMgr.Backend/Services/Windows11BlocksService.cs)、[Windows11BlockMutation](../ContextMenuMgr.Backend/Services/Windows11BlockMutation.cs)、[Windows11ClsidImpactIndex](../ContextMenuMgr.Backend/Services/Windows11ClsidImpactIndex.cs)、[ContextMenuRegistryCatalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs) 的 SetWindows11EnabledAsync，及前端 [Windows11ContextMenuService](../ContextMenuMgr.Frontend/Services/Windows11ContextMenuService.cs) / [页面 VM](../ContextMenuMgr.Frontend/ViewModels/Windows11ContextMenuPageViewModel.cs)。
+本文负责 Win11 来源、声明身份、应用/CLSID mutation、blocked 恢复和特有 UI。入口：[Windows11ContextMenuCatalog](../ContextMenuMgr.Core/Services/Windows11ContextMenuCatalog.cs)、[Windows11BlocksService](../ContextMenuMgr.Core/Services/Windows11BlocksService.cs)、[Windows11BlockMutation](../ContextMenuMgr.Core/Services/Windows11BlockMutation.cs)、[Windows11ClsidImpactIndex](../ContextMenuMgr.Core/Services/Windows11ClsidImpactIndex.cs)、[ContextMenuRegistryCatalog](../ContextMenuMgr.Core/Services/ContextMenuRegistryCatalog.cs) 的 SetWindows11EnabledAsync，及前端 [Windows11ContextMenuService](../ContextMenuMgr.Frontend/Services/Windows11ContextMenuService.cs) / [页面 VM](../ContextMenuMgr.Frontend/ViewModels/Windows11ContextMenuPageViewModel.cs)。
 
 ## 来源、发现与身份
 
@@ -11,7 +11,7 @@
 
 支持门槛为 Windows >=10.0.22000。无用户上下文 catalog 跳过；专用 Pipe 与 GetSnapshot、通用 Win11 SetEnabled/ApplyDecision 使用认证交互 SID，不 fallback 到其它登录用户。`BackendUserContextResolver` 在身份解析边界直接核验已启用的 `INTERACTIVE`（`S-1-5-4`）组成员资格，非交互 token 在 Pipe/WTS 边界被拒绝且不生成用户上下文，因而无法进入 PackagedCom 用户 Blocked 读取与 mutation。本地账户、域账户与 Entra ID（`S-1-12-1-...`）交互登录一律统一解析，不调用 `IsAccountSid()`，也不做任何 SID 前缀/形态分类。`Windows11BlocksService` 直接使用 `context.Sid` 并验证对应 `HKEY_USERS/<SID>` hive 已加载；仍须 loaded hive/native view，不用服务 HKCU；blocked mutation 不需要 SessionId。SystemCommandStore 属机器级来源，不依赖用户上下文。前端 DI 始终注册页面/服务，正常导航按 OS 隐藏，防意外导航解析崩溃；不用 HKCR/PackagedCom 存在性作支持门槛。
 
-[PackagedContextMenuDiscovery](../ContextMenuMgr.Backend/Services/PackagedContextMenuDiscovery.cs) 用 PackageManager.FindPackagesForUser(SID)，按 full name 去重，读 AppxManifest.xml（缺失时 bundle manifest fallback）。按 AppX namespace family、Extension Category 与元素 LocalName 解析 windows.fileExplorerContextMenus、windows.comServer，关联 SurrogateServer/ExeServer class CLSID 与 verb。缺 manifest/XML/无效 CLSID/无法关联等局部跳过/告警，不证明完整发现。
+[PackagedContextMenuDiscovery](../ContextMenuMgr.Core/Services/PackagedContextMenuDiscovery.cs) 用 PackageManager.FindPackagesForUser(SID)，按 full name 去重，读 AppxManifest.xml（缺失时 bundle manifest fallback）。按 AppX namespace family、Extension Category 与元素 LocalName 解析 windows.fileExplorerContextMenus、windows.comServer，关联 SurrogateServer/ExeServer class CLSID 与 verb。缺 manifest/XML/无效 CLSID/无法关联等局部跳过/告警，不证明完整发现。
 
 声明保留 package full/family/display/publisher/install metadata、context types、Verb ID、server/class metadata；未声明 server path 则 FilePath 为空，不能用 package 目录伪造。manifest 标题不是 IExplorerCommand.GetTitle 的 Explorer 动态结果。
 
@@ -27,7 +27,7 @@ System 项为 `win11-system|{commandKey}`，真实 HKLM CommandStore 路径；�
 
 ### 缓存与性能边界
 
-[PackagedContextMenuScanCache](../ContextMenuMgr.Backend/Services/PackagedContextMenuScanCache.cs) 按 SID 缓存 package 发现 30 秒，并发复用正在扫描；调用方取消不取消共享扫描。Blocked 不缓存，每次投影重开。常规快照重建 registry impact，手动 mutation 可复用最近 30 秒同 SID 声明/引用，缓存不保证刚安装/卸载立即可见。部分 package 错误汇总日志，不改变发现语义。
+[PackagedContextMenuScanCache](../ContextMenuMgr.Core/Services/PackagedContextMenuScanCache.cs) 按 SID 缓存 package 发现 30 秒，并发复用正在扫描；调用方取消不取消共享扫描。Blocked 不缓存，每次投影重开。常规快照重建 registry impact，手动 mutation 可复用最近 30 秒同 SID 声明/引用，缓存不保证刚安装/卸载立即可见。部分 package 错误汇总日志，不改变发现语义。
 
 已有 regular baseline 时 mutation 只构建 Win11 projection，不扫 classic；首次缺 baseline 仍完整采纳常规来源，不能建立局部 baseline。查询、手动/审批/隔离/纠偏与 state 保存共用 catalog 持久 gate；不由局部操作清理 classic 状态。状态分类统一见[状态与监控](state-and-monitoring.md)。
 
@@ -63,14 +63,14 @@ SystemCommandStore 使用 ShellVerbVisibility 读写，不进入上述 Blocked a
 
 OtherRules/GuidBlock 是机器 CLSID 全局规则。不要将 Windows.Share/SendToMyPhone 的 ExplorerCommandHandler GUID 加入 GUID Lock 来绕过保护；系统 handler 共享/链路可能使现代菜单不可用或回落 classic，需具体 Explorer 证据，不能保证安全。
 
-[Win11ClassicContextMenuService](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuService.cs) 是独立的全局经典菜单设置，不复用 Blocked/Packaged COM 控制域。正常请求走认证 Pipe，在 native registry view 的 `HKEY_USERS/<认证 SID>/Software/Classes/CLSID` 下管理以下两个 `InprocServer32` 默认值：
+[Win11ClassicContextMenuService](../ContextMenuMgr.Core/Services/Win11ClassicContextMenuService.cs) 是独立的全局经典菜单设置，不复用 Blocked/Packaged COM 控制域。正常请求走认证 Pipe，在 native registry view 的 `HKEY_USERS/<认证 SID>/Software/Classes/CLSID` 下管理以下两个 `InprocServer32` 默认值：
 
 - `{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}`
 - `{51668040-5e31-4023-bbe3-149163bd80f1}`
 
 **兼容策略/设计约束：** Windows >=10.0.22000 统一使用双 CLSID，两者均须实际存在空默认 `REG_SZ` 才是 Complete。功能推送不由 24H2/25H2/26H2 名称或单一 build 阈值推断；旧 Windows 11 也配置两个目标，旧单 CLSID 安装报告 Incomplete，用户再次开启补齐，不在读取时自动修改。Windows 10 保持读取 false、开启失败、恢复关闭成功的既有行为。此策略管理已知兼容覆盖，不保证任何 build 的 Explorer 必然接受；参考 [双 CLSID 实现](https://github.com/TongenShen/win11-classic-context-menu) 与 [KB5127936](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/10/kb5127936-windows-11-25h2-26h2-update)。
 
-[Win11ClassicContextMenuMutation](../ContextMenuMgr.Backend/Services/Win11ClassicContextMenuMutation.cs) 在一次逻辑操作中预读两个目标，保存默认值的存在性/类型/内容及原键是否存在，并预检现有目标写权限。空键缺默认值可补齐；非空或非 `REG_SZ` 默认值属于 Conflict，开启和恢复均在首次写入前拒绝，不接管 COM server。保留命名值和其它子键；恢复只删空默认值，并仅清理仍为空的 InprocServer32/CLSID，绝不 DeleteSubKeyTree。重复开启不重写完整覆盖，重复恢复无操作。
+[Win11ClassicContextMenuMutation](../ContextMenuMgr.Core/Services/Win11ClassicContextMenuMutation.cs) 在一次逻辑操作中预读两个目标，保存默认值的存在性/类型/内容及原键是否存在，并预检现有目标写权限。空键缺默认值可补齐；非空或非 `REG_SZ` 默认值属于 Conflict，开启和恢复均在首次写入前拒绝，不接管 COM server。保留命名值和其它子键；恢复只删空默认值，并仅清理仍为空的 InprocServer32/CLSID，绝不 DeleteSubKeyTree。重复开启不重写完整覆盖，重复恢复无操作。
 
 查询/写入共用服务 gate，查询不会读到本服务提交的中间态。写前重新核对原值，写后通过新 handle 读回全部目标并重开认证用户 hive，成功响应描述实际状态。失败反向复用 `RegistryValueMutationTransaction` 的条件回滚，仅当前值仍等于本次写入值时恢复原值；本次新建的空目标键可清理，第三方命名值/子键保持不变。回滚失败、hive unload、权限失败和外部冲突记录 SID/结果并返回失败。开始修改前响应取消，修改开始后取消/断连不打断提交或补偿；不承诺硬杀/断电恢复。注册表没有跨进程 value compare-and-swap，写前/回滚前/空键删除前检查仍存在外部写入竞争窗口，不宣称跨进程原子事务或自动重试不确定写入。
 

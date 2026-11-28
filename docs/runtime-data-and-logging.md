@@ -29,7 +29,7 @@
 
 ## Portable host identity
 
-[RuntimeHostIdentityProvider](../ContextMenuMgr.Backend/Services/RuntimeHostIdentityProvider.cs) 对 purpose + MachineGuid + **交互用户 fallback SID** 做 SHA-256，保存指纹/12 字符前缀、版本与时间。它没有接收每个 Pipe 请求的 SID：首次可信结果被进程缓存。无用户时暂不可信并可重试；多用户切换后不能据此宣称逐请求 host binding，需部署验证。HKLM MachineGuid 优先 Registry64。
+[RuntimeHostIdentityProvider](../ContextMenuMgr.Core/Services/RuntimeHostIdentityProvider.cs) 对 purpose + MachineGuid + **交互用户 fallback SID** 做 SHA-256，保存指纹/12 字符前缀、版本与时间。它没有接收每个 Pipe 请求的 SID：首次可信结果被进程缓存。无用户时暂不可信并可重试；多用户切换后不能据此宣称逐请求 host binding，需部署验证。HKLM MachineGuid 优先 Registry64。
 
 Portable envelope 指纹不同会隔离旧 state 至 `Quarantine/foreign-host-...`，重新建立本地空 baseline；legacy dictionary 仅在当前 identity 可验证时迁移。删除备份按 `DeletedBackups/<host-prefix>` 分目录，非当前 host/旧根的备份隔离，恢复只接受当前 scoped 目录，不能导入另一用户/Windows 的 .reg。
 

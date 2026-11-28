@@ -1051,14 +1051,19 @@ function Write-InstallerRuntimeInventory {
     # Critical payload read-back: an ignored/failed replacement must not complete
     # a mode transition with the previous runtimeconfig or application binaries.
     $lines += '  IncomingApplicationFiles ='
-    foreach ($baseName in @('ContextMenuManagerPlus', 'ContextMenuManagerPlus.Service', 'ContextMenuManagerPlus.TrayHost')) {
-        foreach ($extension in @('.exe', '.dll', '.deps.json', '.runtimeconfig.json')) {
-            $name = $baseName + $extension
-            $file = Join-Path $PublishDir $name
-            Ensure-FileExists -Path $file -Description 'Critical installer payload'
-            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            $lines += "    '$name|$hash;' +"
+    $applicationFiles = @(
+        foreach ($baseName in @('ContextMenuManagerPlus', 'ContextMenuManagerPlus.Service', 'ContextMenuManagerPlus.TrayHost')) {
+            foreach ($extension in @('.exe', '.dll', '.deps.json', '.runtimeconfig.json')) {
+                $baseName + $extension
+            }
         }
+        'ContextMenuMgr.Core.dll'
+    )
+    foreach ($name in $applicationFiles) {
+        $file = Join-Path $PublishDir $name
+        Ensure-FileExists -Path $file -Description 'Critical installer payload'
+        $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        $lines += "    '$name|$hash;' +"
     }
     $lines += "    '';"
     [System.IO.File]::WriteAllLines($Path, [string[]] $lines, [System.Text.Encoding]::UTF8)

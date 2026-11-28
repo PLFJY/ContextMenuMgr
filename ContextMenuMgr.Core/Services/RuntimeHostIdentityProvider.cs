@@ -5,12 +5,14 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class RuntimeHostIdentityProvider
 {
     private readonly FileLogger _logger;
+    private readonly Func<string?> _resolveInteractiveUserSid;
     private readonly Lock _syncRoot = new();
     private RuntimeHostIdentity? _cachedIdentity;
 
-    public RuntimeHostIdentityProvider(FileLogger logger)
+    public RuntimeHostIdentityProvider(FileLogger logger, Func<string?> resolveInteractiveUserSid)
     {
         _logger = logger;
+        _resolveInteractiveUserSid = resolveInteractiveUserSid;
     }
 
     public RuntimeHostIdentity GetCurrent()
@@ -45,13 +47,13 @@ public sealed class RuntimeHostIdentityProvider
                 return LogUntrusted("MachineGuidUnavailable");
             }
 
-            var userContext = new BackendUserContextResolver(_logger).TryResolveInteractiveUserFallback();
-            if (string.IsNullOrWhiteSpace(userContext?.Sid))
+            var userSid = _resolveInteractiveUserSid();
+            if (string.IsNullOrWhiteSpace(userSid))
             {
                 return LogUntrusted("FrontendUserSidUnavailable");
             }
 
-            var fingerprint = RuntimeIdentityFingerprint.Compute(machineGuid, userContext.Sid);
+            var fingerprint = RuntimeIdentityFingerprint.Compute(machineGuid, userSid);
             var identity = new RuntimeHostIdentity(
                 IsTrusted: true,
                 SchemaVersion: RuntimeHostIdentity.CurrentSchemaVersion,

@@ -1,6 +1,6 @@
 # ShellNew 发现、排序与锁定
 
-本文是 ShellNew 物理注册、发现、排序/ACL 条件事务及恢复的权威说明。入口为 [SpecialMenuService](../ContextMenuMgr.Backend/Services/SpecialMenuService.cs)、[FrontendUserClassesRoot](../ContextMenuMgr.Backend/Services/FrontendUserClassesRoot.cs)、[ShellNewOrderTransaction](../ContextMenuMgr.Backend/Services/ShellNewOrderTransaction.cs)、[PackagedShellNewDiscovery](../ContextMenuMgr.Backend/Services/PackagedShellNewDiscovery.cs)；请求模型见 [SpecialMenuContracts](../ContextMenuMgr.Contracts/SpecialMenuContracts.cs)，UI 所有者为 [SpecialMenuPageViewModel](../ContextMenuMgr.Frontend/ViewModels/SpecialMenuPageViewModel.cs)。属于链路 A，需要认证 SID；merged HKCR 发现另需匹配 SessionId。
+本文是 ShellNew 物理注册、发现、排序/ACL 条件事务及恢复的权威说明。入口为 [SpecialMenuService](../ContextMenuMgr.Core/Services/SpecialMenuService.cs)、[FrontendUserClassesRoot](../ContextMenuMgr.Backend/Services/FrontendUserClassesRoot.cs)、[ShellNewOrderTransaction](../ContextMenuMgr.Core/Services/ShellNewOrderTransaction.cs)、[PackagedShellNewDiscovery](../ContextMenuMgr.Core/Services/PackagedShellNewDiscovery.cs)；请求模型见 [SpecialMenuContracts](../ContextMenuMgr.Contracts/SpecialMenuContracts.cs)，UI 所有者为 [SpecialMenuPageViewModel](../ContextMenuMgr.Frontend/ViewModels/SpecialMenuPageViewModel.cs)。属于链路 A，需要认证 SID；merged HKCR 发现另需匹配 SessionId。
 
 WPS/Office 共存检测和图标选择见 [SpecialMenu](special-menus.md#wps-与-microsoft-office-共存)。
 

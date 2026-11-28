@@ -19,12 +19,9 @@ namespace ContextMenuMgr.Backend.Services;
 public sealed class NamedPipeBackendServer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly ContextMenuRegistryCatalog _catalog;
+    private readonly BackendRequestDispatcher _dispatcher;
     private readonly SpecialMenuService _specialMenuService;
-    private readonly Windows11BlocksService _windows11BlocksService;
-    private readonly Win11ClassicContextMenuService _win11ClassicContextMenuService;
     private readonly AutoStartService _autoStartService;
-    private readonly FileTypeSceneMenuService _fileTypeSceneMenuService;
     private readonly ExplorerRestartService _explorerRestartService;
     private readonly FileLogger _logger;
     private readonly ConcurrentDictionary<Guid, PipeClientConnection> _clients = new();
@@ -36,25 +33,12 @@ public sealed class NamedPipeBackendServer
     internal event EventHandler<BackendStopRequestedEventArgs>? BackendShutdownRequested;
     public event EventHandler? EnsureTrayHostRequested;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="NamedPipeBackendServer"/> class.
-    /// </summary>
-    public NamedPipeBackendServer(
-        ContextMenuRegistryCatalog catalog,
-        SpecialMenuService specialMenuService,
-        Windows11BlocksService windows11BlocksService,
-        Win11ClassicContextMenuService win11ClassicContextMenuService,
-        AutoStartService autoStartService,
-        FileTypeSceneMenuService fileTypeSceneMenuService,
-        ExplorerRestartService explorerRestartService,
-        FileLogger logger)
+    internal NamedPipeBackendServer(BackendRequestDispatcher dispatcher, SpecialMenuService specialMenuService,
+        AutoStartService autoStartService, ExplorerRestartService explorerRestartService, FileLogger logger)
     {
-        _catalog = catalog;
+        _dispatcher = dispatcher;
         _specialMenuService = specialMenuService;
-        _windows11BlocksService = windows11BlocksService;
-        _win11ClassicContextMenuService = win11ClassicContextMenuService;
         _autoStartService = autoStartService;
-        _fileTypeSceneMenuService = fileTypeSceneMenuService;
         _explorerRestartService = explorerRestartService;
         _logger = logger;
     }
@@ -209,49 +193,34 @@ public sealed class NamedPipeBackendServer
                         _specialMenuService.OpenWithMonitoring?.ObserveUser(subscribedUser);
                 }
 
-                PipeResponse response;
+                BackendDispatchResult result;
                 var stopwatch = Stopwatch.StartNew();
                 await _logger.LogAsync(BuildRequestStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken);
                 await _logger.LogRequestOperationAsync(envelope.Request.Command,
                     BuildOperationStartLog(connection.Id, envelope.CorrelationId, envelope.Request), cancellationToken: cancellationToken);
                 try
                 {
-                    // Request handlers are allowed to fail independently; the pipe
-                    // stays alive and the caller receives a structured error response.
-                    using var coverage = MenuDiscoveryCoverage.Begin();
-                    var absence = await VerifyRequestTargetAsync(envelope.Request, stream, cancellationToken);
-                    response = absence ?? await HandleRequestAsync(envelope.Request, stream, cancellationToken);
-                    if (envelope.Request.Command is PipeCommand.GetSnapshot or PipeCommand.GetSceneSnapshot
-                        or PipeCommand.GetSpecialMenuSnapshot or PipeCommand.GetWin11ContextMenuSnapshot
-                        or PipeCommand.GetWpsOfficePendingApprovals or PipeCommand.GetShellSubMenuItems
-                        or PipeCommand.FindRelatedFileTypeMenuItems or PipeCommand.ReviewOpenWithRegistration)
-                        response = response with { SnapshotIsComplete = response.Success && coverage.Complete,
-                            ClassicSnapshotIsComplete = response.Success && coverage.ClassicComplete };
+                    var context = new BackendRequestContext(
+                        () => new BackendUserContextResolver(_logger).TryResolveFromPipeClient(stream), _logger);
+                    var hostResponse = await HandleHostRequestAsync(envelope.Request, stream, context, cancellationToken);
+                    result = hostResponse is null
+                        ? await _dispatcher.DispatchAsync(envelope.Request, context, cancellationToken)
+                        : new(BackendRequestDispatcher.CorrelateResponseWithRequest(envelope.Request, hostResponse));
                 }
                 catch (Exception ex)
                 {
-                    await _logger.LogAsync(
-                        RuntimeLogLevel.Error,
-                        $"PipeRequestException: ConnectionId={connection.Id}, CorrelationId={envelope.CorrelationId}, Command={envelope.Request.Command}, ClientOperationId={envelope.Request.ClientOperationId}, Exception={ex}",
-                        cancellationToken);
-                    response = new PipeResponse
-                    {
-                        Success = false,
-                        ErrorCode = ex is DocumentIconRepairException repairError ? repairError.ErrorCode
-                            : envelope.Request.Command is PipeCommand.SetDocumentIconRepair or PipeCommand.GetOfficeSuiteCoexistenceStatus
-                                ? ex is InvalidDataException ? PipeErrorCodes.DocumentIconRepairRecoveryInvalid
-                                    : ex is UnauthorizedAccessException or System.Security.SecurityException ? PipeErrorCodes.DocumentIconRepairAccessDenied
-                                    : PipeErrorCodes.DocumentIconRepairFailed
-                                : null,
-                        Message = ex.Message
-                    };
-                }
-                finally
-                {
-                    stopwatch.Stop();
+                    result = BackendRequestDispatcher.CreateFailure(envelope.Request, ex);
                 }
 
-                response = CorrelateResponseWithRequest(envelope.Request, response);
+                if (result.Error is { } error)
+                {
+                    await _logger.LogAsync(
+                        RuntimeLogLevel.Error,
+                        $"PipeRequestException: ConnectionId={connection.Id}, CorrelationId={envelope.CorrelationId}, Command={envelope.Request.Command}, ClientOperationId={envelope.Request.ClientOperationId}, Exception={error}",
+                        cancellationToken);
+                }
+                stopwatch.Stop();
+                var response = result.Response;
 
                 await _logger.LogAsync(BuildRequestEndLog(connection.Id, envelope.CorrelationId, envelope.Request, response, stopwatch.ElapsedMilliseconds), cancellationToken);
                 await _logger.LogRequestOperationAsync(envelope.Request.Command,
@@ -318,33 +287,7 @@ public sealed class NamedPipeBackendServer
         Func<BackendNotification, Task> publish,
         Func<Task> deliver)
     {
-        if (response.Success && response.DeletedItemsPurge is { } purged && purged.PurgedItems.Count > 0)
-            await publish(new BackendNotification
-            {
-                Kind = PipeNotificationKind.DeletedItemsPurged,
-                DeletedItemsPurge = purged,
-                ClientOperationId = response.ClientOperationId
-            });
-        if (response.Success && response.Item is not null
-            && request.Command != PipeCommand.GetContextMenuItemState)
-            await publish(new BackendNotification
-            {
-                Kind = PipeNotificationKind.ItemStateChanged,
-                Item = response.Item,
-                Message = response.Message,
-                ClientOperationId = response.ClientOperationId,
-                Timestamp = DateTimeOffset.UtcNow
-            });
-        if (response.Success && response.SpecialItem is not null && request.Command != PipeCommand.GetSpecialMenuItemState)
-            await publish(new BackendNotification
-            {
-                Kind = PipeNotificationKind.ItemStateChanged,
-                SpecialKind = response.SpecialItem.Kind,
-                SpecialItem = response.SpecialItem,
-                Message = response.Message,
-                ClientOperationId = response.ClientOperationId,
-                Timestamp = DateTimeOffset.UtcNow
-            });
+        await BackendRequestDispatcher.PublishMutationNotificationsAsync(request, response, publish);
         try
         {
             await deliver();
@@ -356,7 +299,8 @@ public sealed class NamedPipeBackendServer
         }
     }
 
-    private async Task<PipeResponse> HandleRequestAsync(PipeRequest request, NamedPipeServerStream stream, CancellationToken cancellationToken)
+    private async Task<PipeResponse?> HandleHostRequestAsync(PipeRequest request, NamedPipeServerStream stream,
+        BackendRequestContext context, CancellationToken cancellationToken)
     {
         return request.Command switch
         {
@@ -380,586 +324,30 @@ public sealed class NamedPipeBackendServer
             PipeCommand.RequestPortableExit => HandlePortableExitRequest(stream),
             PipeCommand.SetLogLevel when request.LogLevel is not null
                 => HandleSetLogLevelRequest(request.LogLevel.Value),
-            PipeCommand.GetSnapshot => new PipeResponse
-            {
-                Success = true,
-                Message = "Snapshot loaded.",
-                Items = await _catalog.GetSnapshotAsync(
-                    cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken))
-            },
-            PipeCommand.GetSceneSnapshot when request.SceneKind is not null
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "Scene snapshot loaded.",
-                    Items = await _catalog.GetSceneSnapshotAsync(
-                        request.SceneKind.Value,
-                        request.ScopeValue,
-                        cancellationToken,
-                        await ResolveFrontendUserContextAsync(stream, cancellationToken))
-                },
-            PipeCommand.SetEnhanceMenuItemEnabled when request.ScopeValue is not null && request.DefinitionXml is not null && request.Enable is not null
-                => await HandleSetEnhanceMenuItemEnabledAsync(request, stream, cancellationToken),
-            PipeCommand.SetDetailedEditRuleValue
-                => await _catalog.SetDetailedEditRuleValueAsync(
-                    request.RuleStorageKind,
-                    request.RulePath,
-                    request.RuleSection,
-                    request.RuleKeyName,
-                    request.RuleValueKind,
-                    request.RuleValue,
-                    request.RuleUserSid,
-                    cancellationToken),
-            PipeCommand.AcknowledgeItemState when request.ItemId is not null
-                => await _catalog.AcknowledgeItemStateAsync(
-                    request.ItemId,
-                    cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken), request.Item),
-            PipeCommand.SetEnabled when request.ItemId is not null && request.Enable is not null
-                => await HandleSetEnabledAsync(request, stream, cancellationToken),
-            PipeCommand.GetContextMenuItemState when request.ItemId is not null && request.Item is not null
-                => await _catalog.GetContextMenuItemStateAsync(request.ItemId, request.Item,
-                    cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.SetShellAttribute when request.ItemId is not null && request.Enable is not null && request.ShellAttribute is not null
-                => await _catalog.ApplyShellAttributeAsync(request.ItemId, request.ShellAttribute.Value, request.Enable.Value, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.SetDisplayText when request.ItemId is not null && request.TextValue is not null
-                => await _catalog.ApplyDisplayTextAsync(request.ItemId, request.TextValue, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.SetCommandText when request.ItemId is not null && request.TextValue is not null
-                => await _catalog.ApplyCommandTextAsync(request.ItemId, request.TextValue, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.GetShellSubMenuItems when request.ParentItemId is not null
-                => await _catalog.GetShellSubMenuItemsAsync(request.ParentItemId, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.SetShellSubMenuItemEnabled when request.ParentItemId is not null && request.SubMenuItemId is not null && request.Enable is not null
-                => await _catalog.SetShellSubMenuItemEnabledAsync(request.ParentItemId, request.SubMenuItemId, request.Enable.Value, cancellationToken, await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.GetRegistryProtectionSetting
-                => await _catalog.GetRegistryProtectionSettingAsync(cancellationToken),
-            PipeCommand.SetRegistryProtectionSetting when request.Enable is not null
-                => await _catalog.SetRegistryProtectionSettingAsync(
-                    request.Enable.Value,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.ApplyDecision when request.ItemId is not null && request.Decision is not null
-                => await HandleApplyDecisionAsync(request, stream, cancellationToken),
-            PipeCommand.DeleteItem when request.ItemId is not null
-                => await _catalog.DeleteItemAsync(
-                    request.ItemId,
-                    cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken),
-                    request.Item),
-            PipeCommand.UndoDelete when request.ItemId is not null
-                => await _catalog.UndoDeleteAsync(
-                    request.ItemId,
-                    cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.PurgeDeletedItem when request.ItemId is not null
-                => await _catalog.PurgeDeletedItemAsync(request.ItemId, cancellationToken),
-            PipeCommand.PurgeDeletedItems when request.DeletedItemsPurge is not null
-                => await _catalog.PurgeDeletedItemsAsync(request.DeletedItemsPurge, cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
-            PipeCommand.ResetStateDatabase
-                => await _catalog.ResetStateDatabaseAsync(cancellationToken),
-            PipeCommand.InspectOpenWithSources when request.ScopeValue is not null
-                => new PipeResponse
-                {
-                    Success = true,
-                    OpenWithInspection = await _specialMenuService.InspectOpenWithSourcesAsync(request.ScopeValue,
-                        await ResolveSpecialMenuUserContextAsync(stream, cancellationToken),
-                        cancellationToken)
-                },
-            PipeCommand.ReviewOpenWithRegistration when request.SpecialItem is not null
-                && _specialMenuService.OpenWithMonitoring is { } monitoring
-                => await monitoring.ReviewAsync(request.SpecialItem, request.OpenWithProtection,
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
-                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
-            PipeCommand.GetOpenWithPendingReviews when _specialMenuService.OpenWithMonitoring is { } reviewQuery
-                => new PipeResponse { Success = true, OpenWithReviews = await reviewQuery.GetPendingReviewsAsync(
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
-                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken) },
-            PipeCommand.DecideOpenWithReview when request.OpenWithReview is not null
-                && _specialMenuService.OpenWithMonitoring is { } decisions
-                => await decisions.DecideReviewAsync(request.OpenWithReview,
-                    await ResolveSpecialMenuUserContextAsync(stream, cancellationToken)
-                        ?? throw new InvalidOperationException("Open With requires an authenticated user."), cancellationToken),
-            PipeCommand.GetSpecialMenuSnapshot when request.SpecialKind is not null
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "Special menu snapshot loaded.",
-                    SpecialItems = await _specialMenuService.GetSnapshotAsync(
-                        request.SpecialKind.Value,
-                        await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                        cancellationToken)
-                },
-            PipeCommand.GetSpecialMenuItemState when request.SpecialItem is not null
-                => await _specialMenuService.GetItemStateAsync(request.SpecialItem,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken), cancellationToken),
-            PipeCommand.SetSpecialMenuItemEnabled when request.SpecialItem is not null && request.Enable is not null
-                => await _specialMenuService.SetEnabledAsync(
-                    request.SpecialItem,
-                    request.Enable.Value,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.CreateSpecialMenuItem
-                => await _specialMenuService.CreateAsync(
-                    request,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.UpdateSpecialMenuItem
-                => await _specialMenuService.UpdateAsync(
-                    request,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.DeleteSpecialMenuItem when request.SpecialItem is not null
-                => await _specialMenuService.DeleteAsync(
-                    request.SpecialItem,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.UndoSpecialMenuItem when request.SpecialItem is not null
-                => await _specialMenuService.UndoDeleteAsync(
-                    request.SpecialItem,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.PurgeSpecialMenuItem when request.SpecialItem is not null
-                => await _specialMenuService.PurgeDeletedAsync(
-                    request.SpecialItem,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.MoveSpecialMenuItem
-                => await _specialMenuService.MoveAsync(
-                    request,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.RestoreSpecialMenuDefaults when request.SpecialKind is not null
-                => await _specialMenuService.RestoreDefaultsAsync(
-                    request.SpecialKind.Value,
-                    request.ScopeValue,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.GetShellNewOrderLock => await _specialMenuService.GetShellNewOrderLockAsync(
-                await ResolveSpecialMenuUserContextAsync(stream, cancellationToken), cancellationToken),
-            PipeCommand.SetShellNewOrderLock when request.ShellNewLock is not null
-                => await _specialMenuService.SetShellNewOrderLockAsync(
-                    request.ShellNewLock.Lock,
-                    request.ClientOperationId,
-                    await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, cancellationToken),
-                    cancellationToken),
-            PipeCommand.AnalyzeFileTypeContext when request.FileTypeAnalysis is not null
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "File type context analyzed.",
-                    FileTypeAnalysisResults = await _fileTypeSceneMenuService.AnalyzeAsync(request.FileTypeAnalysis, cancellationToken)
-                },
-            PipeCommand.CreateSceneMenuItem when request.CreateSceneMenuItem is not null
-                => await _fileTypeSceneMenuService.CreateSceneMenuItemAsync(
-                    request.CreateSceneMenuItem,
-                    request.ClientOperationId,
-                    cancellationToken),
-            PipeCommand.FindRelatedFileTypeMenuItems when request.FileTypeBatchQuery is not null
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "Related file-type menu items loaded.",
-                    Items = await _catalog.FindRelatedFileTypeMenuItemsAsync(
-                        request.FileTypeBatchQuery,
-                        cancellationToken,
-                        await ResolveFrontendUserContextAsync(stream, cancellationToken))
-                },
-            PipeCommand.DeleteFileTypeBatchItem when request.Item is not null
-                => await _catalog.DeleteFileTypeBatchItemAsync(request.Item, cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken), request.FileTypeBatchOperationId),
-            PipeCommand.GetFileTypeBatchItemState when request.Item is not null
-                => await _catalog.GetFileTypeBatchItemStateAsync(request.Item, cancellationToken,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken)),
             PipeCommand.RestartExplorer
                 => await HandleRestartExplorerRequestAsync(stream, cancellationToken),
             PipeCommand.RepairRuntimeDataAcl
                 => await HandleRepairRuntimeDataAclAsync(cancellationToken),
-            PipeCommand.SetWin11BlockedItem when request.ItemId is not null
-                => await HandleWin11ToggleAsync(request, stream, enable: false, applicationScope: false, cancellationToken),
-            PipeCommand.RemoveWin11BlockedItem when request.ItemId is not null
-                => await HandleWin11ToggleAsync(request, stream, enable: true, applicationScope: false, cancellationToken),
-            PipeCommand.SetWin11ApplicationEnabled when request.ItemId is not null && request.Enable is not null
-                => await HandleWin11ToggleAsync(request, stream, request.Enable.Value, applicationScope: true, cancellationToken),
-            PipeCommand.GetWin11BlockedItems
-                => await HandleGetWin11BlockedItemsAsync(request, stream, cancellationToken),
-            PipeCommand.GetWin11ContextMenuSnapshot
-                => await HandleGetWin11ContextMenuSnapshotAsync(request, stream, cancellationToken),
-            PipeCommand.GetWin11ModernContextMenuDisabled
-                => await HandleGetWin11ModernContextMenuDisabledAsync(request, stream, cancellationToken),
-            PipeCommand.SetWin11ModernContextMenuDisabled when request.Enable is not null
-                => await HandleSetWin11ModernContextMenuDisabledAsync(request, stream, cancellationToken),
             PipeCommand.SetAutoStartEnabled when request.AutoStartEnabled is not null
                 => await _autoStartService.SetAutoStartEnabledAsync(
                     request.AutoStartEnabled.Value,
                     request.ClientOperationId,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken),
+                    await context.ResolveFrontendUserContextAsync(cancellationToken),
                     cancellationToken,
                     request.ShowTrayIcon),
             PipeCommand.GetAutoStartEnabled
                 => await _autoStartService.GetAutoStartEnabledAsync(
                     request.ClientOperationId,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken),
+                    await context.ResolveFrontendUserContextAsync(cancellationToken),
                     cancellationToken),
             PipeCommand.SetTrayIconPolicy when request.ShowTrayIcon is not null
                 => await _autoStartService.SetTrayIconPolicyAsync(
                     request.ShowTrayIcon.Value,
                     request.ClientOperationId,
-                    await ResolveFrontendUserContextAsync(stream, cancellationToken),
+                    await context.ResolveFrontendUserContextAsync(cancellationToken),
                     cancellationToken),
-            PipeCommand.GetOfficeSuiteCoexistenceStatus
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "Office suite co-existence status loaded.",
-                    OfficeSuiteCoexistence = await _catalog.GetOfficeSuiteCoexistenceStatusAsync(
-                        await ResolveFrontendUserContextAsync(stream, cancellationToken), cancellationToken)
-                },
-            PipeCommand.GetWpsOfficePendingApprovals
-                => new PipeResponse
-                {
-                    Success = true,
-                    Message = "WPS Office pending approvals loaded.",
-                    Items = await _catalog.GetWpsOfficePendingApprovalsAsync(
-                        cancellationToken,
-                        await ResolveFrontendUserContextAsync(stream, cancellationToken))
-                },
-            PipeCommand.SetDocumentIconRepair when request.DocumentIconRepairEnabled is not null
-                => await HandleSetDocumentIconRepairAsync(request.DocumentIconRepairEnabled.Value, stream, cancellationToken),
-            PipeCommand.SetDocumentIconProvider
-                => new PipeResponse { Success = false, Message = "Update the frontend to use reversible document icon repair." },
-            _ => new PipeResponse
-            {
-                Success = false,
-                Message = "The request was missing required data."
-            }
+            _ => null
         };
-    }
-
-    private async Task<PipeResponse> HandleSetEnabledAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        return await _catalog.ApplyDesiredStateAsync(
-            request.ItemId ?? string.Empty,
-            request.Enable.GetValueOrDefault(),
-            cancellationToken,
-            userContext,
-            request.Item);
-    }
-
-    private async Task<PipeResponse> HandleSetDocumentIconRepairAsync(
-        bool enable,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        if (userContext is null)
-        {
-            return new PipeResponse
-            {
-                Success = false,
-                ErrorCode = PipeErrorCodes.DocumentIconRepairFailed,
-                Message = "Cannot change document icons: frontend user context is not available."
-            };
-        }
-
-        return await _catalog.SetDocumentIconRepairAsync(userContext, enable, cancellationToken);
-    }
-
-    private async Task<PipeResponse> HandleSetEnhanceMenuItemEnabledAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        return await _catalog.SetEnhanceMenuItemEnabledAsync(
-            request.ScopeValue ?? string.Empty,
-            request.DefinitionXml ?? string.Empty,
-            request.Enable.GetValueOrDefault(),
-            request.CultureName,
-            userContext!,
-            cancellationToken);
-    }
-
-    private async Task<PipeResponse> HandleApplyDecisionAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        return await _catalog.ApplyDecisionAsync(
-            request.ItemId ?? string.Empty,
-            request.Decision.GetValueOrDefault(),
-            cancellationToken,
-            userContext);
-    }
-
-    private async Task<PipeResponse> HandleWin11ToggleAsync(
-        PipeRequest request, NamedPipeServerStream stream, bool enable, bool applicationScope, CancellationToken cancellationToken)
-    {
-        var context = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        return await _catalog.SetWindows11EnabledAsync(request.ItemId ?? string.Empty,
-            enable, (enable ? request.UnblockMachine : request.BlockMachine) ?? false,
-            request.ClientOperationId, context, cancellationToken, applicationScope);
-    }
-
-    private async Task<PipeResponse> HandleGetWin11BlockedItemsAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11BlockedItems,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: "started",
-            cancellationToken);
-
-        var response = await _windows11BlocksService.GetWin11BlockedItemsAsync(
-            request.ClientOperationId,
-            userContext,
-            cancellationToken);
-
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11BlockedItems,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: response.Success ? "succeeded" : "failed",
-            cancellationToken);
-
-        return response;
-    }
-
-    private async Task<PipeResponse> HandleGetWin11ContextMenuSnapshotAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11ContextMenuSnapshot,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: "started",
-            cancellationToken);
-
-        var items = await _catalog.GetWindows11SnapshotAsync(cancellationToken, userContext);
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11ContextMenuSnapshot,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: "succeeded",
-            cancellationToken);
-
-        return new PipeResponse
-        {
-            Success = true,
-            Message = "Win11 context menu snapshot loaded.",
-            Items = items,
-            ClientOperationId = request.ClientOperationId
-        };
-    }
-
-    private async Task<PipeResponse> HandleGetWin11ModernContextMenuDisabledAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11ModernContextMenuDisabled,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: "started",
-            cancellationToken);
-
-        var response = await _win11ClassicContextMenuService.GetDisabledAsync(
-            request.ClientOperationId,
-            userContext,
-            cancellationToken);
-
-        await LogWin11CommandAsync(
-            PipeCommand.GetWin11ModernContextMenuDisabled,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: response.Success ? "succeeded" : "failed",
-            cancellationToken);
-
-        return response;
-    }
-
-    private async Task<PipeResponse> HandleSetWin11ModernContextMenuDisabledAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var userContext = await ResolveFrontendUserContextAsync(stream, cancellationToken);
-        await LogWin11CommandAsync(
-            PipeCommand.SetWin11ModernContextMenuDisabled,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: $"started, Disabled={request.Enable.GetValueOrDefault()}",
-            cancellationToken);
-
-        var response = await _win11ClassicContextMenuService.SetDisabledAsync(
-            request.Enable.GetValueOrDefault(),
-            request.ClientOperationId,
-            userContext,
-            cancellationToken);
-
-        await LogWin11CommandAsync(
-            PipeCommand.SetWin11ModernContextMenuDisabled,
-            userContext,
-            machineScope: false,
-            handlerClsid: null,
-            result: response.Success ? "succeeded" : "failed",
-            cancellationToken);
-
-        return response;
-    }
-
-    private async Task LogWin11CommandAsync(
-        PipeCommand command,
-        BackendUserContext? userContext,
-        bool machineScope,
-        string? handlerClsid,
-        string result,
-        CancellationToken cancellationToken)
-    {
-        var sid = string.IsNullOrWhiteSpace(userContext?.Sid) ? "<null>" : userContext.Sid;
-        var normalizedClsid = string.IsNullOrWhiteSpace(handlerClsid) ? "<none>" : NormalizeGuid(handlerClsid);
-        await _logger.LogAsync(
-            $"Win11 command {command}: Sid={sid}, Machine={machineScope}, Clsid={normalizedClsid}, Result={result}.",
-            cancellationToken);
-    }
-
-    private static string NormalizeGuid(string guidText)
-    {
-        return Guid.TryParse(guidText, out var guid)
-            ? guid.ToString("B")
-            : guidText.Trim('{', '}');
-    }
-
-    private async Task<PipeResponse?> VerifyRequestTargetAsync(PipeRequest request, NamedPipeServerStream stream, CancellationToken token)
-    {
-        // Cached DTOs never authorize a write or create a replacement registration.
-        if (request.SpecialItem is { } special && request.Command is
-            (PipeCommand.SetSpecialMenuItemEnabled or PipeCommand.DeleteSpecialMenuItem or PipeCommand.UpdateSpecialMenuItem))
-        {
-            var state = await _specialMenuService.GetItemStateAsync(special,
-                await ResolveSpecialMenuUserContextIfNeededAsync(request, stream, token), token);
-            if (!state.Success) return state;
-        }
-        if (request.Item is { IsDeleted: false, IsWindows11ContextMenu: false } original && request.Command is
-            (PipeCommand.SetShellAttribute or PipeCommand.SetDisplayText or PipeCommand.SetCommandText or PipeCommand.DeleteItem))
-        {
-            var state = await _catalog.GetContextMenuItemStateAsync(original.Id, original, token,
-                await ResolveFrontendUserContextAsync(stream, token));
-            if (!state.Success) return state;
-        }
-        return null;
-    }
-
-    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextIfNeededAsync(
-        PipeRequest request,
-        NamedPipeServerStream stream,
-        CancellationToken cancellationToken)
-    {
-        var kind = TryGetSpecialMenuKindForUserContext(request);
-        if (kind is null || !RequiresSpecialMenuUserContext(kind.Value))
-        {
-            return null;
-        }
-
-        return await ResolveSpecialMenuUserContextAsync(stream, cancellationToken);
-    }
-
-    private static bool RequiresSpecialMenuUserContext(SpecialMenuKind kind)
-    {
-        return kind is SpecialMenuKind.ShellNew
-            or SpecialMenuKind.SendTo
-            or SpecialMenuKind.WinX
-            or SpecialMenuKind.OpenWith;
-    }
-
-    private static SpecialMenuKind? TryGetSpecialMenuKindForUserContext(PipeRequest request)
-    {
-        if (request.SpecialItem is not null)
-        {
-            return request.SpecialItem.Kind;
-        }
-
-        if (request.SpecialKind is not null)
-        {
-            return request.SpecialKind.Value;
-        }
-
-        if (request.ShellNewCreate is not null
-            || request.ShellNewUpdate is not null
-            || request.ShellNewSort is not null
-            || request.ShellNewLock is not null)
-        {
-            return SpecialMenuKind.ShellNew;
-        }
-
-        if (request.SendToCreate is not null
-            || request.SendToUpdate is not null)
-        {
-            return SpecialMenuKind.SendTo;
-        }
-
-        if (request.WinXCreateGroup is not null
-            || request.WinXCreateEntry is not null
-            || request.WinXUpdateEntry is not null
-            || request.WinXMove is not null)
-        {
-            return SpecialMenuKind.WinX;
-        }
-
-        if (request.OpenWithCreate is not null
-            || request.OpenWithUpdate is not null)
-        {
-            return SpecialMenuKind.OpenWith;
-        }
-
-        return null;
-    }
-
-    private async Task<BackendUserContext?> ResolveFrontendUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
-    {
-        var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream);
-        if (userContext is null)
-        {
-            MenuDiscoveryCoverage.MarkIncomplete();
-            await _logger.LogAsync(
-                RuntimeLogLevel.Warning,
-                "Frontend user context could not be resolved for user-scoped request.",
-                cancellationToken);
-        }
-
-        if (userContext is not null)
-        {
-            using var frontendHive = Microsoft.Win32.Registry.Users.OpenSubKey(userContext.Sid, writable: false);
-            if (frontendHive is null) MenuDiscoveryCoverage.MarkIncomplete();
-        }
-        return userContext;
     }
 
     private async Task<BackendUserContext?> ResolveFrontendUserSessionContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
@@ -972,22 +360,6 @@ public sealed class NamedPipeBackendServer
                 RuntimeLogLevel.Warning,
                 "Frontend user session context could not be resolved for session-scoped request.",
                 cancellationToken);
-        }
-
-        return userContext;
-    }
-
-    // Resolve only for context-aware special menus. OpenWith requires the authenticated pipe caller.
-    // Do not call this from ordinary catalog, Win11, registry protection,
-    // auto-start, file-type scene, or restart routes.
-    private async Task<BackendUserContext?> ResolveSpecialMenuUserContextAsync(NamedPipeServerStream stream, CancellationToken cancellationToken)
-    {
-        var resolver = new BackendUserContextResolver(_logger);
-        var userContext = resolver.TryResolveFromPipeClient(stream);
-        if (userContext is null)
-        {
-            MenuDiscoveryCoverage.MarkIncomplete();
-            await _logger.LogAsync(RuntimeLogLevel.Warning, "Context-aware special menu request could not resolve frontend user context.", cancellationToken);
         }
 
         return userContext;
@@ -1187,11 +559,6 @@ public sealed class NamedPipeBackendServer
                 : "Explorer restart requested."
         };
     }
-
-    internal static PipeResponse CorrelateResponseWithRequest(PipeRequest request, PipeResponse response)
-        => response.ClientOperationId is null && request.ClientOperationId is { } operationId
-            ? response with { ClientOperationId = operationId }
-            : response;
 
     private static string BuildRequestStartLog(Guid connectionId, Guid correlationId, PipeRequest request)
         => $"PipeRequestStart: ConnectionId={connectionId}, CorrelationId={correlationId}, Command={request.Command}, ClientOperationId={request.ClientOperationId}, ItemId={request.ItemId}, SpecialKind={request.SpecialKind}, SceneKind={request.SceneKind}, Enable={request.Enable}, AutoStartEnabled={request.AutoStartEnabled}, ShowTrayIcon={request.ShowTrayIcon}, ShellNewLock={request.ShellNewLock?.Lock}, Timestamp={DateTimeOffset.UtcNow:O}.";

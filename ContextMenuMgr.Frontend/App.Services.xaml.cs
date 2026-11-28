@@ -42,7 +42,8 @@ public partial class App
         services.AddSingleton<ContextMenuDeepAnalysisService>();
         services.AddSingleton<ShellSubMenuDialogService>();
         services.AddSingleton<DetailedEditMenuDialogService>();
-        services.AddSingleton<IBackendClient, NamedPipeBackendClient>();
+        services.AddSingleton<IBackendClient>(sp => new BackendClient(new NamedPipeBackendTransport(),
+            sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>()));
         services.AddSingleton<IBackendServiceManager, BackendServiceManager>();
         services.AddSingleton<ContextMenuWorkspaceService>();
         services.AddSingleton<ExplorerRestartStateService>();

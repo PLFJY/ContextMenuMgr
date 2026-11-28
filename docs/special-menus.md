@@ -19,7 +19,7 @@ SpecialMenu 指当前代码中由 `SpecialMenuService` 管理、但不适合放�
 
 ## SpecialMenuService 总览
 
-`SpecialMenuService` 位于 `ContextMenuMgr.Backend/Services/SpecialMenuService.cs`。当前 `SpecialMenuKind` 定义在 `ContextMenuMgr.Contracts/SpecialMenuContracts.cs`：
+`SpecialMenuService` 位于 `ContextMenuMgr.Core/Services/SpecialMenuService.cs`。当前 `SpecialMenuKind` 定义在 `ContextMenuMgr.Contracts/SpecialMenuContracts.cs`：
 
 | 类型 | 主要数据位置 | 用户上下文要求 |
 | --- | --- | --- |
@@ -86,16 +86,16 @@ COM，不调用 `IShellLink.Resolve`，也不使用 `WScript.Shell`。SendTo 当
 | --- | --- |
 | DragDrop | `SpecialMenuService` 管理 Classes 的拖放 handler / DefaultDropEffect；仍有服务 HKCR helper，不能宣称已实现所有前端用户 overlay |
 | CommandStore | 读取 Explorer CommandStore；与传统父级 SubCommands 引用开关、Win11 白名单系统命令是不同入口，不由它们推导任意命令可安全修改 |
-| GuidBlock | [GuidBlockMenuService](../ContextMenuMgr.Backend/Services/GuidBlockMenuService.cs) 独立管理机器级 GUID Block 创建/开关/删除；与 classic per-registration、Win11 用户 Blocked 语义不同 |
+| GuidBlock | [GuidBlockMenuService](../ContextMenuMgr.Core/Services/GuidBlockMenuService.cs) 独立管理机器级 GUID Block 创建/开关/删除；与 classic per-registration、Win11 用户 Blocked 语义不同 |
 | InternetExplorer | 旧 `MenuExt` / `-MenuExt` 路径、创建/更新脚本信息；现有 HKCU 限制如上，不是现代浏览器扩展管理 |
 
 ## WPS 与 Microsoft Office 共存
 
 WPS / Microsoft Office 共存保护不会在 ShellNew 或 OpenWith 普通页面追加 File Association / Icon 项。两套 Office 同时存在时，后端只通过待审核专用管道读取当前用户 `HKEY_USERS\<SID>\Software\Classes` 和 ShellNew order key，检测 WPS 注入的 `.pdfwpsshellnew`、`.pptxwpsaicreateshellnew` 等 ShellNew command 项，以及 WPS 对文档关联和图标的用户级覆盖。检测结果是 `special:wps-*` 合成待审核项，不通过 ShellNew ACL lock 修复，也不会自动删除 WPS key。首次运行或重置后，当前已存在的 WPS 合成项会作为已确认 baseline 保存，不进入待审核或外部变化；同时写入 `internal:baseline:wps-office:v1`，即使当前检测结果为零项也要标记扫描已经完成。建立 WPS baseline 后首次出现的新合成项才进入待审核，常规菜单 baseline 不能影响这一判断。
 
-[OfficeSuiteCoexistenceDetector](../ContextMenuMgr.Backend/Services/OfficeSuiteCoexistenceDetector.cs) 与 catalog 专用 WPS Pipe 路径负责检测、持久状态与审核；不是 Applications 注册监控。GetOfficeSuiteCoexistenceStatus 提供共存/修复状态及受保护扩展名，GetWpsOfficePendingApprovals 提供审核项。
+[OfficeSuiteCoexistenceDetector](../ContextMenuMgr.Core/Services/OfficeSuiteCoexistenceDetector.cs) 与 catalog 专用 WPS Pipe 路径负责检测、持久状态与审核；不是 Applications 注册监控。GetOfficeSuiteCoexistenceStatus 提供共存/修复状态及受保护扩展名，GetWpsOfficePendingApprovals 提供审核项。
 
-仅 ShellNew 页面提供“修复 WPS 文档图标覆盖”开关，替代原来的 Microsoft Office/WPS 图标来源单选。开启时，[DocumentIconRepairMutation](../ContextMenuMgr.Backend/Services/DocumentIconRepairMutation.cs) 只捕获当前用户 Office ProgID 的 WPS DefaultIcon 覆盖，并在机器注册中确认仍有有效 Office 图标来源；先持久保存原始值及类型，再删除该用户覆盖值，让合并 Classes 自然继承机器 Office 图标。WPS 自身 ProgID、扩展名默认关联、UserChoice/Hash、机器注册与其它用户均不修改。因此选择 Office 默认打开时使用 Office 图标，选择 WPS 时仍使用 WPS 自己的图标；不再把 WPS 图标复制到 Office 名下，也不固定一份机器图标路径到用户注册。已有正确图标或其它自定义图标保持原样，无覆盖可修复时可开启且保存空恢复清单。
+仅 ShellNew 页面提供“修复 WPS 文档图标覆盖”开关，替代原来的 Microsoft Office/WPS 图标来源单选。开启时，[DocumentIconRepairMutation](../ContextMenuMgr.Core/Services/DocumentIconRepairMutation.cs) 只捕获当前用户 Office ProgID 的 WPS DefaultIcon 覆盖，并在机器注册中确认仍有有效 Office 图标来源；先持久保存原始值及类型，再删除该用户覆盖值，让合并 Classes 自然继承机器 Office 图标。WPS 自身 ProgID、扩展名默认关联、UserChoice/Hash、机器注册与其它用户均不修改。因此选择 Office 默认打开时使用 Office 图标，选择 WPS 时仍使用 WPS 自己的图标；不再把 WPS 图标复制到 Office 名下，也不固定一份机器图标路径到用户注册。已有正确图标或其它自定义图标保持原样，无覆盖可修复时可开启且保存空恢复清单。
 
 关闭时恢复该次开启前捕获的精确数据和类型；没有原始覆盖就不凭空创建 WPS 覆盖。恢复先核对全部目标：当前值必须仍是修复后的缺失值，或已经等于备份原值；发现其它新值、Office 注册已消失/改变到无法确认、SID 或目标不符时拒绝覆盖并保留恢复记录。所有目标限定在 Catalog 的 Office ProgID/DefaultIcon 白名单，按来源 RegistryView 重新开句柄读回。写入、恢复或最终状态保存失败时逆序条件回滚，保留第三方后续修改；失败写 WpsDocumentIconRollbackFailed，不盲重试。不删除 DefaultIcon 键中的其它值，恢复可能重建已消失的空键，不保证撤销空键本身。
 

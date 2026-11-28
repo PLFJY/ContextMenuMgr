@@ -133,7 +133,8 @@ public sealed class OpenWithRegistrationTests
         using var fixture = new Fixture(monitoring: true);
         var review = await fixture.CreatePending(initiallyDisabled: true);
         var logger = new FileLogger(System.IO.Path.ChangeExtension(fixture.StatePath, "pipe.log"));
-        var backend = new NamedPipeBackendServer(null!, fixture.Service, null!, null!, null!, null!, null!, logger);
+        var dispatcher = new BackendRequestDispatcher(null!, fixture.Service, null!, null!, null!, logger);
+        var backend = new NamedPipeBackendServer(dispatcher, fixture.Service, null!, null!, logger);
         var handle = typeof(NamedPipeBackendServer).GetMethod("ObserveClientTaskAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var pipeName = "ContextMenuMgr.Tests.OpenWith." + Guid.NewGuid().ToString("N");
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -144,7 +145,7 @@ public sealed class OpenWithRegistrationTests
             await pipe.WaitForConnectionAsync(budget.Token);
             await (Task)handle.Invoke(backend, [pipe, budget.Token])!;
         }
-        await using var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        await using var client = new BackendClient(new NamedPipeBackendTransport(pipeName), new MenuListCacheService(), new MenuListActivityService());
         var serving = Serve();
         var stateBefore = await File.ReadAllBytesAsync(fixture.StatePath);
         var queried = await client.GetOpenWithPendingReviewsAsync(budget.Token);
@@ -1231,7 +1232,7 @@ public sealed class OpenWithRegistrationTests
             Context = new BackendUserContext(sid, Environment.UserName, _logDirectory, _logDirectory, _logDirectory, null);
             _hive = RegistryKey.OpenBaseKey(RegistryHive.Users, Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
             Directory.CreateDirectory(_logDirectory);
-            Service = new SpecialMenuService(new FileLogger(System.IO.Path.Combine(_logDirectory, "backend.log")));
+            Service = new SpecialMenuService(new FileLogger(System.IO.Path.Combine(_logDirectory, "backend.log")), FrontendUserClassesRoot.TryOpen);
             if (monitoring) RestartMonitoring();
         }
         public BackendUserContext Context { get; }
@@ -1245,7 +1246,7 @@ public sealed class OpenWithRegistrationTests
         {
             var logger = new FileLogger(System.IO.Path.Combine(_logDirectory, "backend.log"));
             Store = new ContextMenuStateStore(StatePath, logger, quarantineDirectory: System.IO.Path.Combine(_logDirectory, "quarantine"));
-            Monitoring = new OpenWithMonitoringService(Store, logger);
+            Monitoring = new OpenWithMonitoringService(Store, logger, new BackendUserContextResolver(logger).ResolveLoggedInUsers);
             Service.OpenWithMonitoring = Monitoring;
         }
         public Task Poll(int seconds) => Monitoring!.PollAsync(Context, _started.AddSeconds(seconds), default);

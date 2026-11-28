@@ -4,11 +4,11 @@
 
 ## 入口与保存格式
 
-- [ContextMenuRegistryCatalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs)：`RunPersistentStateOperationAsync` 串行快照、审核、删除/恢复与 reconciliation 的 Load → Merge → Save。
+- [ContextMenuRegistryCatalog](../ContextMenuMgr.Core/Services/ContextMenuRegistryCatalog.cs)：`RunPersistentStateOperationAsync` 串行快照、审核、删除/恢复与 reconciliation 的 Load → Merge → Save。
 - [ContextMenuRegistryMonitor](../ContextMenuMgr.Backend/Services/ContextMenuRegistryMonitor.cs)：常规轮询、稳定内存 baseline、session 重建；另独立调度 OpenWith Applications 轮询，完整扫描耗时不能阻塞其稳定观测。
-- [ContextMenuStateStore](../ContextMenuMgr.Backend/Services/ContextMenuStateStore.cs)：store gate、schema parser、原子替换、隔离与恢复。
-- [PersistedContextMenuState](../ContextMenuMgr.Backend/Services/PersistedContextMenuState.cs)：desired/observed、pending、删除备份、visibility provenance、子菜单引用、Win11 恢复日志。
-- [ContextMenuChangeClassifier](../ContextMenuMgr.Backend/Services/ContextMenuChangeClassifier.cs)：身份与开关状态变化比较；菜单内容及恢复元数据不参与 Modified 判断。
+- [ContextMenuStateStore](../ContextMenuMgr.Core/Services/ContextMenuStateStore.cs)：store gate、schema parser、原子替换、隔离与恢复。
+- [PersistedContextMenuState](../ContextMenuMgr.Core/Services/PersistedContextMenuState.cs)：desired/observed、pending、删除备份、visibility provenance、子菜单引用、Win11 恢复日志。
+- [ContextMenuChangeClassifier](../ContextMenuMgr.Core/Services/ContextMenuChangeClassifier.cs)：身份与开关状态变化比较；菜单内容及恢复元数据不参与 Modified 判断。
 
 当前 envelope 为 `schemaVersion=3`，包含 `hostIdentity`、`states` 和独立 `openWith`。OpenWith 的 per-SID reviews/generations/reviewVersions、可见性操作 journal 与缺失身份均属于该独立 section；中央待审批读取它们，不向 states 添加伪经典项，也不由通知反向生成审核。旧 schema-3 缺新增集合时保留已发布 reviews/rules，空集合兼容加载；读回失败不清空审核。仍读取 schema 2 与 legacy raw dictionary，不由迁移凭空生成授权规则；未来 schema 拒绝读取，不能当损坏清空。普通 Save 在 store gate 中重新读取并保留最新 OpenWith section；OpenWith callback 同 gate 读取/合并最新常规 states 后保存。catalog gate 与 store gate 各有职责，不能以单次 Load/Save 自身有锁推断整段 read/merge/write 安全。
 

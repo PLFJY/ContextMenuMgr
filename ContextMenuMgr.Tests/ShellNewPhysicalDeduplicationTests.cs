@@ -200,7 +200,7 @@ public sealed class ShellNewPhysicalDeduplicationTests
         }
 
         public static SharedProgIdFixture Create() => new();
-        public SpecialMenuService CreateService() => new(new FileLogger(Path.Combine(_logDirectory, "backend.log")));
+        public SpecialMenuService CreateService() => new(new FileLogger(Path.Combine(_logDirectory, "backend.log")), FrontendUserClassesRoot.TryOpen);
 
         public string ReadFixtureState()
         {

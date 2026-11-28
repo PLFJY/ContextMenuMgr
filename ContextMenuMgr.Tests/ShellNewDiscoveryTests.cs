@@ -44,7 +44,7 @@ public sealed class ShellNewDiscoveryTests(ITestOutputHelper output)
     [Fact]
     public async Task FailedAuthoritativeAcquisition_CannotReturnEmptyOrPackagedOnlySnapshot()
     {
-        var service = new SpecialMenuService(Logger());
+        var service = new SpecialMenuService(Logger(), FrontendUserClassesRoot.TryOpen);
         await Assert.ThrowsAnyAsync<Exception>(() => service.GetSnapshotAsync(SpecialMenuKind.ShellNew, Context(-1), CancellationToken.None));
     }
 

@@ -4,7 +4,7 @@
 
 ## 环境与入口
 
-[ContextMenuMgr.slnx](../ContextMenuMgr.slnx) 包含 .NET 项目、Tests 与 native C++ ProbeHost。需要 .NET 10 SDK、Visual Studio C++ Build Tools/Windows SDK；发布 ARM64 还需 C++ ARM64 toolchain。Backend 通过 `Microsoft.Windows.SDK.NET.Ref` 投影调用 PackageManager；Frontend/Backend/TrayHost/Tests 当前 TFM 为 `net10.0-windows10.0.17763.0`，Contracts 为 net10.0。不要用直接 .winmd 的旧 SDK.Contracts 替代而引入 NETSDK1130；这与禁止为托盘引入 Windows App SDK 是不同约束。
+[ContextMenuMgr.slnx](../ContextMenuMgr.slnx) 包含 .NET 项目、Tests 与 native C++ ProbeHost。需要 .NET 10 SDK、Visual Studio C++ Build Tools/Windows SDK；发布 ARM64 还需 C++ ARM64 toolchain。Core 通过 `Microsoft.Windows.SDK.NET.Ref` 投影调用 PackageManager；Frontend/Backend/Core/TrayHost/Tests 当前 TFM 为 `net10.0-windows10.0.17763.0`，Contracts 为 net10.0。不要用直接 .winmd 的旧 SDK.Contracts 替代而引入 NETSDK1130；这与禁止为托盘引入 Windows App SDK 是不同约束。
 
 [.gitmodules](../.gitmodules) 当前仅有 `Installer/InnoDependencyInstaller` submodule；ProbeHost 的 nlohmann/json 是 vendored header，不是 submodule。递归初始化保证依赖安装器内容；ISCC 位于独立的 `Installer/Inno Setup 6`，不能把缺少 ISCC 一概归因到该 submodule。
 
@@ -42,9 +42,11 @@ ISCC 解析函数为 `Resolve-IsccPath`：先仓库内，再 Program Files/PATH�
 
 restore/publish .NET Frontend、Backend、TrayHost；native ProbeHost 用 MSBuild vcxproj，不用 dotnet publish。并行目标传专属 BaseOutputPath/--artifacts-path，helper OutputPath 从该根派生，避免 apphost/runtimeconfig/deps 互抢。`build.ps1` 对 publish-runs 隔离、收集 dist/artifacts.txt；目标失败停止调度并从 generic list `.ToArray()` 快照停止剩余进程。不要把 PowerShell 5.1 的 `@($genericList)` 当安全等价实现。
 
+Backend 发布通过项目引用携带一份 `ContextMenuMgr.Core.dll`，并在 Service 的 deps 中声明 Core。`Resources/GuidInfosDic.ini` 由 Core 项目提供，部署路径仍相对于应用目录。Frontend 和 TrayHost 的 deps 只声明自身业务项目和 Contracts。Inno 将 Core 作为应用文件复制，并在关键应用文件清单中核对其 SHA-256。 [G1 验证](portable-refactoring-baseline.md#g1-实现与验证)
+
 ### 发布文件筛选
 
-`Publish-Application` 为每个目标先创建干净的共享发布目录，再依次发布 Frontend、Backend、TrayHost 并暂存 ProbeHost；最后校验文件策略、TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用该目录。根目录 [Directory.Build.targets](../Directory.Build.targets) 对三个托管项目设置资产语言属性；两个发布目标分别筛选项目卫星元数据和发布文件。
+`Publish-Application` 为每个目标先创建干净的共享发布目录，再依次发布 Frontend、Backend、TrayHost 并暂存 ProbeHost；最后校验文件策略、TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用该目录。根目录 [Directory.Build.targets](../Directory.Build.targets) 对三个托管入口和 Core 设置资产语言属性，两个发布目标分别筛选项目卫星元数据和发布文件。
 
 - `SatelliteResourceLanguages` 在 NuGet 资产解析时保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant`。该属性也传给普通开发 build 的 SDK 资产解析，影响取决于实际资产。共享目标在 publish 的 `ComputeIntermediateSatelliteAssemblies` 之后过滤项目生成的非允许 culture 项。`ComputeResolvedFilesToPublishList` 后还有一次解析资产过滤，覆盖包和其它 resolved items。规则按 `.resources.dll` 项和 culture 元数据识别。
 - `CopyOutputSymbolsToPublishDirectory=false` 不复制托管项目自己的 PDB，`ResolvedFileToPublish` 过滤还排除传递资产中的独立 PDB 和非允许项目 satellite。`IncludeSymbolsInSingleFile=false` 禁止 SDK 将独立符号文件纳入 bundle。筛选先于 publish deps、bundle 和复制，普通 build 仍生成符号。现有依赖 `CommunityToolkit.Mvvm.dll`、`WinRT.Runtime.dll` 自带内嵌 Portable PDB，筛选保持 DLL 原字节。 [G0 实测](portable-refactoring-baseline.md#g-1-发布资产与分发基线)

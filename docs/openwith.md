@@ -74,7 +74,7 @@ RegRenameKey soft delete、事务 purge 和重复 .deleted 兼容仍保留；没
 
 ## 监控、审核与显式持久保护
 
-[OpenWithMonitoringService](../ContextMenuMgr.Backend/Services/OpenWithMonitoringService.cs) 由 `ContextMenuRegistryMonitor` 管理独立的 Applications 轮询任务，默认每轮结束后等五秒；不等待常规/Win11 全量扫描及其 catalog gate，也不做扩展名来源扫描。两个任务共用停止令牌，Stop/Completion 等待两者退出。每轮重新打开 native HKU/HKLM Applications，无长期 Registry handle/RegNotify watcher；每 root 最多 4096 名，发现预算 15 秒协作取消，单次同步 Windows API 无法抢占。
+[OpenWithMonitoringService](../ContextMenuMgr.Core/Services/OpenWithMonitoringService.cs) 由 `ContextMenuRegistryMonitor` 管理独立的 Applications 轮询任务，默认每轮结束后等五秒；不等待常规/Win11 全量扫描及其 catalog gate，也不做扩展名来源扫描。两个任务共用停止令牌，Stop/Completion 等待两者退出。每轮重新打开 native HKU/HKLM Applications，无长期 Registry handle/RegNotify watcher；每 root 最多 4096 名，发现预算 15 秒协作取消，单次同步 Windows API 无法抢占。
 
 认证 Pipe 上下文和每 30 秒枚举一次的 WTS active/connected/disconnected token 提供用户。resolver 在解析会话与 Pipe 时均验证已启用的 `INTERACTIVE`（`S-1-5-4`）事实，非交互会话在枚举阶段即被忽略；因此 `OpenWithMonitoringService` 接收到的上下文均已具备交互登录身份。执行前独立验证 SID、loaded hive 和 Classes root；同 SID 多 Session 共用一个 baseline，不同 SID 独立。HKLM/HKU 同名项始终是不同物理来源。通知 `OpenWithChanged` 带 UserSid，只向相同认证 SID 的订阅者发送；普通 OpenWith mutation 广播也按 SID 过滤。通知 DTO 只触发 fresh snapshot，不作为状态直接覆盖 UI。TrayHost 只为持久未解决审核数量大于零的监控通知显示既有 Win32 气泡，Information 级别的 OpenWithApprovalNotificationReceived 记录收到的审核信号，不能作为 Windows 实际显示证明；激活统一通过 `OpenApprovals` 打开中央待审批并重新查询。气泡回调只有图标身份，不能从代表性的 SpecialItem 或最近一次全局状态推断历史点击目标；单条、聚合和重叠气泡均采用安全的通用待审批入口。监控不可用诊断不构造待审批，也不产生审核气泡；隐藏图标时仍可接收通知。兼容决定：保留已发布 `FrontendControlCommand.OpenWith` / `--open-openwith` 的显式页面激活，但 TrayHost 不再使用它转接审核。
 
@@ -132,6 +132,6 @@ Debug 构建主窗口按 F12，在调试工具的“模拟打开方式注册”�
 
 ## 源码与维护
 
-入口：[SpecialMenuService](../ContextMenuMgr.Backend/Services/SpecialMenuService.cs)、[OpenWithRegistration](../ContextMenuMgr.Backend/Services/OpenWithRegistration.cs)、[OpenWithSourceInspection](../ContextMenuMgr.Backend/Services/OpenWithSourceInspection.cs)、[OpenWithMonitorState](../ContextMenuMgr.Backend/Services/OpenWithMonitorState.cs)、[前端 VM](../ContextMenuMgr.Frontend/ViewModels/SpecialMenuPageViewModel.cs)、[Contracts](../ContextMenuMgr.Contracts/SpecialMenuContracts.cs)。永久回归在 [OpenWithRegistrationTests](../ContextMenuMgr.Tests/OpenWithRegistrationTests.cs)。
+入口：[SpecialMenuService](../ContextMenuMgr.Core/Services/SpecialMenuService.cs)、[OpenWithRegistration](../ContextMenuMgr.Core/Services/OpenWithRegistration.cs)、[OpenWithSourceInspection](../ContextMenuMgr.Core/Services/OpenWithSourceInspection.cs)、[OpenWithMonitorState](../ContextMenuMgr.Core/Services/OpenWithMonitorState.cs)、[前端 VM](../ContextMenuMgr.Frontend/ViewModels/SpecialMenuPageViewModel.cs)、[Contracts](../ContextMenuMgr.Contracts/SpecialMenuContracts.cs)。永久回归在 [OpenWithRegistrationTests](../ContextMenuMgr.Tests/OpenWithRegistrationTests.cs)。
 
 修改支持的激活结构、visibility/edit stamp、授权、监控预算、state section 或历史 sibling backup 兼容时更新本文；只读来源不能因为被发现就获得修改权限。无 marker 的旧值仍无法证明归属，未实现显式带恢复快照的 legacy recovery。BaiduNetdisk 等具体旧值来源需原始值/类型/marker/command 与同时间日志，当前证据不足，不能由应用名判断。

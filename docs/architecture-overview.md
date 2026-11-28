@@ -4,12 +4,13 @@
 
 ## 模块地图
 
-[ContextMenuMgr.slnx](../ContextMenuMgr.slnx) 包含以下五个生产项目和 Tests。版本集中在 [Directory.Build.props](../Directory.Build.props)；项目中的实际 TFM、依赖和复制目标是构建事实。
+[ContextMenuMgr.slnx](../ContextMenuMgr.slnx) 包含以下六个生产项目和 Tests。版本集中在 [Directory.Build.props](../Directory.Build.props)，构建以项目声明的 TFM、依赖和复制目标为准。
 
 | 模块 | 入口与输出 | 职责 |
 | --- | --- | --- |
 | Frontend | [App.xaml.cs](../ContextMenuMgr.Frontend/App.xaml.cs)、[App.Services.xaml.cs](../ContextMenuMgr.Frontend/App.Services.xaml.cs)；`ContextMenuManagerPlus.exe` | WPF/WPF-UI、DI/MVVM、导航、搜索、设置、Pipe 客户端；服务维护时启动 bootstrapper，深入分析时启动 ProbeHost |
-| Backend | [Program.cs](../ContextMenuMgr.Backend/Program.cs)、[BackendRuntime](../ContextMenuMgr.Backend/Hosting/BackendRuntime.cs)；`ContextMenuManagerPlus.Service.exe` | LocalSystem 服务，组合 catalog、状态库、监控、SpecialMenu 和 Pipe server；同一 EXE 的 `--service-bootstrap` 是一次性提升入口 |
+| Backend | [Program.cs](../ContextMenuMgr.Backend/Program.cs)、[BackendRuntime](../ContextMenuMgr.Backend/Hosting/BackendRuntime.cs)；`ContextMenuManagerPlus.Service.exe` | LocalSystem、SCM、WTS、Pipe server 和持续监控宿主。`--service-bootstrap` 是同一 EXE 的一次性提升入口 |
+| Core | [BackendCore](../ContextMenuMgr.Core/Execution/BackendCore.cs)、[BackendRequestDispatcher](../ContextMenuMgr.Core/Execution/BackendRequestDispatcher.cs)、`ContextMenuMgr.Core.dll` | 复用菜单分发、catalog、SpecialMenu、Win11、状态、备份及单轮 OpenWith 协调 |
 | TrayHost | [Program.cs](../ContextMenuMgr.TrayHost/Program.cs)、[TrayHostRunner](../ContextMenuMgr.TrayHost/TrayHostRunner.cs)；`ContextMenuManagerPlus.TrayHost.exe` | 用户桌面中的 Win32 托盘、通知与前端激活，不拥有注册表业务 |
 | ProbeHost | [main.cpp](../ContextMenuMgr.ProbeHost/src/main.cpp)；`ProbeHost/<arch>/ContextMenuMgr.ProbeHost.exe` | 原生 C++、短生命周期 COM 探测；隔离第三方代码，不提权 |
 | Contracts | [PipeEnvelope](../ContextMenuMgr.Contracts/PipeEnvelope.cs)、[ContextMenuEntry](../ContextMenuMgr.Contracts/ContextMenuEntry.cs) | DTO、IPC、路径、轻量控制客户端及共享日志基础设施；不承载注册表/WTS/UI 业务 |
@@ -19,9 +20,12 @@
 
 ```mermaid
 flowchart LR
-  UI[Frontend / Workspace / ViewModel] -->|请求| Pipe[NamedPipeBackendServer]
-  Pipe --> Catalog[ContextMenuRegistryCatalog]
-  Pipe --> Special[SpecialMenuService]
+  UI[Frontend / Workspace / ViewModel] --> Client[BackendClient]
+  Client --> Transport[NamedPipeBackendTransport]
+  Transport -->|请求| Pipe[NamedPipeBackendServer]
+  Pipe --> Dispatcher[Core / BackendRequestDispatcher]
+  Dispatcher --> Catalog[ContextMenuRegistryCatalog]
+  Dispatcher --> Special[SpecialMenuService]
   Catalog --> Registry[物理 HKLM / HKU]
   Catalog <--> Store[ContextMenuStateStore]
   Monitor[ContextMenuRegistryMonitor] --> Catalog
@@ -33,7 +37,9 @@ flowchart LR
   UI -->|Deep Analysis| Probe[原生 ProbeHost]
 ```
 
-服务 `CreateDefault` 先迁移旧数据、best-effort 修复数据目录 ACL，再创建 logger、host identity、state/protection stores、catalog、SpecialMenu/OpenWith coordinator、Win11/AutoStart/scene/Explorer services、monitor 和 Pipe server。运行启动/停止由 [BackendWindowsService](../ContextMenuMgr.Backend/Hosting/BackendWindowsService.cs) 与 `BackendRuntime` 协调。具体启停、WTS 和通知所有权见[运行时生命周期](runtime-lifecycle.md)。
+Core 只引用 Contracts 和所需 Windows 依赖。Backend 引用 Core 与 Contracts，Frontend 和 TrayHost 的运行时应用项目依赖为 Contracts。Frontend 保留 Backend 和 TrayHost 的 build-only 引用以组装现有多文件布局。ProbeHost 仍独立运行。
+
+`BackendRuntime.CreateDefault` 先迁移旧数据、修复数据 ACL，再创建 logger、host identity、state/protection stores 和备份。`BackendCore` 在这些实例上建立 catalog、SpecialMenu、OpenWith、Win11、文件类型和 dispatcher。Pipe 与 monitor 使用同一套实例及其事务门。宿主提供备用 SID、登录用户枚举和 ShellNew merged Classes 打开方法，并负责启动、停止、通知及激活。详见[运行时生命周期](runtime-lifecycle.md)。
 
 Frontend 取得单实例所有权后建立日志会话和 DI，启动控制 Pipe，创建主窗口并初始化 workspace。workspace 将连接可达性、主快照与 WPS 审核刷新分开：Ping 成功但快照失败属于数据加载错误，不自动升级为服务重装。分类页从 workspace 本地投影；scene-only 项不属于全局集合。详见[前端](frontend-wpf-ui.md)。
 

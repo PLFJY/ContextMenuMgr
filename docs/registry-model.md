@@ -4,7 +4,7 @@
 
 本文解释传统右键菜单如何在 ContextMenuMgr 中被扫描、建模、禁用、删除、恢复、审核和备份。这里的“传统右键菜单”主要指注册在 `shell` 和 `shellex\ContextMenuHandlers` 体系下的菜单项，不包含 Windows 11 packaged context menu，也不包含 ShellNew / SendTo / WinX 等 SpecialMenu。
 
-相关主实现位于 `ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs`、`RegistryBackupService.cs`，前后端传输模型位于 `ContextMenuMgr.Contracts/ContextMenuEntry.cs`。
+相关主实现位于 `ContextMenuMgr.Core/Services/ContextMenuRegistryCatalog.cs`、`RegistryBackupService.cs`，前后端传输模型位于 `ContextMenuMgr.Contracts/ContextMenuEntry.cs`。
 
 ## Windows 传统右键菜单基础
 
@@ -232,7 +232,7 @@ Registry Write Protection 的设置值不是“用户最后一次点击的值”
 
 ## 调试、验证与维护
 
-源码入口：[catalog](../ContextMenuMgr.Backend/Services/ContextMenuRegistryCatalog.cs)、[ShellVerbVisibility](../ContextMenuMgr.Backend/Services/ShellVerbVisibility.cs)、[ProtectedRegistryMutation](../ContextMenuMgr.Backend/Services/ProtectedRegistryMutation.cs)、[RegistryProtectionAcl](../ContextMenuMgr.Backend/Services/RegistryProtectionAcl.cs)、[备份](../ContextMenuMgr.Backend/Services/RegistryBackupService.cs)。状态机与并发持久化唯一说明见[状态与监控](state-and-monitoring.md)，IPC 超时/迟到通知见[进程与权限](process-and-privilege-flows.md)。
+源码入口：[catalog](../ContextMenuMgr.Core/Services/ContextMenuRegistryCatalog.cs)、[ShellVerbVisibility](../ContextMenuMgr.Core/Services/ShellVerbVisibility.cs)、[ProtectedRegistryMutation](../ContextMenuMgr.Core/Services/ProtectedRegistryMutation.cs)、[RegistryProtectionAcl](../ContextMenuMgr.Core/Services/RegistryProtectionAcl.cs)、[备份](../ContextMenuMgr.Core/Services/RegistryBackupService.cs)。状态机与并发持久化唯一说明见[状态与监控](state-and-monitoring.md)，IPC 超时/迟到通知见[进程与权限](process-and-privilege-flows.md)。
 
 保护设置不是 ACL 事实的完整替代。检查 `RegistryProtectionTransitionStarted/Completed`、失败 target、persisted value 和实际 DACL；禁止手改 JSON false 绕过失败。受保护写入按 token acquisition、privilege enable、registry write、descriptor restoration 分阶段定位；error 5 不等于 privilege 缺失。详见[排错](troubleshooting.md#注册表权限与受保护写入)。
 

@@ -6,7 +6,8 @@ using ContextMenuMgr.Contracts;
 namespace ContextMenuMgr.Backend.Services;
 
 /// <summary>Bounded Applications-only reconciliation, driven by the existing registry monitor.</summary>
-internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, FileLogger logger)
+internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, FileLogger logger,
+    Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<string, BackendUserContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
@@ -32,7 +33,7 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
             if (now >= _nextSessionScan)
             {
                 _nextSessionScan = now.AddSeconds(30);
-                foreach (var user in new BackendUserContextResolver(logger).ResolveLoggedInUsers()) ObserveUser(user);
+                foreach (var user in resolveLoggedInUsers()) ObserveUser(user);
             }
         }
         finally { _gate.Release(); }

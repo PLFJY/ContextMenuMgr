@@ -1,5 +1,5 @@
 <Project>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Core'">
     <SatelliteResourceLanguages>en;en-US;zh;zh-CN;zh-TW;zh-Hans;zh-Hant</SatelliteResourceLanguages>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <IncludeSymbolsInSingleFile>false</IncludeSymbolsInSingleFile>
@@ -7,7 +7,7 @@
 
   <Target Name="FilterUnsupportedPublishSatelliteMetadata"
           AfterTargets="ComputeIntermediateSatelliteAssemblies"
-          Condition="'$(_IsPublishing)' == 'true' and ('$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost')">
+          Condition="'$(_IsPublishing)' == 'true' and ('$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Core')">
     <ItemGroup>
       <_UnsupportedPublishSatellite Include="@(IntermediateSatelliteAssembliesWithTargetPath)"
                                     Condition="'%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'en' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'en-US' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-CN' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-TW' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-Hans' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-Hant'" />
@@ -17,7 +17,7 @@
 
   <Target Name="FilterDistributionPublishAssets"
           AfterTargets="ComputeResolvedFilesToPublishList"
-          Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost'">
+          Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Core'">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
                              Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />

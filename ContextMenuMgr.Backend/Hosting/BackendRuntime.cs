@@ -65,7 +65,8 @@ public sealed class BackendRuntime : IDisposable
             $"RuntimePackage: PackageKind={RuntimePaths.PackageKind}, RootDirectory={RuntimePaths.RootDirectory}, LogsDirectory={RuntimePaths.LogsDirectory}, LocksDirectory={RuntimePaths.LocksDirectory}, DataDirectory={RuntimePaths.DataDirectory}");
 
         BackendEmergencyLogger.Log("CreateDefault: creating RuntimeHostIdentityProvider.");
-        var hostIdentityProvider = new RuntimeHostIdentityProvider(logger);
+        var hostIdentityProvider = new RuntimeHostIdentityProvider(logger,
+            () => new BackendUserContextResolver(logger).TryResolveInteractiveUserFallback()?.Sid);
         BackendEmergencyLogger.Log("CreateDefault: RuntimeHostIdentityProvider created.");
 
         BackendEmergencyLogger.Log("CreateDefault: creating ContextMenuStateStore.");
@@ -80,31 +81,13 @@ public sealed class BackendRuntime : IDisposable
         var backupService = new RegistryBackupService(RuntimePaths.DeletedBackupsDirectory, logger, hostIdentityProvider);
         BackendEmergencyLogger.Log("CreateDefault: RegistryBackupService created.");
 
-        BackendEmergencyLogger.Log("CreateDefault: creating ContextMenuRegistryCatalog.");
-        var catalog = new ContextMenuRegistryCatalog(logger, stateStore, backupService, protectionSettingsStore);
-        BackendEmergencyLogger.Log("CreateDefault: ContextMenuRegistryCatalog created.");
-
-        BackendEmergencyLogger.Log("CreateDefault: creating SpecialMenuService.");
-        var specialMenuService = new SpecialMenuService(logger);
-        var openWithMonitoring = new OpenWithMonitoringService(stateStore, logger);
-        specialMenuService.OpenWithMonitoring = openWithMonitoring;
-        BackendEmergencyLogger.Log("CreateDefault: SpecialMenuService created.");
-
-        BackendEmergencyLogger.Log("CreateDefault: creating Windows11BlocksService.");
-        var windows11BlocksService = new Windows11BlocksService(logger);
-        BackendEmergencyLogger.Log("CreateDefault: Windows11BlocksService created.");
-
-        BackendEmergencyLogger.Log("CreateDefault: creating Win11ClassicContextMenuService.");
-        var win11ClassicContextMenuService = new Win11ClassicContextMenuService(logger);
-        BackendEmergencyLogger.Log("CreateDefault: Win11ClassicContextMenuService created.");
+        var core = new BackendCore(logger, stateStore, backupService, protectionSettingsStore,
+            FrontendUserClassesRoot.TryOpen, () => new BackendUserContextResolver(logger).ResolveLoggedInUsers(),
+            BackendEmergencyLogger.Log);
 
         BackendEmergencyLogger.Log("CreateDefault: creating AutoStartService.");
         var autoStartService = new AutoStartService(logger);
         BackendEmergencyLogger.Log("CreateDefault: AutoStartService created.");
-
-        BackendEmergencyLogger.Log("CreateDefault: creating FileTypeSceneMenuService.");
-        var fileTypeSceneMenuService = new FileTypeSceneMenuService(catalog, stateStore, logger);
-        BackendEmergencyLogger.Log("CreateDefault: FileTypeSceneMenuService created.");
 
         BackendEmergencyLogger.Log("CreateDefault: creating ExplorerRestartService.");
         var explorerRestartService = new ExplorerRestartService();
@@ -112,13 +95,13 @@ public sealed class BackendRuntime : IDisposable
 
         BackendEmergencyLogger.Log("CreateDefault: creating ContextMenuRegistryMonitor.");
         var userContextResolver = new BackendUserContextResolver(logger);
-        var monitor = new ContextMenuRegistryMonitor(catalog, logger, userContextResolver);
-        monitor.OpenWithMonitoring = openWithMonitoring;
+        var monitor = new ContextMenuRegistryMonitor(core.Catalog, logger, userContextResolver);
+        monitor.OpenWithMonitoring = core.OpenWith;
         BackendEmergencyLogger.Log("CreateDefault: ContextMenuRegistryMonitor created.");
 
         BackendEmergencyLogger.Log("CreateDefault: creating NamedPipeBackendServer.");
-        var pipeServer = new NamedPipeBackendServer(catalog, specialMenuService, windows11BlocksService, win11ClassicContextMenuService, autoStartService, fileTypeSceneMenuService, explorerRestartService, logger);
-        openWithMonitoring.Changed += (_, notification) => pipeServer.BroadcastNotification(notification);
+        var pipeServer = new NamedPipeBackendServer(core.Dispatcher, core.SpecialMenu, autoStartService, explorerRestartService, logger);
+        core.OpenWith.Changed += (_, notification) => pipeServer.BroadcastNotification(notification);
         BackendEmergencyLogger.Log("CreateDefault: NamedPipeBackendServer created.");
         stateStore.PortableHostMismatchDetected += (_, message) =>
         {

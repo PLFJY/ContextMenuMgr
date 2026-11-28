@@ -34,11 +34,13 @@ public sealed class SpecialMenuService
     private volatile bool _shellNewStopping;
     private readonly SemaphoreSlim _shellNewMutationGate = new(1, 1);
     private readonly FileLogger _logger;
+    private readonly TryOpenFrontendClassesRoot _tryOpenFrontendClassesRoot;
     internal OpenWithMonitoringService? OpenWithMonitoring { get; set; }
 
-    public SpecialMenuService(FileLogger logger)
+    internal SpecialMenuService(FileLogger logger, TryOpenFrontendClassesRoot tryOpenFrontendClassesRoot)
     {
         _logger = logger;
+        _tryOpenFrontendClassesRoot = tryOpenFrontendClassesRoot;
         WinXHasher.FileLoggerHost.Attach(logger);
     }
 
@@ -846,7 +848,7 @@ public sealed class SpecialMenuService
             var orderLocked = IsShellNewOrderLocked(context);
             stage = "MergedRoot";
             _logger.LogFireAndForget($"ShellNewDiscoveryStageStarted: Sid={context.Sid}, Stage={stage}.");
-            if (!FrontendUserClassesRoot.TryOpen(context, _logger, out var mergedClasses, out var failure))
+            if (!_tryOpenFrontendClassesRoot(context, _logger, out var mergedClasses, out var failure))
                 throw new InvalidOperationException($"ShellNew authoritative discovery unavailable: {failure}");
             using (mergedClasses)
             {

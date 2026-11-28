@@ -122,6 +122,8 @@ OpenWith 页复用同一批 `SpecialMenuItemViewModel` 行，通过前端集合�
 
 ## 列表缓存、差量刷新与通知
 
+工作区与页面继续依赖 `IBackendClient`。DI 创建单个 [BackendClient](../ContextMenuMgr.Frontend/Services/BackendClient.cs) 并把列表缓存、活动统计和 [NamedPipeBackendTransport](../ContextMenuMgr.Frontend/Services/NamedPipeBackendTransport.cs) 交给它。客户端负责操作 ID、结构化失败和缓存合并。Transport 使用独立的普通请求连接和持续订阅，负责线格式、ACK、重连及连接释放。DI 通过客户端释放 transport。 [IPC 契约](process-and-privilege-flows.md)
+
 `MenuListCacheService` 是 DI 单例，只保存前端呈现 DTO；缓存身份、路径、容量和原子写见[运行时数据](runtime-data-and-logging.md#列表呈现缓存)。传统分类、应用分组和审批复用 workspace；Win11、SpecialMenu、按范围查询的 Scene/FileTypes、批量管理和子菜单各恢复自己的缓存。缓存恢复不触发 ItemDetected/托盘审核通知，不建立后端 baseline，也不恢复 Busy、Uncertain 或 ShellNew 锁状态。缓存开关须等 backend 就绪，实际请求仍由后端验证原物理来源。
 
 扫描合并时空 ID 或重复 ID 会以包含列表 scope 和冲突 ID 的诊断失败；不会静默保留首项，也不会替换已有完整快照。SpecialMenu 的物理来源去重必须由对应后端责任先完成，缓存不承担推断/合并物理身份。

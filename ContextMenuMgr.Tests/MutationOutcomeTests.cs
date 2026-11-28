@@ -1,4 +1,4 @@
-﻿using ContextMenuMgr.Backend.Services;
+using ContextMenuMgr.Backend.Services;
 using ContextMenuMgr.Contracts;
 using ContextMenuMgr.Frontend.Services;
 using ContextMenuMgr.Frontend.ViewModels;
@@ -30,7 +30,7 @@ public sealed class MutationOutcomeTests
                 CorrelationId = request.CorrelationId, Response = new PipeResponse { Success = true,
                     DeletedItemsPurge = new() { PurgedItems = [purged], SkippedItemIds = [skipped.Id] } } }, options));
         });
-        await using var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        await using var client = new BackendClient(new NamedPipeBackendTransport(pipeName), new MenuListCacheService(), new MenuListActivityService());
         MenuItemsRemovedEventArgs? removed = null;
         client.ItemsRemoved += (_, e) => removed = e;
         await client.PurgeDeletedItemsAsync(new() { Items = [purged, skipped] }, timeout.Token);
@@ -39,6 +39,112 @@ public sealed class MutationOutcomeTests
         Assert.Equal(purged.Id, Assert.Single(removed.ItemIds));
         Assert.True(removed.Matches(new ContextMenuEntry { Id = purged.Id, IsDeleted = true, DeletedAtUtc = purged.DeletedAtUtc }));
         Assert.False(removed.Matches(new ContextMenuEntry { Id = purged.Id, IsDeleted = true, DeletedAtUtc = purged.DeletedAtUtc!.Value.AddMinutes(1) }));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TransportFailureOrCancellation_ReleasesOperationForLateAuthoritativeNotification(bool cancel)
+    {
+        var tracking = new RecentClientOperationCache();
+        var entered = new TaskCompletionSource<PipeRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reply = new TaskCompletionSource<PipeResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new ControlledBackendTransport(async (request, token) =>
+        {
+            Assert.True(tracking.Contains(request.ClientOperationId));
+            entered.SetResult(request);
+            return await reply.Task.WaitAsync(token);
+        });
+        await using var client = new BackendClient(transport, new MenuListCacheService(), new MenuListActivityService(), tracking);
+        var operationId = Guid.NewGuid();
+        var item = new SpecialMenuEntry { Id = "special|test", Kind = SpecialMenuKind.WinX };
+        var notification = new BackendNotification { ClientOperationId = operationId, SpecialItem = item };
+        var observed = new List<BackendNotification>();
+        client.NotificationReceived += (_, received) => observed.Add(received);
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var pending = client.SetSpecialMenuItemEnabledAsync(item, true, operationId, budget.Token);
+        Assert.Equal(operationId, (await entered.Task.WaitAsync(budget.Token)).ClientOperationId);
+        transport.Publish(notification);
+        Assert.Empty(observed);
+
+        if (cancel)
+        {
+            budget.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        }
+        else
+        {
+            reply.SetResult(new PipeResponse { ErrorCode = "StructuredFailure", Message = "Cannot change the item." });
+            var error = await Assert.ThrowsAsync<BackendRequestException>(() => pending);
+            Assert.Equal("StructuredFailure", error.ErrorCode);
+        }
+
+        transport.Publish(notification);
+        Assert.Same(notification, Assert.Single(observed));
+        await client.DisposeAsync();
+        transport.Publish(notification);
+        Assert.Single(observed);
+    }
+
+    private sealed class ControlledBackendTransport(Func<PipeRequest, CancellationToken, Task<PipeResponse>> send) : IBackendTransport
+    {
+        public event Action<BackendNotification>? NotificationReceived;
+        public bool IsConnected => true;
+        public void StartNotifications() { }
+        public void Publish(BackendNotification notification) => NotificationReceived?.Invoke(notification);
+        public Task<PipeResponse> SendAsync(PipeRequest request, Action<BackendNotification> onNotification, CancellationToken token)
+            => send(request, token);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public async Task NotificationAndRequestChannels_ForwardSignalsAndDisposeClosesSubscription()
+    {
+        var pipeName = $"ContextMenuMgr.Test.{Guid.NewGuid():N}";
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var requestReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subscriptionReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task ServeAsync()
+        {
+            await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 2, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            await pipe.WaitForConnectionAsync(timeout.Token);
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+            var frame = JsonSerializer.Deserialize<PipeEnvelope>((await reader.ReadLineAsync(timeout.Token))!, options)!;
+            var reply = new PipeEnvelope { MessageType = PipeMessageType.Response, CorrelationId = frame.CorrelationId, Response = new() { Success = true } };
+            var signal = new PipeEnvelope { MessageType = PipeMessageType.Notification,
+                Notification = new BackendNotification { Kind = PipeNotificationKind.ServiceMessage, Message = frame.Request!.Command.ToString() } };
+            if (frame.Request.Command == PipeCommand.SubscribeNotifications)
+            {
+                await writer.WriteLineAsync(JsonSerializer.Serialize(reply, options));
+                await writer.WriteLineAsync(JsonSerializer.Serialize(signal, options));
+                Assert.Null(await reader.ReadLineAsync(timeout.Token));
+            }
+            else
+            {
+                Assert.Equal(PipeCommand.Ping, frame.Request.Command);
+                await writer.WriteLineAsync(JsonSerializer.Serialize(signal, options));
+                await writer.WriteLineAsync(JsonSerializer.Serialize(reply, options));
+            }
+        }
+
+        var first = ServeAsync();
+        var second = ServeAsync();
+        await using var client = new BackendClient(new NamedPipeBackendTransport(pipeName), new MenuListCacheService(), new MenuListActivityService());
+        client.NotificationReceived += (_, notification) =>
+        {
+            if (notification.Message == nameof(PipeCommand.Ping)) requestReceived.TrySetResult();
+            if (notification.Message == nameof(PipeCommand.SubscribeNotifications)) subscriptionReceived.TrySetResult();
+        };
+
+        await client.ConnectAsync(timeout.Token);
+        await Task.WhenAll(requestReceived.Task, subscriptionReceived.Task).WaitAsync(timeout.Token);
+        Assert.True(client.IsConnected);
+        await client.DisposeAsync();
+        await Task.WhenAll(first, second).WaitAsync(timeout.Token);
+        Assert.False(client.IsConnected);
     }
 
     [Theory]
@@ -295,7 +401,7 @@ public sealed class MutationOutcomeTests
     public void ContextMenuRequestWithoutOperationId_GetsOneAndRegistersItBeforeSend()
     {
         var cache = new RecentClientOperationCache();
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var request = new PipeRequest
         {
             Command = PipeCommand.SetEnabled,
@@ -322,7 +428,7 @@ public sealed class MutationOutcomeTests
     {
         var operationId = Guid.NewGuid();
         var cache = new RecentClientOperationCache();
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var request = new PipeRequest
         {
             Command = PipeCommand.SetEnabled,
@@ -342,7 +448,7 @@ public sealed class MutationOutcomeTests
     public void DifferentClientOperationNotification_IsForwarded()
     {
         var cache = new RecentClientOperationCache();
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var received = false;
         client.NotificationReceived += (_, _) => received = true;
         cache.Register(Guid.NewGuid());
@@ -354,7 +460,7 @@ public sealed class MutationOutcomeTests
     [Fact]
     public void BackendOriginatedNotificationWithoutClientOperationId_IsForwarded()
     {
-        var client = new NamedPipeBackendClient(new RecentClientOperationCache());
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService());
         var received = false;
         client.NotificationReceived += (_, _) => received = true;
 
@@ -367,7 +473,7 @@ public sealed class MutationOutcomeTests
     {
         var now = DateTimeOffset.UtcNow;
         var cache = new RecentClientOperationCache(() => now);
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var failedRequest = client.PrepareRequestForSend(new PipeRequest
         {
             Command = PipeCommand.SetEnabled,
@@ -390,7 +496,7 @@ public sealed class MutationOutcomeTests
     {
         var now = DateTimeOffset.UtcNow;
         var cache = new RecentClientOperationCache(() => now);
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var id = Guid.NewGuid();
         cache.Register(id);
         now = now.AddSeconds(46);
@@ -430,7 +536,7 @@ public sealed class MutationOutcomeTests
         var slowServer = ServeAsync(firstReceived, releaseFirst.Task, null);
         var fastServer = ServeAsync(secondReceived, null,
             new ContextMenuEntry { Id = "test|item", IsEnabled = false });
-        var client = new NamedPipeBackendClient(new RecentClientOperationCache(), pipeName);
+        var client = new BackendClient(new NamedPipeBackendTransport(pipeName), new MenuListCacheService(), new MenuListActivityService());
         var slow = client.GetWpsOfficePendingApprovalsAsync(timeout.Token);
         await firstReceived.Task.WaitAsync(timeout.Token);
         var fast = client.SetEnabledAsync("test|item", false, timeout.Token);
@@ -507,7 +613,7 @@ public sealed class MutationOutcomeTests
     {
         var operationId = Guid.NewGuid();
         var cache = new RecentClientOperationCache();
-        var client = new NamedPipeBackendClient(cache);
+        var client = new BackendClient(new NamedPipeBackendTransport(), new MenuListCacheService(), new MenuListActivityService(), cache);
         var received = new List<BackendNotification>();
         client.NotificationReceived += (_, notification) => received.Add(notification);
         cache.Register(operationId);
@@ -594,6 +700,27 @@ public sealed class MutationOutcomeTests
     }
 
     [Fact]
+    public async Task FileTypeBatchStateReadBack_StillPublishesTheAuthoritativeItem()
+    {
+        var item = new ContextMenuEntry { Id = "batch|physical", IsEnabled = false };
+        var operationId = Guid.NewGuid();
+        var request = new PipeRequest { Command = PipeCommand.GetFileTypeBatchItemState, Item = item, ClientOperationId = operationId };
+        var response = BackendRequestDispatcher.CorrelateResponseWithRequest(request, new PipeResponse { Success = true, Item = item });
+        var notifications = new List<BackendNotification>();
+
+        await BackendRequestDispatcher.PublishMutationNotificationsAsync(request, response, notification =>
+        {
+            notifications.Add(notification);
+            return Task.CompletedTask;
+        });
+
+        var published = Assert.Single(notifications);
+        Assert.Equal(PipeNotificationKind.ItemStateChanged, published.Kind);
+        Assert.Equal(operationId, published.ClientOperationId);
+        Assert.Same(item, published.Item);
+    }
+
+    [Fact]
     public async Task FailedMutation_DoesNotPublishSuccessfulStateChange()
     {
         var published = 0;
@@ -615,7 +742,7 @@ public sealed class MutationOutcomeTests
         var request = new PipeRequest { Command = PipeCommand.SetEnabled, ClientOperationId = requestId };
         var response = new PipeResponse { Success = true, ClientOperationId = responseId };
 
-        var correlated = NamedPipeBackendServer.CorrelateResponseWithRequest(request, response);
+        var correlated = BackendRequestDispatcher.CorrelateResponseWithRequest(request, response);
 
         Assert.Equal(responseId ?? requestId, correlated.ClientOperationId);
         Assert.Equal(responseId, response.ClientOperationId);

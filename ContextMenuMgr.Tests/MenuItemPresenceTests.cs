@@ -99,7 +99,7 @@ public sealed class MenuItemPresenceTests
             directory, directory, directory, null);
         var sendTo = user.GetSendToPath();
         Directory.CreateDirectory(sendTo);
-        var service = new SpecialMenuService(new FileLogger(Path.Combine(directory, "backend.log")));
+        var service = new SpecialMenuService(new FileLogger(Path.Combine(directory, "backend.log")), FrontendUserClassesRoot.TryOpen);
         var path = Path.Combine(sendTo, "missing.txt");
         var entry = new SpecialMenuEntry { Id = "SendTo:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(path)), Kind = SpecialMenuKind.SendTo, Path = path };
         try

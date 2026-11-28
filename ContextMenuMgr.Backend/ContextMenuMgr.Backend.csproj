@@ -28,12 +28,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="Resources\GuidInfosDic.ini">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <ProjectReference Include="..\ContextMenuMgr.Core\ContextMenuMgr.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,7 +38,6 @@
     </PackageReference>
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.12" />
-    <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>

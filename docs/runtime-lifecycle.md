@@ -6,6 +6,8 @@
 
 [Program](../ContextMenuMgr.Backend/Program.cs) 先识别一次性 `--service-bootstrap` 及字典校验入口，再进入服务运行；[BackendWindowsService](../ContextMenuMgr.Backend/Hosting/BackendWindowsService.cs) 的 OnStart 调度 `BackendRuntime.StartAsync`，启停原因交给 [ServiceLifecyclePolicy](../ContextMenuMgr.Backend/Hosting/ServiceLifecyclePolicy.cs)。组合顺序见[模块地图](architecture-overview.md)。SCM Running 与 runtime/Pipe 就绪是不同状态。
 
+宿主在 `BackendCore` 组装后将同一个 catalog 和 OpenWith coordinator 接到 monitor，再接 Pipe 的分发与通知，最后创建用户 Session launcher。Pipe 先启动，持续监控随后启动。Installer 与现有 Portable ZIP 均使用这个宿主，Portable 专用退出依旧由实际 Pipe 连接和 SCM 所有权授权。
+
 ## 安装、修复与移除服务
 
 `BackendServiceManager` 在需要服务级维护时解析 `ContextMenuManagerPlus.Service.exe`，用 `ProcessStartInfo.Verb = "runas"` 启动 elevated backend process。这个进程执行 `--service-bootstrap` 命令后退出，不是长期运行的 Backend Service。

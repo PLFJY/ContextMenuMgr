@@ -1,6 +1,6 @@
 # 进程、权限、用户上下文与 IPC
 
-本文负责权限/身份通道和 Named Pipe 契约；具体业务事务见各子系统。源码从 [NamedPipeBackendServer](../ContextMenuMgr.Backend/Services/NamedPipeBackendServer.cs)、[NamedPipeBackendClient](../ContextMenuMgr.Frontend/Services/NamedPipeBackendClient.cs)、[BackendUserContextResolver](../ContextMenuMgr.Backend/Services/BackendUserContextResolver.cs) 开始。
+本文负责权限、身份通道和 Named Pipe 契约。源码从 [NamedPipeBackendServer](../ContextMenuMgr.Backend/Services/NamedPipeBackendServer.cs)、[BackendRequestDispatcher](../ContextMenuMgr.Core/Execution/BackendRequestDispatcher.cs)、[NamedPipeBackendTransport](../ContextMenuMgr.Frontend/Services/NamedPipeBackendTransport.cs) 与 [BackendUserContextResolver](../ContextMenuMgr.Backend/Services/BackendUserContextResolver.cs) 开始。
 
 ## 四条链路
 
@@ -37,7 +37,9 @@ ShellNew 的 `FrontendUserClassesRoot` 在同步退出即恢复的服务 scope �
 
 [PipeConstants](../ContextMenuMgr.Contracts/PipeConstants.cs) 定义 backend `ContextMenuMgr.Backend`、frontend control 和 TrayHost control 名称。backend 使用 byte-mode async NamedPipeServerStream，UTF-8 一行 JSON `PipeEnvelope`，MessageType/CorrelationId 加 Request、Response 或 Notification。每个普通客户端请求独立连接，通知保持订阅连接。
 
-服务 Pipe ACL 给 LocalSystem/Administrators FullControl，Authenticated Users ReadWrite/CreateNewInstance。它不是仅本产品二进制可访问的能力令牌；请求中的路径/SID/DTO 仍是不可信输入，handler 必须验证物理身份和权限边界。`RuleUserSid` 等字段存在不代表客户端可以冒充任意用户。OpenWith 通知另按认证 SID 过滤，不把这项保护推导成所有通知均按用户隔离。
+服务 Pipe ACL 给 LocalSystem/Administrators FullControl，Authenticated Users ReadWrite/CreateNewInstance。请求路径和 DTO 仍需要 handler 校验范围。宿主读取真实 Pipe caller，并为普通分发提供惰性的 [BackendRequestContext](../ContextMenuMgr.Core/Execution/BackendRequestContext.cs)。Core 在请求范围内保留物理 preflight、发现覆盖率、结构化错误和响应 operation ID。宿主处理 Ping、订阅、TrayHost、停止/Portable 退出、自启动、Explorer、日志级别和数据 ACL；只有 Explorer 的路径使用既有同 SID Session fallback。OpenWith 与 `DeletedItemsPurged` 使用连接认证 SID 过滤订阅者。
+
+**现有授权缺口。** `SetDetailedEditRuleValue` 仍直接传递请求内的 `RulePath` 和 `RuleUserSid`。Catalog 接受 HKCR、HKLM 和 HKU 物理根，HKCU 分支也由该 DTO SID 选 hive；此路线缺少调用者 SID 与允许写入规则的服务端绑定。Frontend 自身的规则检查无法约束其它已认证 Pipe 调用者。G1 保留既有协议和行为；该授权问题需单独处理，供 G2 使用可复用分发前须确定可信目标来源。 [分发](../ContextMenuMgr.Core/Execution/BackendRequestDispatcher.cs)、[详细编辑写入](../ContextMenuMgr.Core/Services/ContextMenuRegistryCatalog.cs)
 
 `RequestPortableExit` 是追加的窄生命周期命令，不改变普通 `RequestShutdown`。只接受该 Portable 目录 Frontend EXE 的活进程，Pipe SID、进程 token SID 与实际 Session 必须一致；PID、路径、SID、包类型不取自 DTO，也没有用户/Session fallback。持有客户端进程句柄防 PID 复用，运行期固定的前端文件身份防换名替换；TrayHost 和任意认证本地客户端不能申请自动删除。产品还保守检查其它登录 Session、Frontend/TrayHost 和所有活动 Pipe 消费者；只有调用 Frontend 自己的连接或原生已确认断开的连接可共存，未知消费者拒绝退出。检查与新连接 admission 共用 gate，接受退出后不再接收新业务连接，避免验证与删除之间引入新消费者。实际 DeleteService 在已退出 Pipe impersonation 的 LocalSystem 进程执行，并再次核对线程身份。只允许自身固定 ServiceName，完整顺序和 SCM/policy 核对见[生命周期](runtime-lifecycle.md#portable-自动移除-scm-注册)。此窄链路 A 例外不提供任意服务卸载 API，也不扩大 Pipe ACL 或替代链路 B 的显式维护命令。
 
@@ -59,7 +61,7 @@ SetDocumentIconRepair 追加于 PipeCommand 末尾，使用独立的可空布尔
 
 ## 请求、迟到通知与不确定结果
 
-每个请求有 `CorrelationId`；客户端为未提供的 `ClientOperationId` 生成 ID 并登记。后端响应继承请求 ID，成功状态变化先广播再尝试直响应，因此 Pipe 断开不能吞掉已成功 mutation 通知。独立 monitor 通知没有本地操作 ID。
+Pipe transport 为每个请求生成帧 `CorrelationId`。`BackendClient` 在交给 transport 前生成或保留并登记 `ClientOperationId`。Dispatcher 保留 handler 已设的 ID，其余继承请求 ID，并按响应构建成功 mutation 通知。宿主先广播再写直响应，因此订阅者仍有机会收到直连中断前已提交的结果。普通经典/SpecialMenu 定点读回不发变更通知，`GetFileTypeBatchItemState` 仍按其既有例外处理。独立 monitor 通知没有本地操作 ID。
 
 `RecentClientOperationCache` 在途项不按时间过期，成功结束保留十秒以抑制本实例重复广播；超时/失败删除，使迟到成功通知能到达。其它实例没有该本地缓存仍更新。OpenWith DTO 只失效快照；普通 workspace 的 generic ItemStateChanged 只更新已存在 Id，不引入 scene-only 项。
 

@@ -7,41 +7,12 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ContextMenuMgr.Backend.Services;
 
-internal enum ShellNewPhysicalSource
-{
-    Unresolved,
-    User,
-    Machine
-}
-
-/// <summary>
-/// Maps the effective registration observed through HKCR to a writable physical
-/// source. The input facts are obtained from Windows' merged view plus explicit
-/// physical probes; this type does not implement HKCR merging itself.
-/// </summary>
-internal static class ShellNewPhysicalSourceResolver
-{
-    public static ShellNewPhysicalSource Resolve(bool effectiveRegistrationExists, bool userRegistrationExists, bool machineRegistrationExists)
-    {
-        if (!effectiveRegistrationExists)
-        {
-            return ShellNewPhysicalSource.Unresolved;
-        }
-
-        return userRegistrationExists
-            ? ShellNewPhysicalSource.User
-            : machineRegistrationExists
-                ? ShellNewPhysicalSource.Machine
-                : ShellNewPhysicalSource.Unresolved;
-    }
-}
-
 /// <summary>
 /// Opens the interactive frontend user's effective HKCR view for read-only
 /// discovery.  This is deliberately separate from the explicit HKU/HKLM
 /// roots used by ShellNew mutations.
 /// </summary>
-internal sealed class FrontendUserClassesRoot : IDisposable
+internal sealed class FrontendUserClassesRoot : IFrontendClassesRoot
 {
     private const int KeyRead = 0x20019;
     private const int KeyWow64_64Key = 0x0100;
@@ -55,7 +26,7 @@ internal sealed class FrontendUserClassesRoot : IDisposable
 
     public RegistryKey ClassesRoot { get; }
 
-    public static bool TryOpen(BackendUserContext context, FileLogger logger, out FrontendUserClassesRoot? result, out string? failure)
+    public static bool TryOpen(BackendUserContext context, FileLogger logger, out IFrontendClassesRoot? result, out string? failure)
     {
         FrontendUserClassesRoot? opened = null;
         string? error = null;

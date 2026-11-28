@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.17763.57</WindowsSdkPackageVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Configurations>Debug;Release;Beta</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
+    <FrameworkReference Include="Microsoft.Windows.SDK.NET.Ref" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\GuidInfosDic.ini" CopyToOutputDirectory="PreserveNewest" />
+    <InternalsVisibleTo Include="ContextMenuManagerPlus.Service" />
+    <InternalsVisibleTo Include="ContextMenuMgr.Tests" />
+  </ItemGroup>
+
+</Project>

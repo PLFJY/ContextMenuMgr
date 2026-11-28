@@ -118,7 +118,7 @@ public sealed class ShellNewPhysicalStateTransitionTests
         public SpecialMenuService CreateService()
         {
             Directory.CreateDirectory(_logDirectory);
-            return new SpecialMenuService(new FileLogger(Path.Combine(_logDirectory, "backend.log")));
+            return new SpecialMenuService(new FileLogger(Path.Combine(_logDirectory, "backend.log")), FrontendUserClassesRoot.TryOpen);
         }
 
         public SpecialMenuEntry CreateEntry(string registryPath, bool isEnabled, string counterpartPath)
