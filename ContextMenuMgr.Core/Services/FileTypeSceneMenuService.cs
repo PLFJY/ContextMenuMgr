@@ -11,28 +11,39 @@ public sealed class FileTypeSceneMenuService
     private readonly ContextMenuRegistryCatalog _catalog;
     private readonly ContextMenuStateStore _stateStore;
     private readonly FileLogger _logger;
+    private readonly TryOpenFrontendClassesRoot _tryOpenFrontendClassesRoot;
+    private readonly Func<string, string> _expandInteractiveEnvironment;
 
-    public FileTypeSceneMenuService(
+    internal FileTypeSceneMenuService(
         ContextMenuRegistryCatalog catalog,
         ContextMenuStateStore stateStore,
-        FileLogger logger)
+        FileLogger logger,
+        TryOpenFrontendClassesRoot tryOpenFrontendClassesRoot,
+        Func<string, string>? expandInteractiveEnvironment = null)
     {
         _catalog = catalog;
         _stateStore = stateStore;
         _logger = logger;
+        _tryOpenFrontendClassesRoot = tryOpenFrontendClassesRoot;
+        _expandInteractiveEnvironment = expandInteractiveEnvironment ?? Environment.ExpandEnvironmentVariables;
     }
 
-    public Task<IReadOnlyList<FileTypeAnalysisResult>> AnalyzeAsync(FileTypeAnalysisRequest request, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<FileTypeAnalysisResult>> AnalyzeAsync(FileTypeAnalysisRequest request,
+        BackendUserContext userContext, CancellationToken cancellationToken)
     {
+        if (!_tryOpenFrontendClassesRoot(userContext, _logger, out var classes, out var failure) || classes is null)
+            throw new InvalidOperationException(failure ?? "The verified interactive user's merged Classes view is unavailable.");
+        using (classes)
+        {
         var inputPath = request.Path.Trim();
-        var path = Environment.ExpandEnvironmentVariables(inputPath);
+        var path = _expandInteractiveEnvironment(inputPath);
         var results = new List<FileTypeAnalysisResult>();
         _logger.LogFireAndForget($"FileTypeAnalyzeStart: InputPath={inputPath}, ExpandedPath={path}.");
 
         if (File.Exists(path))
         {
             _logger.LogFireAndForget($"FileTypeAnalyzePathKind: ExpandedPath={path}, Kind=File.");
-            AnalyzeFile(path, results, includeLnkScene: true);
+            AnalyzeFile(path, results, classes.ClassesRoot, includeLnkScene: true);
         }
         else if (Directory.Exists(path))
         {
@@ -47,6 +58,7 @@ public sealed class FileTypeSceneMenuService
 
         _logger.LogFireAndForget($"FileTypeAnalyzeEnd: InputPath={inputPath}, ExpandedPath={path}, ResultCount={results.Count}, Results={string.Join(";", results.Select(static item => $"{item.SceneKind}:{item.ScopeValue}"))}.");
         return Task.FromResult<IReadOnlyList<FileTypeAnalysisResult>>(results);
+        }
     }
 
     public async Task<PipeResponse> CreateSceneMenuItemAsync(
@@ -161,7 +173,7 @@ public sealed class FileTypeSceneMenuService
         }
     }
 
-    private static void AnalyzeFile(string filePath, List<FileTypeAnalysisResult> results, bool includeLnkScene)
+    private static void AnalyzeFile(string filePath, List<FileTypeAnalysisResult> results, RegistryKey classesRoot, bool includeLnkScene)
     {
         var extension = Path.GetExtension(filePath).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(extension))
@@ -176,7 +188,7 @@ public sealed class FileTypeSceneMenuService
                 var shortcut = ShortcutFile.Read(filePath);
                 if (File.Exists(shortcut.TargetPath))
                 {
-                    AnalyzeFile(shortcut.TargetPath, results, includeLnkScene: false);
+                    AnalyzeFile(shortcut.TargetPath, results, classesRoot, includeLnkScene: false);
                 }
                 else if (Directory.Exists(shortcut.TargetPath))
                 {
@@ -233,7 +245,7 @@ public sealed class FileTypeSceneMenuService
             });
         }
 
-        using var extensionKey = Registry.ClassesRoot.OpenSubKey(extension, writable: false);
+        using var extensionKey = classesRoot.OpenSubKey(extension, writable: false);
         var progId = extensionKey?.GetValue(null)?.ToString();
         if (string.IsNullOrWhiteSpace(progId))
         {

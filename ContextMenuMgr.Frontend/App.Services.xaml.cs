@@ -37,9 +37,22 @@ public partial class App
         services.AddSingleton<LocalizationService>();
         services.AddSingleton<FrontendThemeService>();
         services.AddSingleton<MainWindowPlacementService>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<IconPreviewService>(sp => new IconPreviewService(
+            sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser));
+#else
         services.AddSingleton<IconPreviewService>();
+#endif
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<RuleDictionaryCatalogService>(sp => new RuleDictionaryCatalogService(
+            sp.GetRequiredService<LocalizationService>(), sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser));
+        services.AddSingleton<EnhanceMenuRuleService>(sp => new EnhanceMenuRuleService(
+            sp.GetRequiredService<IBackendClient>(), sp.GetRequiredService<LocalizationService>(),
+            sp.GetRequiredService<FrontendSettingsService>(), sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser));
+#else
         services.AddSingleton<RuleDictionaryCatalogService>();
         services.AddSingleton<EnhanceMenuRuleService>();
+#endif
 #if CONTEXTMENUMGR_IN_PROCESS
         services.AddSingleton<DetailedEditRuleService>(sp => new DetailedEditRuleService(
             sp.GetRequiredService<IBackendClient>(), sp.GetRequiredService<FrontendSettingsService>(),
@@ -52,15 +65,27 @@ public partial class App
         services.AddSingleton<Windows11ContextMenuService>();
         services.AddSingleton<ContextMenuGlobalSearchService>();
         services.AddSingleton<GlobalSearchNavigationFilterService>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<ContextMenuItemActionsService>(sp => new ContextMenuItemActionsService(
+            sp.GetRequiredService<LocalizationService>(), sp.GetRequiredService<FrontendSettingsService>(),
+            sp.GetRequiredService<IBackendClient>(), sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser));
+#else
         services.AddSingleton<ContextMenuItemActionsService>();
+#endif
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<ContextMenuApplicationIdentityService>(sp => new ContextMenuApplicationIdentityService(
+            sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser.ExpandEnvironmentVariables));
+#else
         services.AddSingleton<ContextMenuApplicationIdentityService>();
+#endif
         services.AddSingleton<ContextMenuDeepAnalysisService>();
         services.AddSingleton<ShellSubMenuDialogService>();
         services.AddSingleton<DetailedEditMenuDialogService>();
 #if CONTEXTMENUMGR_IN_PROCESS
         services.AddSingleton<InProcessBackendRuntime>(_ => InProcessBackendRuntime.Create());
         services.AddSingleton<IBackendClient>(sp => new BackendClient(sp.GetRequiredService<InProcessBackendRuntime>().Transport,
-            sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>()));
+            sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>(),
+            new RecentClientOperationCache(), () => sp.GetRequiredService<InProcessBackendRuntime>().UserSid));
 #else
         services.AddSingleton<IBackendClient>(sp => new BackendClient(new NamedPipeBackendTransport(),
             sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>()));
@@ -99,7 +124,14 @@ public partial class App
         services.AddSingleton<ApplicationGroupsPageViewModel>();
         services.AddSingleton<Windows11ContextMenuPageViewModel>();
         services.AddSingleton<FileTypesPageViewModel>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<FileTypeMenuAnalysisPageViewModel>(sp => new FileTypeMenuAnalysisPageViewModel(
+            sp.GetRequiredService<IBackendClient>(), sp.GetRequiredService<LocalizationService>(),
+            sp.GetRequiredService<INavigationService>(), sp.GetRequiredService<FileTypesPageViewModel>(),
+            () => sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser.Context.ProfilePath));
+#else
         services.AddSingleton<FileTypeMenuAnalysisPageViewModel>();
+#endif
         services.AddSingleton<ShellNewPageViewModel>();
         services.AddSingleton<SendToPageViewModel>();
         services.AddSingleton<WinXPageViewModel>();

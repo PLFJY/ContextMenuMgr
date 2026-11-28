@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -1764,8 +1765,14 @@ public partial class SpecialMenuPageViewModel : ObservableObject, IDisposable, I
                     {
                         // Windows requires confirmation in its own default-app UI.
                         // Opening Settings is not evidence that defaults changed.
+#if CONTEXTMENUMGR_IN_PROCESS
+                        InProcessBootstrap.User.StartNonElevatedProcess(
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                            ["ms-settings:defaultapps"], InProcessBootstrap.User.Context.ProfilePath);
+#else
                         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:defaultapps")
                             { UseShellExecute = true });
+#endif
                         _awaitingOfficeDefaultApps = true;
                     }
                     catch (Exception launchError)

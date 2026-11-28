@@ -271,7 +271,10 @@ internal sealed class BackendRequestDispatcher
                 {
                     Success = true,
                     Message = "File type context analyzed.",
-                    FileTypeAnalysisResults = await _fileTypeSceneMenuService.AnalyzeAsync(request.FileTypeAnalysis, cancellationToken)
+                    FileTypeAnalysisResults = await _fileTypeSceneMenuService.AnalyzeAsync(request.FileTypeAnalysis,
+                        await context.ResolveFrontendUserContextAsync(cancellationToken)
+                            ?? throw new InvalidOperationException("File type analysis requires the verified interactive user context."),
+                        cancellationToken)
                 },
             PipeCommand.CreateSceneMenuItem when request.CreateSceneMenuItem is not null
                 => await _fileTypeSceneMenuService.CreateSceneMenuItemAsync(

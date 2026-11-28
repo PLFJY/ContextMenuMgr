@@ -640,7 +640,9 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
     public async Task ResetStateDatabaseAsync(CancellationToken cancellationToken)
     {
         await _backendClient.ResetStateDatabaseAsync(cancellationToken);
+#if !CONTEXTMENUMGR_IN_PROCESS
         await OpenWithReviews.RefreshAsync(cancellationToken);
+#endif
         _refreshGeneration++;
         _refreshTask = null;
         await RefreshAsync();

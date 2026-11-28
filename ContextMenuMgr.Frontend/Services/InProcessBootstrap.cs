@@ -39,8 +39,44 @@ internal static class InProcessBootstrap
         if (!string.Equals(root, applicationData, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Portable data must remain inside the application Data directory.");
         var directory = new DirectoryInfo(root);
-        if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("The application Data directory is a reparse point. Resolve it before starting the elevated Portable runtime.");
+        if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0
+            && !IsExpectedScoopPersistenceTarget(directory))
+            throw new InvalidOperationException("The application Data reparse point is not the matching Scoop package's persistent Data directory.");
+    }
+
+    private static bool IsExpectedScoopPersistenceTarget(DirectoryInfo dataDirectory)
+    {
+        try
+        {
+            var appDirectory = new DirectoryInfo(Path.GetFullPath(AppContext.BaseDirectory));
+            var packageVersion = appDirectory.Parent;
+            var packageDirectory = packageVersion?.Parent;
+            var appsDirectory = packageDirectory?.Parent;
+            if (packageDirectory is null || !string.Equals(appsDirectory?.Name, "apps", StringComparison.OrdinalIgnoreCase)
+                || (!string.Equals(packageDirectory.Name, "contextmenumgrplus", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(packageDirectory.Name, "contextmenumgrplus-beta", StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            var scoopRoot = appsDirectory!.Parent;
+            if (scoopRoot is null) return false;
+            var expectedTarget = Path.GetFullPath(Path.Combine(scoopRoot.FullName, "persist", packageDirectory.Name, "Data"));
+            var target = dataDirectory.ResolveLinkTarget(returnFinalTarget: true);
+            if (target is null || !string.Equals(Path.GetFullPath(target.FullName), expectedTarget, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // Only the version's Data entry may be a reparse point; persistence parents must be ordinary directories.
+            for (var current = new DirectoryInfo(expectedTarget); current is not null; current = current.Parent)
+            {
+                if (!current.Exists || (current.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+                if (string.Equals(Path.GetFullPath(current.FullName), Path.GetFullPath(scoopRoot.FullName), StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
     }
 }
 #endif

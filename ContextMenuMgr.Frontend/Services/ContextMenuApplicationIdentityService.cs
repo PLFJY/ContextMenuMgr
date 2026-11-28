@@ -7,6 +7,13 @@ namespace ContextMenuMgr.Frontend.Services;
 
 public sealed class ContextMenuApplicationIdentityService
 {
+    private readonly Func<string, string> _expandEnvironmentVariables;
+
+    public ContextMenuApplicationIdentityService() : this(Environment.ExpandEnvironmentVariables) { }
+
+    public ContextMenuApplicationIdentityService(Func<string, string> expandEnvironmentVariables)
+        => _expandEnvironmentVariables = expandEnvironmentVariables;
+
     private static readonly Regex CommandPathRegex = new(
         "^(?:\\\"(?<path>[^\\\"]+\\.(?:exe|dll))\\\"|(?<path>.+?\\.(?:exe|dll)))(?=\\s|$)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -16,7 +23,7 @@ public sealed class ContextMenuApplicationIdentityService
 
     public ContextMenuApplicationIdentity GetIdentity(ContextMenuEntry entry)
     {
-        var commandExecutablePath = ResolveCommandExecutablePath(entry);
+        var commandExecutablePath = ResolveCommandExecutablePath(entry, _expandEnvironmentVariables);
         var handlerClsid = string.IsNullOrWhiteSpace(entry.HandlerClsid)
             ? null
             : entry.HandlerClsid.Trim();
@@ -74,7 +81,7 @@ public sealed class ContextMenuApplicationIdentityService
     /// </summary>
     public static string? GetFriendlyApplicationName(ContextMenuEntry entry)
     {
-        var executablePath = ResolveCommandExecutablePath(entry);
+        var executablePath = ResolveCommandExecutablePath(entry, Environment.ExpandEnvironmentVariables);
         if (string.IsNullOrWhiteSpace(executablePath))
         {
             return null;
@@ -84,14 +91,14 @@ public sealed class ContextMenuApplicationIdentityService
         return string.IsNullOrWhiteSpace(fileName) ? null : fileName;
     }
 
-    private static string? ResolveCommandExecutablePath(ContextMenuEntry entry)
+    private static string? ResolveCommandExecutablePath(ContextMenuEntry entry, Func<string, string> expandEnvironmentVariables)
     {
         if (entry.EntryKind == ContextMenuEntryKind.ShellExtension
             && !string.IsNullOrWhiteSpace(entry.FilePath))
             return entry.FilePath.Trim();
         var commandMatch = CommandPathRegex.Match(entry.CommandText?.Trim() ?? string.Empty);
         if (!commandMatch.Success) return null;
-        var path = Environment.ExpandEnvironmentVariables(commandMatch.Groups["path"].Value.Trim());
+        var path = expandEnvironmentVariables(commandMatch.Groups["path"].Value.Trim());
         if (path.Contains('%')) return null;
         try { return Path.IsPathFullyQualified(path) ? Path.GetFullPath(path) : null; }
         catch (ArgumentException) { return null; }

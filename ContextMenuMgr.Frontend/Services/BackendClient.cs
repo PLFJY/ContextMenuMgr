@@ -8,6 +8,7 @@ internal sealed class BackendClient : IBackendClient
     private readonly MenuListCacheService _listCache;
     private readonly MenuListActivityService _activity;
     private readonly RecentClientOperationCache _recentLocalOperations;
+    private readonly Func<string?>? _interactiveUserSid;
     private bool _disposed;
     public event EventHandler<MenuItemsRemovedEventArgs>? ItemsRemoved;
     public async Task<MenuListSnapshot<T>?> ReadCachedListAsync<T>(PipeRequest request, CancellationToken token)
@@ -53,12 +54,13 @@ internal sealed class BackendClient : IBackendClient
     }
 
     internal BackendClient(IBackendTransport transport, MenuListCacheService cache, MenuListActivityService activity,
-        RecentClientOperationCache recentLocalOperations)
+        RecentClientOperationCache recentLocalOperations, Func<string?>? interactiveUserSid = null)
     {
         _transport = transport;
         _listCache = cache;
         _activity = activity;
         _recentLocalOperations = recentLocalOperations;
+        _interactiveUserSid = interactiveUserSid;
         _transport.NotificationReceived += OnNotificationReceived;
     }
 
@@ -1045,8 +1047,9 @@ internal sealed class BackendClient : IBackendClient
 
     internal bool TryForwardSubscriptionNotification(BackendNotification notification)
     {
-        if ((notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged) && !string.Equals(notification.UserSid,
-            System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)) return false;
+        if ((notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged)
+            && !string.Equals(notification.UserSid, _interactiveUserSid?.Invoke()
+                ?? System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value, StringComparison.OrdinalIgnoreCase)) return false;
         if (_recentLocalOperations.Contains(notification.ClientOperationId))
         {
             return false;

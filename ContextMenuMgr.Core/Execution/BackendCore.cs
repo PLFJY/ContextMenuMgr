@@ -6,7 +6,7 @@ internal sealed class BackendCore
     public BackendCore(FileLogger logger, ContextMenuStateStore stateStore, RegistryBackupService backupService,
         BackendProtectionSettingsStore protectionSettingsStore, TryOpenFrontendClassesRoot tryOpenFrontendClassesRoot,
         Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers, Action<string>? logStartup = null,
-        bool enableProtectionWorkflows = true)
+        bool enableProtectionWorkflows = true, Func<string, string>? expandInteractiveEnvironment = null)
     {
         logStartup?.Invoke("CreateDefault: creating ContextMenuRegistryCatalog.");
         Catalog = new ContextMenuRegistryCatalog(logger, stateStore, backupService, protectionSettingsStore);
@@ -27,7 +27,8 @@ internal sealed class BackendCore
         logStartup?.Invoke("CreateDefault: Win11ClassicContextMenuService created.");
 
         logStartup?.Invoke("CreateDefault: creating FileTypeSceneMenuService.");
-        var fileTypeSceneMenuService = new FileTypeSceneMenuService(Catalog, stateStore, logger);
+        var fileTypeSceneMenuService = new FileTypeSceneMenuService(Catalog, stateStore, logger,
+            tryOpenFrontendClassesRoot, expandInteractiveEnvironment);
         logStartup?.Invoke("CreateDefault: FileTypeSceneMenuService created.");
 
         Dispatcher = new BackendRequestDispatcher(Catalog, SpecialMenu, windows11BlocksService,

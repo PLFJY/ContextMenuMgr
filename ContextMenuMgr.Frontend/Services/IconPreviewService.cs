@@ -20,6 +20,20 @@ public sealed class IconPreviewService
 
     private readonly ConcurrentDictionary<string, ImageSource?> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _backgroundLoadLimiter = new(initialCount: 4, maxCount: 4);
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly PortableInteractiveUser? _portableUser;
+#endif
+
+#if CONTEXTMENUMGR_IN_PROCESS
+    internal IconPreviewService() : this(null) { }
+
+    internal IconPreviewService(PortableInteractiveUser? portableUser)
+    {
+        _portableUser = portableUser;
+    }
+#else
+    public IconPreviewService() { }
+#endif
 
     /// <summary>
     /// Gets icon.
@@ -263,15 +277,15 @@ public sealed class IconPreviewService
         }
     }
 
-    private static string NormalizeIconPath(string iconPath)
+    private string NormalizeIconPath(string iconPath)
     {
-        var normalized = Environment.ExpandEnvironmentVariables(iconPath.Trim().Trim('"'));
+        var normalized = ExpandEnvironmentVariables(iconPath.Trim().Trim('"'));
         return normalized.StartsWith('@')
             ? normalized[1..].Trim()
             : normalized;
     }
 
-    private static bool TryParseIconLocation(string? value, out string? iconPath, out int iconIndex)
+    private bool TryParseIconLocation(string? value, out string? iconPath, out int iconIndex)
     {
         iconPath = null;
         iconIndex = 0;
@@ -281,7 +295,7 @@ public sealed class IconPreviewService
             return false;
         }
 
-        var expanded = Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
+        var expanded = ExpandEnvironmentVariables(value.Trim().Trim('"'));
         if (expanded.StartsWith('@'))
         {
             expanded = expanded[1..].Trim();
@@ -297,6 +311,14 @@ public sealed class IconPreviewService
 
         iconPath = expanded;
         return !string.IsNullOrWhiteSpace(iconPath);
+    }
+
+    private string ExpandEnvironmentVariables(string value)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.ExpandEnvironmentVariables(value);
+#endif
+        return Environment.ExpandEnvironmentVariables(value);
     }
 
     private static string? ResolveIconFilePath(string iconPath)

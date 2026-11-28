@@ -266,4 +266,67 @@ Expand-Archive -LiteralPath "$r/Release/dist/ContextMenuMgrPlus-1.8.1-x64-self-c
 
 ### G2 入口与现场限制
 
-客户端与菜单分发边界已可供 G2 开发。G2 启用前须验证原交互 SID/token 与 HKU/view、ShellNew merged Classes、跨账户缓存身份、请求取消与线程调度、ProbeHost 非提升 token，以及详细编辑路线的可信目标绑定。本次可用的 Windows 环境未提供隔离的 SCM 安装测试机，实际 WPF/TrayHost 启动、LocalSystem、多 Session、Installer 安装升级、Portable ZIP 服务启停和 x86/arm64 真机执行仍待验收。发布及包管理器证据限于本地产物和离线 fixtures。 [详细编辑授权缺口](process-and-privilege-flows.md#pipe-格式权限与演进)
+G1 交付了可供 G2 复用的客户端与菜单分发边界，并标出原交互 SID/token 与 HKU/view、ShellNew merged Classes、跨账户缓存身份、请求取消与线程调度、ProbeHost 非提升 token、详细编辑可信目标绑定等风险。G2 源码适配和专项自动化结果见下文；真实跨账户、Explorer、COM/ProbeHost 和注册表集成仍待验证。本次环境未提供隔离的 SCM 安装测试机；LocalSystem、多 Session、Installer 安装升级、Portable ZIP 服务启停和 x86/arm64 真机执行仍待验收。发布及包管理器证据限于本地产物和离线 fixtures。 [详细编辑授权缺口](process-and-privilege-flows.md#pipe-格式权限与演进)
+
+## G2 实现与验证
+
+### 宿主选择与组合
+
+`BackendHostingMode` 是编译期属性，缺省 `Service`；只有显式 `-p:BackendHostingMode=InProcess` 才编入本地宿主代码、选择 Portable package kind 和 `app.in-process.manifest`（`requireAdministrator`）。不能由设置文件、Service EXE 是否存在或旧 Portable 的 package kind 切换宿主。Service 与历史 Portable ZIP 的 build-only Backend/TrayHost staging 保持 Service；In-process 前端引用 Core 并不引用/复制 Service 和 TrayHost payload。
+
+本地 `App` 在 Settings、RuntimePaths 和 DI 初始化前运行 `InProcessBootstrap.Prepare`。它验证 Data 根、只读检查与本地 Portable 服务路径关联的 SCM 状态，并创建 `PortableInteractiveUser`。`InProcessBackendRuntime` 一次性拥有该用户、Core/stores 和 transport；请求经现有 `BackendClient`、operation ID、dispatcher/`BackendRequestContext`、共享通知策略执行。host router 只处理 Ping/本地订阅 ready、日志级别、原 Session Explorer 重启和数据 ACL 诊断；服务生命周期、TrayHost、自启动、保护策略、approval 和后台查询显式失败。路由清单是显式枚举 switch，默认拒绝未知命令。
+
+### 身份、用户范围和权限
+
+本地用户身份来自当前 Session 的 Shell window → Explorer process → primary token，并以同 Session WTS 登录用户 SID、INTERACTIVE、SessionId、medium integrity、非提升/非 UIAccess、加载 hive、profile 目录及二次 Shell window 检查验证。不同管理员账户 UAC 不会被当作目标用户；无法确认就阻止启动。profile/known folders、host fingerprint、cache 分区、Detailed Edit SID、用户 hive、经适配的合并 Classes view、环境变量展开以及需要普通交互的 Explorer/URL/注册表子进程使用这一已保留身份。ShellNew、文件类型分析和旧 IE 用户菜单通过 host delegate/显式 SID 打开原用户注册表；Service 继续走原实现。共享 Core 尚有进程 HKCR 元数据读路径，未保证跨账户用户覆盖，详见下文。
+
+Frontend 普通菜单操作仍按原注册表 mutation 和 read-back 事务执行；只有 continuous monitor / interception 不启动。catalog snapshot、desired/observed、删除/恢复、GUID block、ShellNew 持久锁、OpenWith 实体枚举与显式管理、Win11、SendTo/WinX、IE 菜单、图标修复和备份保留。OpenWith coordinator 保留以共享普通交易与状态，In-process 不启动 poll，不展示队列/审核，不运行审批刷新。旧 Portable 的服务、保护、批准和注册表 ACL 不转换、不清理；若检测到服务仍存在或所有权/状态不能证明安全，本地宿主拒绝启动，G4 再处理接管。
+
+**剩余用户 Classes 审计限制。** Frontend 及 ShellNew/文件类型分析已通过保留 token 访问原用户 Classes，但共享 Core 仍有元数据路径直接查询进程合并视图：`ShellMetadataResolver.OpenRegistryPath`、`GuidMetadataCatalog.OpenClsidKeys`、`SpecialMenuService.GetDragDropItems`/扩展图标查找，以及 `Registry.ClassesRoot` 通用 target 解析。部分是机器元数据，部分可能受 HKU Classes 覆盖；跨账户提升时读取不保证原用户优先级。真实 HKCR precedence 和对应写入物理来源须按具体操作适配/验收，不能宣称完整跨账户功能等价。IE 用户菜单已改为使用原 SID 的 HKU 路径；Service 编译仍保留当前 `Registry.CurrentUser` 路径。详见[进程与权限](process-and-privilege-flows.md#G2-in-process-portable-身份边界)。
+
+`InProcessBackendTransport` 在 transport gate 内拒绝新 admission，已接收请求独立并行；caller cancellation 只结束等待，不取消已接收后端事务。成功响应和提交后通知仍按共享 dispatcher 策略关联；通知 listener 异常被隔离。mutable 请求、响应及通知的集合在交界处复制。关闭先停止 admission，drain 已接收工作，释放 runtime/user token；App 最多等待 15 秒并在超时时记录未确认状态，不发 Service shutdown/Portable-exit 请求。Deep Analysis 使用同一已验证用户的非提升 primary token；每请求私有输出目录、reparse 检查和 4 MiB 结果上限防止高权父进程直接激活第三方 COM。
+
+### 构建与复现
+
+G2 本地多文件验证命令：
+
+```powershell
+dotnet build .\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj -p:BackendHostingMode=InProcess -c Debug
+dotnet test .\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj -p:BackendHostingMode=InProcess -c Debug --no-restore --filter FullyQualifiedName~InProcessBackendTransportTests
+dotnet build .\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj -c Debug --no-restore
+dotnet test .\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj -c Debug --no-restore
+```
+
+运行必须是隔离验证机中由用户明确启动的提升程序，不作为普通开发/F5 启动；使用全新独立目录和合成 Data。不要在开发者实际菜单上执行回归 mutation。G2 不改 Release 目标、十个公共资产或 package-manager 发布。
+
+### 验证结果与未证明事项
+
+结果、命令日志及 TRX 保存在忽略目录 `artifacts/g2-verification/`；它们不是发布产物。当前 x64 Windows/SDK 的自动化检查、全量测试、发布构建、应用启动、生产注册表 mutation、真实 UAC/SCM 和 COM 隔离分别记录如下：
+
+| 证据类型 | 结果 |
+| --- | --- |
+| 源码审查 | 编译选择、请求路由、原交互 token、用户 Classes、普通编辑与后台 capability 边界由上述当前代码定义；Service 的既有组合仍编译通过。 |
+| Debug 构建 | In-process Frontend/Core/Contracts x64 通过（74 analyzer warnings、0 errors）；Service Backend/Core 及最终 Service Frontend 构建通过（0 warnings/errors）。实际提取 In-process EXE 的 RT_MANIFEST，确认 `requireAdministrator` 和 `uiAccess=false`。该布局含 Core/Contracts、x86/x64 ProbeHost 和当前产品中文卫星，无 Service/TrayHost EXE；Debug 保留 3 个应用/Core/Contracts PDB 符合开发符号行为。 |
+| In-process Release 矩阵 | 六个独立 `dotnet publish`：RID x86/x64/arm64 × SC/FD，均为多文件；每个实际 EXE 提取 RT_MANIFEST 均符合 requireAdministrator，apphost PE 与 RID 一致。最终源码重建后，x64 SC 288 文件，x86/arm64 SC 各 287，三 FD 各 25；全部含 Core/Contracts、x86/x64/arm64 ProbeHost，无 Service/TrayHost、独立 PDB 或不支持卫星。Release 编译重建并核验三种 ProbeHost PE。 |
+| 公共 Release 矩阵 | `Scripts/Build-Target.ps1` 的七个旧目标均以最终源码成功重建，含三个 SC Installer 附加 ZIP，共十个资产。与 G1 `artifacts/g1-verification/Release/publish` 对比，七个发布目录的相对文件路径、文件数逐一完全相同（SC x64/arm64 298、x86 296；FD x64 41、x86 40、arm64 42、AnyCPU 45），无独立 PDB/不支持卫星。PE 检查确认各 RID 前端/Service/TrayHost 预期机器类型相同；AnyCPU apphost 当前为 x64，三个 ProbeHost PE 分别为 x86/x64/arm64。 |
+| 公共资产名与大小 | 十个确切文件名及大小见下表；名称、矩阵与 G1 相同，大小为最终源码本次本地构建值。 |
+| Beta 与增量 | x64 SC Beta target 成功，生成 `1.8.1-Beta+a7e202e` 本地 Setup/ZIP；该 hash 是本轮未提交代码前 HEAD，不是待发布构建标识。FD AnyCPU Release 在同一隔离输出目录连续运行两次成功，最终 ZIP 13,093,842 字节。仅本地验证，无外部发布。 |
+| Service 全量自动化 | `dotnet test .\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj -c Debug --no-restore --logger "trx;LogFileName=g2-service-final.trx" --results-directory artifacts\g2-verification`：564 通过、4 跳过、0 失败，共 568；与 G1 用例结果相同，实际 Named Pipe 覆盖仍运行。 |
+| In-process 自动化 | `dotnet test .\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj -p:BackendHostingMode=InProcess -c Debug --no-restore --filter FullyQualifiedName~InProcessBackendTransportTests`：最终源码 7 通过、0 跳过/失败。包含命令能力完整清单、结构化拒绝、共享 dispatcher/通知、取消后 drain、DTO 集合隔离、原用户 SID 通知过滤及文件类型分析 Classes SID。整套测试若以该全局属性运行则 481 通过、4 跳过、90 失败：现有 Service/Frontend 测试未启动本地用户 bootstrap，却在 `RuntimeHosting.IsInProcess` 下访问其用户 token；部分状态用例也使用了不带 Portable host identity 的历史 fixture。不能把这轮当作测试通过，G2 需按专用 In-process fixtures 扩充覆盖；为覆盖两宿主，全量 Service 套件另行通过。完整 In-process 结果 `g2-inprocess-full.trx` 和最终专项 `g2-inprocess-focused-final3.trx` 在验证目录。 |
+| Windows 集成 | 未运行提升 WPF app、真实 HKU/Registry view、Explorer restart、SCM 归属、交叉账户 UAC、RDP/多 Session、Windows 11/COM 或第三方 ProbeHost 激活；禁止从本地 build/合成测试推断通过。 |
+| 安全/分发限制 | `VerifyDataRoot` 仅允许稳定/Beta 已知 Scoop identity 下，version `Data` junction 精确指向同一 Scoop root 的 `persist/<id>/Data`，并验证持久目录链自身没有 reparse point；其它 Data reparse point 拒绝。真实 Scoop current/persist 布局尚未集成验证。Core 元数据 HKCR/HKCU 的剩余边界见前述限制；管理员相对 LocalSystem 缺少的注册表操作能力仍需实际按 API/权限逐项验收。 |
+
+| 公共 Release 资产 | 字节数 |
+| --- | ---: |
+| `ContextMenuMgrPlus-1.8.1-x64-self-contained-Setup.exe` | 53,105,758 |
+| `ContextMenuMgrPlus-1.8.1-x64-self-contained-portable.zip` | 74,184,254 |
+| `ContextMenuMgrPlus-1.8.1-x64-framework-dependent-Setup.exe` | 10,051,408 |
+| `ContextMenuMgrPlus-1.8.1-x86-self-contained-Setup.exe` | 48,915,612 |
+| `ContextMenuMgrPlus-1.8.1-x86-self-contained-portable.zip` | 69,052,486 |
+| `ContextMenuMgrPlus-1.8.1-x86-framework-dependent-Setup.exe` | 9,875,551 |
+| `ContextMenuMgrPlus-1.8.1-arm64-self-contained-Setup.exe` | 47,778,948 |
+| `ContextMenuMgrPlus-1.8.1-arm64-self-contained-portable.zip` | 69,370,270 |
+| `ContextMenuMgrPlus-1.8.1-arm64-framework-dependent-Setup.exe` | 10,209,750 |
+| `ContextMenuMgrPlus-1.8.1-framework-dependent-portable.zip` | 13,094,057 |
+
+G3 入口条件：当前多文件发布布局及 ProbeHost PE 已验证；单文件 bundle 输入、最终 bundle 内嵌内容、首次永久提取/后续修复尚属 G3。跨账户 HKCR/用户 Classes 元数据物理来源与原交互用户优先级审计、实际 Scoop current/persist junction 核验、不同管理员凭据 UAC 后的原用户 hive/Explorer/非提升 ProbeHost 验证仍缺失；这些阻止宣称跨账户功能等价或进入最终发布验收，但不阻止在保留启动拒绝和权限边界的前提下继续进行隔离的 G3 打包工程。G4 入口条件：在隔离副本中证明旧 Service 所有权、遗留 ACL、旧 Data 与 concurrent writer 检测；迁移不可以 G2 的启动拒绝替代。

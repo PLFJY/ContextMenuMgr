@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -258,6 +259,11 @@ public partial class ShellViewModel : ObservableObject, IDisposable
     {
         try
         {
+#if CONTEXTMENUMGR_IN_PROCESS
+            using var process = InProcessBootstrap.User.StartNonElevatedProcess(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "cmd.exe"),
+                ["/d", "/c", BuildIconCacheRefreshCommand()], InProcessBootstrap.User.Context.ProfilePath);
+#else
             var process = Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
@@ -266,6 +272,7 @@ public partial class ShellViewModel : ObservableObject, IDisposable
                 UseShellExecute = false,
                 WindowStyle = ProcessWindowStyle.Hidden
             });
+#endif
 
             if (process is null)
             {

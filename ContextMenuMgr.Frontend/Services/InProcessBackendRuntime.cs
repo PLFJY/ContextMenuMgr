@@ -12,13 +12,17 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
     private readonly BackendCore _core;
     private readonly InProcessBackendTransport _transport;
     private readonly FileLogger _logger;
+    private readonly ContextMenuStateStore _stateStore;
 
-    private InProcessBackendRuntime(PortableInteractiveUser user, BackendCore core, FileLogger logger)
+    private InProcessBackendRuntime(PortableInteractiveUser user, BackendCore core, ContextMenuStateStore stateStore, FileLogger logger)
     {
         _user = user;
         _core = core;
+        _stateStore = stateStore;
         _logger = logger;
         _transport = new InProcessBackendTransport(DispatchAsync, () => _user.TryGetContext()?.Sid, logger);
+        _stateStore.PortableHostMismatchDetected += OnPortableHostMismatchDetected;
+        _stateStore.RecoveryOccurred += OnStateRecoveryOccurred;
     }
 
     public IBackendTransport Transport => _transport;
@@ -43,10 +47,10 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
             var backups = new RegistryBackupService(RuntimePaths.DeletedBackupsDirectory, logger, identity);
             var core = new BackendCore(logger, state, backups, settings, user.TryOpenClassesRoot,
                 () => [user.TryGetContext() ?? throw new InvalidOperationException("The verified desktop user is no longer available.")],
-                enableProtectionWorkflows: false);
+                enableProtectionWorkflows: false, expandInteractiveEnvironment: user.ExpandEnvironmentVariables);
             if (!state.IsCurrentHostIdentityVerified)
                 throw new InvalidOperationException("Portable data belongs to another host identity. Preserve the data and resolve it before using this runtime.");
-            return new InProcessBackendRuntime(user, core, logger);
+            return new InProcessBackendRuntime(user, core, state, logger);
         }
         catch
         {
@@ -146,6 +150,27 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
         return new PipeResponse { Success = true, Message = "Log level updated." };
     }
 
+    private void OnPortableHostMismatchDetected(object? sender, string message) => _transport.PublishNotification(new BackendNotification
+    {
+        Kind = PipeNotificationKind.ServiceMessage,
+        Message = message,
+        Timestamp = DateTimeOffset.UtcNow
+    });
+
+    private void OnStateRecoveryOccurred(object? sender, ContextMenuStateStoreRecovery recovery)
+    {
+        var resourceKey = recovery.Health == ContextMenuStateStoreHealth.RecoveredFromBackup
+            ? "ContextMenuStateRecoveredFromBackup"
+            : "ContextMenuStateResetAfterCorruption";
+        _transport.PublishNotification(new BackendNotification
+        {
+            Kind = PipeNotificationKind.ServiceMessage,
+            Message = resourceKey,
+            MessageResourceKey = resourceKey,
+            Timestamp = DateTimeOffset.UtcNow
+        });
+    }
+
     private static int RestartExplorer(int? sessionId)
     {
         if (sessionId is null) return 0;
@@ -169,6 +194,8 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _stateStore.PortableHostMismatchDetected -= OnPortableHostMismatchDetected;
+        _stateStore.RecoveryOccurred -= OnStateRecoveryOccurred;
         await _transport.DisposeAsync().ConfigureAwait(false);
         _user.Dispose();
     }

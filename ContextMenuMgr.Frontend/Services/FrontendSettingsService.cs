@@ -466,6 +466,36 @@ public sealed class FrontendSettingsService
         catch { Current = previous; throw; }
     }
 
+    public void ResetUserPreferencesPreservingHostPolicy()
+    {
+        var previous = Current;
+        Current = new FrontendSettings
+        {
+            AutoStartOnLogin = previous.AutoStartOnLogin,
+            ShowTrayIcon = previous.ShowTrayIcon,
+            KeepBackgroundAfterClose = previous.KeepBackgroundAfterClose,
+            RemovePortableServiceOnExit = previous.RemovePortableServiceOnExit,
+            LockNewContextMenuItems = previous.LockNewContextMenuItems
+        };
+
+        var previousTransitionState = IsLifecycleTransitionInProgress;
+        IsLifecycleTransitionInProgress = true;
+        try
+        {
+            Save();
+            if (LastSaveError is not null) throw new IOException(LastSaveError);
+        }
+        catch
+        {
+            Current = previous;
+            throw;
+        }
+        finally
+        {
+            IsLifecycleTransitionInProgress = previousTransitionState;
+        }
+    }
+
     private void TryMigrateLegacySettings()
     {
         try

@@ -26,6 +26,7 @@ internal sealed class PortableInteractiveUser : IDisposable
     private const int KeyWow64_64Key = 0x0100;
     private const int KeyWow64_32Key = 0x0200;
     private const uint KnownFolderDontVerify = 0x00004000;
+    private const uint CreateUnicodeEnvironment = 0x00000400;
     private const int WindowsPathCapacity = 32768;
 
     private static readonly SecurityIdentifier InteractiveGroup = new(WellKnownSidType.InteractiveSid, null);
@@ -135,6 +136,15 @@ internal sealed class PortableInteractiveUser : IDisposable
         }
     }
 
+    public RegistryKey OpenUserHive(RegistryView view = RegistryView.Default)
+    {
+        if (TryGetContext() is null)
+            throw new InvalidOperationException("The verified desktop user's profile is no longer available.");
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
+        return users.OpenSubKey(Context.Sid, writable: false)
+            ?? throw new InvalidOperationException("The verified desktop user's registry hive is no longer loaded.");
+    }
+
     public bool TryOpenClassesRoot(BackendUserContext context, FileLogger logger,
         out IFrontendClassesRoot? root, out string? failure)
     {
@@ -180,9 +190,19 @@ internal sealed class PortableInteractiveUser : IDisposable
         var commandLine = new StringBuilder(QuoteArgument(executablePath));
         foreach (var argument in arguments) commandLine.Append(' ').Append(QuoteArgument(argument));
         var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Desktop = "winsta0\\default" };
-        if (!CreateProcessWithToken(_token, 0, executablePath, commandLine, 0x00000400,
-                IntPtr.Zero, workingDirectory, ref startup, out var processInfo))
-            throw LastError("Start Deep Analysis under the non-elevated desktop user token");
+        if (!CreateEnvironmentBlock(out var environment, _token, inherit: false))
+            throw LastError("Create the desktop user's process environment");
+        ProcessInformation processInfo;
+        try
+        {
+            if (!CreateProcessWithToken(_token, 0, executablePath, commandLine,
+                    CreateUnicodeEnvironment | 0x00000400, environment, workingDirectory, ref startup, out processInfo))
+                throw LastError("Start Deep Analysis under the non-elevated desktop user token");
+        }
+        finally
+        {
+            _ = DestroyEnvironmentBlock(environment);
+        }
         CloseHandle(processInfo.Thread);
         CloseHandle(processInfo.Process);
         try { return Process.GetProcessById(checked((int)processInfo.ProcessId)); }
@@ -374,6 +394,15 @@ internal sealed class PortableInteractiveUser : IDisposable
     private static extern bool CreateProcessWithToken(SafeAccessTokenHandle token, uint logonFlags,
         string applicationName, StringBuilder commandLine, uint creationFlags, IntPtr environment,
         string currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
+
+    [DllImport("userenv.dll", EntryPoint = "CreateEnvironmentBlock", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateEnvironmentBlock(out IntPtr environment, SafeAccessTokenHandle token,
+        [MarshalAs(UnmanagedType.Bool)] bool inherit);
+
+    [DllImport("userenv.dll", EntryPoint = "DestroyEnvironmentBlock", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyEnvironmentBlock(IntPtr environment);
 
     [DllImport("kernel32.dll", ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

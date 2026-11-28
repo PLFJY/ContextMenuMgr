@@ -13,14 +13,22 @@ namespace ContextMenuMgr.Frontend.Services;
 public sealed class RuleDictionaryCatalogService
 {
     private readonly LocalizationService _localization;
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly PortableInteractiveUser? _portableUser;
+#endif
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RuleDictionaryCatalogService"/> class.
     /// </summary>
-    public RuleDictionaryCatalogService(LocalizationService localization)
+#if CONTEXTMENUMGR_IN_PROCESS
+    internal RuleDictionaryCatalogService(LocalizationService localization, PortableInteractiveUser? portableUser)
     {
         _localization = localization;
+        _portableUser = portableUser;
     }
+#else
+    public RuleDictionaryCatalogService(LocalizationService localization) => _localization = localization;
+#endif
 
     /// <summary>
     /// Loads enhance Menu Groups.
@@ -233,15 +241,19 @@ public sealed class RuleDictionaryCatalogService
         }
 
         var clsidPath = $@"CLSID\{guid:B}";
-        using var clsidKey = Registry.ClassesRoot.OpenSubKey(clsidPath, writable: false);
+        using var classesRoot = OpenClassesRoot();
+        using var clsidKey = classesRoot.OpenSubKey(clsidPath, writable: false);
+        using var inproc = clsidKey?.OpenSubKey("InprocServer32", writable: false);
+        using var local = clsidKey?.OpenSubKey("LocalServer32", writable: false);
         var candidates = new[]
         {
-            clsidKey?.OpenSubKey("InprocServer32", writable: false)?.GetValue(null)?.ToString(),
-            clsidKey?.OpenSubKey("LocalServer32", writable: false)?.GetValue(null)?.ToString()
+            inproc?.GetValue(null)?.ToString(),
+            local?.GetValue(null)?.ToString()
         };
 
         return candidates
             .Select(ExtractFilePath)
+            .Select(path => path is null ? null : ExpandPath(path))
             .Any(File.Exists);
     }
 
@@ -301,7 +313,7 @@ public sealed class RuleDictionaryCatalogService
         return true;
     }
 
-    private static bool JudgeFileExists(XElement element)
+    private bool JudgeFileExists(XElement element)
     {
         foreach (var fileElement in element.Elements("FileExists"))
         {
@@ -376,7 +388,7 @@ public sealed class RuleDictionaryCatalogService
         return null;
     }
 
-    private static string? ExtractCommandExecutable(string command)
+    private string? ExtractCommandExecutable(string command)
     {
         var expanded = ExpandPath(command);
         if (string.IsNullOrWhiteSpace(expanded))
@@ -552,7 +564,7 @@ public sealed class RuleDictionaryCatalogService
         return rulePath;
     }
 
-    private static bool RegistryPathExists(string fullPath)
+    private bool RegistryPathExists(string fullPath)
     {
         try
         {
@@ -561,15 +573,8 @@ public sealed class RuleDictionaryCatalogService
             var root = separatorIndex >= 0 ? normalized[..separatorIndex] : normalized;
             var subPath = separatorIndex >= 0 ? normalized[(separatorIndex + 1)..] : string.Empty;
 
-            using var key = root.ToUpperInvariant() switch
-            {
-                "HKEY_CLASSES_ROOT" or "HKCR" => Registry.ClassesRoot.OpenSubKey(subPath, writable: false),
-                "HKEY_CURRENT_USER" or "HKCU" => Registry.CurrentUser.OpenSubKey(subPath, writable: false),
-                "HKEY_LOCAL_MACHINE" or "HKLM" => Registry.LocalMachine.OpenSubKey(subPath, writable: false),
-                "HKEY_USERS" or "HKU" => Registry.Users.OpenSubKey(subPath, writable: false),
-                _ => null
-            };
-
+            using var registryRoot = OpenRegistryRoot(root);
+            using var key = registryRoot?.OpenSubKey(subPath, writable: false);
             return key is not null;
         }
         catch
@@ -578,8 +583,46 @@ public sealed class RuleDictionaryCatalogService
         }
     }
 
-    private static string ExpandPath(string path)
+    private RegistryKey? OpenRegistryRoot(string root)
     {
+        switch (root.ToUpperInvariant())
+        {
+            case "HKEY_CLASSES_ROOT":
+            case "HKCR":
+#if CONTEXTMENUMGR_IN_PROCESS
+                if (_portableUser is not null) return _portableUser.OpenClassesRoot(RegistryView.Default);
+#endif
+                return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
+            case "HKEY_CURRENT_USER":
+            case "HKCU":
+#if CONTEXTMENUMGR_IN_PROCESS
+                if (_portableUser is not null) return _portableUser.OpenUserHive();
+#endif
+                return RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Default);
+            case "HKEY_LOCAL_MACHINE":
+            case "HKLM":
+                return RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Default);
+            case "HKEY_USERS":
+            case "HKU":
+                return RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default);
+            default:
+                return null;
+        }
+    }
+
+    private RegistryKey OpenClassesRoot()
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.OpenClassesRoot(RegistryView.Default);
+#endif
+        return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
+    }
+
+    private string ExpandPath(string path)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.ExpandEnvironmentVariables(path);
+#endif
         return Environment.ExpandEnvironmentVariables(path);
     }
 

@@ -33,6 +33,8 @@ ProbeHost 必须保持边界清晰：
 
 不要把 ProbeHost 当提权链路。它由前端启动，解决的是第三方 COM 隔离和架构匹配，不解决管理员权限。
 
+G2 In-process Portable 的 Frontend 本身已提升，不能直接 `Process.Start` ProbeHost，否则第三方 Shell Extension 会继承管理员令牌。该构建使用经 Explorer/SID/Session/完整性验证的原交互用户 primary token，并以其环境启动所选架构的 ProbeHost；没有合适 token 时分析失败关闭，不回退到提升进程。请求/结果位于 Data 下的每操作私有目录，结果文件拒绝目录和 reparse point，并限制为 4 MiB；取消/超时继续使用现有进程清理路径。此实现仍是进程隔离，不是 COM 安全沙箱。当前已通过构建和测试，真实同账户/跨账户 UAC 下的 COM 激活、重定向输出及超时清理尚待 Windows 集成验证。
+
 ## 架构选择
 
 当前前端 `ContextMenuDeepAnalysisService` 会根据 handler DLL 的 PE machine type 选择 ProbeHost：

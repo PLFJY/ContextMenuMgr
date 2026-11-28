@@ -13,12 +13,20 @@ public partial class OpenWithReviewQueueService(IBackendClient backend, Localiza
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
-    private readonly string _sid = WindowsIdentity.GetCurrent().User!.Value;
+    private readonly string _sid = GetCurrentUserSid();
     private Task<bool>? _refresh;
     private bool _invalidated;
     public ObservableCollection<OpenWithApprovalItemViewModel> Items { get; } = [];
     public event EventHandler? SnapshotChanged;
     [ObservableProperty] public partial string StatusText { get; private set; } = string.Empty;
+
+    private static string GetCurrentUserSid()
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (RuntimeHosting.IsInProcess) return InProcessBootstrap.User.Context.Sid;
+#endif
+        return WindowsIdentity.GetCurrent().User!.Value;
+    }
 
     public Task<bool> RefreshAsync(CancellationToken token)
     {

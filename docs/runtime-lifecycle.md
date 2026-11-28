@@ -8,6 +8,10 @@
 
 宿主在 `BackendCore` 组装后将同一个 catalog 和 OpenWith coordinator 接到 monitor，再接 Pipe 的分发与通知，最后创建用户 Session launcher。Pipe 先启动，持续监控随后启动。Installer 与现有 Portable ZIP 均使用这个宿主，Portable 专用退出依旧由实际 Pipe 连接和 SCM 所有权授权。
 
+G2 验证构建由 `BackendHostingMode=InProcess` 在编译期选择，默认仍为 `Service`；不得根据 `RuntimePackageKind.Portable` 推断宿主，因为历史 Portable ZIP 仍需 Service。In-process Frontend 在初始化 RuntimePaths/DI 前验证本地 Portable Data、排除未解决的服务注册并建立原交互用户 token，再持有唯一 local Core/transport 实例。它不创建 SCM 服务、Pipe server、monitor、WTS launcher 或 TrayHost。通知 readiness 为本地状态；Explorer 重启只针对已验证 Session，启动本地宿主不触碰注册表保护策略和旧服务。
+
+关闭主窗口即关闭应用。在 ServiceProvider disposal 时先阻止 transport 新请求，再等待已接纳操作结束并释放 runtime/state、logger 和用户 token，最多等待 15 秒；超时明确记为未确认，不能视为操作已回滚。该策略不发送 `RequestShutdown`/`RequestPortableExit`，不停止已有服务。旧 Service 托管安装与 Portable ZIP 的关闭事务保持原路径。实现和验证限制见[Portable 重构基线](portable-refactoring-baseline.md#G2-实现与验证)。
+
 ## 安装、修复与移除服务
 
 `BackendServiceManager` 在需要服务级维护时解析 `ContextMenuManagerPlus.Service.exe`，用 `ProcessStartInfo.Verb = "runas"` 启动 elevated backend process。这个进程执行 `--service-bootstrap` 命令后退出，不是长期运行的 Backend Service。

@@ -13,6 +13,16 @@
 
 B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-lifecycle.md)，D 的协议/架构和隔离边界见[ProbeHost](deep-analysis-probehost.md)。不要用一次性 bootstrapper 替代普通 runtime backend，也不要从服务 Session 显示 UI。
 
+### G2 In-process Portable 身份边界
+
+仅显式 `BackendHostingMode=InProcess` 验证构建启用本地宿主；缺省及现有发布目标仍为 Service。应用要求管理员启动，但提升令牌只提供注册表管理权限，**不是**目标用户身份。`PortableInteractiveUser.Resolve` 从当前 Session 的 shell 窗口定位 Explorer，校验其映像、Session、SID、INTERACTIVE 组、非提升状态、medium integrity、非 UIAccess 和已加载用户 hive，并保留 Explorer 的 primary token。目标 SID 另以该 Session 的 WTS 登录账户验证，因此标准用户用另一管理员凭据完成 UAC 时，仍拒绝将管理员 HKCU 当作原用户。身份不完整时启动失败关闭；不按活动控制台或 DTO SID 猜测用户。
+
+该 token 为 In-process `BackendUserContext` 提供 SID、SessionId 和 profile/special folder 路径；用户 Classes view 由 `RegOpenUserClassesRoot` 打开，用户 hive 使用 `HKEY_USERS/<SID>`。路径展开与面向用户的子进程启动使用保留的原用户 token。机器级注册表操作仍由提升进程执行，LocalSystem 特有权限不被模拟或静默替代。该选择需要在同账户与跨账户 UAC、RDP/多 Session、锁屏、Explorer 重启和真实 HKU/view 上分别集成验证；目前本地编译/合成测试不构成这些 Windows 证明。
+
+此宿主将 `PipeCommand` 显式路由为本地宿主操作、共享 Dispatcher 操作或结构化拒绝；不回退到 Service Pipe。Continuous protection、approval、WPS/OpenWith 审核、TrayHost、自启动、Service 生命周期及废弃命令均不可用；普通菜单改动、GUID block、ShellNew 持久顺序锁、Win11、OpenWith 普通管理、删除/恢复和图标修复仍按实际实现保留。详细能力清单及通知/取消/生命周期语义见[Portable 重构基线](portable-refactoring-baseline.md#G2-实现与验证)。
+
+尚未完成的身份来源审计：Core 的 `ShellMetadataResolver.OpenRegistryPath`、`GuidMetadataCatalog.OpenClsidKeys` 和 `SpecialMenuService` DragDrop/扩展图标元数据仍可能直接读取进程 `Registry.ClassesRoot`；Core 的部分 `%变量%` 展开也调用 `Environment.ExpandEnvironmentVariables`。机器注册信息不依赖原用户，但每用户 Classes 覆盖可能不同，跨账户 UAC 下的元数据、发现优先级及写入物理来源还没有完整证明。不得把这些路径的当前结果作为已验证的原用户视图。详细文件与 G3 前置项见[Portable 基线](portable-refactoring-baseline.md#G2-实现与验证)。
+
 ## 身份解析与模拟边界
 
 权限、SID、hive 和 SessionId 是四个维度。LocalSystem 的 HKCU 不是前端用户 HKCU；用户写入明确选 `HKEY_USERS/<SID>`，不因权限高而扩大到 HKLM。显示名/路径不是认证依据。

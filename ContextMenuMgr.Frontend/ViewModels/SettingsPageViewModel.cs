@@ -686,6 +686,10 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
     private async Task ResetSettingsAsync()
     {
         if (!IsLifecycleSettingsEnabled) return;
+#if CONTEXTMENUMGR_IN_PROCESS
+        await ResetUserPreferencesForInProcessAsync();
+        return;
+#else
         IsLifecycleSettingsEnabled = false;
         _settingsService.IsLifecycleTransitionInProgress = true;
         IsWin11ContextMenuSettingEnabled = false;
@@ -775,7 +779,51 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
             IsWin11ContextMenuSettingEnabled = !_disposed && _workspace.IsBackendReady
                 && IsWin11ModernContextMenuSupported && _win11SettingStateKnown;
         }
+#endif
     }
+
+#if CONTEXTMENUMGR_IN_PROCESS
+    private async Task ResetUserPreferencesForInProcessAsync()
+    {
+        IsLifecycleSettingsEnabled = false;
+        IsWin11ContextMenuSettingEnabled = false;
+        try
+        {
+            if (IsWin11ModernContextMenuSupported)
+                await SaveWin11ContextMenuSettingAsync(false);
+
+            _settingsService.ResetUserPreferencesPreservingHostPolicy();
+            AutoStartOnLogin = _settingsService.Current.AutoStartOnLogin;
+            RemovePortableServiceOnExit = _settingsService.Current.RemovePortableServiceOnExit;
+            ShowTrayIcon = _settingsService.Current.ShowTrayIcon;
+            LockNewContextMenuItems = _settingsService.Current.LockNewContextMenuItems;
+
+            _localization.SelectedLanguage = AppLanguageOption.System;
+            SelectedLanguage = AvailableLanguages.FirstOrDefault(item => item.Option == AppLanguageOption.System) ?? AvailableLanguages[0];
+
+            _themeService.SetThemePreference(AppThemeOption.System);
+            SetSelectedThemeFromPreference(AppThemeOption.System);
+
+            FrontendDebugLog.Configure(AppLogLevel.Warning);
+            SelectedLogLevel = AvailableLogLevels.FirstOrDefault(item => item.Option == AppLogLevel.Warning) ?? AvailableLogLevels[1];
+            await _workspace.SyncBackendLogLevelAsync();
+
+            await FrontendMessageBox.ShowInfoAsync(
+                _localization.Translate("MaintenanceResetSettingsSucceeded"),
+                _localization.Translate("DebugToolsTitle"));
+        }
+        catch (Exception ex)
+        {
+            await FrontendMessageBox.ShowErrorAsync(ex.Message, _localization.Translate("DebugToolsTitle"));
+        }
+        finally
+        {
+            IsLifecycleSettingsEnabled = !_disposed && _workspace.IsBackendReady;
+            IsWin11ContextMenuSettingEnabled = !_disposed && _workspace.IsBackendReady
+                && IsWin11ModernContextMenuSupported && _win11SettingStateKnown;
+        }
+    }
+#endif
 
     [RelayCommand]
     private async Task ClearAllLogsAsync()
@@ -950,6 +998,10 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         var lifecyclePolicyLoaded = false;
         try
         {
+#if CONTEXTMENUMGR_IN_PROCESS
+            lifecyclePolicyLoaded = true;
+            await LoadWin11ModernContextMenuSettingAsync();
+#else
             // Load auto-start setting from backend (async, non-blocking)
             var autoStartEnabled = await _startupService.IsAutoStartEnabledAsync(CancellationToken.None);
             AutoStartOnLogin = autoStartEnabled;
@@ -971,6 +1023,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
             // Registry is the source of truth; frontend settings only mirror it.
             await LoadWin11ModernContextMenuSettingAsync();
+#endif
         }
         catch (Exception ex)
         {
@@ -980,7 +1033,11 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         {
             _initialSettingsLoadInProgress = false;
             _lifecycleStateUncertain = IsPortablePackage && PortableServiceExitPolicy.HasUnsettledStartupTransaction(RuntimePaths.DataDirectory);
+#if CONTEXTMENUMGR_IN_PROCESS
+            IsLifecycleSettingsEnabled = !_disposed && _workspace.IsBackendReady;
+#else
             IsLifecycleSettingsEnabled = !_disposed && lifecyclePolicyLoaded && _workspace.IsBackendReady && !_lifecycleStateUncertain;
+#endif
         }
     }
 
@@ -1083,10 +1140,7 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
         try
         {
             Directory.CreateDirectory(folderPath);
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folderPath}\"")
-            {
-                UseShellExecute = true
-            });
+            _actionsService.OpenFolder(folderPath);
         }
         catch (Exception ex)
         {

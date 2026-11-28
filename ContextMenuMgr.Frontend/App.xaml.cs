@@ -450,10 +450,41 @@ public partial class App : Application
         }
 
         _mainWindow = null;
+        var shellViewModel = _shellViewModel;
         _shellViewModel = null;
         if (!normalClose) return;
 #if CONTEXTMENUMGR_IN_PROCESS
-        Shutdown();
+        try
+        {
+            shellViewModel?.Dispose();
+            var serviceProvider = _serviceProvider;
+            _serviceProvider = null;
+            if (serviceProvider is not null)
+            {
+                var disposal = serviceProvider.DisposeAsync().AsTask();
+                try
+                {
+                    await disposal.WaitAsync(TimeSpan.FromSeconds(15));
+                }
+                catch (TimeoutException)
+                {
+                    FrontendDebugLog.Warning("App", "In-process shutdown exceeded 15 seconds. An admitted operation may not have reached a confirmed terminal state before process exit.");
+                    _ = disposal.ContinueWith(
+                        task => FrontendDebugLog.Error("App", task.Exception!, "In-process resource disposal failed after the shutdown deadline."),
+                        CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FrontendDebugLog.Error("App", ex, "In-process shutdown failed before all resources were released.");
+        }
+        finally
+        {
+            Shutdown();
+        }
         return;
 #else
         try

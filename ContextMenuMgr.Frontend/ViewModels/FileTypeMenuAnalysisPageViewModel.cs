@@ -18,6 +18,7 @@ public partial class FileTypeMenuAnalysisPageViewModel : ObservableObject, IDisp
     private readonly IBackendClient _backendClient;
     private readonly INavigationService _navigationService;
     private readonly FileTypesPageViewModel _fileTypesPageViewModel;
+    private readonly Func<string> _getInitialFolder;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileTypeMenuAnalysisPageViewModel"/> class.
@@ -26,12 +27,14 @@ public partial class FileTypeMenuAnalysisPageViewModel : ObservableObject, IDisp
         IBackendClient backendClient,
         LocalizationService localization,
         INavigationService navigationService,
-        FileTypesPageViewModel fileTypesPageViewModel)
+        FileTypesPageViewModel fileTypesPageViewModel,
+        Func<string>? getInitialFolder = null)
     {
         _backendClient = backendClient;
         _localization = localization;
         _navigationService = navigationService;
         _fileTypesPageViewModel = fileTypesPageViewModel;
+        _getInitialFolder = getInitialFolder ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         _localization.LanguageChanged += OnLanguageChanged;
     }
@@ -74,7 +77,7 @@ public partial class FileTypeMenuAnalysisPageViewModel : ObservableObject, IDisp
         var dialog = new OpenFolderDialog
         {
             Title = AnalyzeFolderText,
-            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            InitialDirectory = _getInitialFolder()
         };
         if (dialog.ShowDialog() == true)
         {

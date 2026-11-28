@@ -11,18 +11,32 @@ public sealed class EnhanceMenuRuleService
     private readonly IBackendClient _backendClient;
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly PortableInteractiveUser? _portableUser;
+#endif
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EnhanceMenuRuleService"/> class.
     /// </summary>
+#if CONTEXTMENUMGR_IN_PROCESS
+    internal EnhanceMenuRuleService(
+#else
     public EnhanceMenuRuleService(
+#endif
         IBackendClient backendClient,
         LocalizationService localization,
-        FrontendSettingsService settingsService)
+        FrontendSettingsService settingsService
+#if CONTEXTMENUMGR_IN_PROCESS
+        , PortableInteractiveUser? portableUser = null
+#endif
+        )
     {
         _backendClient = backendClient;
         _localization = localization;
         _settingsService = settingsService;
+#if CONTEXTMENUMGR_IN_PROCESS
+        _portableUser = portableUser;
+#endif
     }
 
     /// <summary>
@@ -68,20 +82,22 @@ public sealed class EnhanceMenuRuleService
             cancellationToken);
     }
 
-    private static bool IsShellEnabled(string relativeGroupPath, EnhanceMenuItemDefinition definition)
+    private bool IsShellEnabled(string relativeGroupPath, EnhanceMenuItemDefinition definition)
     {
-        using var key = Registry.ClassesRoot.OpenSubKey($@"{relativeGroupPath}\shell\{definition.KeyName}", writable: false);
+        using var classesRoot = OpenClassesRoot();
+        using var key = classesRoot.OpenSubKey($@"{relativeGroupPath}\shell\{definition.KeyName}", writable: false);
         return key is not null;
     }
 
-    private static bool IsShellExEnabled(string relativeGroupPath, EnhanceMenuItemDefinition definition)
+    private bool IsShellExEnabled(string relativeGroupPath, EnhanceMenuItemDefinition definition)
     {
         if (!Guid.TryParse(definition.GuidText, out var expectedGuid))
         {
             return false;
         }
 
-        using var handlersKey = Registry.ClassesRoot.OpenSubKey($@"{relativeGroupPath}\shellex\ContextMenuHandlers", writable: false);
+        using var classesRoot = OpenClassesRoot();
+        using var handlersKey = classesRoot.OpenSubKey($@"{relativeGroupPath}\shellex\ContextMenuHandlers", writable: false);
         if (handlersKey is null)
         {
             return false;
@@ -98,6 +114,14 @@ public sealed class EnhanceMenuRuleService
         }
 
         return false;
+    }
+
+    private RegistryKey OpenClassesRoot()
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.OpenClassesRoot(RegistryView.Default);
+#endif
+        return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
     }
 
     private static string? NormalizeClassesRootRelativePath(string? path)

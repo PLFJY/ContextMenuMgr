@@ -1,15 +1,22 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using ContextMenuMgr.Contracts;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 namespace ContextMenuMgr.Frontend.Services;
 
 public sealed class ContextMenuDeepAnalysisService
 {
+    private const int MaximumResultFileBytes = 4 * 1024 * 1024;
+    private const uint GenericRead = 0x80000000;
+    private const uint FileShareRead = 0x00000001;
+    private const uint OpenExisting = 3;
+    private const uint OpenReparsePoint = 0x00200000;
     private const int NativeAccessViolationExitCode = -1073741819;
     private const int StackBufferOverrunExitCode = -1073740791;
     private const string ProbeHostArchitectureMismatchMessage = "解析辅助进程架构与目录标识不一致，无法启动。请重新构建或安装完整程序包。";
@@ -37,7 +44,16 @@ public sealed class ContextMenuDeepAnalysisService
             "FrontendOperation",
             $"DeepAnalysisStart: OperationId={request.OperationId}, ItemId={request.ItemId}, DisplayName={request.DisplayName}, EntryKind={request.EntryKind}, Category={request.Category}, HandlerClsid={request.HandlerClsid}, ProbeMode={request.ProbeMode}, Timestamp={startedAt:O}.");
 
-        var selection = SelectProbeHost(request);
+        ProbeHostSelection selection;
+        try
+        {
+            selection = SelectProbeHost(request);
+        }
+        catch (Exception ex) when (RuntimeHosting.IsInProcess)
+        {
+            FrontendDebugLog.Warning("ContextMenuDeepAnalysisService", $"Portable user context unavailable for ProbeHost selection: {ex.Message}");
+            return Failure("InteractiveUserUnavailable", ex.Message, request);
+        }
         FrontendDebugLog.Info(
             "ContextMenuDeepAnalysisService",
             $"ProbeHostSelection: OSArchitecture={RuntimeInformation.OSArchitecture}, FrontendProcessArchitecture={RuntimeInformation.ProcessArchitecture}, HandlerFilePath={selection.HandlerFilePath ?? "<null>"}, HandlerFileExists={selection.HandlerFileExists}, HandlerMachineType={selection.HandlerMachineType}, HandlerMachineRawValue={selection.HandlerMachineRawValue ?? "<null>"}, SelectedProbeHostPath={selection.SelectedProbeHostPath ?? "<null>"}, SelectedProbeHostArchitecture={selection.SelectedProbeHostArchitecture}, Reason={selection.Reason}.");
@@ -81,11 +97,18 @@ public sealed class ContextMenuDeepAnalysisService
         if (RuntimeHosting.IsInProcess && (File.GetAttributes(operationRoot) & FileAttributes.ReparsePoint) != 0)
             return Failure("ProbeHostUnavailable", "Deep Analysis data directory must not be a reparse point.", request);
         var operationDirectory = Path.Combine(operationRoot, Guid.NewGuid().ToString("N"));
-        if (RuntimeHosting.IsInProcess) InProcessBootstrap.User.CreatePrivateDirectory(operationDirectory);
-        else Directory.CreateDirectory(operationDirectory);
+        CreateOperationDirectory(operationDirectory);
         var requestPath = Path.Combine(operationDirectory, "request.json");
         var resultPath = Path.Combine(operationDirectory, "result.json");
-        await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, JsonOptions), Utf8NoBom, cancellationToken);
+        try
+        {
+            await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, JsonOptions), Utf8NoBom, cancellationToken);
+        }
+        catch
+        {
+            TryDeleteDirectory(operationDirectory);
+            throw;
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -105,10 +128,7 @@ public sealed class ContextMenuDeepAnalysisService
         startInfo.ArgumentList.Add("--result");
         startInfo.ArgumentList.Add(resultPath);
 
-        using var process = RuntimeHosting.IsInProcess
-            ? InProcessBootstrap.User.StartNonElevatedProcess(probeHostPath,
-                ["--request", requestPath, "--result", resultPath], startInfo.WorkingDirectory)
-            : new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        using var process = StartProbeHostProcess(probeHostPath, requestPath, resultPath, startInfo);
         Task<string>? outputTask = null;
         Task<string>? errorTask = null;
         try
@@ -151,9 +171,7 @@ public sealed class ContextMenuDeepAnalysisService
                 "ContextMenuDeepAnalysisService",
                 $"ProbeHostCapturedOutput: ItemId={request.ItemId}, StdoutExcerpt={Excerpt(output, 300)}, StderrExcerpt={Excerpt(error, 1000)}.");
 
-            var resultJson = File.Exists(resultPath)
-                ? await File.ReadAllTextAsync(resultPath, Utf8NoBom, cancellationToken)
-                : string.Empty;
+            var resultJson = await TryReadResultFileAsync(resultPath, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(resultJson))
             {
@@ -229,6 +247,29 @@ public sealed class ContextMenuDeepAnalysisService
         {
             TryDeleteDirectory(operationDirectory);
         }
+    }
+
+    private static void CreateOperationDirectory(string directory)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (RuntimeHosting.IsInProcess)
+        {
+            InProcessBootstrap.User.CreatePrivateDirectory(directory);
+            return;
+        }
+#endif
+        Directory.CreateDirectory(directory);
+    }
+
+    private static Process StartProbeHostProcess(string probeHostPath, string requestPath, string resultPath,
+        ProcessStartInfo startInfo)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (RuntimeHosting.IsInProcess)
+            return InProcessBootstrap.User.StartNonElevatedProcess(probeHostPath,
+                ["--request", requestPath, "--result", resultPath], startInfo.WorkingDirectory);
+#endif
+        return new Process { StartInfo = startInfo, EnableRaisingEvents = true };
     }
 
     private ProbeHostSelection SelectProbeHost(ContextMenuDeepAnalysisRequest request)
@@ -378,7 +419,7 @@ public sealed class ContextMenuDeepAnalysisService
         };
     }
 
-    private static string? ResolveHandlerPathFromClsid(string? handlerClsid)
+    private string? ResolveHandlerPathFromClsid(string? handlerClsid)
     {
         if (!Guid.TryParse(handlerClsid, out var clsid))
         {
@@ -394,7 +435,8 @@ public sealed class ContextMenuDeepAnalysisService
         {
             try
             {
-                using var key = Registry.ClassesRoot.OpenSubKey(valuePath);
+                using var classesRoot = OpenClassesRootForFrontend();
+                using var key = classesRoot.OpenSubKey(valuePath);
                 if (key?.GetValue(null) is string value && !string.IsNullOrWhiteSpace(value))
                 {
                     return NormalizeComServerPath(value);
@@ -408,14 +450,14 @@ public sealed class ContextMenuDeepAnalysisService
         return null;
     }
 
-    private static string? NormalizeComServerPath(string? value)
+    private string? NormalizeComServerPath(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
             return null;
         }
 
-        var expanded = Environment.ExpandEnvironmentVariables(value.Trim());
+        var expanded = ExpandEnvironmentVariables(value.Trim());
         if (expanded.StartsWith('"'))
         {
             var closingQuoteIndex = expanded.IndexOf('"', 1);
@@ -436,6 +478,71 @@ public sealed class ContextMenuDeepAnalysisService
 
         return expanded;
     }
+
+    private RegistryKey OpenClassesRootForFrontend()
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (RuntimeHosting.IsInProcess)
+            return InProcessBootstrap.User.OpenClassesRoot(RegistryView.Default);
+#endif
+        return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
+    }
+
+    private string ExpandEnvironmentVariables(string value)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (RuntimeHosting.IsInProcess)
+            return InProcessBootstrap.User.ExpandEnvironmentVariables(value);
+#endif
+        return Environment.ExpandEnvironmentVariables(value);
+    }
+
+    private static async Task<string> TryReadResultFileAsync(string resultPath, CancellationToken cancellationToken)
+    {
+        using var handle = OpenFileWithoutFollowingReparsePoints(resultPath, GenericRead, FileShareRead,
+            IntPtr.Zero, OpenExisting, 0x00000080 | OpenReparsePoint, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (error is 2 or 3) return string.Empty;
+            throw new Win32Exception(error, "Open the ProbeHost result file.");
+        }
+
+        if (!GetFileInformationByHandleEx(handle, 9 /* FileAttributeTagInfo */, out var tagInfo,
+                (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Inspect the ProbeHost result file.");
+        if ((tagInfo.FileAttributes & ((uint)FileAttributes.ReparsePoint | (uint)FileAttributes.Directory)) != 0)
+            throw new InvalidDataException("ProbeHost result must be a regular file.");
+        if (!GetFileSizeEx(handle, out var length))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Read the ProbeHost result size.");
+        if (length is <= 0 or > MaximumResultFileBytes)
+            throw new InvalidDataException($"ProbeHost result size is outside the supported range ({length} bytes).");
+
+        await using var stream = new FileStream(handle, FileAccess.Read, 64 * 1024, isAsync: true);
+        using var reader = new StreamReader(stream, Utf8NoBom, detectEncodingFromByteOrderMarks: true,
+            bufferSize: 64 * 1024, leaveOpen: true);
+        return await reader.ReadToEndAsync(cancellationToken);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle OpenFileWithoutFollowingReparsePoints(string path, uint desiredAccess,
+        uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int informationClass,
+        out FileAttributeTagInfo information, uint bufferSize);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFileSizeEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileSizeEx(SafeFileHandle file, out long fileSize);
 
     private static ContextMenuDeepAnalysisResult Failure(
         string errorCode,

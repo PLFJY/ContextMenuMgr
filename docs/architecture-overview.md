@@ -43,6 +43,8 @@ Core 只引用 Contracts 和所需 Windows 依赖。Backend 引用 Core 与 Cont
 
 Frontend 取得单实例所有权后建立日志会话和 DI，启动控制 Pipe，创建主窗口并初始化 workspace。workspace 将连接可达性、主快照与 WPS 审核刷新分开：Ping 成功但快照失败属于数据加载错误，不自动升级为服务重装。分类页从 workspace 本地投影；scene-only 项不属于全局集合。详见[前端](frontend-wpf-ui.md)。
 
+G2 验证布局通过 `BackendHostingMode=InProcess` 编译期开关进入另一条宿主组合：要求提升的 Frontend 在最早启动阶段解析原桌面用户 token，再建立唯一 `InProcessBackendRuntime`，经现有 `BackendClient`、`InProcessBackendTransport` 和同一 `BackendCore.Dispatcher` 处理普通请求。它仍用 `RuntimePackageKind.Portable` 和应用目录 `Data`，但不重解释历史 ZIP 的 Service 托管模式。Installer 与既有 Portable ZIP 缺省保持 Service/Pipe；新本地宿主不构造 Service Runtime、monitor、SCM 或 TrayHost。命令能力及关闭边界记录在[Portable 重构基线](portable-refactoring-baseline.md#G2-实现与验证)。
+
 ## 职责与持久化边界
 
 | 责任 | 权威说明 | 关键所有者 |

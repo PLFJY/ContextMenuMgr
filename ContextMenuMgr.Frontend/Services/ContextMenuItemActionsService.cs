@@ -15,15 +15,30 @@ public sealed class ContextMenuItemActionsService
     private readonly LocalizationService _localization;
     private readonly FrontendSettingsService _settingsService;
     private readonly IBackendClient _backendClient;
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly PortableInteractiveUser? _portableUser;
+#endif
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextMenuItemActionsService"/> class.
     /// </summary>
-    public ContextMenuItemActionsService(LocalizationService localization, FrontendSettingsService settingsService, IBackendClient backendClient)
+#if CONTEXTMENUMGR_IN_PROCESS
+    internal ContextMenuItemActionsService(LocalizationService localization, FrontendSettingsService settingsService,
+#else
+    public ContextMenuItemActionsService(LocalizationService localization, FrontendSettingsService settingsService,
+#endif
+        IBackendClient backendClient
+#if CONTEXTMENUMGR_IN_PROCESS
+        , PortableInteractiveUser? portableUser = null
+#endif
+        )
     {
         _localization = localization;
         _settingsService = settingsService;
         _backendClient = backendClient;
+#if CONTEXTMENUMGR_IN_PROCESS
+        _portableUser = portableUser;
+#endif
     }
 
     /// <summary>
@@ -108,6 +123,17 @@ public sealed class ContextMenuItemActionsService
                 var targetPath = item.Entry.FilePath;
                 var parentDirectory = Path.GetDirectoryName(targetPath);
                 var useSeparateWindow = _settingsService.Current.OpenMoreExplorer;
+                var arguments = File.Exists(targetPath)
+                    ? useSeparateWindow ? new[] { "/n,/select,", targetPath } : new[] { "/select,", targetPath }
+                    : useSeparateWindow ? new[] { "/n,", parentDirectory ?? targetPath } : new[] { parentDirectory ?? targetPath };
+#if CONTEXTMENUMGR_IN_PROCESS
+                if (_portableUser is not null)
+                {
+                    StartForInteractiveUser(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                        BuildExplorerArguments(arguments), AppContext.BaseDirectory);
+                    return;
+                }
+#endif
                 var startInfo = File.Exists(targetPath)
                     ? new ProcessStartInfo(
                         "explorer.exe",
@@ -193,11 +219,18 @@ public sealed class ContextMenuItemActionsService
                 return;
             }
 
-            var process = Process.Start(new ProcessStartInfo("reg.exe", $"export \"{GetClassesRootPath(item.Entry.RegistryPath)}\" \"{fileDialog.FileName}\" /y")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
+            var registryPath = GetClassesRootPath(item.Entry.RegistryPath);
+            var exportArguments = new[] { "export", registryPath, fileDialog.FileName, "/y" };
+#if CONTEXTMENUMGR_IN_PROCESS
+            using var process = StartForInteractiveUser(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "reg.exe"),
+                exportArguments, (_portableUser ?? throw new InvalidOperationException("The verified desktop user's process token is unavailable.")).Context.ProfilePath);
+#else
+            using var process = Process.Start(new ProcessStartInfo("reg.exe", $"export \"{registryPath}\" \"{fileDialog.FileName}\" /y")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+#endif
 
             if (process is null)
             {
@@ -226,13 +259,38 @@ public sealed class ContextMenuItemActionsService
             "RestartExplorer");
     }
 
-    private static void OpenShellTarget(string target)
+    private void OpenShellTarget(string target)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null)
+        {
+            StartForInteractiveUser(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                [target], _portableUser.Context.ProfilePath);
+            return;
+        }
+#endif
         Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
     }
 
-    private static bool ShowPropertiesDialog(string filePath)
+    public void OpenFolder(string path)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null)
+        {
+            StartForInteractiveUser(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                [path], _portableUser.Context.ProfilePath);
+            return;
+        }
+#endif
+        Process.Start(new ProcessStartInfo("explorer.exe", QuoteForShell(path)) { UseShellExecute = true });
+    }
+
+    private bool ShowPropertiesDialog(string filePath)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null)
+            throw new InvalidOperationException("File Properties is unavailable in elevated Portable mode because it can activate third-party shell handlers in the elevated process.");
+#endif
         var info = new ShellExecuteInfo
         {
             cbSize = Marshal.SizeOf<ShellExecuteInfo>(),
@@ -249,10 +307,22 @@ public sealed class ContextMenuItemActionsService
     {
         // LastKey accepts a hive-qualified path. A localized computer prefix
         // based on the application's language may not match Windows' language.
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null)
+        {
+            using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default);
+            using var userHive = users.OpenSubKey(_portableUser.Context.Sid, writable: true)
+                ?? throw new InvalidOperationException("The verified desktop user's registry hive is no longer loaded.");
+            using var regeditKey = userHive.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit", writable: true)
+                ?? throw new InvalidOperationException("Could not open the desktop user's Registry Editor settings.");
+            regeditKey.SetValue("LastKey", fullRegistryPath, RegistryValueKind.String);
+        }
+#else
         using (var regeditKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit"))
         {
             regeditKey.SetValue("LastKey", fullRegistryPath, RegistryValueKind.String);
         }
+#endif
 
         // An existing instance does not reload LastKey when activated. Open a
         // fresh instance for navigation without closing the user's other windows.
@@ -274,11 +344,36 @@ public sealed class ContextMenuItemActionsService
         var forceNewInstance = _settingsService.Current.OpenMoreRegedit || hasExistingEditor;
         FrontendDebugLog.Operation("FrontendOperation",
             $"RegistryEditorNavigationRequested: RegistryPath={fullRegistryPath}, NewInstance={forceNewInstance}.");
-        using var process = Process.Start(new ProcessStartInfo("regedit.exe", forceNewInstance ? "-m" : string.Empty)
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null)
         {
-            UseShellExecute = true
-        }) ?? throw new InvalidOperationException("Failed to start regedit.exe.");
+            StartForInteractiveUser(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "regedit.exe"),
+                forceNewInstance ? ["-m"] : [], _portableUser.Context.ProfilePath);
+            return;
+        }
+#endif
+        using var process = Process.Start(new ProcessStartInfo("regedit.exe", forceNewInstance ? "-m" : string.Empty)
+            { UseShellExecute = true }) ?? throw new InvalidOperationException("Failed to start regedit.exe.");
     }
+
+#if CONTEXTMENUMGR_IN_PROCESS
+    private Process StartForInteractiveUser(string executablePath, IEnumerable<string> arguments, string workingDirectory)
+        => (_portableUser ?? throw new InvalidOperationException("The verified desktop user's process token is unavailable."))
+            .StartNonElevatedProcess(executablePath, arguments, workingDirectory);
+
+    private static string[] BuildExplorerArguments(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count == 2 && arguments[0] is "/n,/select," or "/select,")
+            return [arguments[0] + QuoteArgument(arguments[1])];
+        if (arguments.Count == 2 && arguments[0] is "/n," or "/")
+            return [arguments[0] + QuoteArgument(arguments[1])];
+        return arguments.Select(QuoteArgument).ToArray();
+    }
+
+    private static string QuoteArgument(string value) => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+#endif
+
+    private static string QuoteForShell(string value) => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
     private Task ShowMissingTargetAsync(string messageKey, string titleKey)
     {
