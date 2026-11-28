@@ -253,6 +253,52 @@ public sealed class ContextMenuStateStoreTests
         Assert.Equal(ContextMenuStateStoreHealth.Healthy, legacyStore.Health);
     }
 
+    // An OpenWith writer can be the first writer after an upgrade. It must carry forward ordinary recovery records.
+    [Fact]
+    public async Task OpenWithFirstWrite_PreservesSchema2DesiredStateAndDeletedRecovery()
+    {
+        using var fixture = new StateStoreFixture();
+        const string physicalPath = @"HKEY_LOCAL_MACHINE\Software\Classes\G0.File\shell\removed";
+        const string backupPath = @"C:\Synthetic\Data\DeletedBackups\removed.reg";
+        await File.WriteAllTextAsync(fixture.StatePath, """
+            {
+              "schemaVersion": 2,
+              "states": {
+                "disabled": { "id": "disabled", "desiredEnabled": false, "observedEnabled": true },
+                "removed": {
+                  "id": "removed",
+                  "isDeleted": true,
+                  "backendRegistryPath": "HKEY_LOCAL_MACHINE\\Software\\Classes\\G0.File\\shell\\removed",
+                  "backupFilePath": "C:\\Synthetic\\Data\\DeletedBackups\\removed.reg",
+                  "deletedAtUtc": "2026-01-02T03:04:05+00:00"
+                }
+              }
+            }
+            """);
+
+        const string sid = "S-1-5-21-1-2-3-1001";
+        await fixture.CreateStore().WithOpenWithAsync(state =>
+        {
+            state.Users[sid] = new();
+            return true;
+        }, true, default);
+
+        var reopened = fixture.CreateStore();
+        var states = await reopened.LoadAsync(default);
+        Assert.False(states["disabled"].DesiredEnabled);
+        Assert.True(states["disabled"].ObservedEnabled);
+        Assert.True(states["removed"].IsDeleted);
+        Assert.Equal(physicalPath, states["removed"].BackendRegistryPath);
+        Assert.Equal(backupPath, states["removed"].BackupFilePath);
+        Assert.Equal(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero), states["removed"].DeletedAtUtc);
+        await reopened.WithOpenWithAsync(state =>
+        {
+            Assert.Contains(sid, state.Users.Keys);
+            Assert.Empty(state.Rules);
+            return true;
+        }, false, default);
+    }
+
     [Fact]
     public async Task ShellVerbVisibilityProvenance_RoundTripsAcrossStoreReload()
     {

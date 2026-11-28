@@ -44,10 +44,10 @@ restore/publish .NET Frontend、Backend、TrayHost；native ProbeHost 用 MSBuil
 
 ### 发布文件筛选
 
-`Publish-Application` 为每个目标先创建干净的共享发布目录，再依次发布 Frontend、Backend、TrayHost 并暂存 ProbeHost；最后校验文件策略、TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用该目录。托管项目的规则由根目录 [Directory.Build.targets](../Directory.Build.targets) 应用于三者，普通开发 build 不使用发布过滤。
+`Publish-Application` 为每个目标先创建干净的共享发布目录，再依次发布 Frontend、Backend、TrayHost 并暂存 ProbeHost；最后校验文件策略、TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用该目录。根目录 [Directory.Build.targets](../Directory.Build.targets) 对三个托管项目设置资产语言属性；两个发布目标分别筛选项目卫星元数据和发布文件。
 
-- `SatelliteResourceLanguages` 在 NuGet 资产解析时保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant`；共享目标在 `ComputeIntermediateSatelliteAssemblies` 之后过滤项目生成的非允许 culture 项，使 SDK 后续依赖文件生成也看不到被排除 satellite。`ComputeResolvedFilesToPublishList` 后还有一次解析资产过滤，覆盖包和其它 resolved items。规则按 `.resources.dll` 项和 culture 元数据识别，不按普通 DLL 所在目录猜测。
-- `CopyOutputSymbolsToPublishDirectory=false` 不复制托管项目自己的 PDB，`ResolvedFileToPublish` 过滤还排除传递资产中的 PDB 和非允许项目 satellite。`IncludeSymbolsInSingleFile=false` 明确禁止把符号纳入未来 single-file bundle。过滤发生在 SDK 生成 publish deps 文件、bundle 与复制文件之前；不改普通 build 的符号生成或中间目录，也不把 PDB 嵌入托管程序集。
+- `SatelliteResourceLanguages` 在 NuGet 资产解析时保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant`。该属性也传给普通开发 build 的 SDK 资产解析，影响取决于实际资产。共享目标在 publish 的 `ComputeIntermediateSatelliteAssemblies` 之后过滤项目生成的非允许 culture 项。`ComputeResolvedFilesToPublishList` 后还有一次解析资产过滤，覆盖包和其它 resolved items。规则按 `.resources.dll` 项和 culture 元数据识别。
+- `CopyOutputSymbolsToPublishDirectory=false` 不复制托管项目自己的 PDB，`ResolvedFileToPublish` 过滤还排除传递资产中的独立 PDB 和非允许项目 satellite。`IncludeSymbolsInSingleFile=false` 禁止 SDK 将独立符号文件纳入 bundle。筛选先于 publish deps、bundle 和复制，普通 build 仍生成符号。现有依赖 `CommunityToolkit.Mvvm.dll`、`WinRT.Runtime.dll` 自带内嵌 Portable PDB，筛选保持 DLL 原字节。 [G0 实测](portable-refactoring-baseline.md#g-1-发布资产与分发基线)
 - ProbeHost 发布阶段只暂存目标架构的 EXE 和 `ThirdPartyNotices/nlohmann-json-LICENSE.MIT`；其原生 PDB 不复制到发布布局。发布校验只报告意外 `.pdb` 或不允许的 culture satellite，不再删除文件。
 - 发布脚本每目标从空目录开始，避免增量或并行运行遗留文件污染资产。过滤只排除上述两类文件，其余载荷字节不由该策略改写。
 

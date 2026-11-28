@@ -7,6 +7,7 @@
 | 任务 | 权威文档 / 范围 | 何时追加相邻文档 |
 | --- | --- | --- |
 | 找进程、入口、模块所有者 | [架构与模块职责](architecture-overview.md) | 定位后转下表具体机制 |
+| G1–G6 Portable 重构与兼容验收 | [Portable 重构基线](portable-refactoring-baseline.md) | 查 G0 命令、持久数据、权限、旧资产与迁移证据 |
 | PipeCommand/DTO、SID/hive、Session、impersonation、UAC 通道 | [进程、权限与 IPC](process-and-privilege-flows.md) | 涉及物理写入读相应 backend；SCM/WTS 启动读生命周期 |
 | state schema、baseline、审核、外部变化、reset、损坏恢复 | [状态与监控](state-and-monitoring.md) | 物理 provenance/backup 读 registry/Win11；OpenWith 授权读其专文 |
 

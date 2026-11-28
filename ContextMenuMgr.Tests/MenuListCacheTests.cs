@@ -68,6 +68,26 @@ public sealed class MenuListCacheTests : IAsyncLifetime
         Assert.NotNull(await Cache(identity).ReadAsync<ContextMenuEntry>(Scope));
     }
 
+    // Pin the persisted v1 fingerprint bytes so two readers using the same changed algorithm cannot hide a break.
+    [Fact]
+    public async Task ExistingV1Cache_CanBeReopenedUsingTheSharedDeviceAndUserFingerprint()
+    {
+        const string persistedFingerprint = "6d22fbed0e7dde2ae6eb53f65de5ae4fc899ad6c7fdb0d84656252e9d37f6fdc";
+        var writer = Cache(persistedFingerprint);
+        await writer.MergeAsync(Scope, new[] { Entry("existing", enabled: false) }, true, writer.Version);
+        await writer.FlushAsync();
+
+        var identity = RuntimeIdentityFingerprint.Compute("01234567-89ab-cdef-0123-456789abcdef", "S-1-5-21-1-2-3-1001");
+        var snapshot = await Cache(identity).ReadAsync<ContextMenuEntry>(Scope);
+
+        Assert.NotNull(snapshot);
+        Assert.Collection(snapshot, item =>
+        {
+            Assert.Equal("existing", item.Id);
+            Assert.False(item.IsEnabled);
+        });
+    }
+
     [Fact]
     public async Task MatchingDirectoryPrefixDoesNotBypassFullIdentityVerification()
     {
