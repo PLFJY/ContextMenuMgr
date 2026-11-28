@@ -78,7 +78,6 @@ public sealed class ContextMenuDeepAnalysisService
             };
         }
 
-        var probeHostPath = selection.SelectedProbeHostPath;
         var architectureFailure = ValidateSelectedProbeHostArchitecture(selection, request);
         if (architectureFailure is not null)
         {
@@ -88,63 +87,64 @@ public sealed class ContextMenuDeepAnalysisService
             return architectureFailure;
         }
 
-        using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(5));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var operationRoot = RuntimeHosting.IsInProcess
             ? Path.Combine(RuntimePaths.DataDirectory, "DeepAnalysis")
             : Path.Combine(Path.GetTempPath(), "ContextMenuMgr.DeepAnalysis");
-        Directory.CreateDirectory(operationRoot);
-        if (RuntimeHosting.IsInProcess && (File.GetAttributes(operationRoot) & FileAttributes.ReparsePoint) != 0)
-            return Failure("ProbeHostUnavailable", "Deep Analysis data directory must not be a reparse point.", request);
-        var operationDirectory = Path.Combine(operationRoot, Guid.NewGuid().ToString("N"));
-        CreateOperationDirectory(operationDirectory);
-        var requestPath = Path.Combine(operationDirectory, "request.json");
-        var resultPath = Path.Combine(operationDirectory, "result.json");
-        try
-        {
-            await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, JsonOptions), Utf8NoBom, cancellationToken);
-        }
-        catch
-        {
-            TryDeleteDirectory(operationDirectory);
-            throw;
-        }
+        return await RunProbeHostAsync(request, selection, operationRoot, startedAt, timeout,
+            CreateOperationDirectory, StartProbeHostProcess, cancellationToken);
+    }
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = probeHostPath,
-            WorkingDirectory = Path.GetDirectoryName(probeHostPath) ?? AppContext.BaseDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = Utf8NoBom,
-            StandardOutputEncoding = Utf8NoBom,
-            StandardErrorEncoding = Utf8NoBom
-        };
-        startInfo.ArgumentList.Add("--request");
-        startInfo.ArgumentList.Add(requestPath);
-        startInfo.ArgumentList.Add("--result");
-        startInfo.ArgumentList.Add(resultPath);
-
-        using var process = StartProbeHostProcess(probeHostPath, requestPath, resultPath, startInfo);
+    internal async Task<ContextMenuDeepAnalysisResult> RunProbeHostAsync(
+        ContextMenuDeepAnalysisRequest request, ProbeHostSelection selection, string operationRoot,
+        DateTimeOffset startedAt, TimeSpan? timeout, Action<string> createOperationDirectory,
+        Func<ProcessStartInfo, Process?> startProcess, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(5));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        string? operationDirectory = null;
+        Process? process = null;
         Task<string>? outputTask = null;
         Task<string>? errorTask = null;
+        var failureCode = "ProbeHostFailed";
         try
         {
+            linkedCts.Token.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(operationRoot);
+            if (RuntimeHosting.IsInProcess && (File.GetAttributes(operationRoot) & FileAttributes.ReparsePoint) != 0)
+                return Failure("ProbeHostUnavailable", "Deep Analysis data directory must not be a reparse point.", request);
+            operationDirectory = Path.Combine(operationRoot, Guid.NewGuid().ToString("N"));
+            createOperationDirectory(operationDirectory);
+            var requestPath = Path.Combine(operationDirectory, "request.json");
+            var resultPath = Path.Combine(operationDirectory, "result.json");
+            await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, JsonOptions), Utf8NoBom, linkedCts.Token);
+
+            var probeHostPath = selection.SelectedProbeHostPath!;
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = probeHostPath,
+                WorkingDirectory = Path.GetDirectoryName(probeHostPath) ?? AppContext.BaseDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardInputEncoding = Utf8NoBom,
+                StandardOutputEncoding = Utf8NoBom,
+                StandardErrorEncoding = Utf8NoBom
+            };
+            startInfo.ArgumentList.Add("--request");
+            startInfo.ArgumentList.Add(requestPath);
+            startInfo.ArgumentList.Add("--result");
+            startInfo.ArgumentList.Add(resultPath);
+
+            linkedCts.Token.ThrowIfCancellationRequested();
             FrontendDebugLog.Info(
                 "ContextMenuDeepAnalysisService",
                 $"ProbeHostStart: Path={probeHostPath}, OperationId={request.OperationId}, ItemId={request.ItemId}, ProbeMode={request.ProbeMode}, TimeoutMs={(timeout ?? TimeSpan.FromSeconds(5)).TotalMilliseconds:F0}, RequestPath={requestPath}, ResultPath={resultPath}.");
 
-            if (!RuntimeHosting.IsInProcess && !process.Start())
-            {
-                FrontendDebugLog.Operation(
-                    "FrontendOperation",
-                    $"DeepAnalysisEnd: OperationId={request.OperationId}, ItemId={request.ItemId}, ProbeMode={request.ProbeMode}, Success=false, ErrorCode=ProbeHostStartFailed, ItemCount=0, ElapsedMs={(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds:F0}.");
-                return Failure("ProbeHostStartFailed", "Failed to start ProbeHost.", request);
-            }
-
+            failureCode = "ProbeHostStartFailed";
+            process = startProcess(startInfo) ?? throw new InvalidOperationException("Failed to start ProbeHost.");
+            failureCode = "ProbeHostFailed";
             if (!RuntimeHosting.IsInProcess)
             {
                 process.StandardInput.Close();
@@ -240,12 +240,13 @@ public sealed class ContextMenuDeepAnalysisService
             FrontendDebugLog.Error(
                 "FrontendOperation",
                 ex,
-                $"DeepAnalysisEnd: OperationId={request.OperationId}, ItemId={request.ItemId}, ProbeMode={request.ProbeMode}, Success=false, ErrorCode=ProbeHostFailed, ItemCount=0, ElapsedMs={(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds:F0}.");
-            return Failure("ProbeHostFailed", ex.Message, request);
+                $"DeepAnalysisEnd: OperationId={request.OperationId}, ItemId={request.ItemId}, ProbeMode={request.ProbeMode}, Success=false, ErrorCode={failureCode}, ItemCount=0, ElapsedMs={(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds:F0}.");
+            return Failure(failureCode, ex.Message, request);
         }
         finally
         {
-            TryDeleteDirectory(operationDirectory);
+            process?.Dispose();
+            if (operationDirectory is not null) TryDeleteDirectory(operationDirectory);
         }
     }
 
@@ -261,15 +262,14 @@ public sealed class ContextMenuDeepAnalysisService
         Directory.CreateDirectory(directory);
     }
 
-    private static Process StartProbeHostProcess(string probeHostPath, string requestPath, string resultPath,
-        ProcessStartInfo startInfo)
+    private static Process? StartProbeHostProcess(ProcessStartInfo startInfo)
     {
 #if CONTEXTMENUMGR_IN_PROCESS
-        if (RuntimeHosting.IsInProcess)
-            return InProcessBootstrap.User.StartNonElevatedProcess(probeHostPath,
-                ["--request", requestPath, "--result", resultPath], startInfo.WorkingDirectory);
+        return InProcessBootstrap.User.StartNonElevatedProcess(startInfo.FileName,
+            startInfo.ArgumentList, startInfo.WorkingDirectory);
+#else
+        return Process.Start(startInfo);
 #endif
-        return new Process { StartInfo = startInfo, EnableRaisingEvents = true };
     }
 
     private ProbeHostSelection SelectProbeHost(ContextMenuDeepAnalysisRequest request)
@@ -791,13 +791,14 @@ public sealed class ContextMenuDeepAnalysisService
         }
     }
 
-    private static void KillProcess(Process process)
+    private static void KillProcess(Process? process)
     {
         try
         {
-            if (!process.HasExited)
+            if (process is not null && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
+                process.WaitForExit(500);
             }
         }
         catch

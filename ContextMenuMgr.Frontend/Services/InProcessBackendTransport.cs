@@ -99,6 +99,7 @@ internal sealed class InProcessBackendTransport(
             {
                 if (notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged)
                     notification = notification with { UserSid = userSid() };
+                PublishNotification(notification);
                 PublishSafely(onNotification, InProcessBackendSnapshots.Notification(notification));
                 return Task.CompletedTask;
             }).ConfigureAwait(false);

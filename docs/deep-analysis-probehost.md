@@ -116,6 +116,8 @@ Native build、Debug/Release 架构集合、许可与打包规则仅在[构建�
 
 前端优先读取 result file，再尝试 stdout JSON；记录 exit code、stdout/stderr 和 DiagnosticDetails。超时后尝试结束进程，取消/关闭时清理临时请求/结果；第三方 DLL 的进程内操作不受本产品“只读探测”契约约束，因此这是崩溃/架构隔离，不是安全沙箱。不能保证第三方代码无外部副作用。
 
+通过架构检查后，前端在同一个操作范围内创建私有请求目录、序列化请求、启动并等待 ProbeHost。启动抛出异常时返回带 operation ID 的 `ProbeHostStartFailed`，即使没有进程句柄也会尝试清理本次目录。有句柄时，异常和取消路径先尝试结束进程，再释放句柄并清理目录。In-process 启动始终使用原用户的非提升 token。 [分析执行](../ContextMenuMgr.Frontend/Services/ContextMenuDeepAnalysisService.cs)
+
 手验应记录 DLL/ProbeHost PE、实际 sample 类型、模式、进程退出/超时及 result/stderr，对照 SpecificHandler 与 WholeContextMenu；空/自绘图标不得使菜单失败。实际第三方 COM、Explorer 依赖、32/64/ARM64 和卡死/崩溃必须在可恢复 Windows 环境检查，构建和序列化测试不证明具体扩展可探测。
 
 修改架构选择、request/result、错误分类、图标/超时清理时更新本文，布局变化同步构建文档；不得将隔离失败修成 Frontend/Backend 直接加载 DLL。

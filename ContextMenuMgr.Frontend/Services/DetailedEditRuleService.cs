@@ -171,6 +171,12 @@ public sealed class DetailedEditRuleService
                     Contracts.PipeErrorCodes.RegistryWriteProtectionEnabled);
             }
 
+#if CONTEXTMENUMGR_IN_PROCESS
+            var (scope, _) = DetailedEditRegistryTarget.Parse(clause.Path);
+            var userSid = scope == DetailedEditRegistryTarget.Scope.Machine ? null : GetCurrentUserSid();
+#else
+            var userSid = GetCurrentUserSid();
+#endif
             await _backendClient.SetDetailedEditRuleValueAsync(
                 clause.StorageKind.ToString(),
                 clause.Path,
@@ -178,7 +184,7 @@ public sealed class DetailedEditRuleService
                 clause.KeyName,
                 clause.ValueKind.ToString(),
                 value,
-                GetCurrentUserSid(),
+                userSid,
                 cancellationToken);
             return;
         }
@@ -279,6 +285,12 @@ public sealed class DetailedEditRuleService
 
     private (RegistryKey? BaseKey, string SubPath) OpenRegistryBaseKey(string fullPath)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        var (scope, physicalPath) = DetailedEditRegistryTarget.Parse(fullPath);
+        if (scope == DetailedEditRegistryTarget.Scope.ExplicitUser
+            && !string.Equals(physicalPath.Split('\\', 2)[0], GetCurrentUserSid(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Detailed Edit can only read the verified interactive user's registry hive.");
+#endif
         var normalized = fullPath.Replace('/', '\\');
         var separatorIndex = normalized.IndexOf('\\');
         var root = separatorIndex >= 0 ? normalized[..separatorIndex] : normalized;
@@ -297,6 +309,9 @@ public sealed class DetailedEditRuleService
 
     private string? GetCurrentUserSid()
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        return _interactiveUserSid?.Invoke();
+#else
         if (_interactiveUserSid is not null) return _interactiveUserSid();
         try
         {
@@ -306,14 +321,17 @@ public sealed class DetailedEditRuleService
         {
             return null;
         }
+#endif
     }
 
     private RegistryKey OpenClassesRoot()
     {
 #if CONTEXTMENUMGR_IN_PROCESS
-        if (_portableUser is not null) return _portableUser.OpenClassesRoot(RegistryView.Default);
-#endif
+        return (_portableUser ?? throw new InvalidOperationException("The verified interactive user's Classes view is unavailable."))
+            .OpenClassesRoot(RegistryView.Default);
+#else
         return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
+#endif
     }
 
     private static RegistryKey OpenUserHive(string? sid)

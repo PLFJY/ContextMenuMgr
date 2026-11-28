@@ -330,3 +330,33 @@ dotnet test .\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj -c Debug --no-res
 | `ContextMenuMgrPlus-1.8.1-framework-dependent-portable.zip` | 13,094,057 |
 
 G3 入口条件：当前多文件发布布局及 ProbeHost PE 已验证；单文件 bundle 输入、最终 bundle 内嵌内容、首次永久提取/后续修复尚属 G3。跨账户 HKCR/用户 Classes 元数据物理来源与原交互用户优先级审计、实际 Scoop current/persist junction 核验、不同管理员凭据 UAC 后的原用户 hive/Explorer/非提升 ProbeHost 验证仍缺失；这些阻止宣称跨账户功能等价或进入最终发布验收，但不阻止在保留启动拒绝和权限边界的前提下继续进行隔离的 G3 打包工程。G4 入口条件：在隔离副本中证明旧 Service 所有权、遗留 ACL、旧 Data 与 concurrent writer 检测；迁移不可以 G2 的启动拒绝替代。
+
+### G2.1 本地宿主回归验证
+
+Detailed Edit 以原用户身份绑定 HKCU/HKU，HKLM 请求省略用户 SID。Notepad++ 的两个 HKCR 设置先核对合并视图与物理来源，再将写入绑定到原用户或机器 Classes。验证使用实际内置字典和隔离的注册表子树。[目标绑定与 IPC](process-and-privilege-flows.md#G2-in-process-portable-身份边界)
+
+本地 transport 投递共享 Dispatcher 的提交后订阅通知。客户端收到取消后仍可应用迟到提交，缓存和订阅事件按 operation ID 去重。SendTo 用例通过真实客户端和 Dispatcher 修改临时文件，分别覆盖取消后提交、提交通知发出时取消、普通成功和失败。批量清理用例核对 SID、删除记录时间和异常订阅者。ProbeHost 的故障用例在请求落盘后模拟启动异常，核对失败响应和操作目录清理。[ProbeHost 生命周期](deep-analysis-probehost.md)
+
+命令日志、TRX 和相对发布清单位于忽略的 `artifacts/g2.1-verification/`。代表性 x64 FD Release 目录含 25 个文件，共 36,918,090 字节。apphost 为 x64，清单为 `requireAdministrator`、`uiAccess=false`。x86/x64/arm64 ProbeHost 的 PE 类型分别为 0x014C/0x8664/0xAA64，保留 nlohmann/json 许可证。未发现 Service/TrayHost 入口、独立 PDB 或非允许卫星。真实跨账户 UAC、Windows Classes 优先级、Explorer 重启及非提升 ProbeHost COM 激活继续作为独立 Windows 验收。
+
+本机 AMD64 Windows 10.0.26300、.NET SDK 11.0.100 的验证命令如下。两个增量 Debug 构建各报告 0 警告、0 错误。Release 发布日志有 72 条分析器及编译器警告记录，包含 WPF 临时项目和主项目的重复诊断，发布成功。相对文件清单和 G2 的 x64 FD 目录一致，原先自带内嵌符号的两个依赖 DLL 校验值也一致。
+
+```powershell
+$tests = '.\ContextMenuMgr.Tests\ContextMenuMgr.Tests.csproj'
+$frontend = '.\ContextMenuMgr.Frontend\ContextMenuMgr.Frontend.csproj'
+$results = 'artifacts\g2.1-verification'
+$focused = 'FullyQualifiedName~InProcessBackendTransportTests|FullyQualifiedName~DetailedEditRuleTests|FullyQualifiedName~DeepAnalysisLifecycleTests'
+$shared = 'FullyQualifiedName~MenuListCacheTests|FullyQualifiedName~FrontendControlClientTests|FullyQualifiedName~ContextMenuWorkspaceNotificationScopeTests|(FullyQualifiedName~MutationOutcomeTests&FullyQualifiedName!~OpenWithQueue_RefreshRacesTimeoutsAndLateSignalsCannotLoseOrResurrectReviews)'
+
+dotnet build $frontend -p:BackendHostingMode=Service -c Debug --no-restore
+dotnet build $frontend -p:BackendHostingMode=InProcess -c Debug --no-restore
+dotnet test $tests -c Debug --no-restore --logger 'trx;LogFileName=service-full.trx' --results-directory $results
+dotnet test $tests -p:BackendHostingMode=InProcess -c Debug --no-restore --filter $focused --logger 'trx;LogFileName=inprocess-focused-final.trx' --results-directory $results
+dotnet test $tests -p:BackendHostingMode=InProcess -c Debug --no-build --no-restore --filter $shared --logger 'trx;LogFileName=inprocess-shared.trx' --results-directory $results
+dotnet test $tests -p:BackendHostingMode=InProcess -c Debug --no-build --no-restore --logger 'trx;LogFileName=inprocess-full.trx' --results-directory $results
+dotnet publish $frontend -p:BackendHostingMode=InProcess -c Release -r win-x64 --self-contained false --artifacts-path "$results/release-build" -o "$results/publish-win-x64-fd"
+```
+
+Service 全量 566 通过、4 跳过、0 失败。InProcess 专项 21 通过、宿主无关筛选 63 通过，两者均无跳过或失败。Service 全量和 InProcess 专项的测试编译日志分别有 84 和 86 条警告记录。扩展筛选额外运行 OpenWith 审核队列的前端用例，复现了 G2 的启动上下文缺失失败，详见 `inprocess-shared-initial.trx`。
+
+InProcess 全量 495 通过、4 跳过、90 失败，共 589。按 TRX 测试全名对比，90 个失败用例与 G2 完全相同。按主要验证责任分类，39 个是 Service 审核、监控或生命周期夹具，42 个依赖 Portable host identity 或使用关联的注册表与持久状态夹具，9 个构造前端或本地路径时缺少交互身份 bootstrap。失败栈也会跨类别，例如审核工作流夹具可能先因为没有 host identity 而失败。逐项分类和首行错误保存在 `inprocess-failure-classification.csv`。本轮新增用例全部通过，现有失败仍保留于全量执行。

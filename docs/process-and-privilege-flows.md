@@ -23,6 +23,8 @@ B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-l
 
 In-process Core 已把保留 token 打开的用户合并 Classes root 传入经典菜单、级联菜单、Win11 CommandStore、SendTo 图标、DragDrop 与 GUID Block 的用户敏感元数据解析；DragDrop 的机器注册与写入明确使用 HKLM Classes。Service/default 仍保留进程 `Registry.ClassesRoot` 语义。仍需 Windows 集成验证 `RegOpenUserClassesRoot` 的实际 precedence、跨账户 UAC 下的用户覆盖及每项物理写入来源；环境变量展开与 LocalSystem 不可替代权限也需单独验收。源码适配不能替代这些验证。详细文件与 G3 前置项见[Portable 基线](portable-refactoring-baseline.md#G2-实现与验证)。
 
+本地 Detailed Edit 在前端按物理根构造请求。HKLM 不携带 SID，HKCU 由本地宿主绑定到原交互 SID，HKU 的显式根必须对应同一 SID。字典内两条 HKCR 写入都是 Notepad++ CLSID 的 `Settings`（`Title` 和 `ShowIcon`）。宿主先读取原用户的合并 Classes 和原用户、机器的物理来源，优先沿用可见的用户 Settings，否则沿用可见的机器 Settings。缺少 Settings 时，仅当合并视图中可见的 CLSID 只有一个物理归属才允许创建；无法确认来源、值不一致和未列明的 HKCR 规则明确拒绝。共享写入接收解析后的 HKU 或 HKLM 路径。Service 的请求格式和写入规则保持原样。 [本地目标解析](../ContextMenuMgr.Frontend/Services/DetailedEditRegistryTarget.cs)、[Windows Classes 合并视图](https://learn.microsoft.com/windows/win32/sysinfo/merged-view-of-hkey-classes-root)
+
 ## 身份解析与模拟边界
 
 权限、SID、hive 和 SessionId 是四个维度。LocalSystem 的 HKCU 不是前端用户 HKCU；用户写入明确选 `HKEY_USERS/<SID>`，不因权限高而扩大到 HKLM。显示名/路径不是认证依据。
@@ -85,6 +87,8 @@ catalog `_persistentStateGate` 串行状态敏感工作，前端多连接不意�
 | ShellNew / OpenWith | 有各自协作预算、单飞/串行门及 read-back，见主文档 |
 
 预算定义见 [BackendRequestBudgets](../ContextMenuMgr.Frontend/Services/BackendRequestBudgets.cs)。超时/取消表示停止等待，不证明后端没写；关闭取消可跳过后续查询。确认请求状态才成功，确认旧状态才回退，核对不可用则显示 Uncertain 并阻止再次写；fresh notification/refresh 解除。UI item version 防旧失败任务覆盖新权威结果，细节见[前端](frontend-wpf-ui.md#异步操作与结果)。不可盲重试不确定 mutation。
+
+本地 transport 与 Pipe 一样将提交结果发往订阅端。若提交在客户端释放请求前到达，客户端按 operation ID 暂存通知。响应已应用时丢弃暂存副本；等待取消时，客户端完成缓存事务清理后释放抑制并重放暂存通知。之后到达的提交走正常订阅，OpenWith 与批量清理仍须匹配原交互 SID，批量清理也核对删除时间。缓存更新及事件投递在操作 ID 去重之后进行。 [本地传输](../ContextMenuMgr.Frontend/Services/InProcessBackendTransport.cs)、[客户端](../ContextMenuMgr.Frontend/Services/BackendClient.cs)
 
 ## 列表发现覆盖与已移除结果
 

@@ -111,7 +111,8 @@ public sealed class InProcessBackendTransportTests : IDisposable
         var notifications = new List<BackendNotification>();
         Action<BackendNotification> listeners = _ => throw new InvalidOperationException("Subscriber fixture");
         listeners += notifications.Add;
-        transport.NotificationReceived += notifications.Add;
+        var subscription = new List<BackendNotification>();
+        transport.NotificationReceived += subscription.Add;
         transport.StartNotifications();
 
         var query = new PipeRequest { Command = PipeCommand.GetSpecialMenuSnapshot, SpecialKind = SpecialMenuKind.SendTo };
@@ -128,9 +129,112 @@ public sealed class InProcessBackendTransportTests : IDisposable
         var notification = Assert.Single(notifications);
         Assert.Equal(response.ClientOperationId, notification.ClientOperationId);
         Assert.False(notification.SpecialItem!.IsEnabled);
+        Assert.Equal(notification.ClientOperationId, Assert.Single(subscription).ClientOperationId);
 
         await transport.SendAsync(query with { Command = PipeCommand.GetSpecialMenuItemState, SpecialItem = item }, listeners, default);
         Assert.Single(notifications);
+        Assert.Single(subscription);
+    }
+
+    [Theory]
+    [InlineData("cancel-before-commit")]
+    [InlineData("cancel-during-publication")]
+    [InlineData("success")]
+    [InlineData("failure")]
+    public async Task ClientAppliesCommittedSendToMutationOnce(string outcome)
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(budget.Token);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delivered = new TaskCompletionSource<BackendNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var executions = 0;
+        var eventCount = 0;
+        var operationId = Guid.NewGuid();
+        var logger = MakeLogger();
+        var user = new BackendUserContext(FixtureSid, "Fixture", _root, _root, _root, 1);
+        var core = new BackendCore(logger, new ContextMenuStateStore(Path.Combine(_root, "state.json")),
+            new RegistryBackupService(Path.Combine(_root, "DeletedBackups")),
+            new BackendProtectionSettingsStore(Path.Combine(_root, "protection.json")),
+            (BackendUserContext _, FileLogger _, out IFrontendClassesRoot? classes, out string? failure) =>
+            {
+                classes = null;
+                failure = "Fixture has no optional SendTo icons.";
+                return false;
+            }, () => new[] { user });
+        var path = Path.Combine(Directory.CreateDirectory(user.GetSendToPath()).FullName, "fixture.txt");
+        await File.WriteAllTextAsync(path, "fixture", budget.Token);
+        await using var cache = new MenuListCacheService(Path.Combine(_root, "Cache"), null);
+        await using var transport = new InProcessBackendTransport(async (request, _, token) =>
+        {
+            if (request.Command == PipeCommand.Ping) return new(new PipeResponse { Success = true });
+            if (request.Command == PipeCommand.SetSpecialMenuItemEnabled)
+            {
+                Assert.Equal(operationId, request.ClientOperationId);
+                Interlocked.Increment(ref executions);
+                entered.TrySetResult();
+                await commit.Task.WaitAsync(budget.Token);
+                if (outcome == "failure") File.Delete(path);
+            }
+            return await core.Dispatcher.DispatchAsync(request, new BackendRequestContext(() => user, logger), token);
+        }, () => FixtureSid, logger);
+        await using var client = new BackendClient(transport, cache, new MenuListActivityService(),
+            new RecentClientOperationCache(), () => FixtureSid);
+        client.NotificationReceived += (_, _) => throw new InvalidOperationException("Subscriber fixture");
+        client.NotificationReceived += (_, notification) =>
+        {
+            Interlocked.Increment(ref eventCount);
+            delivered.TrySetResult(notification);
+        };
+        transport.NotificationReceived += notification =>
+        {
+            // Runs after the actual client has seen the event, before the transport can return its response.
+            if (notification.ClientOperationId == operationId && outcome == "cancel-during-publication")
+                caller.Cancel();
+        };
+        await client.ConnectAsync(budget.Token);
+        var item = Assert.Single(await client.GetSpecialMenuSnapshotAsync(SpecialMenuKind.SendTo, budget.Token));
+        Assert.Equal(path, item.Path);
+
+        var pending = client.SetSpecialMenuItemEnabledAsync(item, false, operationId, caller.Token);
+        try
+        {
+            await entered.Task.WaitAsync(budget.Token);
+            if (outcome == "cancel-before-commit")
+            {
+                caller.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+                Assert.True(cache.FindItem<SpecialMenuEntry>(item.Id)!.IsEnabled);
+            }
+            commit.SetResult();
+
+            switch (outcome)
+            {
+                case "success":
+                    Assert.False((await pending)!.IsEnabled);
+                    Assert.Equal(0, eventCount);
+                    break;
+                case "failure":
+                    await Assert.ThrowsAsync<BackendRequestException>(() => pending);
+                    Assert.Equal(0, eventCount);
+                    break;
+                default:
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+                    var notification = await delivered.Task.WaitAsync(budget.Token);
+                    Assert.Equal(operationId, notification.ClientOperationId);
+                    Assert.False(notification.SpecialItem!.IsEnabled);
+                    Assert.Equal(1, eventCount);
+                    break;
+            }
+
+            if (outcome != "failure")
+            {
+                Assert.False(cache.FindItem<SpecialMenuEntry>(item.Id)!.IsEnabled);
+                Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.Hidden));
+            }
+            Assert.Equal(1, executions);
+        }
+        finally { commit.TrySetResult(); }
     }
 
     [Fact]
@@ -217,21 +321,66 @@ public sealed class InProcessBackendTransportTests : IDisposable
         var delivered = new List<BackendNotification>();
         client.NotificationReceived += (_, notification) => delivered.Add(notification);
 
-        var accepted = client.TryForwardSubscriptionNotification(new BackendNotification
+        transport.StartNotifications();
+        transport.PublishNotification(new BackendNotification
         {
             SpecialKind = SpecialMenuKind.OpenWith,
             UserSid = FixtureSid
         });
-        var rejected = client.TryForwardSubscriptionNotification(new BackendNotification
+        transport.PublishNotification(new BackendNotification
         {
             SpecialKind = SpecialMenuKind.OpenWith,
             UserSid = "S-1-5-21-9-8-7-500"
         });
 
-        Assert.True(accepted);
-        Assert.False(rejected);
         Assert.Single(delivered);
         Assert.Equal(FixtureSid, delivered[0].UserSid);
+    }
+
+    [Fact]
+    public async Task LateBulkPurgeRemovesOnlyMatchingRecoveryRecordsForTheVerifiedUser()
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(budget.Token);
+        var deletedAt = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var item = new ContextMenuEntry { Id = "deleted", IsDeleted = true, DeletedAtUtc = deletedAt };
+        var replaced = item with { Id = "replaced", DeletedAtUtc = deletedAt.AddDays(1) };
+        var references = new[] { new DeletedItemReference(item.Id, deletedAt), new DeletedItemReference(replaced.Id, deletedAt) };
+        var purged = new DeletedItemsPurgeResult { PurgedItems = references };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = new TaskCompletionSource<BackendNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var cache = new MenuListCacheService(Path.Combine(_root, "Cache"), null);
+        await cache.MergeAsync("fixture", new[] { item, replaced }, true, cache.Version, budget.Token);
+        await using var transport = new InProcessBackendTransport(async (request, _, _) =>
+        {
+            if (request.Command == PipeCommand.Ping) return new(new PipeResponse { Success = true });
+            entered.SetResult();
+            await commit.Task.WaitAsync(budget.Token);
+            return new(new PipeResponse { Success = true, DeletedItemsPurge = purged });
+        }, () => FixtureSid, MakeLogger());
+        await using var client = new BackendClient(transport, cache, new MenuListActivityService(),
+            new RecentClientOperationCache(), () => FixtureSid);
+        await client.ConnectAsync(budget.Token);
+        var pending = client.PurgeDeletedItemsAsync(new DeletedItemsPurgeRequest { Items = references }, caller.Token);
+        try
+        {
+            await entered.Task.WaitAsync(budget.Token);
+            caller.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+            transport.PublishNotification(new BackendNotification { Kind = PipeNotificationKind.DeletedItemsPurged,
+                DeletedItemsPurge = purged, UserSid = "S-1-5-21-9-8-7-500" });
+            Assert.NotNull(cache.FindItem<ContextMenuEntry>(item.Id));
+            client.ItemsRemoved += (_, _) => throw new InvalidOperationException("Subscriber fixture");
+            client.NotificationReceived += (_, notification) => observed.TrySetResult(notification);
+            commit.SetResult();
+            var notification = await observed.Task.WaitAsync(budget.Token);
+            Assert.Equal(FixtureSid, notification.UserSid);
+            Assert.NotNull(notification.ClientOperationId);
+            Assert.Null(cache.FindItem<ContextMenuEntry>(item.Id));
+            Assert.Equal(deletedAt.AddDays(1), cache.FindItem<ContextMenuEntry>(replaced.Id)!.DeletedAtUtc);
+        }
+        finally { commit.TrySetResult(); }
     }
 
     [Fact]

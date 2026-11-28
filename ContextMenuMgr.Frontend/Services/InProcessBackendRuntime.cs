@@ -81,68 +81,18 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
 
         if (request.Command == PipeCommand.SetDetailedEditRuleValue)
         {
-            if (!TryBindDetailedEditUser(request, out var boundRequest, out var failure))
-                return BackendRequestDispatcher.CreateFailure(request, new InvalidOperationException(failure));
-            request = boundRequest;
+            try
+            {
+                request = DetailedEditRegistryTarget.Bind(request, _user);
+            }
+            catch (Exception ex)
+            {
+                return BackendRequestDispatcher.CreateFailure(request, ex);
+            }
         }
 
         var context = new BackendRequestContext(() => _user.TryGetContext(), _logger);
         return await _core.Dispatcher.DispatchAsync(request, context, cancellationToken).ConfigureAwait(false);
-    }
-
-    private bool TryBindDetailedEditUser(PipeRequest request, out PipeRequest bound, out string failure)
-    {
-        bound = request;
-        failure = string.Empty;
-        if (request.RuleStorageKind != nameof(RuleStorageKind.Registry) || string.IsNullOrWhiteSpace(request.RulePath))
-        {
-            failure = "Detailed edit request does not contain a supported registry target.";
-            return false;
-        }
-
-        var path = request.RulePath.Replace('/', '\\');
-        var separator = path.IndexOf('\\');
-        var hive = (separator < 0 ? path : path[..separator]).ToUpperInvariant();
-        var remainder = separator < 0 ? string.Empty : path[(separator + 1)..];
-        var sid = _user.Context.Sid;
-        var userScoped = hive is "HKCU" or "HKEY_CURRENT_USER";
-        var explicitUserHive = hive is "HKU" or "HKEY_USERS";
-        if (userScoped)
-        {
-            if (request.RuleUserSid is not null && !string.Equals(request.RuleUserSid, sid, StringComparison.OrdinalIgnoreCase))
-            {
-                failure = "Detailed edit SID does not match the verified interactive user.";
-                return false;
-            }
-            bound = request with { RuleUserSid = sid };
-            return true;
-        }
-
-        if (explicitUserHive)
-        {
-            var targetSid = remainder.Split('\\', 2)[0];
-            if (!string.Equals(targetSid, sid, StringComparison.OrdinalIgnoreCase)
-                || request.RuleUserSid is not null && !string.Equals(request.RuleUserSid, sid, StringComparison.OrdinalIgnoreCase))
-            {
-                failure = "Detailed edit can only target the verified interactive user's registry hive.";
-                return false;
-            }
-            bound = request with { RuleUserSid = sid };
-            return true;
-        }
-
-        if (hive is "HKLM" or "HKEY_LOCAL_MACHINE")
-        {
-            if (request.RuleUserSid is not null)
-            {
-                failure = "Machine-scoped detailed edits do not accept a user SID.";
-                return false;
-            }
-            return true;
-        }
-
-        failure = "Detailed edit registry root is not supported by In-process Portable.";
-        return false;
     }
 
     private PipeResponse SetLogLevel(RuntimeLogLevel level)

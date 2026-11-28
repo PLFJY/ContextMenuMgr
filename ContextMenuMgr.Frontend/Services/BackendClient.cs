@@ -9,6 +9,10 @@ internal sealed class BackendClient : IBackendClient
     private readonly MenuListActivityService _activity;
     private readonly RecentClientOperationCache _recentLocalOperations;
     private readonly Func<string?>? _interactiveUserSid;
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly Lock _localNotificationGate = new();
+    private readonly Dictionary<Guid, List<BackendNotification>> _localNotifications = [];
+#endif
     private bool _disposed;
     public event EventHandler<MenuItemsRemovedEventArgs>? ItemsRemoved;
     public async Task<MenuListSnapshot<T>?> ReadCachedListAsync<T>(PipeRequest request, CancellationToken token)
@@ -76,6 +80,41 @@ internal sealed class BackendClient : IBackendClient
 
     private async Task<PipeResponse> ExecuteRequestAsync(PipeRequest request, CancellationToken token)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_transport is InProcessBackendTransport)
+        {
+            var id = request.ClientOperationId ?? Guid.NewGuid();
+            var generation = _listCache.Generation;
+            lock (_localNotificationGate) _localNotifications.Add(id, []);
+            var completed = false;
+            try
+            {
+                var response = await ExecuteRequestCoreAsync(request with { ClientOperationId = id }, token).ConfigureAwait(false);
+                completed = true;
+                return response;
+            }
+            finally
+            {
+                List<BackendNotification> notifications;
+                lock (_localNotificationGate)
+                {
+                    if (!completed) _recentLocalOperations.Remove(id);
+                    notifications = _localNotifications[id];
+                    _localNotifications.Remove(id);
+                }
+
+                // A commit can arrive before the canceled request releases its cache mutation.
+                // Replay only after that cleanup, and only if the response was not applied.
+                if (!completed && generation == _listCache.Generation)
+                    foreach (var notification in notifications) TryForwardSubscriptionNotification(notification, generation);
+            }
+        }
+#endif
+        return await ExecuteRequestCoreAsync(request, token).ConfigureAwait(false);
+    }
+
+    private async Task<PipeResponse> ExecuteRequestCoreAsync(PipeRequest request, CancellationToken token)
+    {
         using var activity = IsListQuery(request.Command) ? _activity.Begin() : null;
         if (request.Item is null && request.ItemId is { } itemId)
             request = request with { Item = _listCache.FindItem<ContextMenuEntry>(itemId) };
@@ -112,7 +151,7 @@ internal sealed class BackendClient : IBackendClient
                 if (request.SpecialItem is not null) _listCache.ApplyResult<SpecialMenuEntry>(id, null, removed: true, generation: generation);
                 else _listCache.ApplyResult<ContextMenuEntry>(id, null, removed: true, generation: generation);
                 mutationResultApplied = true;
-                ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, new[] { id }));
+                RaiseItemsRemoved(new MenuItemsRemovedEventArgs(request, new[] { id }));
             }
             if (request.Command == PipeCommand.ReviewOpenWithRegistration && result.SnapshotIsComplete == true)
             {
@@ -158,7 +197,7 @@ internal sealed class BackendClient : IBackendClient
                         : _listCache.ApplyResult<ContextMenuEntry>(removed, null, true, mutation, version, generation);
                 if (applied) accepted.Add(removed);
             }
-            if (accepted.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, accepted, notifyUser: mutation));
+            if (accepted.Count > 0) RaiseItemsRemoved(new MenuItemsRemovedEventArgs(request, accepted, notifyUser: mutation));
             throw;
         }
         finally
@@ -166,7 +205,7 @@ internal sealed class BackendClient : IBackendClient
             if (purgeSelection.Count > 0)
             {
                 var removedIds = _listCache.ApplyDeletedItemsPurge(purgeSelection, result?.DeletedItemsPurge, completesMutation: true, generation);
-                if (removedIds.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, removedIds));
+                if (removedIds.Count > 0) RaiseItemsRemoved(new MenuItemsRemovedEventArgs(request, removedIds));
             }
             if (mutation && !removedResult && !mutationResultApplied)
             {
@@ -180,7 +219,19 @@ internal sealed class BackendClient : IBackendClient
     private void ApplyPurgedItems(DeletedItemsPurgeResult result, PipeRequest request, int generation)
     {
         var accepted = _listCache.ApplyDeletedItemsPurge(result.PurgedItems, result, completesMutation: false, generation);
-        if (accepted.Count > 0) ItemsRemoved?.Invoke(this, new MenuItemsRemovedEventArgs(request, accepted));
+        if (accepted.Count > 0) RaiseItemsRemoved(new MenuItemsRemovedEventArgs(request, accepted));
+    }
+
+    private void RaiseItemsRemoved(MenuItemsRemovedEventArgs args)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_transport is InProcessBackendTransport)
+        {
+            NotifyLocalSubscribers(ItemsRemoved, args);
+            return;
+        }
+#endif
+        ItemsRemoved?.Invoke(this, args);
     }
 
     public event EventHandler<BackendNotification>? NotificationReceived;
@@ -1043,9 +1094,24 @@ internal sealed class BackendClient : IBackendClient
     }
 
     private void OnNotificationReceived(BackendNotification notification)
-        => TryForwardSubscriptionNotification(notification);
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_transport is InProcessBackendTransport && notification.ClientOperationId is { } id)
+        {
+            lock (_localNotificationGate)
+            {
+                if (_localNotifications.TryGetValue(id, out var pending))
+                {
+                    pending.Add(notification);
+                    return;
+                }
+            }
+        }
+#endif
+        TryForwardSubscriptionNotification(notification);
+    }
 
-    internal bool TryForwardSubscriptionNotification(BackendNotification notification)
+    internal bool TryForwardSubscriptionNotification(BackendNotification notification, int? generation = null)
     {
         if ((notification.SpecialKind == SpecialMenuKind.OpenWith || notification.Kind == PipeNotificationKind.DeletedItemsPurged)
             && !string.Equals(notification.UserSid, _interactiveUserSid?.Invoke()
@@ -1057,9 +1123,37 @@ internal sealed class BackendClient : IBackendClient
 
         if (notification.Kind == PipeNotificationKind.DeletedItemsPurged && notification.DeletedItemsPurge is { } purged)
             ApplyPurgedItems(purged, new PipeRequest { Command = PipeCommand.PurgeDeletedItems,
-                DeletedItemsPurge = new DeletedItemsPurgeRequest { Items = purged.PurgedItems } }, _listCache.Generation);
+                DeletedItemsPurge = new DeletedItemsPurgeRequest { Items = purged.PurgedItems } }, generation ?? _listCache.Generation);
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_transport is InProcessBackendTransport)
+        {
+            if (notification.Kind == PipeNotificationKind.ItemStateChanged)
+            {
+                if (notification.Item is { } item)
+                    _listCache.ApplyResult(item.Id, item, completesMutation: false, generation: generation);
+                if (notification.SpecialItem is { } special)
+                    _listCache.ApplyResult(special.Id, special, completesMutation: false, generation: generation);
+            }
+            NotifyLocalSubscribers(NotificationReceived, notification);
+            return true;
+        }
+#endif
         NotificationReceived?.Invoke(this, notification);
         return true;
     }
 
+#if CONTEXTMENUMGR_IN_PROCESS
+    private void NotifyLocalSubscribers<T>(EventHandler<T>? observers, T args)
+    {
+        if (observers is null) return;
+        foreach (EventHandler<T> observer in observers.GetInvocationList())
+        {
+            try { observer(this, args); }
+            catch (Exception ex)
+            {
+                FrontendDebugLog.Warning(nameof(BackendClient), $"Local notification listener failed: {ex.Message}");
+            }
+        }
+    }
+#endif
 }
