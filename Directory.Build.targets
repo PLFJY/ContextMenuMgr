@@ -1,0 +1,28 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost'">
+    <SatelliteResourceLanguages>en;en-US;zh;zh-CN;zh-TW;zh-Hans;zh-Hant</SatelliteResourceLanguages>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <IncludeSymbolsInSingleFile>false</IncludeSymbolsInSingleFile>
+  </PropertyGroup>
+
+  <Target Name="FilterUnsupportedPublishSatelliteMetadata"
+          AfterTargets="ComputeIntermediateSatelliteAssemblies"
+          Condition="'$(_IsPublishing)' == 'true' and ('$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost')">
+    <ItemGroup>
+      <_UnsupportedPublishSatellite Include="@(IntermediateSatelliteAssembliesWithTargetPath)"
+                                    Condition="'%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'en' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'en-US' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-CN' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-TW' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-Hans' and '%(IntermediateSatelliteAssembliesWithTargetPath.Culture)' != 'zh-Hant'" />
+      <IntermediateSatelliteAssembliesWithTargetPath Remove="@(_UnsupportedPublishSatellite)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="FilterDistributionPublishAssets"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Culture)' != '' and '%(ResolvedFileToPublish.Culture)' != 'en' and '%(ResolvedFileToPublish.Culture)' != 'en-US' and '%(ResolvedFileToPublish.Culture)' != 'zh' and '%(ResolvedFileToPublish.Culture)' != 'zh-CN' and '%(ResolvedFileToPublish.Culture)' != 'zh-TW' and '%(ResolvedFileToPublish.Culture)' != 'zh-Hans' and '%(ResolvedFileToPublish.Culture)' != 'zh-Hant' and '%(ResolvedFileToPublish.Extension)' == '.dll' and $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').EndsWith('.resources.dll'))" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -813,6 +813,7 @@ function Publish-Application {
         $probeHostLabel = [string] $probeHostArchitecture.Label
         $probeHostLabels += $probeHostLabel
         $probeHostOutput = Join-Path $publishDir (Join-Path "ProbeHost" $probeHostLabel)
+        $probeHostBuildOutput = Join-Path $taskArtifactsRoot (Join-Path "probehost-native" $probeHostLabel)
         $probeHostIntermediate = Join-Path $taskArtifactsRoot (Join-Path "probehost-native-obj" $probeHostLabel)
         if ($null -eq $msBuildPath) {
             $msBuildPath = Resolve-MSBuildPath
@@ -823,9 +824,12 @@ function Publish-Application {
             -NativeProbeHostProject $ProbeHostProject `
             -Configuration $Configuration `
             -Label $probeHostLabel `
-            -OutputDirectory $probeHostOutput `
+            -OutputDirectory $probeHostBuildOutput `
             -IntermediateDirectory $probeHostIntermediate
-        Ensure-FileExists -Path (Join-Path $probeHostOutput "ContextMenuMgr.ProbeHost.exe") -Description "ProbeHost executable ($probeHostLabel)"
+        $probeHostExecutable = Join-Path $probeHostBuildOutput "ContextMenuMgr.ProbeHost.exe"
+        Ensure-FileExists -Path $probeHostExecutable -Description "ProbeHost executable ($probeHostLabel)"
+        New-Item -ItemType Directory -Path $probeHostOutput -Force | Out-Null
+        Copy-Item -LiteralPath $probeHostExecutable -Destination (Join-Path $probeHostOutput "ContextMenuMgr.ProbeHost.exe") -Force
     }
 
     if ($Platform -eq "anycpu" -and $probeHostLabels.Count -eq 0) {
@@ -861,14 +865,14 @@ function Publish-Application {
     Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.Service.dll") -Description "Backend service DLL"
     Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.TrayHost.exe") -Description "Tray host executable"
 
-    Remove-UnneededPublishFiles -PublishDir $publishDir
+    Assert-NoUnneededPublishFiles -PublishDir $publishDir
     Assert-TrayHostLocalizationArtifacts -PublishDir $publishDir
     Write-PackageManifest -PublishDir $publishDir -PackageKind $PackageKind
 
     return $publishDir
 }
 
-function Remove-UnneededPublishFiles {
+function Assert-NoUnneededPublishFiles {
     param([Parameter(Mandatory)] [string] $PublishDir)
 
     $keptCultures = @('en', 'en-US', 'zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant')
@@ -878,23 +882,15 @@ function Remove-UnneededPublishFiles {
         if ($directory.Name -in $keptCultures -or ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
             continue
         }
-
         foreach ($file in Get-ChildItem -LiteralPath $directory.FullName -File -Force -Filter '*.resources.dll') {
-            if ($file.Name -notlike '*.resources.dll') {
-                continue
-            }
-            # Check the assembly culture without loading the assembly into PowerShell.
-            $culture = [System.Reflection.AssemblyName]::GetAssemblyName($file.FullName).CultureName
-            if ($culture -eq $directory.Name) {
-                $file
-            }
+            if ([System.Reflection.AssemblyName]::GetAssemblyName($file.FullName).CultureName -eq $directory.Name) { $file }
         }
     })
-
-    foreach ($file in ($symbols + $satellites)) {
-        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+    if ($symbols.Count -gt 0 -or $satellites.Count -gt 0) {
+        $unexpected = @($symbols + $satellites | ForEach-Object FullName)
+        throw "Publish contains files excluded by the MSBuild asset policy:`n$($unexpected -join "`n")"
     }
-    Write-Host "Publish cleanup removed $($symbols.Count) PDBs and $($satellites.Count) satellite assemblies."
+    Write-Host "Publish asset policy verified: no PDBs or unsupported satellite assemblies were staged."
 }
 
 function Test-BinaryContainsUtf8String {

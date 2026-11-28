@@ -44,11 +44,12 @@ restore/publish .NET Frontend、Backend、TrayHost；native ProbeHost 用 MSBuil
 
 ### 发布文件筛选
 
-`Publish-Application` 完成三个托管项目和 ProbeHost 的发布后，清理本次共享发布目录，再校验 TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用清理后的文件。
+`Publish-Application` 为每个目标先创建干净的共享发布目录，再依次发布 Frontend、Backend、TrayHost 并暂存 ProbeHost；最后校验文件策略、TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用该目录。托管项目的规则由根目录 [Directory.Build.targets](../Directory.Build.targets) 应用于三者，普通开发 build 不使用发布过滤。
 
-- 删除发布目录中的 `.pdb`，包括 ProbeHost 子目录中的原生符号。普通 `dotnet build` 的输出和编译中间目录保留调试符号。
-- 保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant` 资源，支持简中、繁中和英文回退。对发布根的其他子目录，只删除程序集声明的 culture 与目录名相符的 `*.resources.dll`。
-- 筛选仅删除以上两类文件，保留其余文件的原始字节。
+- `SatelliteResourceLanguages` 在 NuGet 资产解析时保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant`；共享目标在 `ComputeIntermediateSatelliteAssemblies` 之后过滤项目生成的非允许 culture 项，使 SDK 后续依赖文件生成也看不到被排除 satellite。`ComputeResolvedFilesToPublishList` 后还有一次解析资产过滤，覆盖包和其它 resolved items。规则按 `.resources.dll` 项和 culture 元数据识别，不按普通 DLL 所在目录猜测。
+- `CopyOutputSymbolsToPublishDirectory=false` 不复制托管项目自己的 PDB，`ResolvedFileToPublish` 过滤还排除传递资产中的 PDB 和非允许项目 satellite。`IncludeSymbolsInSingleFile=false` 明确禁止把符号纳入未来 single-file bundle。过滤发生在 SDK 生成 publish deps 文件、bundle 与复制文件之前；不改普通 build 的符号生成或中间目录，也不把 PDB 嵌入托管程序集。
+- ProbeHost 发布阶段只暂存目标架构的 EXE 和 `ThirdPartyNotices/nlohmann-json-LICENSE.MIT`；其原生 PDB 不复制到发布布局。发布校验只报告意外 `.pdb` 或不允许的 culture satellite，不再删除文件。
+- 发布脚本每目标从空目录开始，避免增量或并行运行遗留文件污染资产。过滤只排除上述两类文件，其余载荷字节不由该策略改写。
 
 ### ProbeHost 架构与许可
 
