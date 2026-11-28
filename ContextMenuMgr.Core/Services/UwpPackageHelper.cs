@@ -15,13 +15,16 @@ internal static class UwpPackageHelper
     /// Gets package Name.
     /// </summary>
     public static string? GetPackageName(string? uwpName)
+        => GetPackageName(uwpName, frontendClassesRoot: null);
+
+    internal static string? GetPackageName(string? uwpName, RegistryKey? frontendClassesRoot)
     {
         if (string.IsNullOrWhiteSpace(uwpName))
         {
             return null;
         }
 
-        using var packageKey = Registry.ClassesRoot.OpenSubKey(PackageRegPath, writable: false);
+        using var packageKey = (frontendClassesRoot ?? Registry.ClassesRoot).OpenSubKey(PackageRegPath, writable: false);
         if (packageKey is null)
         {
             return null;
@@ -42,21 +45,25 @@ internal static class UwpPackageHelper
     /// Gets file Path.
     /// </summary>
     public static string? GetFilePath(string? uwpName, Guid guid)
+        => GetFilePath(uwpName, guid, frontendClassesRoot: null);
+
+    internal static string? GetFilePath(string? uwpName, Guid guid, RegistryKey? frontendClassesRoot)
     {
-        var packageName = GetPackageName(uwpName);
+        var classesRoot = frontendClassesRoot ?? Registry.ClassesRoot;
+        var packageName = GetPackageName(uwpName, frontendClassesRoot);
         if (string.IsNullOrWhiteSpace(packageName))
         {
             return null;
         }
 
         var regPath = $@"{PackageRegPath}\{packageName}\Class\{guid:B}";
-        using var packagedClassKey = Registry.ClassesRoot.OpenSubKey(regPath, writable: false);
+        using var packagedClassKey = classesRoot.OpenSubKey(regPath, writable: false);
         if (packagedClassKey is null)
         {
             return null;
         }
 
-        using var packageInfoKey = Registry.ClassesRoot.OpenSubKey($@"{PackagesRegPath}\{packageName}", writable: false);
+        using var packageInfoKey = classesRoot.OpenSubKey($@"{PackagesRegPath}\{packageName}", writable: false);
         if (packageInfoKey is null)
         {
             return null;

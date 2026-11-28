@@ -18,6 +18,8 @@ internal sealed class Windows11ContextMenuCatalog
 
     private readonly FileLogger? _logger;
     private readonly PackagedContextMenuScanCache _packageScanCache;
+    private readonly TryOpenFrontendClassesRoot? _tryOpenFrontendClassesRoot;
+    private readonly bool _useFrontendClassesRootForMetadata;
     private readonly Dictionary<string, (DateTimeOffset CapturedAt, IReadOnlyList<ContextMenuEntry> Entries, bool Complete)> _mutationDiscovery = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _discoveryLock = new();
 
@@ -27,13 +29,35 @@ internal sealed class Windows11ContextMenuCatalog
     }
 
     internal Windows11ContextMenuCatalog(FileLogger? logger, PackagedContextMenuScanCache? packageScanCache)
+        : this(logger, packageScanCache, null, false)
+    {
+    }
+
+    internal Windows11ContextMenuCatalog(FileLogger? logger, PackagedContextMenuScanCache? packageScanCache,
+        TryOpenFrontendClassesRoot? tryOpenFrontendClassesRoot, bool useFrontendClassesRootForMetadata)
     {
         _logger = logger;
+        _tryOpenFrontendClassesRoot = tryOpenFrontendClassesRoot;
+        _useFrontendClassesRootForMetadata = useFrontendClassesRootForMetadata;
         _packageScanCache = packageScanCache ?? new PackagedContextMenuScanCache(
             sid => PackagedContextMenuDiscovery.FindForUser(sid, _logger, CancellationToken.None));
     }
 
     public bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+
+    private IFrontendClassesRoot? OpenFrontendClassesForMetadata(BackendUserContext? userContext)
+    {
+        if (!_useFrontendClassesRootForMetadata) return null;
+        if (userContext is null)
+            throw new InvalidOperationException("The verified interactive user is required to resolve Windows 11 shell metadata.");
+        IFrontendClassesRoot? frontendClasses = null;
+        string? failure = null;
+        if (_tryOpenFrontendClassesRoot is null
+            || !_tryOpenFrontendClassesRoot(userContext, _logger ?? throw new InvalidOperationException("A logger is required to open the interactive user's Classes view."), out frontendClasses, out failure)
+            || frontendClasses is null)
+            throw new InvalidOperationException($"The verified interactive user's merged Classes view is unavailable: {failure ?? "no provider is configured"}");
+        return frontendClasses;
+    }
 
     // Manual changes reuse recent discovery, never cached switch values. Normal
     // snapshots still rebuild the impact index for automatic policy decisions.
@@ -51,13 +75,17 @@ internal sealed class Windows11ContextMenuCatalog
         }
         return recent is null
             ? await EnumerateEntriesAsync(cancellationToken, userContext)
-            : RefreshStates(recent, userContext.Sid, cancellationToken);
+            : RefreshStates(recent, userContext, cancellationToken);
     }
 
-    public IReadOnlyList<ContextMenuEntry> RefreshStates(IEnumerable<ContextMenuEntry> entries, string userSid, CancellationToken cancellationToken)
+    public IReadOnlyList<ContextMenuEntry> RefreshStates(IEnumerable<ContextMenuEntry> entries, BackendUserContext? userContext,
+        CancellationToken cancellationToken)
     {
+        var userSid = userContext?.Sid ?? throw new InvalidOperationException("The verified interactive user is unavailable.");
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var frontendClassesRoot = frontendClasses?.ClassesRoot;
         var blocked = new Dictionary<string, Windows11BlockedState>(StringComparer.OrdinalIgnoreCase);
-        var commands = EnumerateSystemCommandStoreEntries().ToDictionary(entry => entry.Id, StringComparer.OrdinalIgnoreCase);
+        var commands = EnumerateSystemCommandStoreEntries(userContext, frontendClassesRoot).ToDictionary(entry => entry.Id, StringComparer.OrdinalIgnoreCase);
         var result = new List<ContextMenuEntry>();
         foreach (var entry in entries)
         {
@@ -88,7 +116,9 @@ internal sealed class Windows11ContextMenuCatalog
         }
 
         var items = new Dictionary<string, ContextMenuEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var commandEntry in EnumerateSystemCommandStoreEntries())
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var frontendClassesRoot = frontendClasses?.ClassesRoot;
+        foreach (var commandEntry in EnumerateSystemCommandStoreEntries(userContext, frontendClassesRoot))
         {
             items[commandEntry.Id] = commandEntry;
         }
@@ -350,7 +380,8 @@ internal sealed class Windows11ContextMenuCatalog
             : guidText.Trim();
     }
 
-    private IEnumerable<ContextMenuEntry> EnumerateSystemCommandStoreEntries()
+    private IEnumerable<ContextMenuEntry> EnumerateSystemCommandStoreEntries(BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
     {
         using var root = Registry.LocalMachine.OpenSubKey(SystemCommandStorePath, writable: false);
         if (root is null)
@@ -367,20 +398,21 @@ internal sealed class Windows11ContextMenuCatalog
                 continue;
             }
 
-            entries.Add(CreateSystemCommandEntry(name, itemKey));
+            entries.Add(CreateSystemCommandEntry(name, itemKey, userContext, frontendClassesRoot));
         }
 
         return entries;
     }
 
-    private ContextMenuEntry CreateSystemCommandEntry(string commandKey, RegistryKey itemKey)
+    private ContextMenuEntry CreateSystemCommandEntry(string commandKey, RegistryKey itemKey,
+        BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
         var registryPath = $@"HKEY_LOCAL_MACHINE\{SystemCommandStorePath}\{commandKey}";
         var commandText = itemKey.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString();
         var handlerGuid = ResolveSystemCommandHandlerGuid(itemKey);
-        var icon = ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText);
-        var filePath = ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText)
-            ?? ShellMetadataResolver.ResolveShellExtensionFilePath(handlerGuid);
+        var icon = ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText, userContext, frontendClassesRoot);
+        var filePath = ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText, userContext, frontendClassesRoot)
+            ?? ShellMetadataResolver.ResolveShellExtensionFilePath(handlerGuid, userContext, frontendClassesRoot);
         var displayName = ShellMetadataResolver.ResolveVerbDisplayName(itemKey, commandKey);
         var isEnabled = ShellVerbVisibility.IsEnabled(itemKey);
         var isProtected = IsSystemCommandProtected(commandKey);

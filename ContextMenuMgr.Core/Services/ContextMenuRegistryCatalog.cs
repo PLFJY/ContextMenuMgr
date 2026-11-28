@@ -89,6 +89,8 @@ public sealed class ContextMenuRegistryCatalog
     private readonly Windows11ContextMenuCatalog _windows11Catalog;
     private readonly OfficeSuiteCoexistenceDetector _officeCoexistenceDetector;
     private readonly RecycleBinPinToStartMutation _recycleBinPinToStart;
+    private readonly TryOpenFrontendClassesRoot? _tryOpenFrontendClassesRoot;
+    private readonly bool _useFrontendClassesRootForMetadata;
     private readonly SemaphoreSlim _persistentStateGate = new(1, 1);
     private readonly AsyncLocal<int> _persistentStateGateDepth = new();
     private readonly SemaphoreSlim _registryProtectionTransitionGate = new(1, 1);
@@ -119,14 +121,19 @@ public sealed class ContextMenuRegistryCatalog
         IRegistryProtectionSettingsStore protectionSettingsStore,
         IRegistryProtectionTargetAccessor registryProtectionTargetAccessor,
         Windows11ContextMenuCatalog? windows11Catalog = null,
-        IRecycleBinPinToStartRegistry? recycleBinPinToStartRegistry = null)
+        IRecycleBinPinToStartRegistry? recycleBinPinToStartRegistry = null,
+        TryOpenFrontendClassesRoot? tryOpenFrontendClassesRoot = null,
+        bool useFrontendClassesRootForMetadata = false)
     {
         _logger = logger;
         _stateStore = stateStore;
         _backupService = backupService;
         _protectionSettingsStore = protectionSettingsStore;
         _registryProtectionTargetAccessor = registryProtectionTargetAccessor;
-        _windows11Catalog = windows11Catalog ?? new Windows11ContextMenuCatalog(logger);
+        _tryOpenFrontendClassesRoot = tryOpenFrontendClassesRoot;
+        _useFrontendClassesRootForMetadata = useFrontendClassesRootForMetadata;
+        _windows11Catalog = windows11Catalog ?? new Windows11ContextMenuCatalog(logger, null,
+            tryOpenFrontendClassesRoot, useFrontendClassesRootForMetadata);
         _officeCoexistenceDetector = new OfficeSuiteCoexistenceDetector(logger);
         _recycleBinPinToStart = new RecycleBinPinToStartMutation(recycleBinPinToStartRegistry ?? new WindowsRecycleBinPinToStartRegistry());
     }
@@ -1057,7 +1064,7 @@ public sealed class ContextMenuRegistryCatalog
 
             physicalVerificationSucceeded = true;
             var postWriteSnapshot = item.IsWindows11ContextMenu
-                ? _windows11Catalog.RefreshStates(snapshot.Where(static entry => entry.IsWindows11ContextMenu), userContext!.Sid, cancellationToken)
+                ? _windows11Catalog.RefreshStates(snapshot.Where(static entry => entry.IsWindows11ContextMenu), userContext, cancellationToken)
                 : await GetClassicSnapshotAsync(cancellationToken, userContext);
             var refreshedLogical = postWriteSnapshot
                 .FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.OrdinalIgnoreCase));
@@ -1575,7 +1582,7 @@ public sealed class ContextMenuRegistryCatalog
             return CreateFailure($"Menu item '{item.DisplayName}' is deleted. Undo the deletion before changing its text.", item);
         }
 
-        if (!CanEditDisplayText(item))
+        if (!CanEditDisplayText(item, userContext))
         {
             return CreateFailure("This menu item does not support text changes.", item);
         }
@@ -2535,6 +2542,8 @@ public sealed class ContextMenuRegistryCatalog
             ? RegistryRootInstanceScope.AllKnownInstances
             : RegistryRootInstanceScope.MachineAndFrontendUser;
 
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var frontendClassesRoot = frontendClasses?.ClassesRoot;
         foreach (var instance in EnumerateRootInstances(scope, userContext))
         {
             foreach (var physicalRootPath in physicalRootPaths)
@@ -2560,7 +2569,9 @@ public sealed class ContextMenuRegistryCatalog
                     itemKey,
                     keyName,
                     defaultValue,
-                    handlerClsid);
+                    handlerClsid,
+                    userContext,
+                    frontendClassesRoot);
                 var editableText = entryKind == ContextMenuEntryKind.ShellVerb
                     ? ResolveEditableText(itemKey, defaultValue)
                     : null;
@@ -2573,15 +2584,15 @@ public sealed class ContextMenuRegistryCatalog
 
                 var (iconPath, iconIndex) = entryKind switch
                 {
-                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
-                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText, userContext, frontendClassesRoot),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid, userContext, frontendClassesRoot),
                     _ => (null, 0)
                 };
 
                 var filePath = entryKind switch
                 {
-                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
-                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText, userContext, frontendClassesRoot),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid, userContext, frontendClassesRoot),
                     _ => null
                 };
 
@@ -3578,16 +3589,18 @@ public sealed class ContextMenuRegistryCatalog
 
     private IEnumerable<ContextMenuEntry> EnumerateEntries(IEnumerable<RegistryRootDescriptor> roots, BackendUserContext? userContext = null)
     {
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
         foreach (var root in roots)
         {
-            foreach (var item in EnumerateRoot(root, userContext))
+            foreach (var item in EnumerateRoot(root, userContext, frontendClasses?.ClassesRoot))
             {
                 yield return item;
             }
         }
     }
 
-    private IEnumerable<ContextMenuEntry> EnumerateRoot(RegistryRootDescriptor root, BackendUserContext? userContext = null)
+    private IEnumerable<ContextMenuEntry> EnumerateRoot(RegistryRootDescriptor root, BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
     {
         foreach (var instance in EnumerateRootInstances(root.InstanceScope, userContext))
         {
@@ -3609,7 +3622,7 @@ public sealed class ContextMenuRegistryCatalog
                 var handlerClsid = root.EntryKind == ContextMenuEntryKind.ShellExtension
                     ? ResolveShellExtensionHandlerClsid(subKeyName, defaultValue)
                     : null;
-                var displayName = ResolveDisplayName(root, itemKey, subKeyName, defaultValue, handlerClsid);
+                var displayName = ResolveDisplayName(root, itemKey, subKeyName, defaultValue, handlerClsid, userContext, frontendClassesRoot);
                 var editableText = root.EntryKind == ContextMenuEntryKind.ShellVerb
                     ? ResolveEditableText(itemKey, defaultValue)
                     : null;
@@ -3624,14 +3637,14 @@ public sealed class ContextMenuRegistryCatalog
 
                 var (iconPath, iconIndex) = root.EntryKind switch
                 {
-                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText),
-                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid),
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbIcon(itemKey, commandText, userContext, frontendClassesRoot),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionIcon(handlerClsid, userContext, frontendClassesRoot),
                     _ => (null, 0)
                 };
                 var filePath = root.EntryKind switch
                 {
-                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText),
-                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid),
+                    ContextMenuEntryKind.ShellVerb => ShellMetadataResolver.ResolveVerbFilePath(itemKey, commandText, userContext, frontendClassesRoot),
+                    ContextMenuEntryKind.ShellExtension => ShellMetadataResolver.ResolveShellExtensionFilePath(handlerClsid, userContext, frontendClassesRoot),
                     _ => null
                 };
 
@@ -3683,10 +3696,12 @@ public sealed class ContextMenuRegistryCatalog
         RegistryKey itemKey,
         string fallbackKeyName,
         string? rawDefaultValue,
-        string? handlerClsid)
+        string? handlerClsid,
+        BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
     {
         var displayName = itemKey.Name.Contains(@"\shellex\", StringComparison.OrdinalIgnoreCase)
-            ? ShellMetadataResolver.ResolveShellExtensionDisplayName(fallbackKeyName, handlerClsid, rawDefaultValue)
+            ? ShellMetadataResolver.ResolveShellExtensionDisplayName(fallbackKeyName, handlerClsid, rawDefaultValue, userContext, frontendClassesRoot)
             : ShellMetadataResolver.ResolveVerbDisplayName(itemKey, fallbackKeyName);
 
         if (itemKey.Name.Contains(@"\shellex\", StringComparison.OrdinalIgnoreCase)
@@ -3705,6 +3720,22 @@ public sealed class ContextMenuRegistryCatalog
         }
 
         return NormalizeDisplayName(displayName);
+    }
+
+    private IFrontendClassesRoot? OpenFrontendClassesForMetadata(BackendUserContext? userContext)
+    {
+        if (!_useFrontendClassesRootForMetadata) return null;
+        if (userContext is null)
+            throw new InvalidOperationException("The verified interactive user is required to resolve shell metadata.");
+        IFrontendClassesRoot? frontendClasses = null;
+        string? failure = null;
+        if (_tryOpenFrontendClassesRoot is null
+            || !_tryOpenFrontendClassesRoot(userContext, _logger, out frontendClasses, out failure)
+            || frontendClasses is null)
+        {
+            throw new InvalidOperationException($"The verified interactive user's merged Classes view is unavailable: {failure ?? "no provider is configured"}");
+        }
+        return frontendClasses;
     }
 
     private static string? ResolveShellExtensionHandlerClsid(string keyName, string? defaultValue)
@@ -4343,7 +4374,8 @@ public sealed class ContextMenuRegistryCatalog
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             states.TryGetValue(parent.Id, out var state);
-            var items = EnumerateShellSubMenuItems(parent, parentKey, state).ToArray();
+            using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+            var items = EnumerateShellSubMenuItems(parent, parentKey, state, userContext, frontendClasses?.ClassesRoot).ToArray();
             return new PipeResponse { Success = true, Message = "Shell submenu loaded.", ShellSubMenuItems = items };
         }, cancellationToken);
 
@@ -4366,7 +4398,8 @@ public sealed class ContextMenuRegistryCatalog
 
             var states = await _stateStore.LoadAsync(cancellationToken);
             states.TryGetValue(parent.Id, out var state);
-            var child = EnumerateShellSubMenuItems(parent, parentKey, state)
+            using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+            var child = EnumerateShellSubMenuItems(parent, parentKey, state, userContext, frontendClasses?.ClassesRoot)
                 .FirstOrDefault(item => string.Equals(item.Id, childId, StringComparison.Ordinal));
             if (child is null && MenuDiscoveryCoverage.IsClassicComplete && userContext is not null)
                 return new PipeResponse { Success = false, ErrorCode = PipeErrorCodes.MenuItemRemoved,
@@ -4482,7 +4515,8 @@ public sealed class ContextMenuRegistryCatalog
             };
         }, cancellationToken);
 
-    private IEnumerable<ShellSubMenuItem> EnumerateShellSubMenuItems(ContextMenuEntry parent, RegistryKey parentKey, PersistedContextMenuState? state)
+    private IEnumerable<ShellSubMenuItem> EnumerateShellSubMenuItems(ContextMenuEntry parent, RegistryKey parentKey,
+        PersistedContextMenuState? state, BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
         var subCommands = parentKey.GetValue("SubCommands")?.ToString();
         if (subCommands is not null && (!string.IsNullOrWhiteSpace(subCommands) || state?.DisabledSubMenuReferences.Count > 0))
@@ -4495,11 +4529,11 @@ public sealed class ContextMenuRegistryCatalog
                     yield return new ShellSubMenuItem { Id = $"{parent.Id}|subcommands|separator|{index++}", ParentId = parent.Id, DisplayName = "|", KeyName = "|", IsSeparator = true, SourceKind = ShellSubMenuSourceKind.SubCommands };
                     continue;
                 }
-                yield return CreateCommandStoreSubMenuItem(parent, token, enabled: true, index++);
+                yield return CreateCommandStoreSubMenuItem(parent, token, enabled: true, index++, userContext, frontendClassesRoot);
             }
             foreach (var disabled in state?.DisabledSubMenuReferences ?? [])
                 if (!ParseSubCommands(subCommands).Contains(disabled.ReferenceName, StringComparer.OrdinalIgnoreCase))
-                    yield return CreateCommandStoreSubMenuItem(parent, disabled.ReferenceName, enabled: false, disabled.OriginalIndex);
+                    yield return CreateCommandStoreSubMenuItem(parent, disabled.ReferenceName, enabled: false, disabled.OriginalIndex, userContext, frontendClassesRoot);
             yield break;
         }
 
@@ -4516,7 +4550,7 @@ public sealed class ContextMenuRegistryCatalog
             var flags = Convert.ToInt32(childKey.GetValue("CommandFlags", 0), CultureInfo.InvariantCulture);
             var separator = flags % 16 >= 8;
             var command = childKey.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString();
-            var (icon, iconIndex) = ShellMetadataResolver.ResolveVerbIcon(childKey, command);
+            var (icon, iconIndex) = ShellMetadataResolver.ResolveVerbIcon(childKey, command, userContext, frontendClassesRoot);
             yield return new ShellSubMenuItem
             {
                 Id = $"{parent.Id}|{source}|{keyName}", ParentId = parent.Id, DisplayName = separator ? "|" : ShellMetadataResolver.ResolveVerbDisplayName(childKey, keyName), KeyName = keyName,
@@ -4527,11 +4561,12 @@ public sealed class ContextMenuRegistryCatalog
         }
     }
 
-    private static ShellSubMenuItem CreateCommandStoreSubMenuItem(ContextMenuEntry parent, string reference, bool enabled, int index)
+    private static ShellSubMenuItem CreateCommandStoreSubMenuItem(ContextMenuEntry parent, string reference, bool enabled, int index,
+        BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
         using var key = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\{reference}", writable: false);
         var command = key?.OpenSubKey("command", writable: false)?.GetValue(null)?.ToString();
-        var (icon, iconIndex) = key is null ? (null, 0) : ShellMetadataResolver.ResolveVerbIcon(key, command);
+        var (icon, iconIndex) = key is null ? (null, 0) : ShellMetadataResolver.ResolveVerbIcon(key, command, userContext, frontendClassesRoot);
         return new ShellSubMenuItem { Id = $"{parent.Id}|subcommands|{reference}|{index}", ParentId = parent.Id, DisplayName = key is null ? reference : ShellMetadataResolver.ResolveVerbDisplayName(key, reference), KeyName = reference, ReferenceName = reference, CommandText = command, IconPath = icon, IconIndex = iconIndex, IsEnabled = enabled, CanToggle = key is not null, IsShared = true, SourceKind = ShellSubMenuSourceKind.SubCommands };
     }
 
@@ -5481,7 +5516,7 @@ public sealed class ContextMenuRegistryCatalog
             // Best-effort legacy machine-wide cleanup.
             try
             {
-                using var machineHandlersKey = Registry.ClassesRoot.OpenSubKey(handlersRelativePath, writable: true);
+                using var machineHandlersKey = Registry.LocalMachine.OpenSubKey($@"SOFTWARE\Classes\{handlersRelativePath}", writable: true);
                 if (machineHandlersKey is not null)
                 {
                     foreach (var subKeyName in machineHandlersKey.GetSubKeyNames())
@@ -5771,20 +5806,22 @@ public sealed class ContextMenuRegistryCatalog
         return itemKey.GetValue("ExplorerCommandHandler") is null;
     }
 
-    private static bool CanEditDisplayText(ContextMenuEntry item)
+    private bool CanEditDisplayText(ContextMenuEntry item, BackendUserContext? userContext)
     {
         if (item.EntryKind != ContextMenuEntryKind.ShellVerb)
         {
             return false;
         }
 
-        return !HasMultiItemSubCommands(item.RegistryPath)
+        return !HasMultiItemSubCommands(item.RegistryPath, userContext)
                && !string.Equals(item.KeyName, "open", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool HasMultiItemSubCommands(string registryPath)
+    private bool HasMultiItemSubCommands(string registryPath, BackendUserContext? userContext)
     {
-        using var itemKey = Registry.ClassesRoot.OpenSubKey(registryPath, writable: false);
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var classesRoot = frontendClasses?.ClassesRoot ?? Registry.ClassesRoot;
+        using var itemKey = classesRoot.OpenSubKey(registryPath, writable: false);
         return itemKey is not null && HasMultiItemSubCommands(itemKey);
     }
 

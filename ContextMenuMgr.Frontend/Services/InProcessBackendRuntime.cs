@@ -47,7 +47,8 @@ internal sealed class InProcessBackendRuntime : IAsyncDisposable
             var backups = new RegistryBackupService(RuntimePaths.DeletedBackupsDirectory, logger, identity);
             var core = new BackendCore(logger, state, backups, settings, user.TryOpenClassesRoot,
                 () => [user.TryGetContext() ?? throw new InvalidOperationException("The verified desktop user is no longer available.")],
-                enableProtectionWorkflows: false, expandInteractiveEnvironment: user.ExpandEnvironmentVariables);
+                enableProtectionWorkflows: false, expandInteractiveEnvironment: user.ExpandEnvironmentVariables,
+                useFrontendClassesRootForMetadata: true);
             if (!state.IsCurrentHostIdentityVerified)
                 throw new InvalidOperationException("Portable data belongs to another host identity. Preserve the data and resolve it before using this runtime.");
             return new InProcessBackendRuntime(user, core, state, logger);

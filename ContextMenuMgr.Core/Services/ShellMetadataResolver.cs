@@ -56,16 +56,18 @@ internal static class ShellMetadataResolver
         string keyName,
         string? handlerClsid,
         string? handlerDefaultValue,
-        BackendUserContext? userContext = null)
+        BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
-        return ResolveShellExtensionDisplayNameDetails(keyName, handlerClsid, handlerDefaultValue, userContext).DisplayName;
+        return ResolveShellExtensionDisplayNameDetails(keyName, handlerClsid, handlerDefaultValue, userContext, frontendClassesRoot).DisplayName;
     }
 
     internal static ShellExtensionDisplayNameResolution ResolveShellExtensionDisplayNameDetails(
         string keyName,
         string? handlerClsid,
         string? handlerDefaultValue,
-        BackendUserContext? userContext = null)
+        BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
         IReadOnlyList<string> checkedClsidRoots = [];
         string? filePath = null;
@@ -74,7 +76,7 @@ internal static class ShellMetadataResolver
 
         if (Guid.TryParse(handlerClsid, out var handlerGuid))
         {
-            var clsidDisplayName = GuidMetadataCatalog.ResolveClsidDisplayName(handlerGuid, userContext);
+            var clsidDisplayName = GuidMetadataCatalog.ResolveClsidDisplayName(handlerGuid, userContext, frontendClassesRoot);
             checkedClsidRoots = clsidDisplayName.CheckedClsidRoots;
             if (IsUsefulDisplayName(clsidDisplayName.DisplayName) && !clsidDisplayName.IsWeak)
             {
@@ -110,7 +112,7 @@ internal static class ShellMetadataResolver
 
         if (Guid.TryParse(handlerClsid, out handlerGuid))
         {
-            filePath = GuidMetadataCatalog.GetFilePath(handlerGuid, userContext);
+            filePath = GuidMetadataCatalog.GetFilePath(handlerGuid, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(filePath))
             {
                 var fileDisplayName = ResolveFileDisplayName(filePath, checkedClsidRoots);
@@ -186,7 +188,8 @@ internal static class ShellMetadataResolver
     /// <summary>
     /// Executes static.
     /// </summary>
-    public static (string? IconPath, int IconIndex) ResolveVerbIcon(RegistryKey itemKey, string? commandText)
+    public static (string? IconPath, int IconIndex) ResolveVerbIcon(RegistryKey itemKey, string? commandText,
+        BackendUserContext? userContext = null, RegistryKey? frontendClassesRoot = null)
     {
         var iconValue = itemKey.GetValue("Icon")?.ToString();
         if (TryParseIconLocation(iconValue, out var iconPath, out var iconIndex))
@@ -202,13 +205,13 @@ internal static class ShellMetadataResolver
         var handlerGuid = ExtractVerbHandlerGuid(itemKey);
         if (handlerGuid.HasValue)
         {
-            var guidLocation = GuidMetadataCatalog.GetIconLocation(handlerGuid.Value);
+            var guidLocation = GuidMetadataCatalog.GetIconLocation(handlerGuid.Value, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidLocation.IconPath))
             {
                 return guidLocation;
             }
 
-            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid.Value);
+            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid.Value, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidFilePath))
             {
                 return (guidFilePath, 0);
@@ -235,12 +238,13 @@ internal static class ShellMetadataResolver
     /// <summary>
     /// Executes resolve Verb File Path.
     /// </summary>
-    public static string? ResolveVerbFilePath(RegistryKey itemKey, string? commandText)
+    public static string? ResolveVerbFilePath(RegistryKey itemKey, string? commandText,
+        BackendUserContext? userContext = null, RegistryKey? frontendClassesRoot = null)
     {
         var handlerGuid = ExtractVerbHandlerGuid(itemKey);
         if (handlerGuid.HasValue)
         {
-            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid.Value);
+            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid.Value, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidFilePath))
             {
                 return guidFilePath;
@@ -259,17 +263,18 @@ internal static class ShellMetadataResolver
     /// <summary>
     /// Executes static.
     /// </summary>
-    public static (string? IconPath, int IconIndex) ResolveShellExtensionIcon(string? handlerClsid)
+    public static (string? IconPath, int IconIndex) ResolveShellExtensionIcon(string? handlerClsid,
+        BackendUserContext? userContext = null, RegistryKey? frontendClassesRoot = null)
     {
         if (Guid.TryParse(handlerClsid, out var handlerGuid))
         {
-            var guidLocation = GuidMetadataCatalog.GetIconLocation(handlerGuid);
+            var guidLocation = GuidMetadataCatalog.GetIconLocation(handlerGuid, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidLocation.IconPath))
             {
                 return guidLocation;
             }
 
-            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid);
+            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidFilePath))
             {
                 return (guidFilePath, 0);
@@ -281,7 +286,7 @@ internal static class ShellMetadataResolver
             return (null, 0);
         }
 
-        foreach (var clsidKey in EnumerateClsidKeys(handlerGuid))
+        foreach (var clsidKey in EnumerateClsidKeys(handlerGuid, userContext, frontendClassesRoot))
         {
             using (clsidKey)
             {
@@ -299,11 +304,12 @@ internal static class ShellMetadataResolver
     /// <summary>
     /// Executes resolve Shell Extension File Path.
     /// </summary>
-    public static string? ResolveShellExtensionFilePath(string? handlerClsid)
+    public static string? ResolveShellExtensionFilePath(string? handlerClsid,
+        BackendUserContext? userContext = null, RegistryKey? frontendClassesRoot = null)
     {
         if (Guid.TryParse(handlerClsid, out var handlerGuid))
         {
-            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid);
+            var guidFilePath = GuidMetadataCatalog.GetFilePath(handlerGuid, userContext, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(guidFilePath))
             {
                 return guidFilePath;
@@ -318,11 +324,12 @@ internal static class ShellMetadataResolver
         return null;
     }
 
-    private static IEnumerable<RegistryKey> EnumerateClsidKeys(Guid guid, BackendUserContext? userContext = null)
+    private static IEnumerable<RegistryKey> EnumerateClsidKeys(Guid guid, BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
         foreach (var path in GuidMetadataCatalog.GetClsidRootPaths(guid, userContext))
         {
-            var key = OpenRegistryPath(path);
+            var key = OpenRegistryPath(path, frontendClassesRoot);
             if (key is not null)
             {
                 yield return key;
@@ -330,7 +337,7 @@ internal static class ShellMetadataResolver
         }
     }
 
-    private static RegistryKey? OpenRegistryPath(string fullPath)
+    private static RegistryKey? OpenRegistryPath(string fullPath, RegistryKey? frontendClassesRoot)
     {
         const string classesRootPrefix = @"HKEY_CLASSES_ROOT\";
         const string localMachinePrefix = @"HKEY_LOCAL_MACHINE\";
@@ -338,7 +345,7 @@ internal static class ShellMetadataResolver
 
         if (fullPath.StartsWith(classesRootPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            return Registry.ClassesRoot.OpenSubKey(fullPath[classesRootPrefix.Length..], writable: false);
+            return (frontendClassesRoot ?? Registry.ClassesRoot).OpenSubKey(fullPath[classesRootPrefix.Length..], writable: false);
         }
 
         if (fullPath.StartsWith(localMachinePrefix, StringComparison.OrdinalIgnoreCase))

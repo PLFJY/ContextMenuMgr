@@ -21,7 +21,7 @@ B/C 的命令、SCM/启动策略和通知完整说明见[生命周期](runtime-l
 
 此宿主将 `PipeCommand` 显式路由为本地宿主操作、共享 Dispatcher 操作或结构化拒绝；不回退到 Service Pipe。Continuous protection、approval、WPS/OpenWith 审核、TrayHost、自启动、Service 生命周期及废弃命令均不可用；普通菜单改动、GUID block、ShellNew 持久顺序锁、Win11、OpenWith 普通管理、删除/恢复和图标修复仍按实际实现保留。详细能力清单及通知/取消/生命周期语义见[Portable 重构基线](portable-refactoring-baseline.md#G2-实现与验证)。
 
-尚未完成的身份来源审计：Core 的 `ShellMetadataResolver.OpenRegistryPath`、`GuidMetadataCatalog.OpenClsidKeys` 和 `SpecialMenuService` DragDrop/扩展图标元数据仍可能直接读取进程 `Registry.ClassesRoot`；Core 的部分 `%变量%` 展开也调用 `Environment.ExpandEnvironmentVariables`。机器注册信息不依赖原用户，但每用户 Classes 覆盖可能不同，跨账户 UAC 下的元数据、发现优先级及写入物理来源还没有完整证明。不得把这些路径的当前结果作为已验证的原用户视图。详细文件与 G3 前置项见[Portable 基线](portable-refactoring-baseline.md#G2-实现与验证)。
+In-process Core 已把保留 token 打开的用户合并 Classes root 传入经典菜单、级联菜单、Win11 CommandStore、SendTo 图标、DragDrop 与 GUID Block 的用户敏感元数据解析；DragDrop 的机器注册与写入明确使用 HKLM Classes。Service/default 仍保留进程 `Registry.ClassesRoot` 语义。仍需 Windows 集成验证 `RegOpenUserClassesRoot` 的实际 precedence、跨账户 UAC 下的用户覆盖及每项物理写入来源；环境变量展开与 LocalSystem 不可替代权限也需单独验收。源码适配不能替代这些验证。详细文件与 G3 前置项见[Portable 基线](portable-refactoring-baseline.md#G2-实现与验证)。
 
 ## 身份解析与模拟边界
 

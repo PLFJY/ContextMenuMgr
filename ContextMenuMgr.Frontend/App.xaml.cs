@@ -164,6 +164,29 @@ public partial class App : Application
             return true;
         }
 
+#if CONTEXTMENUMGR_IN_PROCESS
+        // The elevated In-process host intentionally has no FrontendControlServer.
+        // Never probe the Service host's pipe: a coexisting Service frontend must
+        // not receive activation requests from a Portable process.
+        try
+        {
+            if (_singleInstanceMutex.WaitOne(0))
+            {
+                _ownsSingleInstanceMutex = true;
+                return true;
+            }
+        }
+        catch (AbandonedMutexException)
+        {
+            _ownsSingleInstanceMutex = true;
+            return true;
+        }
+
+        _singleInstanceMutex.Dispose();
+        _singleInstanceMutex = null;
+        FrontendDebugLog.Warning("App", $"In-process instance already owns the dedicated mutex. PID={Environment.ProcessId}; secondary launch exited without contacting the Service frontend control pipe.");
+        return false;
+#else
         var attemptCount = 0;
         if (FrontendControlClient
             .TrySendWithStartupRetryAsync(
@@ -207,6 +230,7 @@ public partial class App : Application
             "App",
             $"Secondary frontend activation startup grace exhausted. PID={Environment.ProcessId}, Attempts={attemptCount}; existing mutex remains owned, so no stale-process termination was attempted.");
         return false;
+#endif
     }
 
     private static FrontendControlRequest ParseFrontendControlRequest(string[] args)

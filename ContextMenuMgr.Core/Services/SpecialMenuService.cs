@@ -44,6 +44,29 @@ public sealed class SpecialMenuService
         WinXHasher.FileLoggerHost.Attach(logger);
     }
 
+    private IFrontendClassesRoot? OpenFrontendClassesForMetadata(BackendUserContext? userContext)
+    {
+        if (!RuntimeHosting.IsInProcess) return null;
+        var verifiedUser = RequireUserContext(userContext);
+        if (!_tryOpenFrontendClassesRoot(verifiedUser, _logger, out var frontendClasses, out var failure)
+            || frontendClasses is null)
+            throw new InvalidOperationException($"The verified interactive user's merged Classes view is unavailable: {failure ?? "no Classes root was returned"}");
+        return frontendClasses;
+    }
+
+    private IFrontendClassesRoot? TryOpenFrontendClassesForMetadata(BackendUserContext? userContext)
+    {
+        try
+        {
+            return OpenFrontendClassesForMetadata(userContext);
+        }
+        catch (Exception ex) when (RuntimeHosting.IsInProcess)
+        {
+            _logger.LogFireAndForget($"SpecialMenuMetadata: unable to open the interactive user's merged Classes view; optional SendTo icon metadata was skipped. {ex.Message}");
+            return null;
+        }
+    }
+
     public Task<OpenWithAssociationInspection> InspectOpenWithSourcesAsync(string extension,
         BackendUserContext? userContext, CancellationToken cancellationToken)
     {
@@ -73,9 +96,9 @@ public sealed class SpecialMenuService
             SpecialMenuKind.SendTo => GetSendToItems(RequireUserContext(userContext)),
             SpecialMenuKind.WinX => GetWinXItems(RequireUserContext(userContext)),
             SpecialMenuKind.OpenWith => GetOpenWithItems(RequireUserContext(userContext), cancellationToken),
-            SpecialMenuKind.DragDrop => GetDragDropItems(),
-            SpecialMenuKind.CommandStore => GetCommandStoreItems(),
-            SpecialMenuKind.GuidBlock => GuidBlockMenuService.GetSnapshot(),
+            SpecialMenuKind.DragDrop => GetDragDropItems(userContext),
+            SpecialMenuKind.CommandStore => GetCommandStoreItems(userContext),
+            SpecialMenuKind.GuidBlock => GetGuidBlockItems(userContext),
             SpecialMenuKind.InternetExplorer => GetIeItems(GetPortableUserContext(userContext)),
             _ => []
         };
@@ -140,7 +163,7 @@ public sealed class SpecialMenuService
         var allowed = item.Kind switch
         {
             SpecialMenuKind.CommandStore => path.StartsWith($@"HKEY_LOCAL_MACHINE\{CommandStorePath}\", StringComparison.OrdinalIgnoreCase),
-            SpecialMenuKind.DragDrop => path.StartsWith("HKEY_CLASSES_ROOT\\", StringComparison.OrdinalIgnoreCase)
+            SpecialMenuKind.DragDrop => path.StartsWith(GetDragDropClassesPrefix(), StringComparison.OrdinalIgnoreCase)
                 && (path.Contains(@"\shellex\DragDropHandlers\", StringComparison.OrdinalIgnoreCase)
                     || path.Contains(@"\shellex\-DragDropHandlers\", StringComparison.OrdinalIgnoreCase)),
             _ => false
@@ -184,7 +207,7 @@ public sealed class SpecialMenuService
                     SpecialMenuKind.DragDrop => SetDragDropEnabled(item, enabled),
                     SpecialMenuKind.InternetExplorer => SetRenameBackedRegistryItemEnabled(item, enabled, "MenuExt", "-MenuExt", GetPortableUserContext(userContext)),
                     SpecialMenuKind.CommandStore => SetCommandStoreEnabled(item, enabled),
-                    SpecialMenuKind.GuidBlock => GuidBlockMenuService.SetEnabled(item, enabled),
+                    SpecialMenuKind.GuidBlock => SetGuidBlockEnabled(item, enabled, userContext),
                     _ => throw new InvalidOperationException("This special menu item cannot be toggled.")
                 };
             }
@@ -240,9 +263,9 @@ public sealed class SpecialMenuService
                 SpecialMenuKind.WinX when request.WinXCreateGroup is not null => CreateWinXGroup(request.WinXCreateGroup, RequireUserContext(userContext)),
                 SpecialMenuKind.WinX when request.WinXCreateEntry is not null => CreateWinXEntry(request.WinXCreateEntry, RequireUserContext(userContext)),
                 SpecialMenuKind.OpenWith when request.OpenWithCreate is not null => CreateOpenWith(request.OpenWithCreate, RequireUserContext(userContext), cancellationToken),
-                SpecialMenuKind.DragDrop when request.DragDropCreate is not null => CreateDragDrop(request.DragDropCreate),
-                SpecialMenuKind.CommandStore when request.SpecialItem is not null => CreateCommandStore(request.SpecialItem),
-                SpecialMenuKind.GuidBlock when request.GuidBlockCreate is not null => GuidBlockMenuService.Create(request.GuidBlockCreate),
+                SpecialMenuKind.DragDrop when request.DragDropCreate is not null => CreateDragDrop(request.DragDropCreate, userContext),
+                SpecialMenuKind.CommandStore when request.SpecialItem is not null => CreateCommandStore(request.SpecialItem, userContext),
+                SpecialMenuKind.GuidBlock when request.GuidBlockCreate is not null => CreateGuidBlock(request.GuidBlockCreate, userContext),
                 SpecialMenuKind.InternetExplorer when request.IeMenuCreate is not null => CreateIe(request.IeMenuCreate, GetPortableUserContext(userContext)),
                 _ => throw new InvalidOperationException("The create request was missing required data.")
             };
@@ -281,9 +304,9 @@ public sealed class SpecialMenuService
                 SpecialMenuKind.SendTo when request.SendToUpdate is not null => UpdateSendTo(request.SendToUpdate, RequireUserContext(userContext)),
                 SpecialMenuKind.WinX when request.WinXUpdateEntry is not null => UpdateWinXEntry(request.WinXUpdateEntry, RequireUserContext(userContext)),
                 SpecialMenuKind.OpenWith when request.OpenWithUpdate is not null => UpdateOpenWith(request.OpenWithUpdate, RequireUserContext(userContext), cancellationToken),
-                SpecialMenuKind.DragDrop when request.DefaultDropEffect is not null => UpdateDefaultDropEffect(request.DefaultDropEffect.Value),
+                SpecialMenuKind.DragDrop when request.DefaultDropEffect is not null => UpdateDefaultDropEffect(request.DefaultDropEffect.Value, userContext),
                 SpecialMenuKind.InternetExplorer when request.IeMenuUpdate is not null => UpdateIe(request.IeMenuUpdate, GetPortableUserContext(userContext)),
-                SpecialMenuKind.CommandStore when request.SpecialItem is not null => UpdateCommandStore(request.SpecialItem),
+                SpecialMenuKind.CommandStore when request.SpecialItem is not null => UpdateCommandStore(request.SpecialItem, userContext),
                 _ => throw new InvalidOperationException("The update request was missing required data.")
             };
 
@@ -1646,7 +1669,7 @@ public sealed class SpecialMenuService
     private static string JoinShellNewOrder(IEnumerable<SpecialMenuEntry> items)
         => string.Join(";", items.Select(static item => item.KeyName));
 
-    private static IReadOnlyList<SpecialMenuEntry> GetSendToItems(BackendUserContext context)
+    private IReadOnlyList<SpecialMenuEntry> GetSendToItems(BackendUserContext context)
     {
         var sendToPath = GetSendToPath(context);
         if (string.IsNullOrWhiteSpace(sendToPath))
@@ -1660,14 +1683,14 @@ public sealed class SpecialMenuService
                                  && !string.Equals(Path.GetFileName(path), DeletedFolderName, StringComparison.OrdinalIgnoreCase))
             .OrderBy(static path => DesktopIniStore.GetLocalizedFileName(path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(static path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-            .Select(CreateSendToEntry);
+            .Select(path => CreateSendToEntry(path, context));
 
         return directoryItems
             .Concat(GetDynamicSendToDriveItems())
             .ToArray();
     }
 
-    private static SpecialMenuEntry CreateSendTo(SendToCreateRequest request, BackendUserContext context)
+    private SpecialMenuEntry CreateSendTo(SendToCreateRequest request, BackendUserContext context)
     {
         if (string.IsNullOrWhiteSpace(request.DisplayName) || string.IsNullOrWhiteSpace(request.TargetPath))
         {
@@ -1679,10 +1702,10 @@ public sealed class SpecialMenuService
         var path = GetUniqueFilePath(Path.Combine(sendToPath, RemoveIllegalChars(request.DisplayName) + ".lnk"));
         ShortcutFile.Write(path, request.TargetPath, request.Arguments, request.WorkingDirectory, request.DisplayName, null, null);
         DesktopIniStore.SetLocalizedFileName(path, request.DisplayName);
-        return CreateSendToEntry(path);
+        return CreateSendToEntry(path, context);
     }
 
-    private static SpecialMenuEntry UpdateSendTo(SendToUpdateRequest request, BackendUserContext context)
+    private SpecialMenuEntry UpdateSendTo(SendToUpdateRequest request, BackendUserContext context)
     {
         if (IsDynamicSendToDriveId(request.Id))
         {
@@ -1714,10 +1737,10 @@ public sealed class SpecialMenuService
                 request.RunAsAdministrator);
         }
 
-        return CreateSendToEntry(path);
+        return CreateSendToEntry(path, context);
     }
 
-    private static SpecialMenuEntry CreateSendToEntry(string path)
+    private SpecialMenuEntry CreateSendToEntry(string path, BackendUserContext context)
     {
         ShortcutInfo? shortcut = null;
         if (Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase))
@@ -1733,7 +1756,7 @@ public sealed class SpecialMenuService
         }
 
         var attributes = File.GetAttributes(path);
-        var (iconPath, iconIndex, iconFallback) = ResolveSendToIcon(path, shortcut);
+        var (iconPath, iconIndex, iconFallback) = ResolveSendToIcon(path, shortcut, context);
         return new SpecialMenuEntry
         {
             Id = EncodeId(SpecialMenuKind.SendTo, path),
@@ -1807,7 +1830,8 @@ public sealed class SpecialMenuService
         return items;
     }
 
-    private static (string? IconPath, int IconIndex, string? FallbackPath) ResolveSendToIcon(string path, ShortcutInfo? shortcut)
+    private (string? IconPath, int IconIndex, string? FallbackPath) ResolveSendToIcon(string path, ShortcutInfo? shortcut,
+        BackendUserContext context)
     {
         if (shortcut is not null)
         {
@@ -1832,11 +1856,18 @@ public sealed class SpecialMenuService
         var extension = Path.GetExtension(path);
         if (!string.IsNullOrWhiteSpace(extension))
         {
-            using var extensionKey = Registry.ClassesRoot.OpenSubKey(extension, writable: false);
+            using var frontendClasses = TryOpenFrontendClassesForMetadata(context);
+            if (RuntimeHosting.IsInProcess && frontendClasses is null)
+            {
+                return (extension, 0, path);
+            }
+
+            var classesRoot = frontendClasses?.ClassesRoot ?? Registry.ClassesRoot;
+            using var extensionKey = classesRoot.OpenSubKey(extension, writable: false);
             var progId = extensionKey?.GetValue(null)?.ToString();
             if (!string.IsNullOrWhiteSpace(progId))
             {
-                using var defaultIconKey = Registry.ClassesRoot.OpenSubKey($@"{progId}\DefaultIcon", writable: false);
+                using var defaultIconKey = classesRoot.OpenSubKey($@"{progId}\DefaultIcon", writable: false);
                 var (defaultIconPath, defaultIconIndex) = ParseIconLocation(defaultIconKey?.GetValue(null)?.ToString());
                 if (!string.IsNullOrWhiteSpace(defaultIconPath))
                 {
@@ -2360,8 +2391,13 @@ public sealed class SpecialMenuService
         string.Equals(groupName, DeletedFolderName, StringComparison.OrdinalIgnoreCase)
         || string.Equals(groupName, BackupFolderName, StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<SpecialMenuEntry> GetDragDropItems()
+    private IReadOnlyList<SpecialMenuEntry> GetDragDropItems(BackendUserContext? userContext)
     {
+        using var classesRoot = OpenDragDropClassesRoot();
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var metadataClassesRoot = frontendClasses?.ClassesRoot;
+        var metadataUserContext = RuntimeHosting.IsInProcess ? userContext : null;
+        var registryPrefix = GetDragDropClassesPrefix();
         var groups = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["Folder"] = @"Folder\shellex",
@@ -2374,7 +2410,7 @@ public sealed class SpecialMenuService
         {
             foreach (var part in new[] { "DragDropHandlers", "-DragDropHandlers" })
             {
-                using var handlers = Registry.ClassesRoot.OpenSubKey($@"{group.Value}\{part}", writable: false);
+                using var handlers = classesRoot.OpenSubKey($@"{group.Value}\{part}", writable: false);
                 if (handlers is null)
                 {
                     continue;
@@ -2389,9 +2425,9 @@ public sealed class SpecialMenuService
                         continue;
                     }
 
-                    var displayName = GuidMetadataCatalog.GetDisplayName(guid) ?? keyName;
-                    var icon = GuidMetadataCatalog.GetIconLocation(guid);
-                    var registryPath = $@"HKEY_CLASSES_ROOT\{group.Value}\{part}\{keyName}";
+                    var displayName = GuidMetadataCatalog.GetDisplayName(guid, metadataUserContext, metadataClassesRoot) ?? keyName;
+                    var icon = GuidMetadataCatalog.GetIconLocation(guid, metadataUserContext, metadataClassesRoot);
+                    var registryPath = $@"{registryPrefix}{group.Value}\{part}\{keyName}";
                     result.Add(new SpecialMenuEntry
                     {
                         Id = EncodeId(SpecialMenuKind.DragDrop, registryPath),
@@ -2403,7 +2439,7 @@ public sealed class SpecialMenuService
                         IconIndex = icon.IconIndex,
                         RegistryPath = registryPath,
                         GroupName = group.Key,
-                        TargetPath = GuidMetadataCatalog.GetFilePath(guid),
+                        TargetPath = GuidMetadataCatalog.GetFilePath(guid, metadataUserContext, metadataClassesRoot),
                         Metadata = new Dictionary<string, string> { ["Guid"] = guid.ToString("B") }
                     });
                 }
@@ -2425,7 +2461,7 @@ public sealed class SpecialMenuService
         return result;
     }
 
-    private static SpecialMenuEntry CreateDragDrop(DragDropCreateRequest request)
+    private SpecialMenuEntry CreateDragDrop(DragDropCreateRequest request, BackendUserContext? userContext)
     {
         if (!Guid.TryParse(request.GuidText, out var guid))
         {
@@ -2441,19 +2477,20 @@ public sealed class SpecialMenuService
             _ => throw new InvalidOperationException("Unknown drag-drop group.")
         };
         var path = $@"{shellExPath}\DragDropHandlers\{guid:B}";
-        Registry.SetValue($@"HKEY_CLASSES_ROOT\{path}", string.Empty, guid.ToString("B"), RegistryValueKind.String);
-        return GetDragDropItems().First(item => string.Equals(item.RegistryPath, $@"HKEY_CLASSES_ROOT\{path}", StringComparison.OrdinalIgnoreCase));
+        var registryPath = $@"{GetDragDropClassesPrefix()}{path}";
+        Registry.SetValue(registryPath, string.Empty, guid.ToString("B"), RegistryValueKind.String);
+        return GetDragDropItems(userContext).First(item => string.Equals(item.RegistryPath, registryPath, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static SpecialMenuEntry UpdateDefaultDropEffect(DefaultDropEffect effect)
+    private SpecialMenuEntry UpdateDefaultDropEffect(DefaultDropEffect effect, BackendUserContext? userContext)
     {
         var value = (int)effect;
         foreach (var path in new[] { "*", "AllFilesystemObjects", "Folder", "Directory" })
         {
-            Registry.SetValue($@"HKEY_CLASSES_ROOT\{path}", "DefaultDropEffect", value, RegistryValueKind.DWord);
+            Registry.SetValue($@"{GetDragDropClassesPrefix()}{path}", "DefaultDropEffect", value, RegistryValueKind.DWord);
         }
 
-        return GetDragDropItems().First(static item => item.Id == "dragdrop:default-drop-effect");
+        return GetDragDropItems(userContext).First(static item => item.Id == "dragdrop:default-drop-effect");
     }
 
     internal static IReadOnlyList<SpecialMenuEntry> GetOpenWithItems(BackendUserContext context, CancellationToken cancellationToken,
@@ -2998,8 +3035,28 @@ public sealed class SpecialMenuService
         return string.IsNullOrWhiteSpace(firstToken) ? null : firstToken.Trim('"');
     }
 
-    private static IReadOnlyList<SpecialMenuEntry> GetCommandStoreItems()
+    private IReadOnlyList<SpecialMenuEntry> GetGuidBlockItems(BackendUserContext? userContext)
     {
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        return GuidBlockMenuService.GetSnapshot(frontendClasses?.ClassesRoot);
+    }
+
+    private SpecialMenuEntry SetGuidBlockEnabled(SpecialMenuEntry item, bool enabled, BackendUserContext? userContext)
+    {
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        return GuidBlockMenuService.SetEnabled(item, enabled, frontendClasses?.ClassesRoot);
+    }
+
+    private SpecialMenuEntry CreateGuidBlock(GuidBlockCreateRequest request, BackendUserContext? userContext)
+    {
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        return GuidBlockMenuService.Create(request, frontendClasses?.ClassesRoot);
+    }
+
+    private IReadOnlyList<SpecialMenuEntry> GetCommandStoreItems(BackendUserContext? userContext)
+    {
+        using var frontendClasses = OpenFrontendClassesForMetadata(userContext);
+        var frontendClassesRoot = frontendClasses?.ClassesRoot;
         using var key = Registry.LocalMachine.OpenSubKey(CommandStorePath, writable: false);
         if (key is null)
         {
@@ -3013,7 +3070,7 @@ public sealed class SpecialMenuService
                 using var itemKey = key.OpenSubKey(name);
                 var displayName = itemKey is null ? name : ShellMetadataResolver.ResolveVerbDisplayName(itemKey, name);
                 var command = itemKey?.OpenSubKey("command")?.GetValue(null)?.ToString();
-                var icon = itemKey is null ? (null, 0) : ShellMetadataResolver.ResolveVerbIcon(itemKey, command);
+                var icon = itemKey is null ? (null, 0) : ShellMetadataResolver.ResolveVerbIcon(itemKey, command, userContext, frontendClassesRoot);
                 return new SpecialMenuEntry
                 {
                     Id = EncodeId(SpecialMenuKind.CommandStore, $@"HKEY_LOCAL_MACHINE\{CommandStorePath}\{name}"),
@@ -3030,7 +3087,7 @@ public sealed class SpecialMenuService
             .ToArray();
     }
 
-    private static SpecialMenuEntry CreateCommandStore(SpecialMenuEntry request)
+    private SpecialMenuEntry CreateCommandStore(SpecialMenuEntry request, BackendUserContext? userContext)
     {
         if (string.IsNullOrWhiteSpace(request.KeyName) || string.IsNullOrWhiteSpace(request.CommandText))
         {
@@ -3045,10 +3102,10 @@ public sealed class SpecialMenuService
         }
 
         Registry.SetValue($@"{path}\command", string.Empty, request.CommandText, RegistryValueKind.String);
-        return GetCommandStoreItems().First(item => string.Equals(item.RegistryPath, path, StringComparison.OrdinalIgnoreCase));
+        return GetCommandStoreItems(userContext).First(item => string.Equals(item.RegistryPath, path, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static SpecialMenuEntry UpdateCommandStore(SpecialMenuEntry request)
+    private SpecialMenuEntry UpdateCommandStore(SpecialMenuEntry request, BackendUserContext? userContext)
     {
         var path = DecodeId(request.Id);
         Registry.SetValue(path, "MUIVerb", request.DisplayName, RegistryValueKind.String);
@@ -3058,7 +3115,7 @@ public sealed class SpecialMenuService
             Registry.SetValue($@"{path}\command", string.Empty, request.CommandText, RegistryValueKind.String);
         }
 
-        return GetCommandStoreItems().First(item => string.Equals(item.RegistryPath, path, StringComparison.OrdinalIgnoreCase));
+        return GetCommandStoreItems(userContext).First(item => string.Equals(item.RegistryPath, path, StringComparison.OrdinalIgnoreCase));
     }
 
     private static SpecialMenuEntry SetCommandStoreEnabled(SpecialMenuEntry item, bool enabled)
@@ -3402,9 +3459,10 @@ public sealed class SpecialMenuService
 
     private static DefaultDropEffect GetDefaultDropEffect()
     {
+        using var classesRoot = OpenDragDropClassesRoot();
         foreach (var path in new[] { "*", "AllFilesystemObjects", "Folder", "Directory" })
         {
-            using var key = Registry.ClassesRoot.OpenSubKey(path, writable: false);
+            using var key = classesRoot.OpenSubKey(path, writable: false);
             if (key?.GetValue("DefaultDropEffect") is int value && Enum.IsDefined(typeof(DefaultDropEffect), value))
             {
                 return (DefaultDropEffect)value;
@@ -3413,6 +3471,17 @@ public sealed class SpecialMenuService
 
         return DefaultDropEffect.Default;
     }
+
+    private static RegistryKey OpenDragDropClassesRoot()
+    {
+        if (!RuntimeHosting.IsInProcess) return Registry.ClassesRoot;
+        return Registry.LocalMachine.OpenSubKey(MachineClassesPath, writable: false)
+            ?? throw new InvalidOperationException("The machine Classes registry root is unavailable.");
+    }
+
+    private static string GetDragDropClassesPrefix() => RuntimeHosting.IsInProcess
+        ? @"HKEY_LOCAL_MACHINE\SOFTWARE\Classes\"
+        : @"HKEY_CLASSES_ROOT\";
 
     private static bool HasAnyValue(RegistryKey key, params string[] valueNames) => valueNames.Any(name => key.GetValue(name) is not null);
 

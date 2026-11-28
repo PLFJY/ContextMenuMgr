@@ -9,7 +9,7 @@ internal static class GuidBlockMenuService
 {
     private const string GuidBlockedPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
 
-    internal static IReadOnlyList<SpecialMenuEntry> GetSnapshot()
+    internal static IReadOnlyList<SpecialMenuEntry> GetSnapshot(RegistryKey? frontendClassesRoot = null)
     {
         using var key = Registry.LocalMachine.OpenSubKey(GuidBlockedPath, writable: false);
         if (key is null)
@@ -22,18 +22,18 @@ internal static class GuidBlockMenuService
             .Select(name =>
             {
                 var guid = Guid.Parse(name);
-                var icon = GuidMetadataCatalog.GetIconLocation(guid);
+                var icon = GuidMetadataCatalog.GetIconLocation(guid, userContext: null, frontendClassesRoot: frontendClassesRoot);
                 return new SpecialMenuEntry
                 {
                     Id = $"{SpecialMenuKind.GuidBlock}:{Convert.ToBase64String(Encoding.UTF8.GetBytes(name))}",
                     Kind = SpecialMenuKind.GuidBlock,
-                    DisplayName = GuidMetadataCatalog.GetDisplayName(guid) ?? key.GetValue(name)?.ToString() ?? name,
+                    DisplayName = GuidMetadataCatalog.GetDisplayName(guid, userContext: null, frontendClassesRoot: frontendClassesRoot) ?? key.GetValue(name)?.ToString() ?? name,
                     KeyName = name,
                     IsEnabled = true,
                     IconPath = icon.IconPath,
                     IconIndex = icon.IconIndex,
                     RegistryPath = $@"HKEY_LOCAL_MACHINE\{GuidBlockedPath}",
-                    TargetPath = GuidMetadataCatalog.GetFilePath(guid),
+                    TargetPath = GuidMetadataCatalog.GetFilePath(guid, userContext: null, frontendClassesRoot: frontendClassesRoot),
                     Metadata = new Dictionary<string, string> { ["Guid"] = name }
                 };
             })
@@ -41,7 +41,7 @@ internal static class GuidBlockMenuService
             .ToArray();
     }
 
-    internal static SpecialMenuEntry Create(GuidBlockCreateRequest request)
+    internal static SpecialMenuEntry Create(GuidBlockCreateRequest request, RegistryKey? frontendClassesRoot = null)
     {
         if (!Guid.TryParse(request.GuidText, out var guid))
         {
@@ -51,10 +51,10 @@ internal static class GuidBlockMenuService
         using var key = Registry.LocalMachine.CreateSubKey(GuidBlockedPath, writable: true)
             ?? throw new InvalidOperationException("Unable to open Blocked shell extensions key.");
         key.SetValue(guid.ToString("B"), request.DisplayName ?? string.Empty, RegistryValueKind.String);
-        return GetSnapshot().First(item => string.Equals(item.KeyName, guid.ToString("B"), StringComparison.OrdinalIgnoreCase));
+        return GetSnapshot(frontendClassesRoot).First(item => string.Equals(item.KeyName, guid.ToString("B"), StringComparison.OrdinalIgnoreCase));
     }
 
-    internal static SpecialMenuEntry SetEnabled(SpecialMenuEntry item, bool enabled)
+    internal static SpecialMenuEntry SetEnabled(SpecialMenuEntry item, bool enabled, RegistryKey? frontendClassesRoot = null)
     {
         if (enabled)
         {

@@ -46,22 +46,27 @@ internal static class GuidMetadataCatalog
     /// Gets display Name.
     /// </summary>
     public static string? GetDisplayName(Guid guid, BackendUserContext? userContext)
+        => GetDisplayName(guid, userContext, frontendClassesRoot: null);
+
+    internal static string? GetDisplayName(Guid guid, BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
-        if (userContext is null)
+        if (userContext is null && frontendClassesRoot is null)
         {
-            return DisplayNameCache.GetOrAdd(guid, static id => ResolveDisplayNameUncached(id, userContext: null).DisplayName);
+            return DisplayNameCache.GetOrAdd(guid, static id => ResolveDisplayNameUncached(id, userContext: null, frontendClassesRoot: null).DisplayName);
         }
 
-        return ResolveDisplayNameUncached(guid, userContext).DisplayName;
+        return ResolveDisplayNameUncached(guid, userContext, frontendClassesRoot).DisplayName;
     }
 
-    internal static GuidDisplayNameResolution ResolveClsidDisplayName(Guid guid, BackendUserContext? userContext = null)
+    internal static GuidDisplayNameResolution ResolveClsidDisplayName(Guid guid, BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
         var checkedRoots = GetClsidRootPaths(guid, userContext).ToArray();
 
         if (TryGetDictionaryValue(guid, "ResText", out var resourceText))
         {
-            var resolved = ResolveIndirectString(MakeAbsolute(guid, resourceText, isName: true));
+            var resolved = ResolveIndirectString(MakeAbsolute(guid, resourceText, isName: true,
+                userContext: userContext, frontendClassesRoot: frontendClassesRoot));
             if (IsUsefulDisplayName(resolved))
             {
                 return new GuidDisplayNameResolution(resolved, "Dictionary.ResText", checkedRoots);
@@ -85,7 +90,7 @@ internal static class GuidMetadataCatalog
 
         string? weakClsidDisplayName = null;
         string? weakClsidDisplayNameSource = null;
-        foreach (var clsidKey in OpenClsidKeys(guid, userContext))
+        foreach (var clsidKey in OpenClsidKeys(guid, userContext, frontendClassesRoot))
         {
             using (clsidKey.Key)
             {
@@ -114,20 +119,22 @@ internal static class GuidMetadataCatalog
             IsWeak: weakClsidDisplayName is not null);
     }
 
-    internal static GuidDisplayNameResolution ResolveDisplayName(Guid guid, BackendUserContext? userContext = null)
+    internal static GuidDisplayNameResolution ResolveDisplayName(Guid guid, BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
-        return ResolveDisplayNameUncached(guid, userContext);
+        return ResolveDisplayNameUncached(guid, userContext, frontendClassesRoot);
     }
 
-    private static GuidDisplayNameResolution ResolveDisplayNameUncached(Guid guid, BackendUserContext? userContext)
+    private static GuidDisplayNameResolution ResolveDisplayNameUncached(Guid guid, BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
     {
-        var clsidDisplayName = ResolveClsidDisplayName(guid, userContext);
+        var clsidDisplayName = ResolveClsidDisplayName(guid, userContext, frontendClassesRoot);
         if (IsUsefulDisplayName(clsidDisplayName.DisplayName) && !clsidDisplayName.IsWeak)
         {
             return clsidDisplayName;
         }
 
-        var filePath = GetFilePath(guid, userContext);
+        var filePath = GetFilePath(guid, userContext, frontendClassesRoot);
         if (string.IsNullOrWhiteSpace(filePath))
         {
             return clsidDisplayName;
@@ -178,24 +185,31 @@ internal static class GuidMetadataCatalog
     /// Executes static.
     /// </summary>
     public static (string? IconPath, int IconIndex) GetIconLocation(Guid guid)
-    {
-        return IconCache.GetOrAdd(guid, static id =>
-        {
-            if (TryGetDictionaryValue(id, "Icon", out var iconValue))
-            {
-                var absolute = MakeAbsolute(id, iconValue, isName: false);
-                if (TryParseIconLocation(absolute, out var iconPath, out var iconIndex))
-                {
-                    iconPath = NormalizeCandidatePath(iconPath, GetFilePath(id));
-                    return (iconPath, iconIndex);
-                }
-            }
+        => GetIconLocation(guid, userContext: null, frontendClassesRoot: null);
 
-            var filePath = GetFilePath(id);
-            return string.IsNullOrWhiteSpace(filePath)
-                ? (null, 0)
-                : (filePath, 0);
-        });
+    internal static (string? IconPath, int IconIndex) GetIconLocation(Guid guid, BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
+    {
+        if (userContext is null && frontendClassesRoot is null)
+            return IconCache.GetOrAdd(guid, static id => ResolveIconLocation(id, null, null));
+        return ResolveIconLocation(guid, userContext, frontendClassesRoot);
+    }
+
+    private static (string? IconPath, int IconIndex) ResolveIconLocation(Guid guid, BackendUserContext? userContext,
+        RegistryKey? frontendClassesRoot)
+    {
+        if (TryGetDictionaryValue(guid, "Icon", out var iconValue))
+        {
+            var absolute = MakeAbsolute(guid, iconValue, isName: false, userContext, frontendClassesRoot);
+            if (TryParseIconLocation(absolute, out var iconPath, out var iconIndex))
+            {
+                iconPath = NormalizeCandidatePath(iconPath, GetFilePath(guid, userContext, frontendClassesRoot));
+                return (iconPath, iconIndex);
+            }
+        }
+
+        var filePath = GetFilePath(guid, userContext, frontendClassesRoot);
+        return string.IsNullOrWhiteSpace(filePath) ? (null, 0) : (filePath, 0);
     }
 
     /// <summary>
@@ -207,28 +221,31 @@ internal static class GuidMetadataCatalog
     /// Gets file Path.
     /// </summary>
     public static string? GetFilePath(Guid guid, BackendUserContext? userContext)
+        => GetFilePath(guid, userContext, frontendClassesRoot: null);
+
+    internal static string? GetFilePath(Guid guid, BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
-        if (userContext is null)
+        if (userContext is null && frontendClassesRoot is null)
         {
-            return FilePathCache.GetOrAdd(guid, static id => GetFilePathUncached(id, userContext: null));
+            return FilePathCache.GetOrAdd(guid, static id => GetFilePathUncached(id, userContext: null, frontendClassesRoot: null));
         }
 
-        return GetFilePathUncached(guid, userContext);
+        return GetFilePathUncached(guid, userContext, frontendClassesRoot);
     }
 
-    private static string? GetFilePathUncached(Guid guid, BackendUserContext? userContext)
+    private static string? GetFilePathUncached(Guid guid, BackendUserContext? userContext, RegistryKey? frontendClassesRoot)
     {
         var uwpName = GetUwpName(guid);
         if (!string.IsNullOrWhiteSpace(uwpName))
         {
-            var uwpFilePath = UwpPackageHelper.GetFilePath(uwpName, guid);
+            var uwpFilePath = UwpPackageHelper.GetFilePath(uwpName, guid, frontendClassesRoot);
             if (!string.IsNullOrWhiteSpace(uwpFilePath))
             {
                 return uwpFilePath;
             }
         }
 
-        foreach (var clsidKey in OpenClsidKeys(guid, userContext))
+        foreach (var clsidKey in OpenClsidKeys(guid, userContext, frontendClassesRoot))
         {
             using (clsidKey.Key)
             {
@@ -315,18 +332,28 @@ internal static class GuidMetadataCatalog
         }
     }
 
-    private static IEnumerable<ClsidRegistryKey> OpenClsidKeys(Guid guid, BackendUserContext? userContext = null)
+    private static IEnumerable<ClsidRegistryKey> OpenClsidKeys(Guid guid, BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
         var guidText = guid.ToString("B");
+        var effectiveClassesRoot = frontendClassesRoot ?? Registry.ClassesRoot;
 
         foreach (var relativePath in RegistryClsidPaths)
         {
             var path = $@"HKEY_CLASSES_ROOT\{relativePath}\{guidText}";
-            var classesRootKey = Registry.ClassesRoot.OpenSubKey($@"{relativePath}\{guidText}", writable: false);
+            var classesRootKey = effectiveClassesRoot.OpenSubKey($@"{relativePath}\{guidText}", writable: false);
             if (classesRootKey is not null)
             {
                 yield return new ClsidRegistryKey(path, classesRootKey);
             }
+        }
+
+        // RegOpenUserClassesRoot already supplies this user's merged Classes view.
+        // Do not append machine and HKEY_USERS keys afterward: that would let a
+        // lower-precedence physical registration override merged-view metadata.
+        if (frontendClassesRoot is not null)
+        {
+            yield break;
         }
 
         foreach (var machinePath in MachineClsidPaths)
@@ -440,7 +467,8 @@ internal static class GuidMetadataCatalog
         return result;
     }
 
-    private static string MakeAbsolute(Guid guid, string value, bool isName)
+    private static string MakeAbsolute(Guid guid, string value, bool isName, BackendUserContext? userContext = null,
+        RegistryKey? frontendClassesRoot = null)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -459,7 +487,7 @@ internal static class GuidMetadataCatalog
             if (result.StartsWith("{*?ms-resource://", StringComparison.OrdinalIgnoreCase)
                 && result.EndsWith('}'))
             {
-                var packageName = UwpPackageHelper.GetPackageName(GetUwpName(guid));
+                var packageName = UwpPackageHelper.GetPackageName(GetUwpName(guid), frontendClassesRoot);
                 if (!string.IsNullOrWhiteSpace(packageName))
                 {
                     result = "@{" + packageName + result[2..];
@@ -468,7 +496,7 @@ internal static class GuidMetadataCatalog
             }
         }
 
-        result = NormalizeCandidatePath(result, GetFilePath(guid));
+        result = NormalizeCandidatePath(result, GetFilePath(guid, userContext, frontendClassesRoot));
 
         return isName ? "@" + result : result;
     }
