@@ -63,7 +63,8 @@
             MaxWidth="480"
             Margin="0,0,10,10"
             Background="{DynamicResource ControlFillColorSecondaryBrush}"
-            Style="{StaticResource CardBorderStyle}">
+            Style="{StaticResource CardBorderStyle}"
+            Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}">
             <StackPanel>
                 <ui:TextBlock
                     FontSize="20"
@@ -128,7 +129,8 @@
                     FontWeight="SemiBold"
                     Text="{Binding ProtectionTitle}" />
                 <Grid Margin="0,12,0,0">
-                    <ui:Flyout IsOpen="{Binding IsRegistryProtectionWarningFlyoutOpen, Mode=TwoWay}" Placement="Top">
+                    <ui:Flyout IsOpen="{Binding IsRegistryProtectionWarningFlyoutOpen, Mode=TwoWay}" Placement="Top"
+                               Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <StackPanel Width="340">
                             <ui:TextBlock
                                 FontWeight="SemiBold"
@@ -158,13 +160,15 @@
                         </StackPanel>
                     </ui:Flyout>
 
-                    <ui:ToggleSwitch Content="{Binding LockNewContextMenuItemsLabel}" IsChecked="{Binding LockNewContextMenuItems, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <ui:ToggleSwitch Content="{Binding LockNewContextMenuItemsLabel}" IsChecked="{Binding LockNewContextMenuItems, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
                 <ui:TextBlock
                     Margin="0,8,0,0"
                     Opacity="0.72"
                     Text="{Binding LockNewContextMenuItemsDescription}"
-                    TextWrapping="Wrap" />
+                    TextWrapping="Wrap"
+                    Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 <ui:ToggleSwitch
                     Margin="0,16,0,0"
                     Content="{Binding Win11ModernContextMenuDisabledLabel}"
@@ -181,7 +185,8 @@
         <Border
             Margin="0,0,10,10"
             Background="{DynamicResource ControlFillColorSecondaryBrush}"
-            Style="{StaticResource CardBorderStyle}">
+            Style="{StaticResource CardBorderStyle}"
+            Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}">
             <StackPanel>
                 <ui:TextBlock
                     FontSize="20"

@@ -435,6 +435,7 @@
                             Content="{Binding ApprovalsTitle}"
                             Icon="{ui:SymbolIcon Symbol=ChatWarning24}"
                             InfoBadge="{Binding ApprovalsBadge}"
+                            Visibility="{Binding IsServiceHosting, Converter={StaticResource BooleanToVisibilityConverter}}"
                             TargetPageType="{x:Type pages:ApprovalsPage}" />
                     </modernNavigation:ModernNavigationView.MenuItems>
 

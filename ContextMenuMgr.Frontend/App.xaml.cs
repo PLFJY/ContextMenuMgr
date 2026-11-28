@@ -14,7 +14,11 @@ namespace ContextMenuMgr.Frontend;
 /// </summary>
 public partial class App : Application
 {
+#if CONTEXTMENUMGR_IN_PROCESS
+    private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.InProcess.SingleInstance";
+#else
     private const string SingleInstanceMutexName = @"Global\PLFJY.ContextMenuManagerPlus.SingleInstance";
+#endif
     private const string ProtocolScheme = "contextmenumgrplus";
     private static readonly string LogFilePath = RuntimePaths.FrontendCrashLogPath;
 
@@ -44,6 +48,15 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        try { InProcessBootstrap.Prepare(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Context Menu Manager Plus", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(-1);
+            return;
+        }
+#endif
         RuntimeLogFiles.RecoverEmergency("frontend-crash.log");
         RegisterGlobalExceptionHandlers();
         StartupArguments = e.Args ?? [];
@@ -71,9 +84,11 @@ public partial class App : Application
             FrontendDebugLog.Configure(settingsService.Current.LogLevel);
             _localization.ApplyPersistedLanguage();
 
+#if !CONTEXTMENUMGR_IN_PROCESS
             _controlServerCts = new CancellationTokenSource();
             _controlServer = new FrontendControlServer(HandleFrontendControlRequestAsync);
             _controlServer.Start(_controlServerCts.Token);
+#endif
 
             // Closed, rather than Closing, establishes that the close was not
             // cancelled. Keep IPC alive while the bounded lifecycle work runs.
@@ -437,6 +452,10 @@ public partial class App : Application
         _mainWindow = null;
         _shellViewModel = null;
         if (!normalClose) return;
+#if CONTEXTMENUMGR_IN_PROCESS
+        Shutdown();
+        return;
+#else
         try
         {
             var actions = FrontendCloseLifecyclePolicy.Evaluate(_frontendSettingsService?.Current.KeepBackgroundAfterClose ?? true);
@@ -444,6 +463,7 @@ public partial class App : Application
         }
         catch (Exception ex) { FrontendDebugLog.Error("App", ex, "Normal exit lifecycle failed."); }
         finally { Shutdown(); }
+#endif
     }
 
     private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)

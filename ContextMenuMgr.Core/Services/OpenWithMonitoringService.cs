@@ -7,7 +7,7 @@ namespace ContextMenuMgr.Backend.Services;
 
 /// <summary>Bounded Applications-only reconciliation, driven by the existing registry monitor.</summary>
 internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, FileLogger logger,
-    Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers)
+    Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers, bool protectionWorkflowEnabled = true)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<string, BackendUserContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
@@ -382,6 +382,12 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
 
     internal async Task<IReadOnlyList<SpecialMenuEntry>> GetSnapshotAsync(BackendUserContext context, CancellationToken token)
     {
+        if (!protectionWorkflowEnabled)
+            return SpecialMenuService.GetOpenWithItems(context, token).Select(item => item with
+            {
+                Metadata = new Dictionary<string, string>(item.Metadata)
+            }).ToArray();
+
         ObserveUser(context);
         await _gate.WaitAsync(token);
         try { return await SnapshotCoreAsync(context, token); }
@@ -409,6 +415,9 @@ internal sealed class OpenWithMonitoringService(ContextMenuStateStore store, Fil
     internal async Task<SpecialMenuEntry> SetEnabledAsync(SpecialMenuEntry item, bool enabled,
         BackendUserContext context, CancellationToken token)
     {
+        if (!protectionWorkflowEnabled)
+            return SpecialMenuService.SetOpenWithEnabled(item, enabled, context);
+
         await _gate.WaitAsync(token);
         try
         {

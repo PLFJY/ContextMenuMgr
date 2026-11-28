@@ -325,13 +325,15 @@ public sealed class MenuListCacheService : IAsyncDisposable
     private string GetPath(Type type, string scope) => Path.Combine(_directory,
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(type.Name + "|" + scope))) + ".json");
 
-    private static string? GetFingerprint()
+    internal static string? GetFingerprint(string? userSid = null)
     {
         try
         {
             var machine = RuntimeIdentityFingerprint.ReadMachineGuid();
+            if (machine is null) return null;
+            if (!string.IsNullOrWhiteSpace(userSid)) return RuntimeIdentityFingerprint.Compute(machine, userSid);
             using var identity = WindowsIdentity.GetCurrent();
-            return machine is not null && identity.User is { } sid ? RuntimeIdentityFingerprint.Compute(machine, sid.Value) : null;
+            return identity.User is { } sid ? RuntimeIdentityFingerprint.Compute(machine, sid.Value) : null;
         }
         catch (Exception ex)
         { FrontendDebugLog.Warning(nameof(MenuListCacheService), $"Cache identity unavailable: {ex.Message}"); return null; }

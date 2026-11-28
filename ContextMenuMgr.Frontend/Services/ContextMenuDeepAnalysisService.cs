@@ -74,8 +74,15 @@ public sealed class ContextMenuDeepAnalysisService
 
         using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(5));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        var operationDirectory = Path.Combine(Path.GetTempPath(), "ContextMenuMgr.DeepAnalysis", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(operationDirectory);
+        var operationRoot = RuntimeHosting.IsInProcess
+            ? Path.Combine(RuntimePaths.DataDirectory, "DeepAnalysis")
+            : Path.Combine(Path.GetTempPath(), "ContextMenuMgr.DeepAnalysis");
+        Directory.CreateDirectory(operationRoot);
+        if (RuntimeHosting.IsInProcess && (File.GetAttributes(operationRoot) & FileAttributes.ReparsePoint) != 0)
+            return Failure("ProbeHostUnavailable", "Deep Analysis data directory must not be a reparse point.", request);
+        var operationDirectory = Path.Combine(operationRoot, Guid.NewGuid().ToString("N"));
+        if (RuntimeHosting.IsInProcess) InProcessBootstrap.User.CreatePrivateDirectory(operationDirectory);
+        else Directory.CreateDirectory(operationDirectory);
         var requestPath = Path.Combine(operationDirectory, "request.json");
         var resultPath = Path.Combine(operationDirectory, "result.json");
         await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, JsonOptions), Utf8NoBom, cancellationToken);
@@ -98,7 +105,10 @@ public sealed class ContextMenuDeepAnalysisService
         startInfo.ArgumentList.Add("--result");
         startInfo.ArgumentList.Add(resultPath);
 
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        using var process = RuntimeHosting.IsInProcess
+            ? InProcessBootstrap.User.StartNonElevatedProcess(probeHostPath,
+                ["--request", requestPath, "--result", resultPath], startInfo.WorkingDirectory)
+            : new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         Task<string>? outputTask = null;
         Task<string>? errorTask = null;
         try
@@ -107,7 +117,7 @@ public sealed class ContextMenuDeepAnalysisService
                 "ContextMenuDeepAnalysisService",
                 $"ProbeHostStart: Path={probeHostPath}, OperationId={request.OperationId}, ItemId={request.ItemId}, ProbeMode={request.ProbeMode}, TimeoutMs={(timeout ?? TimeSpan.FromSeconds(5)).TotalMilliseconds:F0}, RequestPath={requestPath}, ResultPath={resultPath}.");
 
-            if (!process.Start())
+            if (!RuntimeHosting.IsInProcess && !process.Start())
             {
                 FrontendDebugLog.Operation(
                     "FrontendOperation",
@@ -115,10 +125,17 @@ public sealed class ContextMenuDeepAnalysisService
                 return Failure("ProbeHostStartFailed", "Failed to start ProbeHost.", request);
             }
 
-            process.StandardInput.Close();
-
-            outputTask = process.StandardOutput.ReadToEndAsync();
-            errorTask = process.StandardError.ReadToEndAsync();
+            if (!RuntimeHosting.IsInProcess)
+            {
+                process.StandardInput.Close();
+                outputTask = process.StandardOutput.ReadToEndAsync();
+                errorTask = process.StandardError.ReadToEndAsync();
+            }
+            else
+            {
+                outputTask = Task.FromResult(string.Empty);
+                errorTask = Task.FromResult("ProbeHost was started under the verified, non-elevated interactive user token. Standard output and error are not redirected in In-process mode.");
+            }
             await process.WaitForExitAsync(linkedCts.Token);
 
             var output = await outputTask;

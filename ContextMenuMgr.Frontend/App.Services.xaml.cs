@@ -1,6 +1,7 @@
 ﻿using ContextMenuMgr.Frontend.Services;
 using ContextMenuMgr.Frontend.ViewModels;
 using ContextMenuMgr.Frontend.Views.Pages;
+using ContextMenuMgr.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Wpf.Ui;
 using Wpf.Ui.DependencyInjection;
@@ -20,7 +21,13 @@ public partial class App
         services.AddSingleton<INavigationService, NavigationService>();
 
         services.AddSingleton<RuntimeDataAclRepairClient>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<MenuListCacheService>(sp => new MenuListCacheService(
+            System.IO.Path.Combine(RuntimePaths.DataDirectory, "Cache", "MenuLists"),
+            MenuListCacheService.GetFingerprint(sp.GetRequiredService<InProcessBackendRuntime>().UserSid)));
+#else
         services.AddSingleton<MenuListCacheService>();
+#endif
         services.AddSingleton<MenuListActivityService>();
         services.AddSingleton<FrontendSettingsService>();
         services.AddSingleton<FrontendStartupService>();
@@ -33,7 +40,15 @@ public partial class App
         services.AddSingleton<IconPreviewService>();
         services.AddSingleton<RuleDictionaryCatalogService>();
         services.AddSingleton<EnhanceMenuRuleService>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<DetailedEditRuleService>(sp => new DetailedEditRuleService(
+            sp.GetRequiredService<IBackendClient>(), sp.GetRequiredService<FrontendSettingsService>(),
+            sp.GetRequiredService<LocalizationService>(),
+            () => sp.GetRequiredService<InProcessBackendRuntime>().UserSid,
+            sp.GetRequiredService<InProcessBackendRuntime>().InteractiveUser));
+#else
         services.AddSingleton<DetailedEditRuleService>();
+#endif
         services.AddSingleton<Windows11ContextMenuService>();
         services.AddSingleton<ContextMenuGlobalSearchService>();
         services.AddSingleton<GlobalSearchNavigationFilterService>();
@@ -42,8 +57,14 @@ public partial class App
         services.AddSingleton<ContextMenuDeepAnalysisService>();
         services.AddSingleton<ShellSubMenuDialogService>();
         services.AddSingleton<DetailedEditMenuDialogService>();
+#if CONTEXTMENUMGR_IN_PROCESS
+        services.AddSingleton<InProcessBackendRuntime>(_ => InProcessBackendRuntime.Create());
+        services.AddSingleton<IBackendClient>(sp => new BackendClient(sp.GetRequiredService<InProcessBackendRuntime>().Transport,
+            sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>()));
+#else
         services.AddSingleton<IBackendClient>(sp => new BackendClient(new NamedPipeBackendTransport(),
             sp.GetRequiredService<MenuListCacheService>(), sp.GetRequiredService<MenuListActivityService>()));
+#endif
         services.AddSingleton<IBackendServiceManager, BackendServiceManager>();
         services.AddSingleton<ContextMenuWorkspaceService>();
         services.AddSingleton<ExplorerRestartStateService>();

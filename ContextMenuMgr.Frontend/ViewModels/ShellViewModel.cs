@@ -85,6 +85,8 @@ public partial class ShellViewModel : ObservableObject, IDisposable
 
     public bool HasServiceAttention => !string.IsNullOrWhiteSpace(ServiceAttentionText);
 
+    public bool IsServiceHosting => !RuntimeHosting.IsInProcess;
+
     public bool IsServiceBootstrapInProgress => _workspace.IsServiceBootstrapInProgress;
 
     /// <summary>

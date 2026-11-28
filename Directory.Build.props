@@ -25,4 +25,14 @@
     <InformationalVersion>$(AppVersion)-Beta</InformationalVersion>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <BackendHostingMode Condition="'$(BackendHostingMode)' == ''">Service</BackendHostingMode>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(BackendHostingMode)' == 'InProcess'">
+    <DefineConstants>$(DefineConstants);CONTEXTMENUMGR_IN_PROCESS</DefineConstants>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)artifacts\in-process</ArtifactsPath>
+  </PropertyGroup>
+
 </Project>

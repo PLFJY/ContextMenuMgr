@@ -160,9 +160,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             if (await EnsureBackendReadyAsync(suppressBootstrapPrompt))
             {
                 await SyncBackendLogLevelAsync();
+#if !CONTEXTMENUMGR_IN_PROCESS
                 await SyncTrayHostLogLevelAsync();
+#endif
                 await EnsureNotificationConnectionAsync();
+#if !CONTEXTMENUMGR_IN_PROCESS
                 StartWpsOfficeApprovalRefreshLoop();
+#endif
                 _uiStateActive = true;
                 await RefreshAsync();
                 _fullyInitialized = true;
@@ -202,9 +206,13 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             {
                 _uiStateActive = false;
                 await SyncBackendLogLevelAsync();
+#if !CONTEXTMENUMGR_IN_PROCESS
                 await SyncTrayHostLogLevelAsync();
+#endif
                 await EnsureNotificationConnectionAsync();
+#if !CONTEXTMENUMGR_IN_PROCESS
                 StartWpsOfficeApprovalRefreshLoop();
+#endif
                 return;
             }
 
@@ -249,8 +257,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
             ConnectionStatus = _localization.Translate("ConnectedStatus");
             // The normal menu snapshot is ready. WPS approvals are secondary data.
             IsLoading = false;
+#if !CONTEXTMENUMGR_IN_PROCESS
             await RefreshWpsOfficeApprovalsAsync();
             await OpenWithReviews.RefreshAsync(_shutdownCts.Token);
+#endif
         }
         catch (Exception ex)
         {
@@ -1121,6 +1131,26 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private async Task<bool> EnsureBackendReadyAsync(bool suppressBootstrapPrompt)
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        try
+        {
+            using var localReady = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token);
+            localReady.CancelAfter(TimeSpan.FromSeconds(15));
+            await _backendClient.ConnectAsync(localReady.Token);
+            ClearMenuLoadFailure();
+            UpdateServiceAttention(ServiceAttentionState.None);
+            ConnectionStatus = _localization.Translate("ConnectedStatus");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !_shutdownCts.IsCancellationRequested)
+        {
+            FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, "Local backend initialization failed.");
+            UpdateServiceAttention(ServiceAttentionState.Unavailable);
+            ConnectionStatus = ex.Message;
+            SetMenuLoadFailure(MenuLoadFailureState.ServiceUnavailable);
+            return false;
+        }
+#else
         var probeBackend = true;
         if (RuntimePaths.PackageKind == RuntimePackageKind.Portable)
         {
@@ -1245,6 +1275,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         }
 
         return ready;
+#endif
     }
 
     private async Task PromptUnblockPortableRuntimeFilesAndRetryAsync()
@@ -1292,6 +1323,10 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
 
     private async Task EnsureTrayHostAsync()
     {
+#if CONTEXTMENUMGR_IN_PROCESS
+        _trayHostEnsured = true;
+        return;
+#else
         if (_trayHostEnsured)
         {
             return;
@@ -1309,6 +1344,7 @@ public partial class ContextMenuWorkspaceService : ObservableObject, IAsyncDispo
         {
             FrontendDebugLog.Error("ContextMenuWorkspaceService", ex, "EnsureTrayHostAsync failed.");
         }
+#endif
     }
 
     /// <summary>

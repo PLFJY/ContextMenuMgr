@@ -8,7 +8,9 @@ public static class RuntimePackageManifest
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static RuntimePackageInfo Current { get; } = Read(AppContext.BaseDirectory);
+    public static RuntimePackageInfo Current { get; } = RuntimeHosting.IsInProcess
+        ? new RuntimePackageInfo(RuntimePackageKind.Portable)
+        : Read(AppContext.BaseDirectory);
 
     public static RuntimePackageInfo Read(string baseDirectory)
     {

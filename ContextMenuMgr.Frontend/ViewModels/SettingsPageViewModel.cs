@@ -166,6 +166,8 @@ public partial class SettingsPageViewModel : ObservableObject, IDisposable
 
     public bool IsPortablePackage => RuntimePaths.PackageKind == RuntimePackageKind.Portable;
 
+    public bool IsServiceHosting => !RuntimeHosting.IsInProcess;
+
     public string RemovePortableServiceOnExitLabel => _localization.Translate("Settings.RemovePortableServiceOnExit");
     public string RemovePortableServiceOnExitDescription => _localization.Translate("Settings.RemovePortableServiceOnExit.Description");
 

@@ -1,4 +1,9 @@
 <Project>
+  <Target Name="ValidateBackendHostingMode" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(BackendHostingMode)' != 'Service' and '$(BackendHostingMode)' != 'InProcess'"
+           Text="BackendHostingMode must be Service or InProcess. Received '$(BackendHostingMode)'." />
+  </Target>
+
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ContextMenuMgr.Frontend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Backend' or '$(MSBuildProjectName)' == 'ContextMenuMgr.TrayHost' or '$(MSBuildProjectName)' == 'ContextMenuMgr.Core'">
     <SatelliteResourceLanguages>en;en-US;zh;zh-CN;zh-TW;zh-Hans;zh-Hant</SatelliteResourceLanguages>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>

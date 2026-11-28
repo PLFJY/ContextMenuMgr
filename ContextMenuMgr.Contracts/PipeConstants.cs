@@ -14,6 +14,8 @@ public static class PipeConstants
 
 public static class PipeErrorCodes
 {
+    public const string BackendCapabilityUnavailable = "BACKEND_CAPABILITY_UNAVAILABLE";
+    public const string InteractiveUserUnavailable = "INTERACTIVE_USER_UNAVAILABLE";
     public const string MenuItemRemoved = "MENU_ITEM_REMOVED";
     public const string RegistryWriteProtectionEnabled = "REGISTRY_WRITE_PROTECTION_ENABLED";
     public const string RegistryProtectionTransitionFailed = "REGISTRY_PROTECTION_TRANSITION_FAILED";

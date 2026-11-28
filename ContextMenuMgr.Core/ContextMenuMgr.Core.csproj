@@ -19,6 +19,7 @@
     <Content Include="Resources\GuidInfosDic.ini" CopyToOutputDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="ContextMenuManagerPlus.Service" />
     <InternalsVisibleTo Include="ContextMenuMgr.Tests" />
+    <InternalsVisibleTo Include="ContextMenuManagerPlus" Condition="'$(BackendHostingMode)' == 'InProcess'" />
   </ItemGroup>
 
 </Project>

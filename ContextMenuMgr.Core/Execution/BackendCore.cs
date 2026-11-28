@@ -5,7 +5,8 @@ internal sealed class BackendCore
 {
     public BackendCore(FileLogger logger, ContextMenuStateStore stateStore, RegistryBackupService backupService,
         BackendProtectionSettingsStore protectionSettingsStore, TryOpenFrontendClassesRoot tryOpenFrontendClassesRoot,
-        Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers, Action<string>? logStartup = null)
+        Func<IReadOnlyList<BackendUserContext>> resolveLoggedInUsers, Action<string>? logStartup = null,
+        bool enableProtectionWorkflows = true)
     {
         logStartup?.Invoke("CreateDefault: creating ContextMenuRegistryCatalog.");
         Catalog = new ContextMenuRegistryCatalog(logger, stateStore, backupService, protectionSettingsStore);
@@ -13,7 +14,7 @@ internal sealed class BackendCore
 
         logStartup?.Invoke("CreateDefault: creating SpecialMenuService.");
         SpecialMenu = new SpecialMenuService(logger, tryOpenFrontendClassesRoot);
-        OpenWith = new OpenWithMonitoringService(stateStore, logger, resolveLoggedInUsers);
+        OpenWith = new OpenWithMonitoringService(stateStore, logger, resolveLoggedInUsers, enableProtectionWorkflows);
         SpecialMenu.OpenWithMonitoring = OpenWith;
         logStartup?.Invoke("CreateDefault: SpecialMenuService created.");
 

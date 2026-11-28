@@ -14,18 +14,41 @@ public sealed class DetailedEditRuleService
     private readonly IBackendClient _backendClient;
     private readonly FrontendSettingsService _settingsService;
     private readonly LocalizationService _localization;
+    private readonly Func<string?>? _interactiveUserSid;
+#if CONTEXTMENUMGR_IN_PROCESS
+    private readonly PortableInteractiveUser? _portableUser;
+#endif
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DetailedEditRuleService"/> class.
     /// </summary>
-    public DetailedEditRuleService(
+    public DetailedEditRuleService(IBackendClient backendClient, FrontendSettingsService settingsService,
+        LocalizationService localization)
+        : this(backendClient, settingsService, localization, null
+#if CONTEXTMENUMGR_IN_PROCESS
+            , null
+#endif
+            )
+    {
+    }
+
+    internal DetailedEditRuleService(
         IBackendClient backendClient,
         FrontendSettingsService settingsService,
-        LocalizationService localization)
+        LocalizationService localization,
+        Func<string?>? interactiveUserSid = null
+#if CONTEXTMENUMGR_IN_PROCESS
+        , PortableInteractiveUser? portableUser = null
+#endif
+        )
     {
         _backendClient = backendClient;
         _settingsService = settingsService;
         _localization = localization;
+        _interactiveUserSid = interactiveUserSid;
+#if CONTEXTMENUMGR_IN_PROCESS
+        _portableUser = portableUser;
+#endif
     }
 
     /// <summary>
@@ -124,12 +147,12 @@ public sealed class DetailedEditRuleService
         await WriteValueAsync(clause, value, cancellationToken);
     }
 
-    private static string? ReadValue(DetailedEditRuleClauseDefinition clause)
+    private string? ReadValue(DetailedEditRuleClauseDefinition clause)
     {
         return clause.StorageKind switch
         {
             RuleStorageKind.Registry => ReadRegistryValue(clause),
-            RuleStorageKind.Ini => ReadIniValue(clause),
+            RuleStorageKind.Ini => ReadIniValue(clause with { Path = ResolvePath(clause.Path) }),
             _ => null
         };
     }
@@ -161,7 +184,7 @@ public sealed class DetailedEditRuleService
         }
 
         // 非 Registry 类型（如 Ini）可以同步写入本地文件
-        WriteNonRegistryValue(clause, value);
+        WriteNonRegistryValue(clause with { Path = ResolvePath(clause.Path) }, value);
     }
 
     private static void WriteNonRegistryValue(DetailedEditRuleClauseDefinition clause, string? value)
@@ -176,9 +199,11 @@ public sealed class DetailedEditRuleService
         }
     }
 
-    private static string? ReadRegistryValue(DetailedEditRuleClauseDefinition clause)
+    private string? ReadRegistryValue(DetailedEditRuleClauseDefinition clause)
     {
         var (baseKey, subPath) = OpenRegistryBaseKey(clause.Path);
+        using (baseKey)
+        {
         using var key = baseKey?.OpenSubKey(subPath, writable: false);
         var value = key?.GetValue(clause.KeyName);
         return value switch
@@ -187,9 +212,10 @@ public sealed class DetailedEditRuleService
             byte[] bytes => string.Join(" ", bytes.Select(static b => b.ToString("X2", CultureInfo.InvariantCulture))),
             _ => Convert.ToString(value, CultureInfo.InvariantCulture)
         };
+        }
     }
 
-    private static string? ReadIniValue(DetailedEditRuleClauseDefinition clause)
+    private string? ReadIniValue(DetailedEditRuleClauseDefinition clause)
     {
         if (string.IsNullOrWhiteSpace(clause.Section))
         {
@@ -251,25 +277,27 @@ public sealed class DetailedEditRuleService
             value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
-    private static (RegistryKey? BaseKey, string SubPath) OpenRegistryBaseKey(string fullPath)
+    private (RegistryKey? BaseKey, string SubPath) OpenRegistryBaseKey(string fullPath)
     {
         var normalized = fullPath.Replace('/', '\\');
         var separatorIndex = normalized.IndexOf('\\');
         var root = separatorIndex >= 0 ? normalized[..separatorIndex] : normalized;
         var subPath = separatorIndex >= 0 ? normalized[(separatorIndex + 1)..] : string.Empty;
 
+        var sid = GetCurrentUserSid();
         return root.ToUpperInvariant() switch
         {
-            "HKEY_CLASSES_ROOT" or "HKCR" => (Registry.ClassesRoot, subPath),
-            "HKEY_CURRENT_USER" or "HKCU" => (Registry.CurrentUser, subPath),
-            "HKEY_LOCAL_MACHINE" or "HKLM" => (Registry.LocalMachine, subPath),
-            "HKEY_USERS" or "HKU" => (Registry.Users, subPath),
+            "HKEY_CLASSES_ROOT" or "HKCR" => (OpenClassesRoot(), subPath),
+            "HKEY_CURRENT_USER" or "HKCU" => (OpenUserHive(sid), subPath),
+            "HKEY_LOCAL_MACHINE" or "HKLM" => (RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Default), subPath),
+            "HKEY_USERS" or "HKU" => (RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default), subPath),
             _ => throw new InvalidOperationException($"Unsupported registry root: {fullPath}")
         };
     }
 
-    private static string? GetCurrentUserSid()
+    private string? GetCurrentUserSid()
     {
+        if (_interactiveUserSid is not null) return _interactiveUserSid();
         try
         {
             return WindowsIdentity.GetCurrent().User?.Value;
@@ -278,6 +306,34 @@ public sealed class DetailedEditRuleService
         {
             return null;
         }
+    }
+
+    private RegistryKey OpenClassesRoot()
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.OpenClassesRoot(RegistryView.Default);
+#endif
+        return RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, RegistryView.Default);
+    }
+
+    private static RegistryKey OpenUserHive(string? sid)
+    {
+        if (string.IsNullOrWhiteSpace(sid))
+            throw new InvalidOperationException("The interactive user's SID could not be verified.");
+        var users = RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default);
+        try
+        {
+            return users.OpenSubKey(sid, writable: false) ?? throw new InvalidOperationException("The interactive user's registry hive is unavailable.");
+        }
+        finally { users.Dispose(); }
+    }
+
+    private string ResolvePath(string path)
+    {
+#if CONTEXTMENUMGR_IN_PROCESS
+        if (_portableUser is not null) return _portableUser.ResolveUserPath(path);
+#endif
+        return Environment.ExpandEnvironmentVariables(path);
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

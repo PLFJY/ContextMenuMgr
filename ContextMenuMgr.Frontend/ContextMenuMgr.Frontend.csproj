@@ -29,6 +29,12 @@
     <NativeProbeHostVerificationLabels Condition="'$(NativeProbeHostVerificationLabels)' == ''">x86 x64 arm64</NativeProbeHostVerificationLabels>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(BackendHostingMode)' == 'InProcess'">
+    <ApplicationManifest>app.in-process.manifest</ApplicationManifest>
+    <NativeProbeHostOutputRoot>$(ArtifactsPath)\probehost-native\$(Configuration)\</NativeProbeHostOutputRoot>
+    <NativeProbeHostIntermediateRoot>$(NativeProbeHostOutputRoot)obj\</NativeProbeHostIntermediateRoot>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Remove="ContextMenuMgr.Frontend.csproj.lscache" />
   </ItemGroup>
@@ -44,8 +50,9 @@
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="WPF-UI.DependencyInjection" Version="4.3.0" />
     <ProjectReference Include="..\ContextMenuMgr.Contracts\ContextMenuMgr.Contracts.csproj" />
-    <ProjectReference Include="..\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\ContextMenuMgr.TrayHost\ContextMenuMgr.TrayHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\ContextMenuMgr.Backend\ContextMenuMgr.Backend.csproj" ReferenceOutputAssembly="false" Condition="'$(BackendHostingMode)' == 'Service'" />
+    <ProjectReference Include="..\ContextMenuMgr.TrayHost\ContextMenuMgr.TrayHost.csproj" ReferenceOutputAssembly="false" Condition="'$(BackendHostingMode)' == 'Service'" />
+    <ProjectReference Include="..\ContextMenuMgr.Core\ContextMenuMgr.Core.csproj" Condition="'$(BackendHostingMode)' == 'InProcess'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -92,8 +99,8 @@
     <MakeDir Directories="$(OutDir)ProbeHost\x86;$(OutDir)ProbeHost\x64;$(OutDir)ProbeHost\arm64;$(OutDir)ThirdPartyNotices" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
 
     <ItemGroup>
-      <BackendArtifacts Include="$(BackendOutputDir)**\*.*" />
-      <TrayHostArtifacts Include="$(MSBuildThisFileDirectory)..\artifacts\trayhost\$(Configuration)\net10.0-windows10.0.17763.0\**\*.*" />
+      <BackendArtifacts Include="$(BackendOutputDir)**\*.*" Condition="'$(BackendHostingMode)' == 'Service'" />
+      <TrayHostArtifacts Include="$(MSBuildThisFileDirectory)..\artifacts\trayhost\$(Configuration)\net10.0-windows10.0.17763.0\**\*.*" Condition="'$(BackendHostingMode)' == 'Service'" />
       <NativeProbeHostX86Artifact Include="$(NativeProbeHostOutputRoot)x86\ContextMenuMgr.ProbeHost.exe" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
       <NativeProbeHostX64Artifact Include="$(NativeProbeHostOutputRoot)x64\ContextMenuMgr.ProbeHost.exe" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true'" />
       <NativeProbeHostArm64Artifact Include="$(NativeProbeHostOutputRoot)arm64\ContextMenuMgr.ProbeHost.exe" Condition="'$(SkipProbeHostArchitectureBuild)' != 'true' and $(NativeProbeHostPlatforms.Contains('ARM64'))" />
