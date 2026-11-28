@@ -63,11 +63,22 @@ function Start-BuildTargetProcess {
         '-DistRoot', $DistRoot
     ) | ForEach-Object { ConvertTo-ProcessArgument -Value ([string] $_) }
 
-    $process = Start-Process `
-        -FilePath $PowerShellPath `
-        -ArgumentList $arguments `
-        -WindowStyle Hidden `
-        -PassThru
+    $processParameters = @{
+        FilePath     = $PowerShellPath
+        ArgumentList = $arguments
+        WindowStyle  = 'Hidden'
+        PassThru     = $true
+    }
+
+    # Preserve PATH when launching Microsoft Store PowerShell.
+    # The Environment parameter requires PowerShell 7.4 or later.
+    if ((Get-Command Start-Process).Parameters.ContainsKey('Environment')) {
+        $processParameters['Environment'] = @{
+            PATH = $env:Path
+        }
+    }
+
+    $process = Start-Process @processParameters
 
     return $process
 }

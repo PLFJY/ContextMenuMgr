@@ -42,6 +42,14 @@ ISCC 解析函数为 `Resolve-IsccPath`：先仓库内，再 Program Files/PATH�
 
 restore/publish .NET Frontend、Backend、TrayHost；native ProbeHost 用 MSBuild vcxproj，不用 dotnet publish。并行目标传专属 BaseOutputPath/--artifacts-path，helper OutputPath 从该根派生，避免 apphost/runtimeconfig/deps 互抢。`build.ps1` 对 publish-runs 隔离、收集 dist/artifacts.txt；目标失败停止调度并从 generic list `.ToArray()` 快照停止剩余进程。不要把 PowerShell 5.1 的 `@($genericList)` 当安全等价实现。
 
+### 发布文件筛选
+
+`Publish-Application` 完成三个托管项目和 ProbeHost 的发布后，清理本次共享发布目录，再校验 TrayHost 本地化并写入包标识。Installer 和 Portable ZIP 共用清理后的文件。
+
+- 删除发布目录中的 `.pdb`，包括 ProbeHost 子目录中的原生符号。普通 `dotnet build` 的输出和编译中间目录保留调试符号。
+- 保留中性资源以及 `en`、`en-US`、`zh`、`zh-CN`、`zh-TW`、`zh-Hans`、`zh-Hant` 资源，支持简中、繁中和英文回退。对发布根的其他子目录，只删除程序集声明的 culture 与目录名相符的 `*.resources.dll`。
+- 筛选仅删除以上两类文件，保留其余文件的原始字节。
+
 ### ProbeHost 架构与许可
 
 | 目标 | 携带 native PE |

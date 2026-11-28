@@ -861,10 +861,40 @@ function Publish-Application {
     Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.Service.dll") -Description "Backend service DLL"
     Ensure-FileExists -Path (Join-Path $publishDir "ContextMenuManagerPlus.TrayHost.exe") -Description "Tray host executable"
 
+    Remove-UnneededPublishFiles -PublishDir $publishDir
     Assert-TrayHostLocalizationArtifacts -PublishDir $publishDir
     Write-PackageManifest -PublishDir $publishDir -PackageKind $PackageKind
 
     return $publishDir
+}
+
+function Remove-UnneededPublishFiles {
+    param([Parameter(Mandatory)] [string] $PublishDir)
+
+    $keptCultures = @('en', 'en-US', 'zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant')
+    $symbols = @(Get-ChildItem -LiteralPath $PublishDir -File -Recurse -Force -Filter '*.pdb' |
+        Where-Object Extension -eq '.pdb')
+    $satellites = @(foreach ($directory in Get-ChildItem -LiteralPath $PublishDir -Directory -Force) {
+        if ($directory.Name -in $keptCultures -or ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            continue
+        }
+
+        foreach ($file in Get-ChildItem -LiteralPath $directory.FullName -File -Force -Filter '*.resources.dll') {
+            if ($file.Name -notlike '*.resources.dll') {
+                continue
+            }
+            # Check the assembly culture without loading the assembly into PowerShell.
+            $culture = [System.Reflection.AssemblyName]::GetAssemblyName($file.FullName).CultureName
+            if ($culture -eq $directory.Name) {
+                $file
+            }
+        }
+    })
+
+    foreach ($file in ($symbols + $satellites)) {
+        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+    }
+    Write-Host "Publish cleanup removed $($symbols.Count) PDBs and $($satellites.Count) satellite assemblies."
 }
 
 function Test-BinaryContainsUtf8String {
